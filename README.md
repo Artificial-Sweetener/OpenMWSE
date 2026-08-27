@@ -1,4 +1,4 @@
-# OpenMWSE
+# Open Morrowind Special Edition
 
 **OpenMWSE is my opinionated fork of [OpenMW](https://github.com/OpenMW/openmw).**
 
