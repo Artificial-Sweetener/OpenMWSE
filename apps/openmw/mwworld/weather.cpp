@@ -1,6 +1,7 @@
 #include "weather.hpp"
 
 #include <components/esm/stringrefid.hpp>
+#include <components/resource/resourcesystem.hpp>
 #include <components/settings/values.hpp>
 
 #include <components/misc/rng.hpp>
@@ -21,6 +22,7 @@
 #include "../mwrender/renderingmanager.hpp"
 #include "../mwrender/sky.hpp"
 
+#include "atmospherepalette.hpp"
 #include "cellstore.hpp"
 #include "esmstore.hpp"
 #include "player.hpp"
@@ -625,6 +627,7 @@ namespace MWWorld
               Fallback::Map::getFloat("Water_UnderwaterDayFog"), Fallback::Map::getFloat("Water_UnderwaterSunsetFog"),
               Fallback::Map::getFloat("Water_UnderwaterNightFog"))
         , mWeatherSettings()
+        , mAtmospherePalette(std::make_unique<AtmospherePalette>(*rendering.getResourceSystem()->getVFS()))
         , mMasser("Masser")
         , mSecunda("Secunda")
         , mWindSpeed(0.f)
@@ -787,6 +790,7 @@ namespace MWWorld
             if (it != mRegions.end() && playerRegion != mCurrentRegion)
             {
                 mCurrentRegion = playerRegion;
+                mAtmospherePalette->setRegion(mCurrentRegion.getRefIdString());
                 forceWeather(it->second.getWeather());
             }
         }
@@ -815,7 +819,11 @@ namespace MWWorld
         if (!paused || mFastForward)
         {
             // Add new transitions when either the player's current external region changes.
-            if (updateWeatherTime() || updateWeatherRegion(player.getCell()->getCell()->getRegion()))
+            const bool timeChanged = updateWeatherTime();
+            const bool regionChanged = updateWeatherRegion(player.getCell()->getCell()->getRegion());
+            if (regionChanged)
+                mAtmospherePalette->setRegion(mCurrentRegion.getRefIdString());
+            if (timeChanged || regionChanged)
             {
                 auto it = mRegions.find(mCurrentRegion);
                 if (it != mRegions.end())
@@ -826,6 +834,8 @@ namespace MWWorld
 
             updateWeatherTransitions(duration);
         }
+
+        mAtmospherePalette->update(duration, paused, mWeatherSettings);
 
         bool isDay = time.getHour() >= mSunriseTime && time.getHour() <= mTimeSettings.mNightStart;
         if (isExterior && !isDay)
@@ -1275,6 +1285,12 @@ namespace MWWorld
         mResult.mFogColor += flashColor;
         mResult.mAmbientColor += flashColor;
         mResult.mSunColor += flashColor;
+
+        const std::string_view nextWeather
+            = inTransition() ? std::string_view(mWeatherSettings[mNextWeather].mName) : std::string_view();
+        const float weatherTransition = inTransition() ? 1.f - mTransitionFactor : 0.f;
+        mResult.mAtmosphere
+            = mAtmospherePalette->getState(mWeatherSettings[mCurrentWeather].mName, nextWeather, weatherTransition);
     }
 
     inline void WeatherManager::calculateResult(const int weatherID, const float gameHour)

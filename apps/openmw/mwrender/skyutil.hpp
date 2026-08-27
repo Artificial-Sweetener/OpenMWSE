@@ -14,6 +14,8 @@
 #include <components/sceneutil/nodecallback.hpp>
 #include <components/sceneutil/statesetupdater.hpp>
 
+#include "atmosphere.hpp"
+
 namespace Resource
 {
     class ImageManager;
@@ -44,6 +46,8 @@ namespace MWRender
 
         // alpha is the sun transparency
         osg::Vec4f mSunDiscColor;
+
+        AtmosphereState mAtmosphere;
 
         float mFogDepth;
 
@@ -269,6 +273,7 @@ namespace MWRender
         void adjustTransparency(const float ratio) override;
 
         void setDirection(const osg::Vec3f& direction);
+        osg::Vec3f getDirection() const;
         void setGlareTimeOfDayFade(float val);
         void setSunglare(bool enabled);
 
@@ -361,6 +366,20 @@ namespace MWRender
 
     private:
         MeshType mType;
+    };
+
+    /// Reshapes Morrowind's two-ring atmosphere horizon mesh into a closed camera-relative background.
+    class AtmosphereDomeVisitor : public osg::NodeVisitor
+    {
+    public:
+        AtmosphereDomeVisitor();
+
+        void apply(osg::Geometry& geometry) override;
+
+        bool reshaped() const { return mReshaped; }
+
+    private:
+        bool mReshaped = false;
     };
 }
 

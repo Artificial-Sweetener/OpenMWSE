@@ -299,6 +299,8 @@ namespace MWRender
         assert(!mCreated);
 
         mAtmosphereDay = mSceneManager->getInstance(Settings::models().mSkyatmosphere.get(), mEarlyRenderBinRoot);
+        AtmosphereDomeVisitor atmosphereDome;
+        mAtmosphereDay->accept(atmosphereDome);
         ModVertexAlphaVisitor modAtmosphere(ModVertexAlphaVisitor::Atmosphere);
         mAtmosphereDay->accept(modAtmosphere);
 
@@ -634,6 +636,8 @@ namespace MWRender
         if (!mCreated)
             return;
 
+        mAtmosphere = weather.mAtmosphere;
+
         mRainEntranceSpeed = weather.mRainEntranceSpeed;
         mRainMaxRaindrops = weather.mRainMaxRaindrops;
         mRainDiameter = weather.mRainDiameter;
@@ -799,7 +803,6 @@ namespace MWRender
         if (mCloudColour != weather.mFogColor)
         {
             osg::Vec4f clr(weather.mFogColor);
-            clr += osg::Vec4f(0.13f, 0.13f, 0.13f, 0.f);
 
             mCloudUpdater->setEmissionColor(clr);
             mNextCloudUpdater->setEmissionColor(clr);
@@ -885,6 +888,11 @@ namespace MWRender
             return;
 
         mSun->setDirection(direction);
+    }
+
+    osg::Vec3f SkyManager::getSunDirection() const
+    {
+        return mCreated ? mSun->getDirection() : osg::Vec3f(0.f, 0.f, 1.f);
     }
 
     void SkyManager::setMasserState(const MoonState& state)

@@ -43,6 +43,7 @@ set(SHADER_FILES
     compatibility/ripples_blobber.frag
     compatibility/ripples_simulate.frag
     compatibility/fog.glsl
+    compatibility/atmosphere.glsl
     compatibility/groundcover.vert
     compatibility/groundcover.frag
     compatibility/globalmap.vert

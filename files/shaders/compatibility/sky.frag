@@ -15,11 +15,13 @@ uniform vec4 diffuseColor;
 
 varying vec2 diffuseMapUV;
 varying vec4 passColor;
+varying vec3 passViewDirection;
 
 void paintAtmosphere(inout vec4 color)
 {
     color = diffuseColor;
-    color.a *= passColor.a;
+    color.xyz = atmosphereSkyColor(normalize(passViewDirection));
+    color.a = 1.0;
 }
 
 void paintAtmosphereNight(inout vec4 color)

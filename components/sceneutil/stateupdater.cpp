@@ -149,6 +149,13 @@ namespace SceneUtil
         SceneUtil::setUnderwaterFogEnd(*stateset, mUnderwaterFogEnd);
         SceneUtil::setFogDepth(*stateset, -1.f);
 
+        stateset->addUniform(new osg::Uniform("atmosphere.enabled", mAtmosphereEnabled));
+        stateset->addUniform(new osg::Uniform("atmosphere.skyColor", mAtmosphereSkyColor));
+        stateset->addUniform(new osg::Uniform("atmosphere.inScattering", mAtmosphereInScattering));
+        stateset->addUniform(new osg::Uniform("atmosphere.outScattering", mAtmosphereOutScattering));
+        stateset->addUniform(new osg::Uniform("atmosphere.weatherWeight", mAtmosphereWeatherWeight));
+        stateset->addUniform(new osg::Uniform("atmosphere.sunDirection", mAtmosphereSunDirection));
+
         stateset->addUniform(new osg::Uniform("waterHeight", mWaterHeight));
         stateset->addUniform(new osg::Uniform("waterEnabled", mWaterEnabled));
         stateset->addUniform(new osg::Uniform("waterSurface", false));
@@ -164,6 +171,13 @@ namespace SceneUtil
         SceneUtil::updateUnderwaterFogColor(*stateset, mUnderwaterFogColor);
         SceneUtil::updateUnderwaterFogStart(*stateset, mUnderwaterFogStart);
         SceneUtil::updateUnderwaterFogEnd(*stateset, mUnderwaterFogEnd);
+
+        stateset->getUniform("atmosphere.enabled")->set(mAtmosphereEnabled);
+        stateset->getUniform("atmosphere.skyColor")->set(mAtmosphereSkyColor);
+        stateset->getUniform("atmosphere.inScattering")->set(mAtmosphereInScattering);
+        stateset->getUniform("atmosphere.outScattering")->set(mAtmosphereOutScattering);
+        stateset->getUniform("atmosphere.weatherWeight")->set(mAtmosphereWeatherWeight);
+        stateset->getUniform("atmosphere.sunDirection")->set(mAtmosphereSunDirection);
 
         stateset->getUniform("waterHeight")->set(mWaterHeight);
         stateset->getUniform("waterEnabled")->set(mWaterEnabled);
@@ -187,6 +201,17 @@ namespace SceneUtil
     void StateUpdater::setFogEnd(float end)
     {
         mFogEnd = end;
+    }
+
+    void StateUpdater::setAtmosphere(bool enabled, const osg::Vec4f& skyColor, const osg::Vec3f& inScattering,
+        const osg::Vec3f& outScattering, float weatherWeight, const osg::Vec3f& sunDirection)
+    {
+        mAtmosphereEnabled = enabled;
+        mAtmosphereSkyColor = skyColor;
+        mAtmosphereInScattering = inScattering;
+        mAtmosphereOutScattering = outScattering;
+        mAtmosphereWeatherWeight = weatherWeight;
+        mAtmosphereSunDirection = sunDirection;
     }
 
     void StateUpdater::setUnderwaterFogColor(const osg::Vec4f& col)

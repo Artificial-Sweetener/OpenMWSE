@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -42,6 +43,7 @@ namespace Fallback
 
 namespace MWWorld
 {
+    class AtmospherePalette;
     class TimeStamp;
 
     struct Moon
@@ -399,6 +401,7 @@ namespace MWWorld
         TimeOfDayInterpolator<float> mUnderwaterFog;
 
         std::vector<Weather> mWeatherSettings;
+        std::unique_ptr<AtmospherePalette> mAtmospherePalette;
         MoonModel mMasser;
         MoonModel mSecunda;
 

@@ -24,6 +24,8 @@ uniform bool isReflection;
 uniform mat4 osg_ViewMatrixInverse;
 uniform DirectionalLight sun;
 
+#include "atmosphere.glsl"
+
 const vec3 WATER_COLOR = vec3(0.090195, 0.115685, 0.12745);
 
 void computeFog(vec3 pos, float euclideanDist, float linearDist, float near, float far, out float colorScale, out vec3 colorOffset)
@@ -71,16 +73,27 @@ void computeFog(vec3 pos, float euclideanDist, float linearDist, float near, flo
     if (useWaterDepthFog)
         dist -= waterDepth;
 
+    float opticalDistance;
 #if @exponentialFog
-    float fogValue = 1.0 - exp(-2.0 * max(0.0, dist - start / 2.0) / (end - start / 2.0));
+    const float mgeFogScale = 4.4;
+    float curveStart = start / mgeFogScale;
+    float curveRange = max((end - curveStart) / mgeFogScale, 1e-4);
+    opticalDistance = max(0.0, (dist - curveStart) / curveRange);
+    float fogVisibility = exp(-opticalDistance);
 #else
-    float fogValue = clamp((dist - start) * (1.0 / (end - start)), 0.0, 1.0);
+    opticalDistance = clamp((dist - start) / max(end - start, 1e-4), 0.0, 1.0);
+    float fogVisibility = 1.0 - opticalDistance;
 #endif
-    colorScale = 1.0 - fogValue;
+    float fogValue = 1.0 - fogVisibility;
+    colorScale = fogVisibility;
 #ifdef ADDITIVE_BLENDING
     colorOffset = vec3(0.0);
 #else
-    colorOffset = fogColor.xyz * fogValue;
+    if (atmosphere.enabled && !cameraBelowWater && !useWaterDepthFog)
+        colorOffset = atmosphereScatter(normalize(pos), clamp(0.224 * opticalDistance, 0.0, 1.0),
+            fogVisibility, fogColor.xyz);
+    else
+        colorOffset = fogColor.xyz * fogValue;
 #endif
 
     if (useWaterDepthFog) {

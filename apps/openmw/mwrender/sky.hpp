@@ -82,6 +82,7 @@ namespace MWRender
         void setStormParticleDirection(const osg::Vec3f& direction);
 
         void setSunDirection(const osg::Vec3f& direction);
+        osg::Vec3f getSunDirection() const;
 
         void setMasserState(const MoonState& state);
         void setSecundaState(const MoonState& state);
@@ -104,6 +105,8 @@ namespace MWRender
         SceneUtil::RTTNode* getSkyRTT() { return mSkyRTT.get(); }
 
         osg::Vec4f getSkyColor() const { return mSkyColour; }
+
+        const AtmosphereState& getAtmosphereState() const { return mAtmosphere; }
 
     private:
         void create();
@@ -175,6 +178,7 @@ namespace MWRender
         osg::Vec4f mCloudColour;
         osg::Vec4f mSkyColour;
         osg::Vec4f mFogColour;
+        AtmosphereState mAtmosphere;
 
         VFS::Path::Normalized mCurrentParticleEffect;
 

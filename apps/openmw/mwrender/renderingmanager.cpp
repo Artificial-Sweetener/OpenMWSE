@@ -566,6 +566,7 @@ namespace MWRender
     void RenderingManager::setSunColour(const osg::Vec4f& diffuse, const osg::Vec4f& specular, float sunVis)
     {
         // need to wrap this in a StateUpdater?
+        mSunVisibility = sunVis;
         mSunLight->setDiffuse(diffuse);
         mSunLight->setSpecular(osg::Vec4f(specular.x(), specular.y(), specular.z(), specular.w() * sunVis));
 
@@ -580,10 +581,8 @@ namespace MWRender
 
     void RenderingManager::setSunDirection(const osg::Vec3f& direction)
     {
-        osg::Vec3f position = -direction;
-
         // This is based on the exterior sun orbit and won't make sense for interiors, see WeatherManager::update
-        position.z() = 400.f - std::abs(position.x());
+        const osg::Vec3f position = getRenderedExteriorSunPosition(direction);
 
         // The sun is not always synchronized with the sunlight because reasons
         const osg::Vec3f sunlightPos = Settings::shaders().mMatchSunlightToSun ? position : -direction;
@@ -766,6 +765,11 @@ namespace MWRender
         mStateUpdater->setUnderwaterFogStart(fogUnderwaterStart);
         mStateUpdater->setUnderwaterFogEnd(fogUnderwaterEnd);
         mStateUpdater->setUnderwaterFogColor(fogUnderwaterColor);
+
+        const AtmosphereState& atmosphere = mSky->getAtmosphereState();
+        mStateUpdater->setAtmosphere(mSky->isEnabled() && atmosphere.mEnabled, mSky->getSkyColor(),
+            atmosphere.mInScattering, atmosphere.mOutScattering, atmosphere.mWeatherWeight,
+            getScatteringSunDirection(mSky->getSunDirection(), mSunVisibility > 0.f));
 
         mViewer->getCamera()->setClearColor(isUnderwater ? fogUnderwaterColor : fogColor);
 

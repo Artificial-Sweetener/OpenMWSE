@@ -24,6 +24,8 @@ set(BUILTIN_DATA_MW_FILES
     # Game-specific settings for calendar.lua
     openmw_aux/calendarconfig.lua
 
+    openmwse/atmosphere.json
+
     scripts/omw/cellhandlers.lua
     scripts/omw/esmfallbacks.lua
     scripts/omw/combat/common.lua

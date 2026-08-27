@@ -95,6 +95,9 @@ namespace SceneUtil
 
         void setFogEnd(float end);
 
+        void setAtmosphere(bool enabled, const osg::Vec4f& skyColor, const osg::Vec3f& inScattering,
+            const osg::Vec3f& outScattering, float weatherWeight, const osg::Vec3f& sunDirection);
+
         void setUnderwaterFogColor(const osg::Vec4f& col);
 
         void setUnderwaterFogStart(float start);
@@ -113,6 +116,12 @@ namespace SceneUtil
         osg::Vec4f mFogColor;
         float mFogStart = 0.f;
         float mFogEnd = 0.f;
+        bool mAtmosphereEnabled = false;
+        osg::Vec4f mAtmosphereSkyColor;
+        osg::Vec3f mAtmosphereInScattering;
+        osg::Vec3f mAtmosphereOutScattering;
+        float mAtmosphereWeatherWeight = 0.f;
+        osg::Vec3f mAtmosphereSunDirection{ 0.f, 0.f, 1.f };
         osg::Vec4f mUnderwaterFogColor;
         float mUnderwaterFogStart = 0.f;
         float mUnderwaterFogEnd = 0.f;

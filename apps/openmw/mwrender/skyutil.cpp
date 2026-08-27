@@ -1,7 +1,11 @@
 #include "skyutil.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
+#include <utility>
+#include <vector>
 
 #include <osg/AlphaFunc>
 #include <osg/BlendFunc>
@@ -395,6 +399,7 @@ namespace MWRender
 
     void AtmosphereUpdater::setDefaults(osg::StateSet* stateset)
     {
+        stateset->setMode(GL_BLEND, osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
         stateset->addUniform(new osg::Uniform("pass", static_cast<int>(Pass::Atmosphere)));
         stateset->addUniform(new osg::Uniform("diffuseColor", mEmissionColor));
     }
@@ -693,6 +698,11 @@ namespace MWRender
         osg::Quat quat;
         quat.makeRotate(osg::Vec3f(0.0f, 0.0f, 1.0f), normalizedDirection);
         mTransform->setAttitude(quat);
+    }
+
+    osg::Vec3f Sun::getDirection() const
+    {
+        return mTransform->getPosition() / mDistance;
     }
 
     void Sun::setGlareTimeOfDayFade(float val)
@@ -1051,5 +1061,85 @@ namespace MWRender
         }
 
         geometry.setColorArray(colors, osg::Array::BIND_PER_VERTEX);
+    }
+
+    AtmosphereDomeVisitor::AtmosphereDomeVisitor()
+        : osg::NodeVisitor(TRAVERSE_ALL_CHILDREN)
+    {
+    }
+
+    void AtmosphereDomeVisitor::apply(osg::Geometry& geometry)
+    {
+        const auto* sourceVertices = dynamic_cast<const osg::Vec3Array*>(geometry.getVertexArray());
+        if (!sourceVertices || sourceVertices->size() < 6)
+            return;
+
+        float minimumZ = std::numeric_limits<float>::max();
+        float maximumZ = std::numeric_limits<float>::lowest();
+        for (const osg::Vec3f& vertex : *sourceVertices)
+        {
+            minimumZ = std::min(minimumZ, vertex.z());
+            maximumZ = std::max(maximumZ, vertex.z());
+        }
+
+        const float height = maximumZ - minimumZ;
+        if (height <= std::numeric_limits<float>::epsilon())
+            return;
+
+        const float ringTolerance = std::max(1e-3f, height * 1e-4f);
+        osg::Vec2f horizonCenter;
+        std::size_t horizonVertexCount = 0;
+        std::size_t upperVertexCount = 0;
+        for (const osg::Vec3f& vertex : *sourceVertices)
+        {
+            if (std::abs(vertex.z() - minimumZ) <= ringTolerance)
+            {
+                horizonCenter += osg::Vec2f(vertex.x(), vertex.y());
+                ++horizonVertexCount;
+            }
+            else if (std::abs(vertex.z() - maximumZ) <= ringTolerance)
+                ++upperVertexCount;
+            else
+                return;
+        }
+
+        if (horizonVertexCount < 3 || horizonVertexCount != upperVertexCount)
+            return;
+
+        horizonCenter /= static_cast<float>(horizonVertexCount);
+        float domeRadius = 0.f;
+        for (const osg::Vec3f& vertex : *sourceVertices)
+        {
+            if (std::abs(vertex.z() - minimumZ) <= ringTolerance)
+                domeRadius = std::max(domeRadius, (osg::Vec2f(vertex.x(), vertex.y()) - horizonCenter).length());
+        }
+        if (domeRadius <= std::numeric_limits<float>::epsilon())
+            return;
+
+        osg::ref_ptr<osg::Vec3Array> domeVertices = new osg::Vec3Array(*sourceVertices);
+        std::vector<std::pair<float, unsigned int>> horizonIndices;
+        horizonIndices.reserve(horizonVertexCount);
+        for (unsigned int index = 0; index < domeVertices->size(); ++index)
+        {
+            osg::Vec3f& vertex = (*domeVertices)[index];
+            if (std::abs(vertex.z() - minimumZ) <= ringTolerance)
+            {
+                vertex.z() = -domeRadius;
+                horizonIndices.emplace_back(
+                    std::atan2(vertex.y() - horizonCenter.y(), vertex.x() - horizonCenter.x()), index);
+            }
+            else
+                vertex.set(horizonCenter.x(), horizonCenter.y(), domeRadius);
+        }
+
+        std::sort(horizonIndices.begin(), horizonIndices.end());
+        osg::ref_ptr<osg::DrawElementsUInt> lowerCap = new osg::DrawElementsUInt(osg::PrimitiveSet::TRIANGLE_FAN);
+        for (const auto& horizon : horizonIndices)
+            lowerCap->push_back(horizon.second);
+
+        geometry.setVertexArray(domeVertices);
+        geometry.addPrimitiveSet(lowerCap);
+        geometry.dirtyBound();
+        mReshaped = true;
     }
 }

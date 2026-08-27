@@ -9,11 +9,15 @@ uniform mat4 texMat0;
 
 varying vec4 passColor;
 varying vec2 diffuseMapUV;
+varying vec3 passViewDirection;
 
 void main()
 {
-    gl_Position = modelToClip(gl_Vertex);
+    vec4 viewPosition = modelToView(gl_Vertex);
+
+    gl_Position = viewToClip(viewPosition);
     passColor = gl_Color;
+    passViewDirection = viewPosition.xyz;
 
     if (pass == PASS_CLOUDS)
         diffuseMapUV = (texMat0 * gl_MultiTexCoord0).xy;

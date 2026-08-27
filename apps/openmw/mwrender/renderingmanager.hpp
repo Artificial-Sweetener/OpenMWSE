@@ -360,6 +360,7 @@ namespace MWRender
         float mFirstPersonFieldOfView;
         bool mUpdateProjectionMatrix = false;
         bool mNight = false;
+        float mSunVisibility = 0.f;
         osg::Vec2f mProjectionOffset;
         const MWWorld::GroundcoverStore& mGroundCoverStore;
         std::map<std::string, std::string> mAppliedShadowDefines;

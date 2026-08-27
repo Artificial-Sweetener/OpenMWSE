@@ -53,6 +53,7 @@ file(GLOB UNITTEST_SRC_FILES
     shader/parsefors.cpp
     shader/parselinks.cpp
     shader/shadermanager.cpp
+    shader/atmosphere.cpp
 
     sqlite3/db.cpp
     sqlite3/request.cpp
