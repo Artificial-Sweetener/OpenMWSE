@@ -76,6 +76,23 @@ This repository is authoritative for all OpenMWSE source and released behavior.
 - Prefer immutable data and pure transformations where practical. Encode units, coordinate spaces, color spaces, time bases, and
   valid ranges in types and names where possible.
 
+## Source readability and documentation comments
+
+- Write self-documenting code with expressive, concise names for modules, types, classes, functions, methods, parameters, and
+  variables.
+- Names communicate mechanics and domain meaning. Documentation comments communicate rationale, constraints, intent, contracts,
+  and other context that is not evident from the declaration and implementation alone.
+- Documentation comments are mandatory for all new and changed modules, types, classes, functions, and methods. Update existing
+  documentation comments whenever the associated contract, constraints, or behavior change.
+- Use concise one-sentence documentation comments for simple declarations and imperative phrasing for callable behavior.
+- Use Doxygen-compatible structured comments for complex C++ APIs. Use the established repository-native documentation-comment
+  conventions for Lua, shaders, build logic, and other source languages.
+- Documentation comments must be accurate and meaningful. Do not restate signatures, control flow, or other obvious mechanics.
+- Inline comments are allowed only for non-obvious behavior, invariants, edge cases, mathematical assumptions, compatibility
+  requirements, ownership, lifecycle, or external constraints.
+- Keep documentation changes within the coherent change boundary. Do not add comments mechanically to otherwise untouched
+  upstream declarations.
+
 ## Behavior and compatibility
 
 Before changing behavior, establish:
@@ -111,8 +128,6 @@ Also:
 - Preserve useful error context. Do not swallow exceptions, ignore error states, or silently replace invalid values.
 - Use the project's logging facilities for runtime diagnostics. Messages should identify the failed operation and relevant
   resource or subsystem without exposing sensitive data.
-- Comments explain non-obvious constraints, compatibility decisions, mathematical assumptions, ownership, or lifecycle. Do not
-  narrate self-explanatory code.
 - New warnings or static-analysis findings introduced by changed code are failures. Do not suppress diagnostics globally to make
   a local change pass.
 
@@ -236,6 +251,7 @@ Review changes for:
 - duplicated ownership, incomplete migrations, or unnecessary upstream conflict surface;
 - public, persisted, content-facing, scripting, rendering, build, and release compatibility;
 - lifetime, threading, determinism, numerical stability, error handling, security, licensing, and provenance;
+- missing, inaccurate, mechanical, or format-inappropriate documentation comments and unclear source names;
 - missing boundary, integration, visual, performance, generation, or release verification; and
 - claims not supported by executed verification.
 
@@ -250,6 +266,7 @@ A change is complete when:
 - the change has no known partial migration, duplicate path, or unnecessary compatibility shim;
 - relevant tests were added or updated and pass;
 - applicable formatting, analysis, build, runtime, visual, performance, generation, and release checks pass;
+- required documentation comments are present, accurate, meaningful, and written in the appropriate source-language format;
 - affected public behavior is documented and generated artifacts are reproducible from canonical source;
 - unrelated user work remains intact;
 - the diff contains no accidental formatting, debug code, temporary files, machine-local paths, or secrets; and
