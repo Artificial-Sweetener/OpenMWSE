@@ -175,7 +175,7 @@ void main(void)
         vec3 specularColor = getSpecularColor(material, passColor).rgb;
 
         vec3 sunDiffuse, sunAmbient, sunSpecular, pointDiffuse, pointAmbient, pointSpecular;
-        directionalLighting(viewDir, viewNormal, shininess, sunDiffuse, sunAmbient, sunSpecular);
+        directionalLighting(passViewPos, viewDir, viewNormal, shininess, sunDiffuse, sunAmbient, sunSpecular);
         pointLighting(screenCoord, viewDir, passViewPos, viewNormal, shininess, pointDiffuse, pointAmbient, pointSpecular);
         shadedLighting = diffuseColor * pointDiffuse + ambientColor * (pointAmbient + sunAmbient) + emissionColor * material.emissiveMult;
         shadedSpecular = specularColor * pointSpecular * material.specStrength;

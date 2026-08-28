@@ -11,6 +11,7 @@ uniform vec4 moonBlend;         // PASS_MOON
 uniform vec4 atmosphereFade;    // PASS_MOON
 uniform vec4 diffuseColor;
 
+#include "lib/util/dither.glsl"
 #include "fog.glsl"
 
 varying vec2 diffuseMapUV;
@@ -20,7 +21,14 @@ varying vec3 passViewDirection;
 void paintAtmosphere(inout vec4 color)
 {
     color = diffuseColor;
-    color.xyz = atmosphereSkyColor(normalize(passViewDirection));
+    vec3 viewDirection = normalize(passViewDirection);
+    vec3 worldDirection = atmosphereWorldDirection(viewDirection);
+    vec3 skyRadiance = atmosphereSkyColor(viewDirection);
+    vec4 clouds
+        = isReflection ? atmosphereCloudScattering(worldDirection, skyRadiance) : vec4(0.0, 0.0, 0.0, 1.0);
+    color.xyz = skyRadiance * clouds.a + clouds.rgb;
+    color.xyz += atmosphereSunDisc(worldDirection) * clouds.a;
+    color.xyz += openmwseTriangularDither(gl_FragCoord.xy) * (0.5 / 255.0);
     color.a = 1.0;
 }
 
@@ -32,6 +40,11 @@ void paintAtmosphereNight(inout vec4 color)
 
 void paintClouds(inout vec4 color)
 {
+    if (atmosphere.enabled)
+    {
+        color = vec4(0.0);
+        return;
+    }
     color = texture2D(diffuseMap, diffuseMapUV);
     color.a *= passColor.a * opacity;
     color.xyz = clamp(color.xyz * diffuseColor.xyz, 0.0, 1.0);
@@ -68,20 +81,25 @@ void paintMoon(inout vec4 color)
 
 void paintSun(inout vec4 color)
 {
+    if (atmosphere.enabled)
+    {
+        color = vec4(0.0);
+        return;
+    }
     color = texture2D(diffuseMap, diffuseMapUV);
     color.a *= opacity;
 }
 
 void paintSunglare(inout vec4 color)
 {
-    color = diffuseColor;
+    color = atmosphere.enabled ? vec4(0.0) : diffuseColor;
 }
 
 void processSunflashQuery()
 {
     const float threshold = 0.8;
 
-    if (texture2D(diffuseMap, diffuseMapUV).a <= threshold)
+    if (atmosphere.enabled || texture2D(diffuseMap, diffuseMapUV).a <= threshold)
         discard;
 }
 

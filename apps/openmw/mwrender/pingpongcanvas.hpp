@@ -21,11 +21,15 @@ namespace Shader
 
 namespace MWRender
 {
+    class AtmosphereDiagnostics;
+
     class PingPongCanvas : public osg::Geometry
     {
     public:
-        PingPongCanvas(
-            Shader::ShaderManager& shaderManager, const std::shared_ptr<LuminanceCalculator>& luminanceCalculator);
+        /// Create a frame canvas that can service shared one-shot atmosphere capture requests.
+        PingPongCanvas(Shader::ShaderManager& shaderManager,
+            const std::shared_ptr<LuminanceCalculator>& luminanceCalculator,
+            std::shared_ptr<AtmosphereDiagnostics> atmosphereDiagnostics);
 
         void drawGeometry(osg::RenderInfo& renderInfo) const;
 
@@ -33,16 +37,26 @@ namespace MWRender
 
         void resizeGLObjectBuffers(unsigned int maxSize) override;
 
-        void dirty() { mDirty = true; }
-
-        void setDirtyAttachments(const std::vector<Fx::Types::RenderTarget>& attachments)
+        /// Invalidate cached framebuffer attachments and all temporal atmosphere history.
+        void dirty()
         {
-            mDirtyAttachments = attachments;
+            mDirty = true;
+            mAtmosphereHistoryValid = false;
         }
+
+        /// Replace only attachments whose technique render-target definitions changed.
+        void setDirtyAttachments(const std::vector<Fx::Types::RenderTarget>& attachments);
 
         const Fx::DispatchArray& getPasses() { return mPasses; }
 
+        /// Replace the frame-local dispatch graph and invalidate atmosphere history tied to the previous graph.
         void setPasses(Fx::DispatchArray&& passes);
+
+        /// Identify the opposite frame canvas that owns temporal atmosphere inputs.
+        void setPreviousCanvas(const PingPongCanvas* canvas) { mPreviousCanvas = canvas; }
+
+        /// Return the named render target from the current dispatch graph when available.
+        osg::Texture2D* findRenderTarget(std::string_view name) const;
 
         void setMask(bool underwater, bool exterior);
 
@@ -78,12 +92,15 @@ namespace MWRender
         osg::ref_ptr<osg::Texture> mTextureDistortion;
 
         mutable bool mDirty = false;
+        mutable bool mAtmosphereHistoryValid = false;
+        const PingPongCanvas* mPreviousCanvas = nullptr;
         mutable std::vector<Fx::Types::RenderTarget> mDirtyAttachments;
         mutable osg::ref_ptr<osg::Viewport> mRenderViewport;
         mutable osg::ref_ptr<osg::FrameBufferObject> mMultiviewResolveFramebuffer;
         mutable osg::ref_ptr<osg::FrameBufferObject> mDestinationFBO;
         mutable std::array<osg::ref_ptr<osg::FrameBufferObject>, 3> mFbos;
         mutable std::shared_ptr<LuminanceCalculator> mLuminanceCalculator;
+        std::shared_ptr<AtmosphereDiagnostics> mAtmosphereDiagnostics;
         mutable osg::buffered_object<osg::State::UniformMap> mEmptyUniformStacks;
     };
 }

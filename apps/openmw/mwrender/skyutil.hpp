@@ -164,7 +164,15 @@ namespace MWRender
     class AtmosphereNightUpdater : public SceneUtil::StateSetUpdater
     {
     public:
-        AtmosphereNightUpdater(Resource::ImageManager* imageManager);
+        /// Select how the night-dome texture contributes to the rendered sky.
+        enum class StarBlendMode
+        {
+            AuthoredTranslucency,
+            EmissiveRadiance,
+        };
+
+        /// Create the state owner for the night-dome texture, weather fade, and requested star-compositing policy.
+        explicit AtmosphereNightUpdater(StarBlendMode blendMode);
 
         void setFade(float fade);
 
@@ -175,7 +183,7 @@ namespace MWRender
 
     private:
         osg::Vec4f mColor;
-        osg::ref_ptr<osg::Texture2D> mTexture;
+        const StarBlendMode mBlendMode;
     };
 
     class CloudUpdater : public SceneUtil::StateSetUpdater
@@ -265,7 +273,8 @@ namespace MWRender
     class Sun : public CelestialBody
     {
     public:
-        Sun(osg::Group* parentNode, Resource::SceneManager& sceneManager);
+        /// Create the legacy textured sun only when unified analytic atmosphere rendering is disabled.
+        Sun(osg::Group* parentNode, Resource::SceneManager& sceneManager, bool useLegacyRendering);
 
         ~Sun();
 

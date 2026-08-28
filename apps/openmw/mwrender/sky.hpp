@@ -50,6 +50,7 @@ namespace MWRender
             Resource::SceneManager* sceneManager, bool enableSkyRTT);
         ~SkyManager();
 
+        /// Advance legacy sky animation only for rendering paths that remain active.
         void update(float duration);
 
         void setEnabled(bool enabled);
@@ -65,6 +66,7 @@ namespace MWRender
         void setMoonColour(bool red);
         ///< change Secunda colour to red
 
+        /// Apply current weather colors, volume controls, and analytic sun state to the sky owner.
         void setWeather(const WeatherResult& weather);
 
         void sunEnable();
@@ -98,7 +100,11 @@ namespace MWRender
         void listAssetsToPreload(
             std::vector<VFS::Path::Normalized>& models, std::vector<VFS::Path::Normalized>& textures);
 
+        /// Return the stable weather wind speed used by wind-driven exterior effects.
         float getBaseWindSpeed() const;
+
+        /// Return the active weather's authored cloud-animation speed.
+        float getCloudSpeed() const;
 
         void setSunglare(bool enabled);
 
@@ -106,6 +112,7 @@ namespace MWRender
 
         osg::Vec4f getSkyColor() const { return mSkyColour; }
 
+        /// Return the canonical atmosphere state assembled for the current weather frame.
         const AtmosphereState& getAtmosphereState() const { return mAtmosphere; }
 
     private:
@@ -161,6 +168,7 @@ namespace MWRender
 
         bool mIsStorm;
 
+        bool mUseLegacyCloudRendering;
         bool mTimescaleClouds;
         float mCloudAnimationTimer;
 

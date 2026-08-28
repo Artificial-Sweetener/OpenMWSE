@@ -2,6 +2,25 @@ Shaders Settings
 ################
 
 .. omw-setting::
+   :title: atmospheric effects
+   :type: boolean
+   :range: true, false
+   :default: true
+
+   Enables the regional atmospheric sky, analytic sun, procedural clouds, low mist, and depth-occluded sun shafts in exteriors.
+   Water reflections render the same sky and cloud field through the reflection camera.
+
+.. omw-setting::
+   :title: atmospheric quality
+   :type: int
+   :range: 0-3
+   :default: 2
+
+   Controls cloud and mist volume resolution, cloud ray samples, and sun-shaft sample density. Higher values preserve more
+   fine volume detail while using the same weather-driven atmospheric model. Water reflections include the cloud field at
+   every quality level.
+
+.. omw-setting::
    :title: force per pixel lighting
    :type: boolean
    :range: true, false

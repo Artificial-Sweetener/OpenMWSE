@@ -32,11 +32,26 @@ namespace MWWorld
             return result;
         }
 
+        /// Read a finite three-channel atmosphere value with field-qualified errors.
         osg::Vec3f readVec3(const YAML::Node& node, std::string_view path)
         {
             if (!node.IsSequence() || node.size() != 3)
                 throw std::runtime_error("OpenMWSE atmosphere value must contain three numbers: " + std::string(path));
-            return { node[0].as<float>(), node[1].as<float>(), node[2].as<float>() };
+            const osg::Vec3f value(node[0].as<float>(), node[1].as<float>(), node[2].as<float>());
+            if (!std::isfinite(value.x()) || !std::isfinite(value.y()) || !std::isfinite(value.z()))
+                throw std::runtime_error("OpenMWSE atmosphere value must be finite: " + std::string(path));
+            return value;
+        }
+
+        /// Read a finite atmosphere scalar constrained to its supported physical range.
+        float readBoundedFloat(
+            const YAML::Node& source, std::string_view name, std::string_view path, float minimum, float maximum)
+        {
+            const float value = source[std::string(name)].as<float>();
+            if (!std::isfinite(value) || value < minimum || value > maximum)
+                throw std::runtime_error("OpenMWSE atmosphere value is outside its supported range: "
+                    + std::string(path) + "." + std::string(name));
+            return value;
         }
 
         osg::Vec4f readColor(const YAML::Node& node, std::string_view path)
@@ -92,6 +107,58 @@ namespace MWWorld
             osg::Vec3f mOutScattering;
         };
 
+        /// Store validated per-weather cloud, mist, and shaft controls in world units.
+        struct VolumeProfile
+        {
+            float mCloudCoverage;
+            float mCloudDensity;
+            float mCloudBaseAltitudeWorldUnits;
+            float mCloudThicknessWorldUnits;
+            float mMistDensity;
+            float mMistBaseAltitudeWorldUnits;
+            float mMistThicknessWorldUnits;
+            float mShaftIntensity;
+        };
+
+        /// Parse and validate one weather volume profile with field-qualified errors.
+        VolumeProfile readVolumeProfile(const YAML::Node& source, std::string_view path)
+        {
+            if (!source.IsMap())
+                throw std::runtime_error("OpenMWSE atmosphere data is missing volume profile: " + std::string(path));
+            return { readBoundedFloat(source, "cloudCoverage", path, 0.f, 1.f),
+                readBoundedFloat(source, "cloudDensity", path, 0.f, 4.f),
+                readBoundedFloat(source, "cloudAltitude", path, -10000.f, 200000.f),
+                readBoundedFloat(source, "cloudThickness", path, 1.f, 200000.f),
+                readBoundedFloat(source, "mistDensity", path, 0.f, 4.f),
+                readBoundedFloat(source, "mistAltitude", path, -10000.f, 50000.f),
+                readBoundedFloat(source, "mistThickness", path, 1.f, 100000.f),
+                readBoundedFloat(source, "shaftIntensity", path, 0.f, 4.f) };
+        }
+
+        /// Interpolate weather volume controls during a weather transition.
+        VolumeProfile blend(const VolumeProfile& from, const VolumeProfile& to, float factor)
+        {
+            return { std::lerp(from.mCloudCoverage, to.mCloudCoverage, factor),
+                std::lerp(from.mCloudDensity, to.mCloudDensity, factor),
+                std::lerp(from.mCloudBaseAltitudeWorldUnits, to.mCloudBaseAltitudeWorldUnits, factor),
+                std::lerp(from.mCloudThicknessWorldUnits, to.mCloudThicknessWorldUnits, factor),
+                std::lerp(from.mMistDensity, to.mMistDensity, factor),
+                std::lerp(from.mMistBaseAltitudeWorldUnits, to.mMistBaseAltitudeWorldUnits, factor),
+                std::lerp(from.mMistThicknessWorldUnits, to.mMistThicknessWorldUnits, factor),
+                std::lerp(from.mShaftIntensity, to.mShaftIntensity, factor) };
+        }
+
+        /// Resolve a canonical weather name to its volume-profile index.
+        std::size_t weatherIndex(std::string_view weather)
+        {
+            const std::string normalized = lowerCase(weather);
+            const auto found = std::find_if(sWeatherNames.begin(), sWeatherNames.end(),
+                [&](std::string_view candidate) { return lowerCase(candidate) == normalized; });
+            if (found == sWeatherNames.end())
+                throw std::runtime_error("OpenMWSE atmosphere received unknown weather: " + std::string(weather));
+            return static_cast<std::size_t>(std::distance(sWeatherNames.begin(), found));
+        }
+
         Palette blend(const Palette& from, const Palette& to, float factor)
         {
             Palette result;
@@ -117,15 +184,27 @@ namespace MWWorld
         }
     }
 
+    /// Own parsed regional palettes, weather volumes, and their current transition state.
     struct AtmospherePalette::Impl
     {
-        explicit Impl(std::istream& stream)
+        /// Parse and validate canonical palette and volume streams.
+        Impl(std::istream& paletteStream, std::istream& volumeStream)
         {
-            const YAML::Node root = YAML::Load(stream);
+            const YAML::Node root = YAML::Load(paletteStream);
             const YAML::Node presets = root["presets"];
             const YAML::Node regions = root["regions"];
             if (!presets.IsMap() || !regions.IsMap())
                 throw std::runtime_error("OpenMWSE atmosphere data must define presets and regions");
+
+            const YAML::Node volumes = YAML::Load(volumeStream);
+            if (!volumes.IsMap())
+                throw std::runtime_error("OpenMWSE atmosphere volume data must define weather profiles");
+
+            for (std::size_t i = 0; i < sWeatherNames.size(); ++i)
+            {
+                const std::string weatherName(sWeatherNames[i]);
+                mVolumes[i] = readVolumeProfile(volumes[weatherName], "atmosphere-volumes." + weatherName);
+            }
 
             for (const auto& entry : presets)
             {
@@ -201,6 +280,7 @@ namespace MWWorld
 
         std::unordered_map<std::string, Palette> mPresets;
         std::unordered_map<std::string, std::string> mRegions;
+        std::array<VolumeProfile, sWeatherNames.size()> mVolumes;
         Palette mApplied;
         Palette mFrom;
         Palette mTarget;
@@ -209,12 +289,13 @@ namespace MWWorld
     };
 
     AtmospherePalette::AtmospherePalette(const VFS::Manager& vfs)
-        : AtmospherePalette(*vfs.get(VFS::Path::NormalizedView("openmwse/atmosphere.json")))
+        : AtmospherePalette(*vfs.get(VFS::Path::NormalizedView("openmwse/atmosphere.json")),
+            *vfs.get(VFS::Path::NormalizedView("openmwse/atmosphere-volumes.json")))
     {
     }
 
-    AtmospherePalette::AtmospherePalette(std::istream& stream)
-        : mImpl(std::make_unique<Impl>(stream))
+    AtmospherePalette::AtmospherePalette(std::istream& paletteStream, std::istream& volumeStream)
+        : mImpl(std::make_unique<Impl>(paletteStream, volumeStream))
     {
     }
 
@@ -237,6 +318,19 @@ namespace MWWorld
         const float nextWeight = nextWeather.empty() ? currentWeight : (usesScattering(nextWeather) ? 1.f : 0.f);
         const float transition = std::clamp(weatherTransition, 0.f, 1.f);
         const float weatherWeight = currentWeight * (1.f - transition) + nextWeight * transition;
-        return { mImpl->mApplied.mInScattering, mImpl->mApplied.mOutScattering, weatherWeight * weatherWeight, true };
+        const VolumeProfile& currentVolume = mImpl->mVolumes[weatherIndex(currentWeather)];
+        const VolumeProfile& nextVolume
+            = nextWeather.empty() ? currentVolume : mImpl->mVolumes[weatherIndex(nextWeather)];
+        const VolumeProfile volume = blend(currentVolume, nextVolume, transition);
+
+        MWRender::AtmosphereState result;
+        result.mInScattering = mImpl->mApplied.mInScattering;
+        result.mOutScattering = mImpl->mApplied.mOutScattering;
+        result.mWeatherWeight = weatherWeight * weatherWeight;
+        result.mEnabled = true;
+        result.mVolumes = { volume.mCloudCoverage, volume.mCloudDensity, volume.mCloudBaseAltitudeWorldUnits,
+            volume.mCloudThicknessWorldUnits, volume.mMistDensity, volume.mMistBaseAltitudeWorldUnits,
+            volume.mMistThicknessWorldUnits, volume.mShaftIntensity };
+        return result;
     }
 }

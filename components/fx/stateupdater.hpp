@@ -20,6 +20,12 @@ namespace Fx
             mData.get<InvProjectionMatrix>() = osg::Matrixf::inverse(matrix);
         }
 
+        /// Return the current projection matrix used by native post-process passes.
+        osg::Matrixf getProjectionMatrix() const { return mData.get<ProjectionMatrix>(); }
+
+        /// Set the previous-frame projection matrix used for temporal reprojection.
+        void setPrevProjectionMatrix(const osg::Matrixf& matrix) { mData.get<PrevProjectionMatrix>() = matrix; }
+
         void setViewMatrix(const osg::Matrixf& matrix)
         {
             mData.get<ViewMatrix>() = matrix;
@@ -102,6 +108,30 @@ namespace Fx
         void setWeatherTransition(float transition)
         {
             mData.get<WeatherTransition>() = transition > 0 ? 1 - transition : 0;
+        }
+
+        /// Publish canonical scene-linear atmosphere, volume, and lighting state to native passes.
+        void setAtmosphere(const osg::Vec3f& inScattering, const osg::Vec3f& outScattering,
+            const osg::Vec4f& cloudParameters, const osg::Vec4f& mistParameters, const osg::Vec4f& sunDiscColor,
+            const osg::Vec3f& solarRadiance, const osg::Vec3f& skyIrradiance, const osg::Vec3f& groundIrradiance,
+            const osg::Vec2f& cloudAdvectionOffsetWorldUnits, const osg::Vec2f& cloudAdvectionDeltaWorldUnits,
+            float historyLightingWeight, float weatherWeight, int quality, float volumeResolutionScale, bool enabled)
+        {
+            mData.get<AtmosphereInScattering>() = inScattering;
+            mData.get<AtmosphereOutScattering>() = outScattering;
+            mData.get<AtmosphereCloudParameters>() = cloudParameters;
+            mData.get<AtmosphereMistParameters>() = mistParameters;
+            mData.get<AtmosphereSunDiscColor>() = sunDiscColor;
+            mData.get<AtmosphereSolarRadiance>() = solarRadiance;
+            mData.get<AtmosphereSkyIrradiance>() = skyIrradiance;
+            mData.get<AtmosphereGroundIrradiance>() = groundIrradiance;
+            mData.get<AtmosphereCloudAdvectionOffset>() = cloudAdvectionOffsetWorldUnits;
+            mData.get<AtmosphereCloudAdvectionDelta>() = cloudAdvectionDeltaWorldUnits;
+            mData.get<AtmosphereHistoryLightingWeight>() = historyLightingWeight;
+            mData.get<AtmosphereWeatherWeight>() = weatherWeight;
+            mData.get<AtmosphereQuality>() = quality;
+            mData.get<AtmosphereVolumeResolutionScale>() = volumeResolutionScale;
+            mData.get<AtmosphereEnabled>() = enabled;
         }
 
         void bindPointLights(std::shared_ptr<SceneUtil::PPLightBuffer> buffer)
@@ -281,11 +311,111 @@ namespace Fx
             static constexpr std::string_view sName = "isInterior";
         };
 
-        using UniformData = Std140::UBO<ProjectionMatrix, InvProjectionMatrix, ViewMatrix, PrevViewMatrix,
-            InvViewMatrix, EyePos, EyeVec, FogColor, AmbientColor, SkyColor, SunColor, SunPos, SunVec, Resolution,
-            RcpResolution, FogNear, FogFar, Near, Far, Fov, GameHour, SunVis, WaterHeight, IsWaterEnabled,
+        /// Bind the previous-frame projection used by temporal reprojection.
+        struct PrevProjectionMatrix : Std140::Mat4
+        {
+            static constexpr std::string_view sName = "prevProjectionMatrix";
+        };
+
+        /// Bind the atmosphere's forward spectral scattering coefficient.
+        struct AtmosphereInScattering : Std140::Vec3
+        {
+            static constexpr std::string_view sName = "atmosphereInScattering";
+        };
+
+        /// Bind the atmosphere's backward spectral scattering coefficient.
+        struct AtmosphereOutScattering : Std140::Vec3
+        {
+            static constexpr std::string_view sName = "atmosphereOutScattering";
+        };
+
+        /// Bind weather-controlled cloud coverage, density, base height, and thickness.
+        struct AtmosphereCloudParameters : Std140::Vec4
+        {
+            static constexpr std::string_view sName = "atmosphereCloudParameters";
+        };
+
+        /// Bind weather-controlled mist density, base height, thickness, and shaft intensity.
+        struct AtmosphereMistParameters : Std140::Vec4
+        {
+            static constexpr std::string_view sName = "atmosphereMistParameters";
+        };
+
+        /// Bind scene-linear analytic sun color and visibility.
+        struct AtmosphereSunDiscColor : Std140::Vec4
+        {
+            static constexpr std::string_view sName = "atmosphereSunDiscColor";
+        };
+
+        /// Bind scene-linear direct solar radiance.
+        struct AtmosphereSolarRadiance : Std140::Vec3
+        {
+            static constexpr std::string_view sName = "atmosphereSolarRadiance";
+        };
+
+        /// Bind scene-linear hemispherical sky irradiance.
+        struct AtmosphereSkyIrradiance : Std140::Vec3
+        {
+            static constexpr std::string_view sName = "atmosphereSkyIrradiance";
+        };
+
+        /// Bind scene-linear lower-hemisphere ground irradiance.
+        struct AtmosphereGroundIrradiance : Std140::Vec3
+        {
+            static constexpr std::string_view sName = "atmosphereGroundIrradiance";
+        };
+
+        /// Store integrated cloud displacement in world units for every procedural cloud consumer.
+        struct AtmosphereCloudAdvectionOffset : Std140::Vec2
+        {
+            static constexpr std::string_view sName = "atmosphereCloudAdvectionOffsetWorldUnits";
+        };
+
+        /// Store exact current-frame cloud displacement in world units for temporal reprojection.
+        struct AtmosphereCloudAdvectionDelta : Std140::Vec2
+        {
+            static constexpr std::string_view sName = "atmosphereCloudAdvectionDeltaWorldUnits";
+        };
+
+        /// Bind confidence that previous-frame atmosphere radiance remains compatible with the current frame.
+        struct AtmosphereHistoryLightingWeight : Std140::Float
+        {
+            static constexpr std::string_view sName = "atmosphereHistoryLightingWeight";
+        };
+
+        /// Bind the regional directional-scattering blend weight.
+        struct AtmosphereWeatherWeight : Std140::Float
+        {
+            static constexpr std::string_view sName = "atmosphereWeatherWeight";
+        };
+
+        /// Bind whether the unified atmosphere system contributes to the frame.
+        struct AtmosphereEnabled : Std140::Bool
+        {
+            static constexpr std::string_view sName = "atmosphereEnabled";
+        };
+
+        /// Bind the bounded atmosphere quality tier.
+        struct AtmosphereQuality : Std140::Int
+        {
+            static constexpr std::string_view sName = "atmosphereQuality";
+        };
+
+        /// Bind the internal volume-buffer scale for reconstruction footprints.
+        struct AtmosphereVolumeResolutionScale : Std140::Float
+        {
+            static constexpr std::string_view sName = "atmosphereVolumeResolutionScale";
+        };
+
+        using UniformData = Std140::UBO<ProjectionMatrix, InvProjectionMatrix, PrevProjectionMatrix, ViewMatrix,
+            PrevViewMatrix, InvViewMatrix, EyePos, EyeVec, FogColor, AmbientColor, SkyColor, SunColor, SunPos, SunVec,
+            Resolution, RcpResolution, FogNear, FogFar, Near, Far, Fov, GameHour, SunVis, WaterHeight, IsWaterEnabled,
             SimulationTime, DeltaSimulationTime, FrameNumber, WindSpeed, WeatherTransition, WeatherID, NextWeatherID,
-            IsUnderwater, IsInterior>;
+            IsUnderwater, IsInterior, AtmosphereInScattering, AtmosphereOutScattering, AtmosphereCloudParameters,
+            AtmosphereMistParameters, AtmosphereSunDiscColor, AtmosphereSolarRadiance, AtmosphereSkyIrradiance,
+            AtmosphereGroundIrradiance, AtmosphereCloudAdvectionOffset, AtmosphereCloudAdvectionDelta,
+            AtmosphereHistoryLightingWeight, AtmosphereWeatherWeight, AtmosphereQuality,
+            AtmosphereVolumeResolutionScale, AtmosphereEnabled>;
 
         UniformData mData;
         bool mUseUBO;

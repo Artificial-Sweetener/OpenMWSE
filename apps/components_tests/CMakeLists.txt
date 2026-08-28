@@ -130,7 +130,8 @@ file(DOWNLOAD
 
 target_compile_definitions(components-tests
     PRIVATE OPENMW_DATA_DIR=u8"${CMAKE_CURRENT_BINARY_DIR}/data"
-            OPENMW_PROJECT_SOURCE_DIR=u8"${PROJECT_SOURCE_DIR}")
+            OPENMW_PROJECT_SOURCE_DIR=u8"${PROJECT_SOURCE_DIR}"
+            OPENMW_PROJECT_BINARY_DIR=u8"${PROJECT_BINARY_DIR}")
 
 if (MSVC AND PRECOMPILE_HEADERS_WITH_MSVC)
     target_precompile_headers(components-tests PRIVATE

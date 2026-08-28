@@ -9,6 +9,9 @@
 #endif
 
 #include "lib/light/util.glsl"
+#include "lib/atmosphere/cloud_shadow.glsl"
+
+uniform mat4 osg_ViewMatrixInverse;
 
 uniform float near;
 uniform vec2 screenRes;
@@ -23,6 +26,9 @@ void doLighting(vec2 screenCoord, vec3 viewPos, vec3 viewNormal, float shininess
     specularLight = vec3(0.0);
 
     calcDirectionalLighting(sun, viewDir, viewNormal, shininess, diffuseLight, ambientLight, specularLight);
+
+    vec3 worldPosition = (osg_ViewMatrixInverse * vec4(viewPos, 1.0)).xyz;
+    openmwseApplyCloudLighting(worldPosition, diffuseLight, ambientLight, specularLight);
 
     diffuseLight *= shadowing;
     specularLight *= shadowing;

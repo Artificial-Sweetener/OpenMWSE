@@ -95,8 +95,12 @@ namespace SceneUtil
 
         void setFogEnd(float end);
 
+        /// Publish canonical scene-linear atmosphere, volume, and lighting state to compatibility shaders.
         void setAtmosphere(bool enabled, const osg::Vec4f& skyColor, const osg::Vec3f& inScattering,
-            const osg::Vec3f& outScattering, float weatherWeight, const osg::Vec3f& sunDirection);
+            const osg::Vec3f& outScattering, float weatherWeight, const osg::Vec3f& sunDirection,
+            const osg::Vec4f& cloudParameters, const osg::Vec4f& mistParameters, const osg::Vec4f& sunDiscColor,
+            const osg::Vec3f& solarRadiance, const osg::Vec3f& skyIrradiance, const osg::Vec3f& groundIrradiance,
+            const osg::Vec2f& cloudAdvectionOffsetWorldUnits, int quality);
 
         void setUnderwaterFogColor(const osg::Vec4f& col);
 
@@ -111,6 +115,9 @@ namespace SceneUtil
 
         void setWaterEnabled(bool enabled);
 
+        /// Select the inert or capture-only compatibility-shader diagnostic output.
+        void setAtmosphereDiagnosticMode(int mode);
+
     private:
         osg::Vec4f mAmbientColor;
         osg::Vec4f mFogColor;
@@ -122,12 +129,21 @@ namespace SceneUtil
         osg::Vec3f mAtmosphereOutScattering;
         float mAtmosphereWeatherWeight = 0.f;
         osg::Vec3f mAtmosphereSunDirection{ 0.f, 0.f, 1.f };
+        osg::Vec4f mAtmosphereCloudParameters;
+        osg::Vec4f mAtmosphereMistParameters;
+        osg::Vec4f mAtmosphereSunDiscColor;
+        osg::Vec3f mAtmosphereSolarRadiance;
+        osg::Vec3f mAtmosphereSkyIrradiance;
+        osg::Vec3f mAtmosphereGroundIrradiance;
+        osg::Vec2f mAtmosphereCloudAdvectionOffsetWorldUnits;
+        int mAtmosphereQuality = 2;
         osg::Vec4f mUnderwaterFogColor;
         float mUnderwaterFogStart = 0.f;
         float mUnderwaterFogEnd = 0.f;
         bool mWireframe = false;
         float mWaterHeight = 0.f;
         bool mWaterEnabled = false;
+        int mAtmosphereDiagnosticMode = 0;
     };
 }
 

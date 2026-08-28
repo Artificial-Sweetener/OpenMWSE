@@ -1,5 +1,7 @@
 #include "postprocessor.hpp"
 
+#include <cstdlib>
+
 #include <SDL_opengl_glext.h>
 #include <algorithm>
 #include <chrono>
@@ -19,6 +21,7 @@
 #include <components/sceneutil/color.hpp>
 #include <components/sceneutil/depth.hpp>
 #include <components/sceneutil/nodecallback.hpp>
+#include <components/sceneutil/shadow.hpp>
 #include <components/settings/values.hpp>
 #include <components/shader/shadermanager.hpp>
 #include <components/stereo/multiview.hpp>
@@ -31,6 +34,8 @@
 
 #include "../mwgui/postprocessorhud.hpp"
 
+#include "atmosphere.hpp"
+#include "atmospherediagnostics.hpp"
 #include "distortion.hpp"
 #include "opaqueblit.hpp"
 #include "pingpongcull.hpp"
@@ -112,10 +117,71 @@ namespace
     }
 
     constexpr float DistortionRatio = 0.25;
+
+    /// Return whether the active context can compile and bind the native post-process uniform block.
+    bool supportsPostProcessorUniformBuffers(osg::GraphicsContext* graphicsContext)
+    {
+        const osg::GLExtensions* extensions = graphicsContext->getState()->get<osg::GLExtensions>();
+        const int glslVersion = static_cast<int>(extensions->glslLanguageVersion * 100);
+        return extensions->isUniformBufferObjectSupported && glslVersion >= 330;
+    }
 }
 
 namespace MWRender
 {
+    void PostProcessor::requestAtmosphereDiagnosticCapture()
+    {
+        const char* outputDirectory = std::getenv("OPENMW_ATMOSPHERE_DIAGNOSTICS_DIR");
+        if (!outputDirectory || outputDirectory[0] == '\0')
+            return;
+
+        mAtmosphereDiagnostics->requestCapture(std::filesystem::path(outputDirectory));
+        Log(Debug::Info) << "Production atmosphere shader-stage comparison requested for the next screenshot frames";
+    }
+
+    void PostProcessor::advanceAtmosphereDiagnosticComparison()
+    {
+        switch (mAtmosphereDiagnostics->advanceComparison())
+        {
+            case AtmosphereDiagnostics::ComparisonAction::BypassShadows:
+                SceneUtil::ShadowManager::instance().setDiagnosticShadowRenderingEnabled(false);
+                Log(Debug::Info) << "Bypassing shadows for the second production diagnostic frame";
+                break;
+            case AtmosphereDiagnostics::ComparisonAction::BypassCoveragePreservation:
+                SceneUtil::ShadowManager::instance().setDiagnosticShadowRenderingEnabled(true);
+                mRendering.setAtmosphereDiagnosticMode(1);
+                Log(Debug::Info) << "Bypassing alpha mip-coverage preservation for the production diagnostic frame";
+                break;
+            case AtmosphereDiagnostics::ComparisonAction::BypassCompatibilityFog:
+                mRendering.setAtmosphereDiagnosticMode(2);
+                Log(Debug::Info) << "Bypassing compatibility fog for the production diagnostic frame";
+                break;
+            case AtmosphereDiagnostics::ComparisonAction::ShowFogVisibility:
+                mRendering.setAtmosphereDiagnosticMode(3);
+                Log(Debug::Info) << "Showing compatibility fog visibility for the production diagnostic frame";
+                break;
+            case AtmosphereDiagnostics::ComparisonAction::ShowFogInScattering:
+                mRendering.setAtmosphereDiagnosticMode(4);
+                Log(Debug::Info) << "Showing compatibility fog in-scattering for the production diagnostic frame";
+                break;
+            case AtmosphereDiagnostics::ComparisonAction::ShowPreFogRadiance:
+                mRendering.setAtmosphereDiagnosticMode(5);
+                Log(Debug::Info) << "Showing object pre-fog radiance for the production diagnostic frame";
+                break;
+            case AtmosphereDiagnostics::ComparisonAction::ShowSampledSurfaceColor:
+                mRendering.setAtmosphereDiagnosticMode(6);
+                Log(Debug::Info) << "Showing object sampled surface color for the production diagnostic frame";
+                break;
+            case AtmosphereDiagnostics::ComparisonAction::RestoreNormalRendering:
+                SceneUtil::ShadowManager::instance().setDiagnosticShadowRenderingEnabled(true);
+                mRendering.setAtmosphereDiagnosticMode(0);
+                Log(Debug::Info) << "Restored normal rendering after production diagnostics";
+                break;
+            case AtmosphereDiagnostics::ComparisonAction::None:
+                break;
+        }
+    }
+
     PostProcessor::PostProcessor(
         RenderingManager& rendering, osgViewer::Viewer* viewer, osg::Group* rootNode, const VFS::Manager* vfs)
         : osg::Group()
@@ -125,16 +191,40 @@ namespace MWRender
         , mViewer(viewer)
         , mVFS(vfs)
         , mUsePostProcessing(Settings::postProcessing().mEnabled)
+        , mUBO(supportsPostProcessorUniformBuffers(viewer->getCamera()->getGraphicsContext()))
         , mSamples(Settings::video().mAntialiasing)
+        , mStateUpdater(new Fx::StateUpdater(mUBO))
         , mPingPongCull(new PingPongCull(this))
         , mDistortionCallback(new DistortionCallback)
     {
         auto& shaderManager = mRendering.getResourceSystem()->getSceneManager()->getShaderManager();
+        osg::GraphicsContext* gc = viewer->getCamera()->getGraphicsContext();
+        osg::GLExtensions* ext = gc->getState()->get<osg::GLExtensions>();
+
+        mWidth = gc->getTraits()->width;
+        mHeight = gc->getTraits()->height;
+
+        if (!ext->glDisablei && ext->glDisableIndexedEXT)
+            ext->glDisablei = ext->glDisableIndexedEXT;
+
+#ifdef ANDROID
+        ext->glDisablei = nullptr;
+#endif
+
+        if (ext->glDisablei)
+            mNormalsSupported = true;
+        else
+            Log(Debug::Error) << "'glDisablei' unsupported, pass normals will not be available to shaders.";
+
+        mGLSLVersion = static_cast<int>(ext->glslLanguageVersion * 100);
 
         std::shared_ptr<LuminanceCalculator> luminanceCalculator = std::make_shared<LuminanceCalculator>(shaderManager);
 
+        mAtmosphereDiagnostics = std::make_shared<AtmosphereDiagnostics>();
         for (auto& canvas : mCanvases)
-            canvas = new PingPongCanvas(shaderManager, luminanceCalculator);
+            canvas = new PingPongCanvas(shaderManager, luminanceCalculator, mAtmosphereDiagnostics);
+        mCanvases[0]->setPreviousCanvas(mCanvases[1]);
+        mCanvases[1]->setPreviousCanvas(mCanvases[0]);
 
         mHUDCamera->setReferenceFrame(osg::Camera::ABSOLUTE_RF);
         mHUDCamera->setRenderOrder(osg::Camera::POST_RENDER);
@@ -193,32 +283,30 @@ namespace MWRender
 
         populateTechniqueFiles();
 
+        if (Settings::shaders().mAtmosphericEffects)
+        {
+            auto atmosphere = loadTechnique("internal_atmosphere");
+            const int quality = Settings::shaders().mAtmosphericQuality.get();
+            const float volumeResolutionScale = getAtmosphereVolumeResolutionScale(quality);
+            auto& targets = atmosphere->getRenderTargetsMap();
+            for (const std::string_view name :
+                { "AtmosphereVolumeRaw", "AtmosphereVolumeHistory", "AtmosphereVolumeMetadataHistory" })
+            {
+                targets[name].mSize.mWidthRatio = volumeResolutionScale;
+                targets[name].mSize.mHeightRatio = volumeResolutionScale;
+            }
+            targets["AtmosphereShafts"].mSize.mWidthRatio = volumeResolutionScale * 0.5f;
+            targets["AtmosphereShafts"].mSize.mHeightRatio = volumeResolutionScale * 0.5f;
+            atmosphere->setInternal(true);
+            atmosphere->setLocked(true);
+            atmosphere->setAlwaysEnabled(true);
+            mInternalTechniques.push_back(std::move(atmosphere));
+        }
+
         auto distortion = loadTechnique("internal_distortion");
         distortion->setInternal(true);
         distortion->setLocked(true);
         mInternalTechniques.push_back(std::move(distortion));
-
-        osg::GraphicsContext* gc = viewer->getCamera()->getGraphicsContext();
-        osg::GLExtensions* ext = gc->getState()->get<osg::GLExtensions>();
-
-        mWidth = gc->getTraits()->width;
-        mHeight = gc->getTraits()->height;
-
-        if (!ext->glDisablei && ext->glDisableIndexedEXT)
-            ext->glDisablei = ext->glDisableIndexedEXT;
-
-#ifdef ANDROID
-        ext->glDisablei = nullptr;
-#endif
-
-        if (ext->glDisablei)
-            mNormalsSupported = true;
-        else
-            Log(Debug::Error) << "'glDisablei' unsupported, pass normals will not be available to shaders.";
-
-        mGLSLVersion = static_cast<int>(ext->glslLanguageVersion * 100);
-        mUBO = ext->isUniformBufferObjectSupported && mGLSLVersion >= 330;
-        mStateUpdater = new Fx::StateUpdater(mUBO);
 
         addChild(mHUDCamera);
         addChild(mRootNode);
@@ -607,6 +695,7 @@ namespace MWRender
             Fx::DispatchNode node;
 
             node.mFlags = technique->getFlags();
+            node.mAlwaysEnabled = technique->getAlwaysEnabled();
 
             if (technique->getHDR())
                 mHDR = true;
@@ -674,6 +763,7 @@ namespace MWRender
                     // FIXME: https://gitlab.com/OpenMW/openmw/-/work_items/9034
                     std::string target = pass->getTarget();
                     auto& renderTarget = technique->getRenderTargetsMap()[target];
+                    subPass.mTargetName = target;
                     subPass.mSize = renderTarget.mSize;
                     subPass.mRenderTexture = renderTarget.mTarget;
                     subPass.mMipMap = renderTarget.mMipMap;
@@ -704,6 +794,7 @@ namespace MWRender
                     }
                 }
 
+                std::size_t inputTargetIndex = 0;
                 for (const auto& name : pass->getRenderTargets())
                 {
                     if (name.empty())
@@ -714,6 +805,8 @@ namespace MWRender
                     auto& renderTarget = technique->getRenderTargetsMap()[name];
                     subPass.mStateSet->setTextureAttribute(subTexUnit, renderTarget.mTarget);
                     subPass.mStateSet->addUniform(new osg::Uniform(name.c_str(), subTexUnit));
+                    subPass.mInputTargetNames[inputTargetIndex] = name;
+                    subPass.mInputTextureUnits[inputTargetIndex] = subTexUnit;
 
                     if (std::find_if(attachmentsToDirty.cbegin(), attachmentsToDirty.cend(),
                             [renderTarget](const auto& rt) { return renderTarget.mTarget == rt.mTarget; })
@@ -722,6 +815,7 @@ namespace MWRender
                         attachmentsToDirty.push_back(Fx::Types::RenderTarget(renderTarget));
                     }
                     subTexUnit++;
+                    inputTargetIndex++;
                 }
 
                 node.mPasses.emplace_back(std::move(subPass));

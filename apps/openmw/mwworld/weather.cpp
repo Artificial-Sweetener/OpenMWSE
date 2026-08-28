@@ -931,8 +931,11 @@ namespace MWWorld
 
         mRendering.configureFog(
             mResult.mFogDepth, underwaterFog, mResult.mDLFogFactor, mResult.mDLFogOffset / 100.0f, mResult.mFogColor);
-        mRendering.setAmbientColour(mResult.mAmbientColor);
-        mRendering.setSunColour(mResult.mSunColor, mResult.mSunColor, mResult.mGlareView * glareFade);
+        const MWRender::AtmosphereLightingState& atmosphereLighting = mResult.mAtmosphere.mLighting;
+        const osg::Vec4f atmosphereAmbientColor(atmosphereLighting.mSkyIrradiance, mResult.mAmbientColor.a());
+        const osg::Vec4f atmosphereSunColor(atmosphereLighting.mSolarRadiance, mResult.mSunColor.a());
+        mRendering.setAmbientColour(atmosphereAmbientColor);
+        mRendering.setSunColour(atmosphereSunColor, atmosphereSunColor, mResult.mGlareView * glareFade);
 
         mRendering.getSkyManager()->setWeather(mResult);
 
@@ -1291,6 +1294,8 @@ namespace MWWorld
         const float weatherTransition = inTransition() ? 1.f - mTransitionFactor : 0.f;
         mResult.mAtmosphere
             = mAtmospherePalette->getState(mWeatherSettings[mCurrentWeather].mName, nextWeather, weatherTransition);
+        mResult.mAtmosphere.mLighting
+            = MWRender::makeAtmosphereLightingState(mResult.mSunColor, mResult.mAmbientColor, mResult.mFogColor);
     }
 
     inline void WeatherManager::calculateResult(const int weatherID, const float gameHour)

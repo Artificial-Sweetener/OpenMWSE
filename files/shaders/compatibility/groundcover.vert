@@ -175,7 +175,7 @@ void main(void)
     vec3 viewDir = viewPos.xyz / euclideanDepth;
 
     vec3 sunDiffuse, sunAmbient, unusedSpecular1, pointDiffuse, pointAmbient, unusedSpecular2;
-    directionalLighting(viewDir, viewNormal, shininess, sunDiffuse, sunAmbient, unusedSpecular1);
+    directionalLighting(viewPos.xyz, viewDir, viewNormal, shininess, sunDiffuse, sunAmbient, unusedSpecular1);
     pointLighting(clipToScreen(gl_Position), viewDir, viewPos.xyz, viewNormal, shininess, pointDiffuse, pointAmbient, unusedSpecular2);
     shadedLighting = pointDiffuse + pointAmbient + sunAmbient;
     passLighting = shadedLighting + sunDiffuse;

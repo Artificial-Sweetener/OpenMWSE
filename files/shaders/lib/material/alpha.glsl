@@ -10,6 +10,8 @@
 #define FUNC_GEQUAL                         518 // 0x0206
 #define FUNC_ALWAYS                         519 // 0x0207
 
+#include "lib/atmosphere/diagnostics.glsl"
+
 float mipmapLevel(vec2 scaleduv)
 {
     vec2 dUVdx = dFdx(scaleduv);
@@ -20,6 +22,9 @@ float mipmapLevel(vec2 scaleduv)
 
 float coveragePreservingAlphaScale(sampler2D diffuseMap, vec2 uv)
 {
+    if (openmwseAtmosphereDiagnosticMode == openmwseAtmosphereDiagnosticCoverageBypassed)
+        return 1.0;
+
     #if @adjustCoverage
         vec2 textureSize;
         #if @useGPUShader4

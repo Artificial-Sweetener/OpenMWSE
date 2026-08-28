@@ -409,12 +409,10 @@ namespace MWRender
         stateset->getUniform("diffuseColor")->set(mEmissionColor);
     }
 
-    AtmosphereNightUpdater::AtmosphereNightUpdater(Resource::ImageManager* imageManager)
+    AtmosphereNightUpdater::AtmosphereNightUpdater(StarBlendMode blendMode)
         : mColor(osg::Vec4f(0, 0, 0, 0))
-        , mTexture(new osg::Texture2D(imageManager->getWarningImage()))
+        , mBlendMode(blendMode)
     {
-        mTexture->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
-        mTexture->setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
     }
 
     void AtmosphereNightUpdater::setFade(float fade)
@@ -426,6 +424,12 @@ namespace MWRender
     {
         stateset->addUniform(new osg::Uniform("opacity", 0.f));
         stateset->addUniform(new osg::Uniform("pass", static_cast<int>(Pass::Atmosphere_Night)));
+        if (mBlendMode == StarBlendMode::EmissiveRadiance)
+        {
+            stateset->setAttributeAndModes(new osg::BlendFunc(osg::BlendFunc::SRC_ALPHA, osg::BlendFunc::ONE,
+                                                osg::BlendFunc::ZERO, osg::BlendFunc::ONE),
+                osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE);
+        }
     }
 
     void AtmosphereNightUpdater::apply(osg::StateSet* stateset, osg::NodeVisitor* /*nv*/)
@@ -626,11 +630,17 @@ namespace MWRender
         mTransform->setNodeMask(visible ? mVisibleMask : 0);
     }
 
-    Sun::Sun(osg::Group* parentNode, Resource::SceneManager& sceneManager)
+    Sun::Sun(osg::Group* parentNode, Resource::SceneManager& sceneManager, bool useLegacyRendering)
         : CelestialBody(parentNode, 1.0f, 1, Mask_Sun)
         , mUpdater(new SunUpdater)
     {
         mTransform->addUpdateCallback(mUpdater);
+
+        if (!useLegacyRendering)
+        {
+            mTransform->removeChild(mGeom);
+            return;
+        }
 
         Resource::ImageManager& imageManager = *sceneManager.getImageManager();
 
@@ -713,8 +723,10 @@ namespace MWRender
 
     void Sun::setSunglare(bool enabled)
     {
-        mSunGlareNode->setNodeMask(enabled ? ~0u : 0);
-        mSunFlashNode->setNodeMask(enabled ? ~0u : 0);
+        if (mSunGlareNode)
+            mSunGlareNode->setNodeMask(enabled ? ~0u : 0);
+        if (mSunFlashNode)
+            mSunFlashNode->setNodeMask(enabled ? ~0u : 0);
     }
 
     osg::ref_ptr<osg::OcclusionQueryNode> Sun::createOcclusionQueryNode(osg::Group* parent, bool queryVisible)

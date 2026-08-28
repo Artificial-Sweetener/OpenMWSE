@@ -6,6 +6,7 @@
 #include <osg/Texture>
 #include <osgUtil/CullVisitor>
 
+#include <components/sceneutil/depth.hpp>
 #include <components/stereo/multiview.hpp>
 #include <components/stereo/stereomanager.hpp>
 
@@ -36,22 +37,29 @@ namespace MWRender
         osgUtil::RenderStage* renderStage = cv->getCurrentRenderStage();
         unsigned frame = cv->getTraversalNumber();
         unsigned frameId = frame % 2;
+        int eyeIndex = 0;
+        Fx::StateUpdater* stateUpdater = mPostProcessor->getStateUpdater();
+        osg::Matrixf projectionMatrix = stateUpdater->getProjectionMatrix();
 
         if (Stereo::getStereo())
         {
             auto& sm = Stereo::Manager::instance();
             auto view = sm.getEye(cv);
-            int index = view == Stereo::Eye::Right ? 1 : 0;
-            auto projectionMatrix = sm.computeEyeProjection(index, true);
-            mPostProcessor->getStateUpdater()->setProjectionMatrix(projectionMatrix);
+            eyeIndex = view == Stereo::Eye::Right ? 1 : 0;
+            projectionMatrix = sm.computeEyeProjection(eyeIndex, SceneUtil::AutoDepth::isReversed());
         }
 
-        mPostProcessor->getStateUpdater()->setViewMatrix(cv->getCurrentCamera()->getViewMatrix());
-        mPostProcessor->getStateUpdater()->setPrevViewMatrix(mLastViewMatrix[0]);
-        mLastViewMatrix[0] = cv->getCurrentCamera()->getViewMatrix();
+        stateUpdater->setProjectionMatrix(projectionMatrix);
+        stateUpdater->setPrevProjectionMatrix(mLastProjectionMatrix[eyeIndex]);
+        mLastProjectionMatrix[eyeIndex] = projectionMatrix;
 
-        mPostProcessor->getStateUpdater()->setEyePos(cv->getEyePoint());
-        mPostProcessor->getStateUpdater()->setEyeVec(cv->getLookVectorLocal());
+        const osg::Matrixf viewMatrix = cv->getCurrentCamera()->getViewMatrix();
+        stateUpdater->setViewMatrix(viewMatrix);
+        stateUpdater->setPrevViewMatrix(mLastViewMatrix[eyeIndex]);
+        mLastViewMatrix[eyeIndex] = viewMatrix;
+
+        stateUpdater->setEyePos(cv->getEyePoint());
+        stateUpdater->setEyeVec(cv->getLookVectorLocal());
 
         if (!mPostProcessor->getFbo(PostProcessor::FBO_Multisample, frameId))
         {

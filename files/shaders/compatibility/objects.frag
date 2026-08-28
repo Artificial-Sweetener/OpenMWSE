@@ -215,6 +215,7 @@ vec2 screenCoords = gl_FragCoord.xy / screenRes;
 
 #endif
 
+    vec3 diagnosticSampledSurfaceColor = gl_FragData[0].rgb;
     float shadowing = unshadowedLightRatio(-passViewPos.z);
     vec3 lighting, specular;
 #if !PER_PIXEL_LIGHTING
@@ -239,6 +240,19 @@ vec2 screenCoords = gl_FragCoord.xy / screenRes;
 #endif
 
     gl_FragData[0].xyz = gl_FragData[0].xyz * lighting + specular;
+
+    if (openmwseAtmosphereDiagnosticMode == openmwseAtmosphereDiagnosticPreFogRadiance
+        || openmwseAtmosphereDiagnosticMode == openmwseAtmosphereDiagnosticSampledSurfaceColor)
+    {
+        vec3 diagnosticColor = openmwseAtmosphereDiagnosticMode == openmwseAtmosphereDiagnosticSampledSurfaceColor
+            ? diagnosticSampledSurfaceColor
+            : gl_FragData[0].rgb;
+        gl_FragData[0] = vec4(diagnosticColor, 1.0);
+#if !defined(FORCE_OPAQUE) && !@disableNormals
+        gl_FragData[1].xyz = viewNormal * 0.5 + 0.5;
+#endif
+        return;
+    }
 
 #if @envMap && !@preLightEnv
     gl_FragData[0].xyz += envEffect;

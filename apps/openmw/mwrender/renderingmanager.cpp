@@ -55,6 +55,7 @@
 
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/class.hpp"
+#include "../mwworld/datetimemanager.hpp"
 #include "../mwworld/groundcoverstore.hpp"
 #include "../mwworld/scene.hpp"
 
@@ -721,11 +722,15 @@ namespace MWRender
     {
         reportStats();
 
+        mPostProcessor->advanceAtmosphereDiagnosticComparison();
+
         mResourceSystem->getSceneManager()->getShaderManager().update(*mViewer);
 
         mWater->setRainIntensity(mSky->getRainRipplesEnabled() ? mSky->getPrecipitationAlpha() : 0.f);
 
         mWater->update(dt, paused);
+        const float gameTimeScale = MWBase::Environment::get().getWorld()->getTimeManager()->getGameTimeScale();
+        mCloudAdvection.update(dt, paused, mSky->getCloudSpeed(), gameTimeScale);
         if (!paused)
         {
             mEffectManager->update(dt);
@@ -767,9 +772,27 @@ namespace MWRender
         mStateUpdater->setUnderwaterFogColor(fogUnderwaterColor);
 
         const AtmosphereState& atmosphere = mSky->getAtmosphereState();
-        mStateUpdater->setAtmosphere(mSky->isEnabled() && atmosphere.mEnabled, mSky->getSkyColor(),
-            atmosphere.mInScattering, atmosphere.mOutScattering, atmosphere.mWeatherWeight,
-            getScatteringSunDirection(mSky->getSunDirection(), mSunVisibility > 0.f));
+        const CloudAdvectionState& cloudAdvection = mCloudAdvection.getState();
+        const bool atmosphereEnabled
+            = Settings::shaders().mAtmosphericEffects && mSky->isEnabled() && atmosphere.mEnabled;
+        const osg::Vec4f skyColor = mSky->getSkyColor();
+        const osg::Vec3f scatteringSunDirection
+            = getScatteringSunDirection(mSky->getSunDirection(), mSunVisibility > 0.f);
+        const float atmosphereHistoryLightingWeight = mAtmosphereHistoryLighting.update(
+            { atmosphere.mLighting.mSolarRadiance, atmosphere.mLighting.mSkyIrradiance,
+                atmosphere.mLighting.mGroundIrradiance, atmosphere.mInScattering, atmosphere.mOutScattering,
+                osg::Vec3f(skyColor.x(), skyColor.y(), skyColor.z()),
+                osg::Vec3f(fogColor.x(), fogColor.y(), fogColor.z()), scatteringSunDirection },
+            atmosphereEnabled);
+        mStateUpdater->setAtmosphere(atmosphereEnabled, mSky->getSkyColor(), atmosphere.mInScattering,
+            atmosphere.mOutScattering, atmosphere.mWeatherWeight, scatteringSunDirection,
+            { atmosphere.mVolumes.mCloudCoverage, atmosphere.mVolumes.mCloudDensity,
+                atmosphere.mVolumes.mCloudBaseAltitudeWorldUnits, atmosphere.mVolumes.mCloudThicknessWorldUnits },
+            { atmosphere.mVolumes.mMistDensity, atmosphere.mVolumes.mMistBaseAltitudeWorldUnits,
+                atmosphere.mVolumes.mMistThicknessWorldUnits, atmosphere.mVolumes.mShaftIntensity },
+            atmosphere.mSunDiscColor, atmosphere.mLighting.mSolarRadiance, atmosphere.mLighting.mSkyIrradiance,
+            atmosphere.mLighting.mGroundIrradiance, cloudAdvection.mOffsetWorldUnits,
+            Settings::shaders().mAtmosphericQuality.get());
 
         mViewer->getCamera()->setClearColor(isUnderwater ? fogUnderwaterColor : fogColor);
 
@@ -786,7 +809,22 @@ namespace MWRender
         stateUpdater->setWeatherTransition(world->getWeatherTransition());
         stateUpdater->setWindSpeed(world->getWindSpeed());
         stateUpdater->setSkyColor(mSky->getSkyColor());
+        stateUpdater->setAtmosphere(atmosphere.mInScattering, atmosphere.mOutScattering,
+            { atmosphere.mVolumes.mCloudCoverage, atmosphere.mVolumes.mCloudDensity,
+                atmosphere.mVolumes.mCloudBaseAltitudeWorldUnits, atmosphere.mVolumes.mCloudThicknessWorldUnits },
+            { atmosphere.mVolumes.mMistDensity, atmosphere.mVolumes.mMistBaseAltitudeWorldUnits,
+                atmosphere.mVolumes.mMistThicknessWorldUnits, atmosphere.mVolumes.mShaftIntensity },
+            atmosphere.mSunDiscColor, atmosphere.mLighting.mSolarRadiance, atmosphere.mLighting.mSkyIrradiance,
+            atmosphere.mLighting.mGroundIrradiance, cloudAdvection.mOffsetWorldUnits,
+            cloudAdvection.mFrameDeltaWorldUnits, atmosphereHistoryLightingWeight, atmosphere.mWeatherWeight,
+            Settings::shaders().mAtmosphericQuality.get(),
+            getAtmosphereVolumeResolutionScale(Settings::shaders().mAtmosphericQuality.get()), atmosphereEnabled);
         mPostProcessor->setUnderwaterFlag(isUnderwater);
+    }
+
+    void RenderingManager::setAtmosphereDiagnosticMode(int mode)
+    {
+        mStateUpdater->setAtmosphereDiagnosticMode(mode);
     }
 
     void RenderingManager::updatePlayerPtr(const MWWorld::Ptr& ptr)

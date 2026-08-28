@@ -2,7 +2,9 @@
 
 #include <array>
 #include <format>
+#include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 
 #include <osg/Texture1D>
@@ -22,6 +24,9 @@
 
 namespace
 {
+    constexpr std::size_t sMaximumIncludeDepth = 16;
+    constexpr std::size_t sMaximumExpandedSourceSize = 4 * 1024 * 1024;
+
     struct ProxyTextureData
     {
         osg::Texture::WrapMode mWrapS = osg::Texture::CLAMP_TO_EDGE;
@@ -34,6 +39,106 @@ namespace
         std::optional<int> mSourceType;
         std::optional<int> mInternalFormat;
     };
+
+    /// Reject absolute, drive-qualified, empty, and parent-traversing shader include paths.
+    bool hasUnsafePathSegment(std::string_view path)
+    {
+        if (path.empty() || path.front() == '/' || path.front() == '\\' || path.find(':') != std::string_view::npos)
+            return true;
+
+        for (std::size_t segmentStart = 0; segmentStart <= path.size();)
+        {
+            const std::size_t segmentEnd = path.find_first_of("/\\", segmentStart);
+            const std::string_view segment = path.substr(segmentStart, segmentEnd - segmentStart);
+            if (segment.empty() || segment == "." || segment == "..")
+                return true;
+            if (segmentEnd == std::string_view::npos)
+                break;
+            segmentStart = segmentEnd + 1;
+        }
+        return false;
+    }
+
+    /// Resolve a relative shader include while keeping it inside the VFS shader namespace.
+    VFS::Path::Normalized resolveIncludePath(VFS::Path::NormalizedView includingFile, std::string_view requestedPath)
+    {
+        if (hasUnsafePathSegment(requestedPath))
+            throw std::runtime_error(std::format("unsafe shader include path '{}'", requestedPath));
+
+        VFS::Path::Normalized includePath(includingFile.parent());
+        includePath /= requestedPath;
+        if (!includePath.value().starts_with("shaders/"))
+            throw std::runtime_error(std::format("shader include '{}' resolves outside shaders", requestedPath));
+        return includePath;
+    }
+
+    /// Expand bounded VFS shader includes while detecting cycles and restoring caller line numbers.
+    std::string expandShaderIncludes(const VFS::Manager& vfs, std::string_view source,
+        VFS::Path::NormalizedView sourcePath, std::set<VFS::Path::Normalized>& includeStack, std::size_t depth)
+    {
+        if (depth > sMaximumIncludeDepth)
+            throw std::runtime_error(std::format("shader include depth exceeds {}", sMaximumIncludeDepth));
+
+        const VFS::Path::Normalized ownedSourcePath(sourcePath);
+        if (!includeStack.insert(ownedSourcePath).second)
+            throw std::runtime_error(std::format("cyclic shader include involving '{}'", sourcePath.value()));
+
+        std::string expanded;
+        expanded.reserve(source.size());
+        std::size_t lineStart = 0;
+        std::size_t lineNumber = 1;
+        while (lineStart < source.size())
+        {
+            const std::size_t lineEnd = source.find('\n', lineStart);
+            const std::size_t contentEnd = lineEnd == std::string_view::npos ? source.size() : lineEnd;
+            const std::string_view line = source.substr(lineStart, contentEnd - lineStart);
+            const std::size_t directiveStart = line.find_first_not_of(" \t");
+            const std::string_view directive
+                = directiveStart == std::string_view::npos ? std::string_view() : line.substr(directiveStart);
+            const bool includeDirective = directive.starts_with("#include")
+                && (directive.size() == 8 || directive[8] == ' ' || directive[8] == '\t');
+            if (!includeDirective)
+            {
+                expanded.append(line);
+            }
+            else
+            {
+                const std::size_t openingQuote = line.find_first_not_of(" \t", directiveStart + 8);
+                const std::size_t closingQuote = openingQuote == std::string_view::npos || line[openingQuote] != '"'
+                    ? std::string_view::npos
+                    : line.find('"', openingQuote + 1);
+                const std::size_t trailingContent = closingQuote == std::string_view::npos
+                    ? std::string_view::npos
+                    : line.find_first_not_of(" \t", closingQuote + 1);
+                if (openingQuote == std::string_view::npos || closingQuote == std::string_view::npos
+                    || (trailingContent != std::string_view::npos && !line.substr(trailingContent).starts_with("//")))
+                    throw std::runtime_error(
+                        std::format("invalid shader include in '{}' at line {}", sourcePath.value(), lineNumber));
+
+                const std::string_view requestedPath = line.substr(openingQuote + 1, closingQuote - openingQuote - 1);
+                const VFS::Path::Normalized includePath = resolveIncludePath(sourcePath, requestedPath);
+                if (!vfs.exists(includePath))
+                    throw std::runtime_error(std::format("shader include '{}' requested by '{}' does not exist",
+                        includePath.value(), sourcePath.value()));
+
+                const std::string includedSource(std::istreambuf_iterator<char>(*vfs.get(includePath)), {});
+                expanded.append(expandShaderIncludes(vfs, includedSource, includePath, includeStack, depth + 1));
+                expanded.append(std::format("\n#line {}\n", lineNumber + 1));
+            }
+
+            if (expanded.size() > sMaximumExpandedSourceSize)
+                throw std::runtime_error(
+                    std::format("expanded shader source exceeds {} bytes", sMaximumExpandedSourceSize));
+            if (lineEnd == std::string_view::npos)
+                break;
+            expanded.push_back('\n');
+            lineStart = lineEnd + 1;
+            ++lineNumber;
+        }
+
+        includeStack.erase(ownedSourcePath);
+        return expanded;
+    }
 }
 
 namespace Fx
@@ -124,6 +229,8 @@ namespace Fx
         try
         {
             std::string source(std::istreambuf_iterator<char>(*mVFS.get(getFileName())), {});
+            std::set<VFS::Path::Normalized> includeStack;
+            source = expandShaderIncludes(mVFS, source, getFileName(), includeStack, 0);
 
             parse(std::move(source));
 

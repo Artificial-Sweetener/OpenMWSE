@@ -326,10 +326,14 @@ namespace MWWorld
         std::span<const uint8_t> getRegionChances(const ESM::RefId& regionID) const;
         void playerTeleported(const ESM::RefId& playerRegion, bool isExterior);
 
-        /**
-         * Per-frame update
-         * @param duration
-         * @param paused
+        /** Advance weather transitions and publish their canonical scene-linear atmosphere lighting state.
+         *
+         * @param duration Unscaled frame interval in seconds.
+         * @param paused Whether simulation-owned weather
+         * state must remain fixed.
+         * @param time Current game time used to evaluate weather color cycles.
+
+         * * @param isExterior Whether exterior weather and atmosphere rendering are active.
          */
         void update(float duration, bool paused, const TimeStamp& time, bool isExterior);
 

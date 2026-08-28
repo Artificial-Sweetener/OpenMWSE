@@ -28,6 +28,7 @@ namespace MWInput
 
         void toggleMainMenu();
         void toggleConsole();
+        /// Capture a screenshot and request production atmosphere diagnostics when either Shift key is held.
         void screenshot();
         void activate();
         void rest();

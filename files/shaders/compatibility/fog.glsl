@@ -1,4 +1,5 @@
 #include "lib/light/struct.glsl"
+#include "lib/atmosphere/diagnostics.glsl"
 
 #if @skyBlending
 #include "lib/core/fragment.h.glsl"
@@ -75,13 +76,10 @@ void computeFog(vec3 pos, float euclideanDist, float linearDist, float near, flo
 
     float opticalDistance;
 #if @exponentialFog
-    const float mgeFogScale = 4.4;
-    float curveStart = start / mgeFogScale;
-    float curveRange = max((end - curveStart) / mgeFogScale, 1e-4);
-    opticalDistance = max(0.0, (dist - curveStart) / curveRange);
+    opticalDistance = openmwseExponentialFogOpticalDistance(dist, start, end);
     float fogVisibility = exp(-opticalDistance);
 #else
-    opticalDistance = clamp((dist - start) / max(end - start, 1e-4), 0.0, 1.0);
+    opticalDistance = openmwseLinearFogOpticalDistance(dist, start, end);
     float fogVisibility = 1.0 - opticalDistance;
 #endif
     float fogValue = 1.0 - fogVisibility;
@@ -120,6 +118,14 @@ vec4 applyFogAtDist(vec4 color, vec3 pos, float euclideanDist, float linearDist,
     float colorScale;
     vec3 colorOffset;
     computeFog(pos, euclideanDist, linearDist, near, far, colorScale, colorOffset);
+
+    if (openmwseAtmosphereDiagnosticMode == openmwseAtmosphereDiagnosticFogBypassed)
+        return color;
+    if (openmwseAtmosphereDiagnosticMode == openmwseAtmosphereDiagnosticFogVisibility)
+        return vec4(vec3(colorScale), color.a);
+    if (openmwseAtmosphereDiagnosticMode == openmwseAtmosphereDiagnosticFogInScattering)
+        return vec4(colorOffset, color.a);
+
     color.xyz = color.xyz * colorScale + colorOffset;
     return color;
 }

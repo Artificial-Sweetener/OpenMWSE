@@ -9,18 +9,26 @@
 #endif
 
 #include "lib/light/util.glsl"
+#include "lib/atmosphere/cloud_shadow.glsl"
+
+uniform mat4 osg_ViewMatrixInverse;
 
 uniform float near;
 uniform vec2 screenRes;
 uniform vec3 gridSize;
 
-void directionalLighting(vec3 viewDir, vec3 viewNormal, float shininess, out vec3 diffuseLight, out vec3 ambientLight, out vec3 specularLight)
+/// Evaluate canonical directional and cloud-shadow lighting at a view-space surface position.
+void directionalLighting(vec3 viewPos, vec3 viewDir, vec3 viewNormal, float shininess, out vec3 diffuseLight,
+    out vec3 ambientLight, out vec3 specularLight)
 {
     diffuseLight = vec3(0.0);
     ambientLight = vec3(0.0);
     specularLight = vec3(0.0);
 
     calcDirectionalLighting(sun, viewDir, viewNormal, shininess, diffuseLight, ambientLight, specularLight);
+
+    vec3 worldPosition = (osg_ViewMatrixInverse * vec4(viewPos, 1.0)).xyz;
+    openmwseApplyCloudLighting(worldPosition, diffuseLight, ambientLight, specularLight);
 }
 
 void pointLighting(vec2 screenCoord, vec3 viewDir, vec3 viewPos, vec3 viewNormal, float shininess, out vec3 diffuseLight, out vec3 ambientLight, out vec3 specularLight)

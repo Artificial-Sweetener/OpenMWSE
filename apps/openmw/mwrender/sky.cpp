@@ -241,6 +241,7 @@ namespace MWRender
         , mAtmosphereNightRoll(0.f)
         , mCreated(false)
         , mIsStorm(false)
+        , mUseLegacyCloudRendering(!Settings::shaders().mAtmosphericEffects)
         , mTimescaleClouds(Fallback::Map::getBool("Weather_Timescale_Clouds"))
         , mCloudAnimationTimer(0.f)
         , mStormParticleDirection(MWWorld::Weather::defaultDirection())
@@ -319,42 +320,48 @@ namespace MWRender
 
         ModVertexAlphaVisitor modStars(ModVertexAlphaVisitor::Stars);
         atmosphereNight->accept(modStars);
-        mAtmosphereNightUpdater = new AtmosphereNightUpdater(mSceneManager->getImageManager());
+        const AtmosphereNightUpdater::StarBlendMode starBlendMode = mUseLegacyCloudRendering
+            ? AtmosphereNightUpdater::StarBlendMode::AuthoredTranslucency
+            : AtmosphereNightUpdater::StarBlendMode::EmissiveRadiance;
+        mAtmosphereNightUpdater = new AtmosphereNightUpdater(starBlendMode);
         atmosphereNight->addUpdateCallback(mAtmosphereNightUpdater);
 
-        mSun = std::make_unique<Sun>(mEarlyRenderBinRoot, *mSceneManager);
+        mSun = std::make_unique<Sun>(mEarlyRenderBinRoot, *mSceneManager, !Settings::shaders().mAtmosphericEffects);
         mSun->setSunglare(mSunglareEnabled);
         mMasser = std::make_unique<Moon>(
             mEarlyRenderBinRoot, *mSceneManager, Fallback::Map::getFloat("Moons_Masser_Size") / 125, Moon::Type_Masser);
         mSecunda = std::make_unique<Moon>(mEarlyRenderBinRoot, *mSceneManager,
             Fallback::Map::getFloat("Moons_Secunda_Size") / 125, Moon::Type_Secunda);
 
-        mCloudNode = new osg::Group;
-        mEarlyRenderBinRoot->addChild(mCloudNode);
+        if (mUseLegacyCloudRendering)
+        {
+            mCloudNode = new osg::Group;
+            mEarlyRenderBinRoot->addChild(mCloudNode);
 
-        mCloudMesh = new osg::PositionAttitudeTransform;
-        osg::ref_ptr<osg::Node> cloudMeshChild
-            = mSceneManager->getInstance(Settings::models().mSkyclouds.get(), mCloudMesh);
-        mCloudUpdater = new CloudUpdater();
-        mCloudUpdater->setOpacity(1.f);
-        cloudMeshChild->addUpdateCallback(mCloudUpdater);
-        mCloudMesh->addChild(cloudMeshChild);
+            mCloudMesh = new osg::PositionAttitudeTransform;
+            osg::ref_ptr<osg::Node> cloudMeshChild
+                = mSceneManager->getInstance(Settings::models().mSkyclouds.get(), mCloudMesh);
+            mCloudUpdater = new CloudUpdater();
+            mCloudUpdater->setOpacity(1.f);
+            cloudMeshChild->addUpdateCallback(mCloudUpdater);
+            mCloudMesh->addChild(cloudMeshChild);
 
-        mNextCloudMesh = new osg::PositionAttitudeTransform;
-        osg::ref_ptr<osg::Node> nextCloudMeshChild
-            = mSceneManager->getInstance(Settings::models().mSkyclouds.get(), mNextCloudMesh);
-        mNextCloudUpdater = new CloudUpdater();
-        mNextCloudUpdater->setOpacity(0.f);
-        nextCloudMeshChild->addUpdateCallback(mNextCloudUpdater);
-        mNextCloudMesh->setNodeMask(0);
-        mNextCloudMesh->addChild(nextCloudMeshChild);
+            mNextCloudMesh = new osg::PositionAttitudeTransform;
+            osg::ref_ptr<osg::Node> nextCloudMeshChild
+                = mSceneManager->getInstance(Settings::models().mSkyclouds.get(), mNextCloudMesh);
+            mNextCloudUpdater = new CloudUpdater();
+            mNextCloudUpdater->setOpacity(0.f);
+            nextCloudMeshChild->addUpdateCallback(mNextCloudUpdater);
+            mNextCloudMesh->setNodeMask(0);
+            mNextCloudMesh->addChild(nextCloudMeshChild);
 
-        mCloudNode->addChild(mCloudMesh);
-        mCloudNode->addChild(mNextCloudMesh);
+            mCloudNode->addChild(mCloudMesh);
+            mCloudNode->addChild(mNextCloudMesh);
 
-        ModVertexAlphaVisitor modClouds(ModVertexAlphaVisitor::Clouds);
-        mCloudMesh->accept(modClouds);
-        mNextCloudMesh->accept(modClouds);
+            ModVertexAlphaVisitor modClouds(ModVertexAlphaVisitor::Clouds);
+            mCloudMesh->accept(modClouds);
+            mNextCloudMesh->accept(modClouds);
+        }
 
         Shader::ShaderManager::DefineMap defines = {};
         Stereo::shaderStereoDefines(defines);
@@ -547,27 +554,28 @@ namespace MWRender
 
         const float timeScale = MWBase::Environment::get().getWorld()->getTimeManager()->getGameTimeScale();
 
-        // UV Scroll the clouds
-        float cloudDelta = duration * mCloudSpeed / 400.f;
-        if (mTimescaleClouds)
-            cloudDelta *= timeScale / 60.f;
-
-        mCloudAnimationTimer += cloudDelta;
-        if (mCloudAnimationTimer >= 4.f)
-            mCloudAnimationTimer -= 4.f;
-
-        mNextCloudUpdater->setTextureCoord(mCloudAnimationTimer);
-        mCloudUpdater->setTextureCoord(mCloudAnimationTimer);
-
-        // morrowind rotates each cloud mesh independently
-        osg::Quat rotation;
-        rotation.makeRotate(MWWorld::Weather::defaultDirection(), mStormDirection);
-        mCloudMesh->setAttitude(rotation);
-
-        if (mNextCloudMesh->getNodeMask())
+        if (mUseLegacyCloudRendering)
         {
-            rotation.makeRotate(MWWorld::Weather::defaultDirection(), mNextStormDirection);
-            mNextCloudMesh->setAttitude(rotation);
+            float cloudDelta = duration * mCloudSpeed / 400.f;
+            if (mTimescaleClouds)
+                cloudDelta *= timeScale / 60.f;
+
+            mCloudAnimationTimer += cloudDelta;
+            if (mCloudAnimationTimer >= 4.f)
+                mCloudAnimationTimer -= 4.f;
+
+            mNextCloudUpdater->setTextureCoord(mCloudAnimationTimer);
+            mCloudUpdater->setTextureCoord(mCloudAnimationTimer);
+
+            osg::Quat rotation;
+            rotation.makeRotate(MWWorld::Weather::defaultDirection(), mStormDirection);
+            mCloudMesh->setAttitude(rotation);
+
+            if (mNextCloudMesh->getNodeMask())
+            {
+                rotation.makeRotate(MWWorld::Weather::defaultDirection(), mNextStormDirection);
+                mNextCloudMesh->setAttitude(rotation);
+            }
         }
 
         // rotate the stars by 360 degrees every 4 days
@@ -637,6 +645,8 @@ namespace MWRender
             return;
 
         mAtmosphere = weather.mAtmosphere;
+        mAtmosphere.mSunDiscColor = weather.mSunDiscColor;
+        mAtmosphere.mSunDiscColor.a() *= weather.mGlareView;
 
         mRainEntranceSpeed = weather.mRainEntranceSpeed;
         mRainMaxRaindrops = weather.mRainMaxRaindrops;
@@ -751,7 +761,7 @@ namespace MWRender
             }
         }
 
-        if (mClouds != weather.mCloudTexture)
+        if (mUseLegacyCloudRendering && mClouds != weather.mCloudTexture)
         {
             mClouds = weather.mCloudTexture;
 
@@ -772,7 +782,7 @@ namespace MWRender
         if (mNextStormDirection != weather.mNextStormDirection)
             mNextStormDirection = weather.mNextStormDirection;
 
-        if (mNextClouds != weather.mNextCloudTexture)
+        if (mUseLegacyCloudRendering && mNextClouds != weather.mNextCloudTexture)
         {
             mNextClouds = weather.mNextCloudTexture;
 
@@ -791,7 +801,7 @@ namespace MWRender
             }
         }
 
-        if (mCloudBlendFactor != weather.mCloudBlendFactor)
+        if (mUseLegacyCloudRendering && mCloudBlendFactor != weather.mCloudBlendFactor)
         {
             mCloudBlendFactor = std::clamp(weather.mCloudBlendFactor, 0.f, 1.f);
 
@@ -800,7 +810,7 @@ namespace MWRender
             mNextCloudMesh->setNodeMask(mCloudBlendFactor > 0.f ? ~0u : 0);
         }
 
-        if (mCloudColour != weather.mFogColor)
+        if (mUseLegacyCloudRendering && mCloudColour != weather.mFogColor)
         {
             osg::Vec4f clr(weather.mFogColor);
 
@@ -851,6 +861,14 @@ namespace MWRender
             return 0.f;
 
         return mBaseWindSpeed;
+    }
+
+    float SkyManager::getCloudSpeed() const
+    {
+        if (!mCreated)
+            return 0.f;
+
+        return mCloudSpeed;
     }
 
     void SkyManager::setSunglare(bool enabled)

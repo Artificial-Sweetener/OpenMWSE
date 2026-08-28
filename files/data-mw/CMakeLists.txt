@@ -25,6 +25,7 @@ set(BUILTIN_DATA_MW_FILES
     openmw_aux/calendarconfig.lua
 
     openmwse/atmosphere.json
+    openmwse/atmosphere-volumes.json
 
     scripts/omw/cellhandlers.lua
     scripts/omw/esmfallbacks.lua

@@ -18,6 +18,8 @@
 #include "../mwworld/globals.hpp"
 #include "../mwworld/player.hpp"
 
+#include "../mwrender/postprocessor.hpp"
+
 #include "../mwmechanics/actorutil.hpp"
 #include "../mwmechanics/npcstats.hpp"
 
@@ -168,6 +170,8 @@ namespace MWInput
 
     void ActionManager::screenshot()
     {
+        if ((SDL_GetModState() & KMOD_SHIFT) != 0)
+            MWBase::Environment::get().getWorld()->getPostProcessor()->requestAtmosphereDiagnosticCapture();
         mScreenCaptureHandler->setFramesToCapture(1);
         mScreenCaptureHandler->captureNextFrame(*mViewer);
     }

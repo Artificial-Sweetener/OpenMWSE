@@ -65,8 +65,6 @@ varying float linearDepth;
 
 uniform sampler2D normalMap;
 
-uniform float osg_SimulationTime;
-
 uniform float near;
 uniform float far;
 
@@ -194,8 +192,7 @@ void main(void)
     specular = clamp(specular, 0.0, 1.0) * shadow * sunSpec.a;
 
     // artificial specularity to make rain ripples more noticeable
-    vec3 skyColorEstimate = vec3(max(0.0, mix(-0.3, 1.0, sunFade)));
-    vec3 rainSpecular = abs(rainRipple.w)*mix(skyColorEstimate, vec3(1.0), 0.05)*0.5;
+    vec3 rainSpecular = abs(rainRipple.w) * mix(max(reflection, vec3(0.0)), vec3(1.0), 0.05) * 0.5;
     float waterTransparency = clamp(fresnel * 6.0 + specular, 0.0, 1.0);
 
     vec3 refraction = waterColor;

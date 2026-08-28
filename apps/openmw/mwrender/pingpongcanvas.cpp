@@ -1,6 +1,7 @@
 #include "pingpongcanvas.hpp"
 
 #include <cassert>
+#include <utility>
 
 #include <components/shader/shadermanager.hpp>
 #include <components/stereo/multiview.hpp>
@@ -8,15 +9,18 @@
 
 #include <osg/Texture2DArray>
 
+#include "atmospherediagnostics.hpp"
 #include "postprocessor.hpp"
 
 namespace MWRender
 {
-    PingPongCanvas::PingPongCanvas(
-        Shader::ShaderManager& shaderManager, const std::shared_ptr<LuminanceCalculator>& luminanceCalculator)
+    PingPongCanvas::PingPongCanvas(Shader::ShaderManager& shaderManager,
+        const std::shared_ptr<LuminanceCalculator>& luminanceCalculator,
+        std::shared_ptr<AtmosphereDiagnostics> atmosphereDiagnostics)
         : mFallbackStateSet(new osg::StateSet)
         , mMultiviewResolveStateSet(new osg::StateSet)
         , mLuminanceCalculator(luminanceCalculator)
+        , mAtmosphereDiagnostics(std::move(atmosphereDiagnostics))
     {
         setUseDisplayList(false);
         setUseVertexBufferObjects(true);
@@ -49,6 +53,30 @@ namespace MWRender
     void PingPongCanvas::setPasses(Fx::DispatchArray&& passes)
     {
         mPasses = std::move(passes);
+        mAtmosphereHistoryValid = false;
+    }
+
+    osg::Texture2D* PingPongCanvas::findRenderTarget(std::string_view name) const
+    {
+        for (const auto& node : mPasses)
+            for (const auto& pass : node.mPasses)
+                if (pass.mTargetName == name)
+                    return pass.mRenderTexture;
+        return nullptr;
+    }
+
+    void PingPongCanvas::setDirtyAttachments(const std::vector<Fx::Types::RenderTarget>& attachments)
+    {
+        mDirtyAttachments.clear();
+        mDirtyAttachments.reserve(attachments.size());
+        for (const auto& attachment : attachments)
+        {
+            Fx::Types::RenderTarget resolved = attachment;
+            if (osg::Texture2D* frameTarget = findRenderTarget(attachment.mTarget->getName()))
+                resolved.mTarget = frameTarget;
+            mDirtyAttachments.emplace_back(std::move(resolved));
+        }
+        mAtmosphereHistoryValid = false;
     }
 
     void PingPongCanvas::setMask(bool underwater, bool exterior)
@@ -101,6 +129,8 @@ namespace MWRender
 
         size_t frameId = state.getFrameStamp()->getFrameNumber() % 2;
 
+        mAtmosphereHistoryValid = false;
+
         std::vector<size_t> filtered;
 
         filtered.reserve(mPasses.size());
@@ -111,13 +141,15 @@ namespace MWRender
 
             if (mMask & node.mFlags)
                 continue;
+            if (!mPostprocessing && !node.mAlwaysEnabled)
+                continue;
 
             filtered.push_back(i);
         }
 
         auto* resolveViewport = state.getCurrentViewport();
 
-        if (filtered.empty() || !mPostprocessing)
+        if (filtered.empty())
         {
             state.pushStateSet(mFallbackStateSet);
             state.apply();
@@ -260,6 +292,32 @@ namespace MWRender
         {
             const auto& node = mPasses[index];
 
+            const bool atmospherePass = node.mHandle && node.mHandle->getName() == "internal_atmosphere";
+            if (atmospherePass)
+            {
+                osg::Texture2D* previousHistory
+                    = mPreviousCanvas ? mPreviousCanvas->findRenderTarget("AtmosphereVolumeHistory") : nullptr;
+                osg::Texture2D* previousMetadataHistory
+                    = mPreviousCanvas ? mPreviousCanvas->findRenderTarget("AtmosphereVolumeMetadataHistory") : nullptr;
+                node.mRootStateSet->setTextureAttribute(
+                    PostProcessor::Unit_AtmosphereHistory, previousHistory ? previousHistory : mTextureScene.get());
+                node.mRootStateSet->setTextureAttribute(PostProcessor::Unit_AtmosphereMetadataHistory,
+                    previousMetadataHistory ? previousMetadataHistory : mTextureScene.get());
+                node.mRootStateSet->setTextureAttribute(PostProcessor::Unit_PreviousDepth,
+                    mPreviousCanvas && mPreviousCanvas->mTextureDepth ? mPreviousCanvas->mTextureDepth.get()
+                                                                      : mTextureDepth.get());
+                node.mRootStateSet->getOrCreateUniform("omw_SamplerAtmosphereHistory", osg::Uniform::SAMPLER_2D)
+                    ->set(PostProcessor::Unit_AtmosphereHistory);
+                node.mRootStateSet->getOrCreateUniform("omw_SamplerAtmosphereMetadataHistory", osg::Uniform::SAMPLER_2D)
+                    ->set(PostProcessor::Unit_AtmosphereMetadataHistory);
+                node.mRootStateSet->getOrCreateUniform("omw_SamplerPreviousDepth", osg::Uniform::SAMPLER_2D)
+                    ->set(PostProcessor::Unit_PreviousDepth);
+                const bool historyHasMatchingView = !Stereo::getStereo() && mPreviousCanvas
+                    && mPreviousCanvas->mAtmosphereHistoryValid && previousHistory && previousMetadataHistory;
+                node.mRootStateSet->getOrCreateUniform("omw_AtmosphereHistoryValid", osg::Uniform::BOOL)
+                    ->set(historyHasMatchingView);
+            }
+
             node.mRootStateSet->setTextureAttribute(PostProcessor::Unit_Depth, mTextureDepth);
 
             if (mAvgLum)
@@ -355,6 +413,9 @@ namespace MWRender
             }
 
             state.popStateSet();
+
+            if (atmospherePass)
+                mAtmosphereHistoryValid = true;
         }
 
         if (Stereo::getMultiview())
@@ -375,6 +436,19 @@ namespace MWRender
         if (lastApplied != destinationHandle)
         {
             bindDestinationFbo();
+        }
+
+        if (mAtmosphereDiagnostics && mAtmosphereDiagnostics->captureRequested())
+        {
+            mAtmosphereDiagnostics->captureFrame(renderInfo, mTextureScene.get(), mTextureDepth.get(),
+                mTextureNormals.get(),
+                mPreviousCanvas ? mPreviousCanvas->mTextureDepth.get() : nullptr,
+                findRenderTarget("AtmosphereVolumeRaw"), findRenderTarget("AtmosphereVolumeHistory"),
+                findRenderTarget("AtmosphereVolumeMetadataHistory"), findRenderTarget("AtmosphereShafts"),
+                mPreviousCanvas ? mPreviousCanvas->findRenderTarget("AtmosphereVolumeHistory") : nullptr,
+                mPreviousCanvas ? mPreviousCanvas->findRenderTarget("AtmosphereVolumeMetadataHistory") : nullptr,
+                destinationHandle, static_cast<int>(resolveViewport->width()),
+                static_cast<int>(resolveViewport->height()));
         }
 
         cacheEmptyUniformStacks(uniformMap, emptyUniformStacks);

@@ -140,6 +140,55 @@ namespace
     technique { passes = main; }
 )" };
 
+    constexpr VFS::Path::NormalizedView includeSuccessPath("shaders/include_success.omwfx");
+    constexpr VFS::Path::NormalizedView includeValuePath("shaders/lib/include_value.glsl");
+    constexpr VFS::Path::NormalizedView includeMissingPath("shaders/include_missing.omwfx");
+    constexpr VFS::Path::NormalizedView includeCyclePath("shaders/include_cycle.omwfx");
+    constexpr VFS::Path::NormalizedView includeCycleAPath("shaders/lib/include_cycle_a.glsl");
+    constexpr VFS::Path::NormalizedView includeCycleBPath("shaders/lib/include_cycle_b.glsl");
+    constexpr VFS::Path::NormalizedView includeUnsafePath("shaders/include_unsafe.omwfx");
+
+    TestingOpenMW::VFSTestFile includeSuccess{ R"(
+    shared {
+        #include "lib/include_value.glsl" // Shared shader source remains authoritative.
+    }
+    fragment main { }
+    technique { passes = main; }
+)" };
+
+    TestingOpenMW::VFSTestFile includeValue{ R"(
+    float includedValue()
+    {
+        return 1.0;
+    }
+)" };
+
+    TestingOpenMW::VFSTestFile includeMissing{ R"(
+    #include "lib/does_not_exist.glsl"
+    fragment main { }
+    technique { passes = main; }
+)" };
+
+    TestingOpenMW::VFSTestFile includeCycle{ R"(
+    #include "lib/include_cycle_a.glsl"
+    fragment main { }
+    technique { passes = main; }
+)" };
+
+    TestingOpenMW::VFSTestFile includeCycleA{ R"(
+    #include "include_cycle_b.glsl"
+)" };
+
+    TestingOpenMW::VFSTestFile includeCycleB{ R"(
+    #include "include_cycle_a.glsl"
+)" };
+
+    TestingOpenMW::VFSTestFile includeUnsafe{ R"(
+    #include "../outside.glsl"
+    fragment main { }
+    technique { passes = main; }
+)" };
+
     using namespace testing;
     using namespace Fx;
 
@@ -161,6 +210,13 @@ namespace
                 { invalidNumberUnsignedLongPath, &invalidNumberUnsignedLong },
                 { invalidNumberHexFloatPath, &invalidNumberHexFloat },
                 { invalidNumberDoublePath, &invalidNumberDouble },
+                { includeSuccessPath, &includeSuccess },
+                { includeValuePath, &includeValue },
+                { includeMissingPath, &includeMissing },
+                { includeCyclePath, &includeCycle },
+                { includeCycleAPath, &includeCycleA },
+                { includeCycleBPath, &includeCycleB },
+                { includeUnsafePath, &includeUnsafe },
             }))
             , mImageManager(mVFS.get(), 0)
         {
@@ -229,6 +285,35 @@ namespace
         EXPECT_EQ(mTechnique->getPasses()[0]->getTarget(), "rendertarget");
     }
 
+    TEST(DispatchNodeTest, frameCopyOwnsAndRebindsRenderTargets)
+    {
+        DispatchNode source;
+        DispatchNode::SubPass producer;
+        producer.mTargetName = "history";
+        producer.mRenderTexture = new osg::Texture2D;
+        producer.mRenderTarget = new osg::FrameBufferObject;
+        producer.mRenderTarget->setAttachment(
+            osg::Camera::COLOR_BUFFER0, osg::FrameBufferAttachment(producer.mRenderTexture));
+
+        DispatchNode::SubPass consumer;
+        consumer.mInputTargetNames[0] = "history";
+        consumer.mInputTextureUnits[0] = 7;
+        consumer.mStateSet->setTextureAttribute(7, producer.mRenderTexture);
+        source.mPasses.emplace_back(std::move(producer));
+        source.mPasses.emplace_back(std::move(consumer));
+
+        DispatchNode frame(source);
+        ASSERT_EQ(frame.mPasses.size(), 2);
+        EXPECT_NE(frame.mRootStateSet, source.mRootStateSet);
+        frame.mRootStateSet->addUniform(new osg::Uniform("frameHistoryValid", true));
+        EXPECT_EQ(source.mRootStateSet->getUniform("frameHistoryValid"), nullptr);
+        EXPECT_NE(frame.mPasses[0].mRenderTexture, source.mPasses[0].mRenderTexture);
+        EXPECT_EQ(frame.mPasses[1].mStateSet->getTextureAttribute(7, osg::StateAttribute::TEXTURE),
+            frame.mPasses[0].mRenderTexture);
+        EXPECT_EQ(frame.mPasses[0].mRenderTarget->getAttachment(osg::Camera::COLOR_BUFFER0).getTexture(),
+            frame.mPasses[0].mRenderTexture);
+    }
+
     TEST_F(TechniqueTest, uniform_properties)
     {
         compile("uniform_properties");
@@ -268,5 +353,29 @@ namespace
     {
         expectFailure("invalid_number_ulong", "number out of range");
         expectFailure("invalid_number_double", "number out of range");
+    }
+
+    TEST_F(TechniqueTest, expands_shader_includes_from_the_virtual_filesystem)
+    {
+        compile("include_success");
+
+        ASSERT_TRUE(mTechnique->isValid());
+        EXPECT_EQ(mTechnique->getPasses().size(), 1);
+    }
+
+    TEST_F(TechniqueTest, fails_when_shader_include_is_missing)
+    {
+        expectFailure(
+            "include_missing", "shaders/lib/does_not_exist.glsl' requested by 'shaders/include_missing.omwfx'");
+    }
+
+    TEST_F(TechniqueTest, fails_when_shader_includes_form_a_cycle)
+    {
+        expectFailure("include_cycle", "cyclic shader include involving 'shaders/lib/include_cycle_a.glsl'");
+    }
+
+    TEST_F(TechniqueTest, fails_when_shader_include_escapes_its_directory)
+    {
+        expectFailure("include_unsafe", "unsafe shader include path '../outside.glsl'");
     }
 }

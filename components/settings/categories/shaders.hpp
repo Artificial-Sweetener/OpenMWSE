@@ -45,6 +45,8 @@ namespace Settings
         SettingValue<bool> mAdjustCoverageForAlphaTest{ mIndex, "Shaders", "adjust coverage for alpha test" };
         SettingValue<bool> mSoftParticles{ mIndex, "Shaders", "soft particles" };
         SettingValue<bool> mWeatherParticleOcclusion{ mIndex, "Shaders", "weather particle occlusion" };
+        SettingValue<bool> mAtmosphericEffects{ mIndex, "Shaders", "atmospheric effects" };
+        SettingValue<int> mAtmosphericQuality{ mIndex, "Shaders", "atmospheric quality", makeClampSanitizerInt(0, 3) };
         SettingValue<float> mWeatherParticleOcclusionSmallFeatureCullingPixelSize{ mIndex, "Shaders",
             "weather particle occlusion small feature culling pixel size" };
     };

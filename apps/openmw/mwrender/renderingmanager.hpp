@@ -1,6 +1,7 @@
 #ifndef OPENMW_MWRENDER_RENDERINGMANAGER_H
 #define OPENMW_MWRENDER_RENDERINGMANAGER_H
 
+#include "atmosphere.hpp"
 #include "objects.hpp"
 #include "renderinginterface.hpp"
 #include "rendermode.hpp"
@@ -208,7 +209,11 @@ namespace MWRender
         /// Clear all worldspace-specific data
         void notifyWorldSpaceChanged();
 
+        /// Advance render subsystems and publish one canonical atmosphere and cloud-advection frame state.
         void update(float dt, bool paused);
+
+        /// Select the inert or capture-only compatibility-shader diagnostic output.
+        void setAtmosphereDiagnosticMode(int mode);
 
         Animation* getAnimation(const MWWorld::Ptr& ptr);
         const Animation* getAnimation(const MWWorld::ConstPtr& ptr) const;
@@ -348,6 +353,8 @@ namespace MWRender
         osg::ref_ptr<SceneUtil::StateUpdater> mStateUpdater;
         osg::ref_ptr<SceneUtil::SharedUniformStateUpdater> mSharedUniformStateUpdater;
         osg::ref_ptr<SceneUtil::PerViewUniformStateUpdater> mPerViewUniformStateUpdater;
+        CloudAdvectionController mCloudAdvection;
+        AtmosphereHistoryLightingController mAtmosphereHistoryLighting;
 
         osg::Vec4f mAmbientColor;
         float mNightEyeFactor;

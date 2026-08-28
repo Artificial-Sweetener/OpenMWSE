@@ -1,10 +1,13 @@
 #ifndef OPENMW_COMPONENTS_FX_TECHNIQUE_HPP
 #define OPENMW_COMPONENTS_FX_TECHNIQUE_HPP
 
+#include <algorithm>
+#include <array>
 #include <filesystem>
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <osg/BlendEquation>
@@ -33,53 +36,103 @@ namespace Fx
 {
     using FlagsType = size_t;
 
+    /// Own a frame-local post-processing dispatch graph and its render-target bindings.
     struct DispatchNode
     {
+        /// Create an empty dispatch graph.
         DispatchNode() = default;
 
+        /// Deep-copy render targets and reconnect copied subpass inputs to the copied textures.
         DispatchNode(const DispatchNode& other, const osg::CopyOp& copyOp = osg::CopyOp::SHALLOW_COPY)
             : mHandle(other.mHandle)
             , mFlags(other.mFlags)
-            , mRootStateSet(other.mRootStateSet)
+            , mAlwaysEnabled(other.mAlwaysEnabled)
+            , mRootStateSet(new osg::StateSet(*other.mRootStateSet, copyOp))
         {
             mPasses.reserve(other.mPasses.size());
 
             for (const auto& subpass : other.mPasses)
                 mPasses.emplace_back(subpass, copyOp);
+
+            for (auto& subpass : mPasses)
+            {
+                for (std::size_t inputIndex = 0; inputIndex < subpass.mInputTargetNames.size(); ++inputIndex)
+                {
+                    if (subpass.mInputTargetNames[inputIndex].empty())
+                        continue;
+                    const auto source = std::find_if(mPasses.begin(), mPasses.end(), [&](const auto& candidate) {
+                        return candidate.mTargetName == subpass.mInputTargetNames[inputIndex];
+                    });
+                    if (source != mPasses.end())
+                        subpass.mStateSet->setTextureAttribute(
+                            subpass.mInputTextureUnits[inputIndex], source->mRenderTexture);
+                }
+            }
         }
 
+        /// Transfer ownership of a dispatch graph without rebinding its internal textures.
+        DispatchNode(DispatchNode&&) noexcept = default;
+
+        /// Destroy the owned frame-local dispatch resources.
         ~DispatchNode() = default;
 
-        DispatchNode& operator=(const DispatchNode&) = default;
+        /// Replace this graph with a deep copy while preserving strong exception safety.
+        DispatchNode& operator=(const DispatchNode& other)
+        {
+            if (this == &other)
+                return *this;
+            DispatchNode copy(other);
+            *this = std::move(copy);
+            return *this;
+        }
 
+        /// Transfer-assign a complete frame-local dispatch graph.
+        DispatchNode& operator=(DispatchNode&&) noexcept = default;
+
+        /// Own one compiled pass, output attachment, and up to three named input bindings.
         struct SubPass
         {
+            /// Create an uncompiled subpass with an independent state set.
             SubPass() = default;
 
             osg::ref_ptr<osg::StateSet> mStateSet = new osg::StateSet;
             osg::ref_ptr<osg::FrameBufferObject> mRenderTarget;
             osg::ref_ptr<osg::Texture2D> mRenderTexture;
+            std::string mTargetName;
+            std::array<std::string, 3> mInputTargetNames;
+            std::array<int, 3> mInputTextureUnits{ -1, -1, -1 };
             bool mResolve = false;
             Types::SizeProxy mSize;
             bool mMipMap = false;
 
+            /// Deep-copy a subpass and attach its copied texture to a new framebuffer.
             SubPass(const SubPass& other, const osg::CopyOp& copyOp = osg::CopyOp::SHALLOW_COPY)
                 : mStateSet(new osg::StateSet(*other.mStateSet, copyOp))
+                , mTargetName(other.mTargetName)
+                , mInputTargetNames(other.mInputTargetNames)
+                , mInputTextureUnits(other.mInputTextureUnits)
                 , mResolve(other.mResolve)
                 , mSize(other.mSize)
                 , mMipMap(other.mMipMap)
             {
-                if (other.mRenderTarget)
-                    mRenderTarget = new osg::FrameBufferObject(*other.mRenderTarget, copyOp);
                 if (other.mRenderTexture)
                     mRenderTexture = new osg::Texture2D(*other.mRenderTexture, copyOp);
+                if (other.mRenderTarget)
+                {
+                    mRenderTarget = new osg::FrameBufferObject;
+                    mRenderTarget->setAttachment(osg::FrameBufferObject::BufferComponent::COLOR_BUFFER0,
+                        osg::FrameBufferAttachment(mRenderTexture));
+                }
             }
 
+            /// Destroy the owned pass state and render-target resources.
             ~SubPass() = default;
 
+            /// Copy-assign subpass state using OpenSceneGraph reference ownership.
             SubPass& operator=(const SubPass&) = default;
         };
 
+        /// Mark the last screen-writing subpass as the dispatch resolve operation.
         void compile()
         {
             for (auto rit = mPasses.rbegin(); rit != mPasses.rend(); ++rit)
@@ -96,6 +149,8 @@ namespace Fx
         std::shared_ptr<Fx::Technique> mHandle = nullptr;
 
         FlagsType mFlags = 0;
+
+        bool mAlwaysEnabled = false;
 
         std::vector<SubPass> mPasses;
 
@@ -189,6 +244,11 @@ namespace Fx
 
         void setInternal(bool internal) { mInternal = internal; }
         bool getInternal() const { return mInternal; }
+
+        /// Keep an internal technique active independently of the user post-processing toggle.
+        void setAlwaysEnabled(bool alwaysEnabled) { mAlwaysEnabled = alwaysEnabled; }
+        /// Return whether this internal technique bypasses the user post-processing toggle.
+        bool getAlwaysEnabled() const { return mAlwaysEnabled; }
 
     private:
         [[noreturn]] void error(std::string_view msg);
@@ -317,6 +377,7 @@ namespace Fx
         bool mDynamic = false;
         bool mLocked = false;
         bool mInternal = false;
+        bool mAlwaysEnabled = false;
     };
 
     template <>

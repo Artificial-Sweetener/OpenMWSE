@@ -224,4 +224,17 @@ namespace SceneUtil
             mShadowTechnique->enableShadows();
         mShadowSettings->setCastsShadowTraversalMask(mOutdoorShadowCastingMask);
     }
+
+    void ShadowManager::setDiagnosticShadowRenderingEnabled(bool enabled) const
+    {
+        if (enabled)
+        {
+            if (mEnableShadows)
+                mShadowTechnique->enableShadows();
+            else
+                mShadowTechnique->disableShadows();
+        }
+        else if (mEnableShadows)
+            mShadowTechnique->disableShadows(true);
+    }
 }

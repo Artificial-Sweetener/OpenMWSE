@@ -7,6 +7,12 @@ set(SDIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(DDIRRELATIVE resources/shaders)
 
 set(SHADER_FILES
+    lib/atmosphere/aerial_perspective.glsl
+    lib/atmosphere/cloud_field.glsl
+    lib/atmosphere/cloud_shadow.glsl
+    lib/atmosphere/clouds.glsl
+    lib/atmosphere/diagnostics.glsl
+    lib/atmosphere/uniforms.glsl
     lib/water/fresnel.glsl
     lib/water/rain_ripples.glsl
     lib/water/ripples.glsl
@@ -17,6 +23,7 @@ set(SHADER_FILES
     lib/util/quickstep.glsl
     lib/util/coordinates.glsl
     lib/util/distortion.glsl
+    lib/util/dither.glsl
     lib/core/fragment.glsl
     lib/core/fragment.h.glsl
     lib/core/fragment_multiview.glsl

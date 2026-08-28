@@ -173,6 +173,7 @@ set(BUILTIN_DATA_FILES
     shaders/adjustments.omwfx
     shaders/bloomlinear.omwfx
     shaders/debug.omwfx
+    shaders/internal_atmosphere.omwfx
     shaders/internal_distortion.omwfx
 
     mygui/core.skin
@@ -269,3 +270,12 @@ set(BUILTIN_DATA_FILES
 foreach (f ${BUILTIN_DATA_FILES})
     copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/${f}" "${OPENMW_RESOURCES_ROOT}" "resources/vfs/${f}")
 endforeach (f)
+
+copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/clouds.glsl" "${OPENMW_RESOURCES_ROOT}"
+    "resources/vfs/shaders/lib/atmosphere/clouds.glsl")
+copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/cloud_field.glsl" "${OPENMW_RESOURCES_ROOT}"
+    "resources/vfs/shaders/lib/atmosphere/cloud_field.glsl")
+copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/aerial_perspective.glsl" "${OPENMW_RESOURCES_ROOT}"
+    "resources/vfs/shaders/lib/atmosphere/aerial_perspective.glsl")
+copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/util/dither.glsl" "${OPENMW_RESOURCES_ROOT}"
+    "resources/vfs/shaders/lib/util/dither.glsl")

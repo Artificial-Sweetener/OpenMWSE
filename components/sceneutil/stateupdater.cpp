@@ -155,10 +155,20 @@ namespace SceneUtil
         stateset->addUniform(new osg::Uniform("atmosphere.outScattering", mAtmosphereOutScattering));
         stateset->addUniform(new osg::Uniform("atmosphere.weatherWeight", mAtmosphereWeatherWeight));
         stateset->addUniform(new osg::Uniform("atmosphere.sunDirection", mAtmosphereSunDirection));
+        stateset->addUniform(new osg::Uniform("atmosphere.cloudParameters", mAtmosphereCloudParameters));
+        stateset->addUniform(new osg::Uniform("atmosphere.mistParameters", mAtmosphereMistParameters));
+        stateset->addUniform(new osg::Uniform("atmosphere.sunDiscColor", mAtmosphereSunDiscColor));
+        stateset->addUniform(new osg::Uniform("atmosphere.solarRadiance", mAtmosphereSolarRadiance));
+        stateset->addUniform(new osg::Uniform("atmosphere.skyIrradiance", mAtmosphereSkyIrradiance));
+        stateset->addUniform(new osg::Uniform("atmosphere.groundIrradiance", mAtmosphereGroundIrradiance));
+        stateset->addUniform(
+            new osg::Uniform("atmosphere.cloudAdvectionOffsetWorldUnits", mAtmosphereCloudAdvectionOffsetWorldUnits));
+        stateset->addUniform(new osg::Uniform("atmosphere.quality", mAtmosphereQuality));
 
         stateset->addUniform(new osg::Uniform("waterHeight", mWaterHeight));
         stateset->addUniform(new osg::Uniform("waterEnabled", mWaterEnabled));
         stateset->addUniform(new osg::Uniform("waterSurface", false));
+        stateset->addUniform(new osg::Uniform("openmwseAtmosphereDiagnosticMode", mAtmosphereDiagnosticMode));
     }
 
     void StateUpdater::apply(osg::StateSet* stateset, osg::NodeVisitor*)
@@ -178,9 +188,19 @@ namespace SceneUtil
         stateset->getUniform("atmosphere.outScattering")->set(mAtmosphereOutScattering);
         stateset->getUniform("atmosphere.weatherWeight")->set(mAtmosphereWeatherWeight);
         stateset->getUniform("atmosphere.sunDirection")->set(mAtmosphereSunDirection);
+        stateset->getUniform("atmosphere.cloudParameters")->set(mAtmosphereCloudParameters);
+        stateset->getUniform("atmosphere.mistParameters")->set(mAtmosphereMistParameters);
+        stateset->getUniform("atmosphere.sunDiscColor")->set(mAtmosphereSunDiscColor);
+        stateset->getUniform("atmosphere.solarRadiance")->set(mAtmosphereSolarRadiance);
+        stateset->getUniform("atmosphere.skyIrradiance")->set(mAtmosphereSkyIrradiance);
+        stateset->getUniform("atmosphere.groundIrradiance")->set(mAtmosphereGroundIrradiance);
+        stateset->getUniform("atmosphere.cloudAdvectionOffsetWorldUnits")
+            ->set(mAtmosphereCloudAdvectionOffsetWorldUnits);
+        stateset->getUniform("atmosphere.quality")->set(mAtmosphereQuality);
 
         stateset->getUniform("waterHeight")->set(mWaterHeight);
         stateset->getUniform("waterEnabled")->set(mWaterEnabled);
+        stateset->getUniform("openmwseAtmosphereDiagnosticMode")->set(mAtmosphereDiagnosticMode);
     }
 
     void StateUpdater::setAmbientColor(const osg::Vec4f& col)
@@ -204,7 +224,10 @@ namespace SceneUtil
     }
 
     void StateUpdater::setAtmosphere(bool enabled, const osg::Vec4f& skyColor, const osg::Vec3f& inScattering,
-        const osg::Vec3f& outScattering, float weatherWeight, const osg::Vec3f& sunDirection)
+        const osg::Vec3f& outScattering, float weatherWeight, const osg::Vec3f& sunDirection,
+        const osg::Vec4f& cloudParameters, const osg::Vec4f& mistParameters, const osg::Vec4f& sunDiscColor,
+        const osg::Vec3f& solarRadiance, const osg::Vec3f& skyIrradiance, const osg::Vec3f& groundIrradiance,
+        const osg::Vec2f& cloudAdvectionOffsetWorldUnits, int quality)
     {
         mAtmosphereEnabled = enabled;
         mAtmosphereSkyColor = skyColor;
@@ -212,6 +235,14 @@ namespace SceneUtil
         mAtmosphereOutScattering = outScattering;
         mAtmosphereWeatherWeight = weatherWeight;
         mAtmosphereSunDirection = sunDirection;
+        mAtmosphereCloudParameters = cloudParameters;
+        mAtmosphereMistParameters = mistParameters;
+        mAtmosphereSunDiscColor = sunDiscColor;
+        mAtmosphereSolarRadiance = solarRadiance;
+        mAtmosphereSkyIrradiance = skyIrradiance;
+        mAtmosphereGroundIrradiance = groundIrradiance;
+        mAtmosphereCloudAdvectionOffsetWorldUnits = cloudAdvectionOffsetWorldUnits;
+        mAtmosphereQuality = quality;
     }
 
     void StateUpdater::setUnderwaterFogColor(const osg::Vec4f& col)
@@ -237,6 +268,11 @@ namespace SceneUtil
     void StateUpdater::setWaterEnabled(bool enabled)
     {
         mWaterEnabled = enabled;
+    }
+
+    void StateUpdater::setAtmosphereDiagnosticMode(int mode)
+    {
+        mAtmosphereDiagnosticMode = mode;
     }
 
     void StateUpdater::setWireframe(bool wireframe)

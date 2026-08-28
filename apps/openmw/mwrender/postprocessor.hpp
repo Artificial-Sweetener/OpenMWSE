@@ -52,6 +52,7 @@ namespace MWRender
     class Water;
     class PingPongCull;
     class PingPongCanvas;
+    class AtmosphereDiagnostics;
     class TransparentDepthBinCallback;
     class DistortionCallback;
 
@@ -91,6 +92,9 @@ namespace MWRender
             Unit_EyeAdaptation,
             Unit_Normals,
             Unit_Distortion,
+            Unit_PreviousDepth,
+            Unit_AtmosphereHistory,
+            Unit_AtmosphereMetadataHistory,
             Unit_NextFree
         };
 
@@ -101,6 +105,7 @@ namespace MWRender
             Status_Unchanged
         };
 
+        /// Create the post-processing graph using the active graphics context's supported uniform path.
         PostProcessor(
             RenderingManager& rendering, osgViewer::Viewer* viewer, osg::Group* rootNode, const VFS::Manager* vfs);
 
@@ -210,6 +215,12 @@ namespace MWRender
         void loadChain();
         void saveChain();
 
+        /// Request a one-shot production pass capture when OPENMW_ATMOSPHERE_DIAGNOSTICS_DIR is set.
+        void requestAtmosphereDiagnosticCapture();
+
+        /// Apply any transient render-state transition required by the diagnostic comparison.
+        void advanceAtmosphereDiagnosticComparison();
+
     private:
         void populateTechniqueFiles();
 
@@ -253,7 +264,7 @@ namespace MWRender
         bool mTriggerShaderReload = false;
         bool mUsePostProcessing = false;
 
-        bool mUBO = false;
+        const bool mUBO;
         bool mHDR = false;
         bool mNormals = false;
         bool mUnderwater = false;
@@ -269,6 +280,7 @@ namespace MWRender
         int mSamples;
 
         osg::ref_ptr<Fx::StateUpdater> mStateUpdater;
+        std::shared_ptr<AtmosphereDiagnostics> mAtmosphereDiagnostics;
         osg::ref_ptr<PingPongCull> mPingPongCull;
         std::array<osg::ref_ptr<PingPongCanvas>, 2> mCanvases;
         osg::ref_ptr<TransparentDepthBinCallback> mTransparentDepthPostPass;

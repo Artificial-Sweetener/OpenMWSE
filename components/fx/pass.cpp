@@ -93,6 +93,10 @@ uniform @builtinSampler omw_SamplerLastPass;
 uniform @builtinSampler omw_SamplerDepth;
 uniform @builtinSampler omw_SamplerNormals;
 uniform @builtinSampler omw_SamplerDistortion;
+uniform @builtinSampler omw_SamplerPreviousDepth;
+uniform @builtinSampler omw_SamplerAtmosphereHistory;
+uniform @builtinSampler omw_SamplerAtmosphereMetadataHistory;
+uniform bool omw_AtmosphereHistoryValid;
 
 uniform vec4 omw_PointLights[@pointLightCount];
 uniform int omw_PointLightsCount;
@@ -233,7 +237,55 @@ mat4 omw_InvProjectionMatrix()
         return dist;
     }
 
-float omw_EstimateFogCoverageFromUV(vec2 uv)
+    /// Sample previous-frame normalized depth with far-plane clear represented as one.
+    float omw_GetPreviousDepth(vec2 uv)
+    {
+#if OMW_MULTIVIEW
+        float depth = omw_Texture2DArray(omw_SamplerPreviousDepth, vec3(uv, gl_ViewID_OVR)).r;
+#else
+        float depth = omw_Texture2D(omw_SamplerPreviousDepth, uv).r;
+#endif
+#if OMW_REVERSE_Z
+        return 1.0 - depth;
+#else
+        return depth;
+#endif
+    }
+
+    /// Reconstruct previous-frame view-axis depth under the active depth convention.
+    float omw_GetPreviousLinearDepth(vec2 uv)
+    {
+#if OMW_REVERSE_Z
+        float depth = omw_GetPreviousDepth(uv);
+        return omw.near * omw.far / (omw.far + depth * (omw.near - omw.far));
+#else
+        float depth = omw_GetPreviousDepth(uv) * 2.0 - 1.0;
+        return 2.0 * omw.near * omw.far / (omw.far + omw.near - depth * (omw.far - omw.near));
+#endif
+    }
+
+    /// Sample premultiplied temporal atmosphere radiance and transmittance.
+    vec4 omw_GetAtmosphereHistory(vec2 uv)
+    {
+#if OMW_MULTIVIEW
+        return omw_Texture2DArray(omw_SamplerAtmosphereHistory, vec3(uv, gl_ViewID_OVR));
+#else
+        return omw_Texture2D(omw_SamplerAtmosphereHistory, uv);
+#endif
+    }
+
+    /// Sample temporal atmosphere distance, opacity, and medium-identity metadata.
+    vec4 omw_GetAtmosphereMetadataHistory(vec2 uv)
+    {
+#if OMW_MULTIVIEW
+        return omw_Texture2DArray(omw_SamplerAtmosphereMetadataHistory, vec3(uv, gl_ViewID_OVR));
+#else
+        return omw_Texture2D(omw_SamplerAtmosphereMetadataHistory, uv);
+#endif
+    }
+
+    /// Estimate normalized fog coverage using the active radial or view-axis distance policy.
+    float omw_EstimateFogCoverageFromUV(vec2 uv)
     {
 #if OMW_RADIAL_FOG
         vec3 uvPos = omw_GetWorldPosFromUV(uv);

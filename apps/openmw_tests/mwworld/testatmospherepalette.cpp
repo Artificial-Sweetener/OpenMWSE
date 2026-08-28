@@ -1,22 +1,44 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
+#include <string_view>
+#include <vector>
 
 #include "apps/openmw/mwworld/atmospherepalette.hpp"
+#include "apps/openmw/mwworld/weather.hpp"
 
 namespace MWWorld
 {
     namespace
     {
-        TEST(MWWorldAtmospherePaletteTest, loadsShippedRegionalPaletteAndCalculatesWeatherWeight)
+        /// Build canonical weather definitions for regional palette transition tests.
+        std::vector<Weather> makeWeatherDefinitions()
         {
-            const std::filesystem::path path
-                = std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/data-mw/openmwse/atmosphere.json";
-            std::ifstream stream(path);
-            ASSERT_TRUE(stream.is_open());
+            constexpr std::array<std::string_view, 10> weatherNames{ "Clear", "Cloudy", "Foggy", "Overcast", "Rain",
+                "Thunderstorm", "Ashstorm", "Blight", "Snow", "Blizzard" };
+            std::vector<Weather> result;
+            result.reserve(weatherNames.size());
+            for (std::size_t index = 0; index < weatherNames.size(); ++index)
+                result.emplace_back(ESM::RefId{}, static_cast<int>(index), std::string(weatherNames[index]), 0.f, 0.f,
+                    0.f, 0.f, std::string{});
+            return result;
+        }
 
-            AtmospherePalette palette(stream);
+        TEST(MWWorldAtmospherePaletteTest, loadsRegionalPaletteAndSeparateVolumeProfiles)
+        {
+            const std::filesystem::path palettePath
+                = std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/data-mw/openmwse/atmosphere.json";
+            const std::filesystem::path volumePath
+                = std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/data-mw/openmwse/atmosphere-volumes.json";
+            std::ifstream paletteStream(palettePath);
+            std::ifstream volumeStream(volumePath);
+            ASSERT_TRUE(paletteStream.is_open());
+            ASSERT_TRUE(volumeStream.is_open());
+
+            AtmospherePalette palette(paletteStream, volumeStream);
             palette.setRegion("Ascadian Isles Region");
 
             const MWRender::AtmosphereState clear = palette.getState("Clear", {}, 0.f);
@@ -24,11 +46,73 @@ namespace MWWorld
             EXPECT_FLOAT_EQ(clear.mWeatherWeight, 1.f);
             EXPECT_EQ(clear.mInScattering, osg::Vec3f(0.25f, 0.38f, 0.48f));
             EXPECT_EQ(clear.mOutScattering, osg::Vec3f(0.07f, 0.36f, 0.76f));
+            EXPECT_FLOAT_EQ(clear.mVolumes.mCloudCoverage, 0.18f);
+            EXPECT_FLOAT_EQ(clear.mVolumes.mMistDensity, 0.05f);
+            EXPECT_FLOAT_EQ(clear.mVolumes.mShaftIntensity, 0.75f);
 
             EXPECT_FLOAT_EQ(palette.getState("Foggy", {}, 0.f).mWeatherWeight, 0.f);
             EXPECT_FLOAT_EQ(palette.getState("Clear", "Foggy", 0.5f).mWeatherWeight, 0.25f);
             EXPECT_FLOAT_EQ(palette.getState("Rain", "Cloudy", 0.5f).mWeatherWeight, 0.25f);
+
+            const MWRender::AtmosphereState rainToCloudy = palette.getState("Rain", "Cloudy", 0.5f);
+            EXPECT_FLOAT_EQ(rainToCloudy.mVolumes.mCloudCoverage, 0.76f);
+            EXPECT_FLOAT_EQ(rainToCloudy.mVolumes.mMistDensity, 0.25f);
+            EXPECT_FLOAT_EQ(rainToCloudy.mVolumes.mShaftIntensity, 0.575f);
         }
 
+        TEST(MWWorldAtmospherePaletteTest, rejectsOutOfRangeVolumeProfilesWithFieldContext)
+        {
+            const std::filesystem::path palettePath
+                = std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/data-mw/openmwse/atmosphere.json";
+            const std::filesystem::path volumePath
+                = std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/data-mw/openmwse/atmosphere-volumes.json";
+            std::ifstream paletteStream(palettePath);
+            std::ifstream volumeStream(volumePath);
+            ASSERT_TRUE(paletteStream.is_open());
+            ASSERT_TRUE(volumeStream.is_open());
+            std::string contents((std::istreambuf_iterator<char>(volumeStream)), std::istreambuf_iterator<char>());
+            const std::string valid = R"("cloudCoverage": 0.18)";
+            const std::size_t position = contents.find(valid);
+            ASSERT_NE(position, std::string::npos);
+            contents.replace(position, valid.size(), R"("cloudCoverage": 1.8)");
+
+            std::istringstream invalid(contents);
+            try
+            {
+                AtmospherePalette palette(paletteStream, invalid);
+                FAIL() << "Expected the invalid cloud coverage to be rejected";
+            }
+            catch (const std::runtime_error& error)
+            {
+                EXPECT_NE(std::string(error.what()).find("atmosphere-volumes.Clear.cloudCoverage"), std::string::npos);
+            }
+        }
+
+        TEST(MWWorldAtmospherePaletteTest, transitionsRegionalColorsWithoutChangingWeatherVolumeProfiles)
+        {
+            const std::filesystem::path palettePath
+                = std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/data-mw/openmwse/atmosphere.json";
+            const std::filesystem::path volumePath
+                = std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/data-mw/openmwse/atmosphere-volumes.json";
+            std::ifstream paletteStream(palettePath);
+            std::ifstream volumeStream(volumePath);
+            ASSERT_TRUE(paletteStream.is_open());
+            ASSERT_TRUE(volumeStream.is_open());
+
+            AtmospherePalette palette(paletteStream, volumeStream);
+            std::vector<Weather> weather = makeWeatherDefinitions();
+            palette.setRegion("Ascadian Isles Region");
+
+            palette.update(0.f, false, weather);
+            EXPECT_NEAR(weather.front().mSkyColor.getDayValue().r(), 0.68990815f, 1e-6f);
+            palette.update(10.f, false, weather);
+            EXPECT_NEAR(weather.front().mSkyColor.getDayValue().r(), 0.70238364f, 1e-6f);
+            palette.update(10.f, false, weather);
+            EXPECT_NEAR(weather.front().mSkyColor.getDayValue().r(), 0.71485907f, 1e-6f);
+
+            const MWRender::AtmosphereState clear = palette.getState("Clear", {}, 0.f);
+            EXPECT_FLOAT_EQ(clear.mVolumes.mCloudCoverage, 0.18f);
+            EXPECT_FLOAT_EQ(clear.mVolumes.mCloudBaseAltitudeWorldUnits, 55000.f);
+        }
     }
 }

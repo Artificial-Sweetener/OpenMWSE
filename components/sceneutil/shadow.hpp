@@ -49,6 +49,9 @@ namespace SceneUtil
 
         void enableOutdoorMode();
 
+        /// Temporarily bypass or restore configured shadow rendering for a diagnostic comparison frame.
+        void setDiagnosticShadowRenderingEnabled(bool enabled) const;
+
     protected:
         static ShadowManager* sInstance;
 
