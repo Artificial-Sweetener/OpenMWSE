@@ -101,15 +101,17 @@ The versioned providers expose these evidence domains:
   normal and diagnostic-isolation stages.
 * ``gameplay@2`` records the cell, camera position and angles, first-person and underwater state, weather, game and simulation
   clocks, and state. The replay controller checks these stable fields before advancing the simulation.
-* ``performance@6`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
+* ``performance@7`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
   scopes for scripts, Lua, mechanics, physics, world, and UI, resource caches and work queues, navigation and paging activity,
   scene statistics, delayed per-camera GPU/render timing, and camera-owned GPU passes for the main scene, shadow maps, water
   reflection, sky render target, post-processing, precipitation occlusion, and ripples. It divides draw traversal wall time into
   camera-covered work and the intervals before, between, and after camera stages. Each surrounding interval is also attributed
   to its adjacent named camera boundaries, while aggregate and per-camera timing reports camera work outside the versioned
   named passes. The report measures the callback work outside its own camera intervals so delayed GPU-query maintenance can be
-  separated from engine draw work.
-  Main-camera render-bin intervals further
+  separated from engine draw work. GPU queries are polled only after an eight-frame readback delay, and collection retains two
+  additional rendered frames before reporting the final sample.
+  Each shadow map reports its own CPU time, GPU time, post-sort render leaves, and state graphs so aggregate shadow
+  cost can be traced to a specific map and its submitted work. Main-camera render-bin intervals further
   identify the scene root and its nested early-sky, attachment-resolve, transparency, occlusion-query, first-person, sun-glare,
   and distortion intervals. Groundcover submission and primitive near/far work are attributed separately to each named camera
   pass. It also reports a bounded stable counter schema for static rendering, attachment resolves,

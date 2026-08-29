@@ -3,6 +3,7 @@
 
 #include <osg/ref_ptr>
 
+#include <optional>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -42,6 +43,8 @@ namespace SceneUtil
         = "OpenMW diagnostic CPU pass begin callback overhead";
     inline constexpr std::string_view diagnosticCpuPassEndOverheadStatistic
         = "OpenMW diagnostic CPU pass end callback overhead";
+    /// Delay query polling until the GPU has had a bounded number of frames to complete the interval.
+    inline constexpr unsigned diagnosticGpuTimingReadbackLatencyFrames = 8;
 
     /// Return the versioned camera-pass identities emitted by performance diagnostics.
     std::span<const DiagnosticGpuPass> diagnosticGpuPasses();
@@ -51,6 +54,15 @@ namespace SceneUtil
 
     /// Enable asynchronous GPU statistics for every camera below one scene-graph owner.
     void enableDiagnosticGpuPassStatistics(osg::Node& root);
+
+    /// Assign one stable logical instance index to a diagnostic camera pass.
+    void setDiagnosticGpuPassInstance(osg::Camera& camera, unsigned instance);
+
+    /// Return the stable logical instance index assigned to a diagnostic camera pass.
+    std::optional<unsigned> diagnosticGpuPassInstance(const osg::Camera& camera);
+
+    /// Return whether one camera currently participates in a bounded diagnostic collection.
+    bool diagnosticGpuPassStatisticsCollectionEnabled(const osg::Camera& camera);
 
     /// Enable or suspend camera and render-bin timing collection without detaching instrumentation.
     void setDiagnosticGpuPassStatisticsCollection(bool enabled);

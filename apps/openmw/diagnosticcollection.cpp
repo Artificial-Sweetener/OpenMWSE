@@ -17,7 +17,7 @@ namespace OMW
 {
     namespace
     {
-        constexpr unsigned renderStatisticsLatency = 8;
+        constexpr unsigned renderStatisticsLatency = SceneUtil::diagnosticGpuTimingReadbackLatencyFrames + 2;
         constexpr std::size_t retainedFrameCount = 1024;
     }
 

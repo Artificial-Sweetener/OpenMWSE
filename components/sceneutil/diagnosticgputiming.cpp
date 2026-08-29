@@ -26,6 +26,7 @@ namespace SceneUtil
     namespace
     {
         constexpr std::string_view collectionCategory = "diagnostic_gpu_passes";
+        constexpr std::string_view passInstanceKey = "OpenMW diagnostic GPU pass instance";
         constexpr std::size_t retainedFrameCount = 1024;
         constexpr std::array passes{
             DiagnosticGpuPass{ "main-scene", sceneCameraName },
@@ -57,6 +58,13 @@ namespace SceneUtil
                 && extensions->glGetQueryObjectui64v != nullptr;
         }
 
+        /// Return whether a delayed GPU query may be polled without targeting recent in-flight work.
+        bool queryReadbackReady(unsigned sampleFrame, unsigned currentFrame) noexcept
+        {
+            return currentFrame >= sampleFrame
+                && currentFrame - sampleFrame >= diagnosticGpuTimingReadbackLatencyFrames;
+        }
+
         /// Owns asynchronous timestamp queries for one instrumented camera.
         class GpuTimestampState final : public osg::Referenced
         {
@@ -78,30 +86,30 @@ namespace SceneUtil
                     return;
 
                 const auto callbackStart = std::chrono::steady_clock::now();
+                const unsigned currentFrame = state->getFrameStamp()->getFrameNumber();
                 std::lock_guard lock(mMutex);
                 ContextQueries& queries = mContexts[state->getContextID()];
                 osg::GLExtensions* extensions = state->get<osg::GLExtensions>();
                 if (supportsTimestamps(extensions))
-                    retireCompleted(*extensions, queries);
+                    retireCompleted(*extensions, queries, currentFrame);
                 if (queries.mActive.has_value())
                     return;
 
                 TimestampPair pair;
-                pair.mFrame = state->getFrameStamp()->getFrameNumber();
+                pair.mFrame = currentFrame;
+                if (supportsTimestamps(extensions))
+                {
+                    const std::array<GLuint, 2> ids = acquireQueries(*extensions, queries);
+                    pair.mStart = ids[0];
+                    pair.mEnd = ids[1];
+                    extensions->glQueryCounter(pair.mStart, GL_TIMESTAMP);
+                }
                 pair.mCpuStart = std::chrono::steady_clock::now();
                 pair.mCpuBegin = osg::Timer::instance()->delta_s(state->getStartTick(), osg::Timer::instance()->tick());
                 camera->getStats()->setAttribute(
                     pair.mFrame, std::string(diagnosticCpuPassBeginStatistic), pair.mCpuBegin);
                 camera->getStats()->setAttribute(pair.mFrame, std::string(diagnosticCpuPassBeginOverheadStatistic),
                     std::chrono::duration<double>(std::chrono::steady_clock::now() - callbackStart).count());
-                if (supportsTimestamps(extensions))
-                {
-                    GLuint ids[2]{};
-                    extensions->glGenQueries(2, ids);
-                    pair.mStart = ids[0];
-                    pair.mEnd = ids[1];
-                    extensions->glQueryCounter(pair.mStart, GL_TIMESTAMP);
-                }
                 queries.mActive = pair;
             }
 
@@ -121,8 +129,6 @@ namespace SceneUtil
                 const unsigned frame = active.mFrame;
                 osg::GLExtensions* extensions = state->get<osg::GLExtensions>();
                 const bool gpuTimingActive = active.mStart != 0 && active.mEnd != 0 && supportsTimestamps(extensions);
-                if (gpuTimingActive)
-                    extensions->glQueryCounter(active.mEnd, GL_TIMESTAMP);
                 osg::ref_ptr<osg::Camera> camera;
                 if (mCamera.lock(camera) && camera->getStats() != nullptr)
                 {
@@ -135,11 +141,13 @@ namespace SceneUtil
                 }
                 const auto trailingOverheadStart = std::chrono::steady_clock::now();
                 if (gpuTimingActive)
+                    extensions->glQueryCounter(active.mEnd, GL_TIMESTAMP);
+                if (gpuTimingActive)
                     context->second.mPending.push_back(active);
                 context->second.mActive.reset();
                 if (supportsTimestamps(extensions))
                 {
-                    retireCompleted(*extensions, context->second);
+                    retireCompleted(*extensions, context->second, frame);
                     trimPending(*extensions, context->second);
                 }
                 if (camera != nullptr && camera->getStats() != nullptr)
@@ -182,10 +190,26 @@ namespace SceneUtil
             {
                 std::optional<TimestampPair> mActive;
                 std::deque<TimestampPair> mPending;
+                std::vector<std::array<GLuint, 2>> mReusable;
             };
 
+            /// Acquire one query pair without repeatedly allocating driver objects after warmup.
+            static std::array<GLuint, 2> acquireQueries(osg::GLExtensions& extensions, ContextQueries& queries)
+            {
+                if (!queries.mReusable.empty())
+                {
+                    const std::array<GLuint, 2> result = queries.mReusable.back();
+                    queries.mReusable.pop_back();
+                    return result;
+                }
+                std::array<GLuint, 2> result{};
+                extensions.glGenQueries(static_cast<GLsizei>(result.size()), result.data());
+                return result;
+            }
+
             /// Publish every completed interval without waiting for unfinished GPU work.
-            void retireCompleted(osg::GLExtensions& extensions, ContextQueries& queries)
+            void retireCompleted(
+                osg::GLExtensions& extensions, ContextQueries& queries, unsigned currentFrame)
             {
                 osg::ref_ptr<osg::Camera> camera;
                 if (!mCamera.lock(camera) || camera->getStats() == nullptr)
@@ -194,6 +218,8 @@ namespace SceneUtil
                 while (!queries.mPending.empty())
                 {
                     const TimestampPair& pair = queries.mPending.front();
+                    if (!queryReadbackReady(pair.mFrame, currentFrame))
+                        break;
                     GLint available = GL_FALSE;
                     extensions.glGetQueryObjectiv(pair.mEnd, GL_QUERY_RESULT_AVAILABLE, &available);
                     if (available != GL_TRUE)
@@ -209,8 +235,7 @@ namespace SceneUtil
                         camera->getStats()->setAttribute(pair.mFrame, std::string(diagnosticGpuPassTimeStatistic),
                             static_cast<double>(end - start) * nanosecondsToSeconds);
                     }
-                    const GLuint ids[]{ pair.mStart, pair.mEnd };
-                    extensions.glDeleteQueries(2, ids);
+                    queries.mReusable.push_back({ pair.mStart, pair.mEnd });
                     queries.mPending.pop_front();
                 }
             }
@@ -243,6 +268,8 @@ namespace SceneUtil
                     const GLuint ids[]{ pair.mStart, pair.mEnd };
                     extensions.glDeleteQueries(2, ids);
                 }
+                for (const std::array<GLuint, 2>& ids : queries.mReusable)
+                    extensions.glDeleteQueries(static_cast<GLsizei>(ids.size()), ids.data());
             }
 
             osg::observer_ptr<osg::Camera> mCamera;
@@ -280,13 +307,14 @@ namespace SceneUtil
                 }
 
                 const unsigned contextId = state->getContextID();
+                const unsigned currentFrame = state->getFrameStamp()->getFrameNumber();
                 const bool gpuTimingEnabled = supportsTimestamps(extensions);
                 if (gpuTimingEnabled)
-                    retireCompleted(*extensions, contextId);
+                    retireCompleted(*extensions, contextId, currentFrame);
 
                 PendingInterval interval{
                     .mCamera = camera,
-                    .mFrame = state->getFrameStamp()->getFrameNumber(),
+                    .mFrame = currentFrame,
                 };
                 if (gpuTimingEnabled)
                 {
@@ -317,7 +345,7 @@ namespace SceneUtil
                         pending.pop_front();
                     }
                 }
-                retireCompleted(*extensions, contextId);
+                retireCompleted(*extensions, contextId, currentFrame);
             }
 
         private:
@@ -340,13 +368,15 @@ namespace SceneUtil
             }
 
             /// Publish completed intervals without synchronizing with unfinished GPU work.
-            void retireCompleted(osg::GLExtensions& extensions, unsigned contextId)
+            void retireCompleted(osg::GLExtensions& extensions, unsigned contextId, unsigned currentFrame)
             {
                 std::lock_guard lock(mMutex);
                 std::deque<PendingInterval>& pending = mPending[contextId];
                 while (!pending.empty())
                 {
                     const PendingInterval& interval = pending.front();
+                    if (!queryReadbackReady(interval.mFrame, currentFrame))
+                        break;
                     GLint available = GL_FALSE;
                     extensions.glGetQueryObjectiv(interval.mEnd, GL_QUERY_RESULT_AVAILABLE, &available);
                     if (available != GL_TRUE)
@@ -487,6 +517,25 @@ namespace SceneUtil
     {
         EnableStatisticsVisitor visitor;
         root.accept(visitor);
+    }
+
+    void setDiagnosticGpuPassInstance(osg::Camera& camera, unsigned instance)
+    {
+        camera.setUserValue(std::string(passInstanceKey), instance);
+    }
+
+    std::optional<unsigned> diagnosticGpuPassInstance(const osg::Camera& camera)
+    {
+        unsigned instance = 0;
+        if (!camera.getUserValue(std::string(passInstanceKey), instance))
+            return std::nullopt;
+        return instance;
+    }
+
+    bool diagnosticGpuPassStatisticsCollectionEnabled(const osg::Camera& camera)
+    {
+        return camera.getStats() != nullptr
+            && camera.getStats()->collectStats(std::string(collectionCategory));
     }
 
     void setDiagnosticGpuPassStatisticsCollection(bool enabled)

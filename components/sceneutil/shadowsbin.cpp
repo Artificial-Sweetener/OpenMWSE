@@ -9,6 +9,8 @@
 
 #include <components/sceneutil/material.hpp>
 
+#include "diagnosticshadowwork.hpp"
+
 using namespace osgUtil;
 
 namespace
@@ -174,6 +176,7 @@ namespace SceneUtil
 
     void ShadowsBin::sortImplementation()
     {
+        DiagnosticShadowWorkRecorder diagnosticWork(*this);
         // The cull visitor contains a stategraph.
         // When a stateset is pushed, it's added/found as a child of the current stategraph node, then that node becomes
         // the new current stategraph node. When a drawable is added, the current stategraph node is added to the

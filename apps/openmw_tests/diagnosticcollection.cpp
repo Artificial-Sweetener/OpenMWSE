@@ -28,8 +28,10 @@ TEST(DiagnosticCollectionTest, EnablesOnlyOneBoundedFutureIntervalAndRestoresPri
     EXPECT_TRUE(viewer.getCamera()->getStats()->collectStats("rendering"));
     EXPECT_FALSE(collection.start(18, 1, 100));
     EXPECT_FALSE(collection.update(110).has_value());
+    EXPECT_FALSE(collection.update(111).has_value());
+    EXPECT_FALSE(collection.update(112).has_value());
 
-    const std::optional<OMW::CompletedDiagnosticCollection> completed = collection.update(111);
+    const std::optional<OMW::CompletedDiagnosticCollection> completed = collection.update(113);
     ASSERT_TRUE(completed.has_value());
     EXPECT_EQ(completed->mRequestId, 17);
     EXPECT_EQ(completed->mFirstFrame, 100);

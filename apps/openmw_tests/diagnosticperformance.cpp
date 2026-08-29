@@ -4,6 +4,7 @@
 #include <apps/openmw/mwrender/renderworkcounter.hpp>
 
 #include <components/sceneutil/diagnosticgputiming.hpp>
+#include <components/sceneutil/diagnosticshadowwork.hpp>
 
 #include <gtest/gtest.h>
 
@@ -59,22 +60,38 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
 
     osg::ref_ptr<osg::Camera> firstShadow = new osg::Camera;
     firstShadow->setName(std::string(SceneUtil::shadowCameraName));
+    SceneUtil::setDiagnosticGpuPassInstance(*firstShadow, 0);
     SceneUtil::enableDiagnosticGpuPassStatistics(*firstShadow);
     firstShadow->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticGpuPassTimeStatistic), 0.002);
+    firstShadow->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassTimeStatistic), 0.0015);
     firstShadow->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassBeginStatistic), 9.996);
     firstShadow->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassEndStatistic), 9.998);
     firstShadow->getStats()->setAttribute(
         frame, std::string(SceneUtil::diagnosticCpuPassBeginOverheadStatistic), 0.0001);
     firstShadow->getStats()->setAttribute(
         frame, std::string(SceneUtil::diagnosticCpuPassEndOverheadStatistic), 0.0002);
+    firstShadow->getStats()->setAttribute(
+        frame, std::string(SceneUtil::diagnosticShadowRenderLeafCountStatistic), 200.0);
+    firstShadow->getStats()->setAttribute(
+        frame, std::string(SceneUtil::diagnosticShadowStateGraphCountStatistic), 40.0);
 
     osg::ref_ptr<osg::Camera> secondShadow = new osg::Camera;
     secondShadow->setName(std::string(SceneUtil::shadowCameraName));
+    SceneUtil::setDiagnosticGpuPassInstance(*secondShadow, 1);
     SceneUtil::enableDiagnosticGpuPassStatistics(*secondShadow);
     secondShadow->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticGpuPassTimeStatistic), 0.003);
     secondShadow->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassBeginStatistic), 9.998);
     secondShadow->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassEndStatistic), 9.999);
     secondShadow->getStats()->setAttribute(frame, std::string(MWRender::groundcoverInstanceRenderCounter), 300.0);
+
+    osg::ref_ptr<osg::Camera> alternateFirstShadow = new osg::Camera;
+    alternateFirstShadow->setName(std::string(SceneUtil::shadowCameraName));
+    SceneUtil::setDiagnosticGpuPassInstance(*alternateFirstShadow, 0);
+    SceneUtil::enableDiagnosticGpuPassStatistics(*alternateFirstShadow);
+    alternateFirstShadow->getStats()->setAttribute(
+        frame, std::string(SceneUtil::diagnosticGpuPassTimeStatistic), 0.004);
+    alternateFirstShadow->getStats()->setAttribute(
+        frame, std::string(SceneUtil::diagnosticCpuPassTimeStatistic), 0.002);
 
     osg::ref_ptr<osg::Camera> auxiliary = new osg::Camera;
     auxiliary->setName("AuxiliarySceneCamera");
@@ -85,7 +102,7 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     OMW::reportDiagnosticPerformance(frame, frame, viewer, output);
     const std::string report = output.str();
 
-    EXPECT_NE(report.find("provider: performance@6"), std::string::npos);
+    EXPECT_NE(report.find("provider: performance@7"), std::string::npos);
     EXPECT_NE(report.find("draw-breakdown:\n  camera-covered:\n    available: true\n    count: 1\n"
                           "    median: 0.010999"),
         std::string::npos)
@@ -111,9 +128,29 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
         << report;
     EXPECT_NE(report.find("  after-interval:\n    available: true\n    count: 1"), std::string::npos) << report;
     EXPECT_NE(report.find("  main-scene:\n    available: true\n    count: 1\n    median: 0.01"), std::string::npos);
-    EXPECT_NE(report.find("  shadow-maps:\n    available: true\n    count: 1\n    median: 0.005"), std::string::npos);
+    EXPECT_NE(report.find("  shadow-maps:\n    available: true\n    count: 1\n    median: 0.009"), std::string::npos);
     EXPECT_NE(report.find("  water-reflection:\n    available: false"), std::string::npos);
     EXPECT_NE(report.find("cpu-passes:\n  main-scene:\n    available: true\n    count: 1"), std::string::npos);
+    EXPECT_NE(report.find("shadow-map-details:\n  - index: 1\n    physical-camera-count: 2\n"
+                          "    gpu-time:\n      available: true\n      count: 1\n      median: 0.006"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("    cpu-time:\n      available: true\n      count: 1\n      median: 0.0035"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("    render-leaves:\n      available: true\n      count: 1\n"
+                          "      median: 200"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("    state-graphs:\n      available: true\n      count: 1\n"
+                          "      median: 40"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("  - index: 2\n    physical-camera-count: 1\n"
+                          "    gpu-time:\n      available: true\n      count: 1\n"
+                          "      median: 0.003"),
+        std::string::npos)
+        << report;
     EXPECT_NE(report.find("unclassified-camera-details:\n  - index: 1\n    name: \"AuxiliarySceneCamera\"\n"
                           "    cpu-time:\n      available: true\n      count: 1\n      median: 0.004"),
         std::string::npos)

@@ -22,6 +22,7 @@
 #include <osgViewer/Viewer>
 
 #include <components/sceneutil/diagnosticgputiming.hpp>
+#include <components/sceneutil/diagnosticshadowwork.hpp>
 
 namespace OMW
 {
@@ -48,6 +49,18 @@ namespace OMW
 
             std::string mName;
             Owner mOwner = Owner::Viewer;
+        };
+
+        /// Maps one stable diagnostic field to the OSG statistic that supplies it.
+        struct CameraMetric
+        {
+            std::string_view mName;
+            std::string_view mStatistic;
+        };
+
+        constexpr std::array cameraDetailMetrics{
+            CameraMetric{ "render-leaves", SceneUtil::diagnosticShadowRenderLeafCountStatistic },
+            CameraMetric{ "state-graphs", SceneUtil::diagnosticShadowStateGraphCountStatistic },
         };
 
         /// Identifies one stable gap between adjacent draw-attribution boundaries.
@@ -181,6 +194,32 @@ namespace OMW
                 double value = 0.0;
                 if (camera.getStats()->getAttribute(frame, std::string(statistic), value) && std::isfinite(value))
                     values.push_back(value);
+            }
+            return values;
+        }
+
+        /// Collect and sum one statistic across physical cameras that represent the same logical pass instance.
+        std::vector<double> collectCameraGroupStatistic(std::span<const osg::ref_ptr<osg::Camera>> cameras,
+            std::string_view statistic, unsigned firstFrame, unsigned lastFrame)
+        {
+            std::vector<double> values;
+            values.reserve(lastFrame - firstFrame + 1);
+            for (unsigned frame = firstFrame; frame <= lastFrame; ++frame)
+            {
+                double total = 0.0;
+                bool available = false;
+                for (const osg::ref_ptr<osg::Camera>& camera : cameras)
+                {
+                    double value = 0.0;
+                    if (camera->getStats()->getAttribute(frame, std::string(statistic), value)
+                        && std::isfinite(value))
+                    {
+                        total += value;
+                        available = true;
+                    }
+                }
+                if (available)
+                    values.push_back(total);
             }
             return values;
         }
@@ -326,6 +365,25 @@ namespace OMW
                    << indentation << "  p99: " << distribution.mP99 << '\n'
                    << indentation << "  worst: " << distribution.mWorst << '\n';
         }
+
+        /// Emit one camera's bounded timing and submitted-scene distributions.
+        void reportCameraDetails(std::ostream& output, std::span<const osg::ref_ptr<osg::Camera>> cameras,
+            unsigned firstFrame, unsigned lastFrame, std::string_view indentation)
+        {
+            reportDistribution(output, { "gpu-time", Metric::Owner::PrimaryCamera },
+                collectCameraGroupStatistic(
+                    cameras, SceneUtil::diagnosticGpuPassTimeStatistic, firstFrame, lastFrame),
+                indentation);
+            reportDistribution(output, { "cpu-time", Metric::Owner::PrimaryCamera },
+                collectCameraGroupStatistic(
+                    cameras, SceneUtil::diagnosticCpuPassTimeStatistic, firstFrame, lastFrame),
+                indentation);
+            for (const CameraMetric& metric : cameraDetailMetrics)
+            {
+                reportDistribution(output, { std::string(metric.mName), Metric::Owner::PrimaryCamera },
+                    collectCameraGroupStatistic(cameras, metric.mStatistic, firstFrame, lastFrame), indentation);
+            }
+        }
     }
 
     DiagnosticDistribution summarizeDiagnosticSamples(std::span<const double> samples)
@@ -360,7 +418,7 @@ namespace OMW
         forEachUserStatsValue(
             [&](const UserStats& value) { metrics.push_back({ value.mTaken, Metric::Owner::Viewer }); });
 
-        output << std::setprecision(17) << "provider: performance@6\n"
+        output << std::setprecision(17) << "provider: performance@7\n"
                << "first-sampled-frame: " << firstFrame << '\n'
                << "last-sampled-frame: " << lastFrame << '\n'
                << "requested-samples: " << lastFrame - firstFrame + 1 << '\n'
@@ -413,6 +471,33 @@ namespace OMW
         }
         reportDistribution(output, { "unclassified-cameras", Metric::Owner::PrimaryCamera },
             collectUnclassifiedCameraPasses(firstFrame, lastFrame));
+
+        output << "shadow-map-details:\n";
+        std::map<unsigned, std::vector<osg::ref_ptr<osg::Camera>>> shadowMaps;
+        std::vector<osg::ref_ptr<osg::Camera>> unindexedShadowMaps;
+        for (const osg::ref_ptr<osg::Camera>& camera : SceneUtil::diagnosticGpuPassCameras())
+        {
+            if (camera->getName() != SceneUtil::shadowCameraName)
+                continue;
+            const std::optional<unsigned> instance = SceneUtil::diagnosticGpuPassInstance(*camera);
+            if (instance.has_value())
+                shadowMaps[*instance].push_back(camera);
+            else
+                unindexedShadowMaps.push_back(camera);
+        }
+        for (const auto& [instance, cameras] : shadowMaps)
+        {
+            output << "  - index: " << instance + 1 << '\n'
+                   << "    physical-camera-count: " << cameras.size() << '\n';
+            reportCameraDetails(output, cameras, firstFrame, lastFrame, "    ");
+        }
+        for (const osg::ref_ptr<osg::Camera>& camera : unindexedShadowMaps)
+        {
+            const std::array cameras{ camera };
+            output << "  - index: unavailable\n"
+                   << "    physical-camera-count: 1\n";
+            reportCameraDetails(output, cameras, firstFrame, lastFrame, "    ");
+        }
 
         output << "unclassified-camera-details:\n";
         std::size_t unclassifiedCameraIndex = 0;

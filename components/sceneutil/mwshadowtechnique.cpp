@@ -19,6 +19,7 @@
 
 #include "mwshadowtechnique.hpp"
 #include "diagnosticgputiming.hpp"
+#include "diagnosticshadowwork.hpp"
 
 #include <osgShadow/ShadowedScene>
 #include <osg/CullFace>
@@ -269,6 +270,8 @@ void VDSMCameraCullCallback::operator()(osg::Node* node, osg::NodeVisitor* nv)
 {
     osgUtil::CullVisitor* cv = static_cast<osgUtil::CullVisitor*>(nv);
     osg::Camera* camera = node->asCamera();
+    if (camera != nullptr && nv->getFrameStamp() != nullptr)
+        SceneUtil::setDiagnosticShadowWorkFrame(*camera, nv->getFrameStamp()->getFrameNumber());
     OSG_INFO<<"VDSMCameraCullCallback::operator()(osg::Node* "<<camera<<", osg::NodeVisitor* "<<cv<<")"<<std::endl;
 
 #if 1
@@ -1595,6 +1598,7 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
             // pass on shadow data to ShadowDataList
             sd->_textureUnit = textureUnit;
             sd->_sm_i = sm_i;
+            SceneUtil::setDiagnosticGpuPassInstance(*camera, sm_i);
 
             sdl.push_back(sd);
 
