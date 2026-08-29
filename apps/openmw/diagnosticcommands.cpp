@@ -193,7 +193,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                 }
 
                 case Diagnostics::CommandType::TraceGameplay:
-                    output << "provider: gameplay@1\nframe: " << frameNumber << '\n'
+                    output << "provider: gameplay@2\nframe: " << frameNumber << '\n'
                            << "state: " << static_cast<int>(mStateManager->getState()) << '\n'
                            << "cell: " << quoteDiagnosticYaml(mWorld->getCellName()) << '\n'
                            << "camera: [" << cameraPosition.x() << ", " << cameraPosition.y() << ", "

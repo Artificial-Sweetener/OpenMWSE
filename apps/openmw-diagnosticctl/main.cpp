@@ -547,6 +547,8 @@ namespace
     {
         const YAML::Node expected = YAML::Load(payloadText(expectedBytes));
         const YAML::Node actual = YAML::Load(payloadText(actualBytes));
+        if (actual["provider"].as<std::string>("") != "gameplay@2")
+            throw std::runtime_error("replay state was reported by an incompatible gameplay provider");
         for (const char* key : { "cell", "weather" })
         {
             if (expected[key].as<std::string>() != actual[key].as<std::string>())
