@@ -1,6 +1,8 @@
 #include "diagnosticperformance.hpp"
 
+#include "diagnosticrenderingtiming.hpp"
 #include "diagnosticworkcounter.hpp"
+#include "mwrender/renderworkcounter.hpp"
 #include "profile.hpp"
 
 #include <algorithm>
@@ -16,6 +18,8 @@
 #include <osg/Camera>
 #include <osg/Stats>
 #include <osgViewer/Viewer>
+
+#include <components/sceneutil/diagnosticgputiming.hpp>
 
 namespace OMW
 {
@@ -47,9 +51,9 @@ namespace OMW
         /// Convert a stable work-counter definition into a statistics query.
         Metric counterMetric(const DiagnosticWorkCounter& counter)
         {
-            return { std::string(counter.mStatistic), counter.mOwner == DiagnosticStatisticOwner::Viewer
-                    ? Metric::Owner::Viewer
-                    : Metric::Owner::PrimaryCamera };
+            return { std::string(counter.mStatistic),
+                counter.mOwner == DiagnosticStatisticOwner::Viewer ? Metric::Owner::Viewer
+                                                                   : Metric::Owner::PrimaryCamera };
         }
 
         /// Collect one metric across the requested frame interval.
@@ -58,13 +62,7 @@ namespace OMW
         {
             osg::Stats* stats = viewer.getViewerStats();
             if (metric.mOwner == Metric::Owner::PrimaryCamera)
-            {
-                osgViewer::Viewer::Cameras cameras;
-                viewer.getCameras(cameras);
-                if (cameras.empty())
-                    return {};
-                stats = cameras.front()->getStats();
-            }
+                stats = viewer.getCamera()->getStats();
 
             std::vector<double> values;
             values.reserve(lastFrame - firstFrame + 1);
@@ -73,6 +71,53 @@ namespace OMW
                 double value = 0.0;
                 if (stats->getAttribute(frame, metric.mName, value) && std::isfinite(value))
                     values.push_back(value);
+            }
+            return values;
+        }
+
+        /// Collect and sum one named camera pass across the requested frame interval.
+        std::vector<double> collectCameraPass(
+            std::string_view cameraName, std::string_view statistic, unsigned firstFrame, unsigned lastFrame)
+        {
+            const std::vector<osg::ref_ptr<osg::Camera>> cameras = SceneUtil::diagnosticGpuPassCameras();
+            std::vector<double> values;
+            values.reserve(lastFrame - firstFrame + 1);
+            for (unsigned frame = firstFrame; frame <= lastFrame; ++frame)
+            {
+                double total = 0.0;
+                bool available = false;
+                for (const osg::ref_ptr<osg::Camera>& camera : cameras)
+                {
+                    if (camera->getName() != cameraName)
+                        continue;
+                    double value = 0.0;
+                    if (camera->getStats()->getAttribute(frame, std::string(statistic), value) && std::isfinite(value))
+                    {
+                        total += value;
+                        available = true;
+                    }
+                }
+                if (available)
+                    values.push_back(total);
+            }
+            return values;
+        }
+
+        /// Collect one primary-camera statistic across the requested frame interval.
+        std::vector<double> collectPrimaryCameraStatistic(
+            std::string_view statistic, unsigned firstFrame, unsigned lastFrame, osgViewer::Viewer& viewer)
+        {
+            osg::Stats* stats = viewer.getCamera()->getStats();
+
+            std::vector<double> values;
+            values.reserve(lastFrame - firstFrame + 1);
+            for (unsigned frame = firstFrame; frame <= lastFrame; ++frame)
+            {
+                double value = 0.0;
+                if (stats->getAttribute(frame, std::string(statistic), value) && std::isfinite(value))
+                {
+                    values.push_back(value);
+                }
             }
             return values;
         }
@@ -124,18 +169,59 @@ namespace OMW
             { "Rendering traversals time taken", Metric::Owner::Viewer },
             { "Cull traversal time taken", Metric::Owner::PrimaryCamera },
             { "Draw traversal time taken", Metric::Owner::PrimaryCamera },
-            { "GPU draw time taken", Metric::Owner::PrimaryCamera },
         };
         forEachUserStatsValue(
             [&](const UserStats& value) { metrics.push_back({ value.mTaken, Metric::Owner::Viewer }); });
 
-        output << std::setprecision(17) << "provider: performance@3\n"
+        output << std::setprecision(17) << "provider: performance@4\n"
                << "first-sampled-frame: " << firstFrame << '\n'
                << "last-sampled-frame: " << lastFrame << '\n'
                << "requested-samples: " << lastFrame - firstFrame + 1 << '\n'
                << "distributions:\n";
         for (const Metric& metric : metrics)
             reportDistribution(output, metric, collectMetric(metric, firstFrame, lastFrame, viewer));
+
+        output << "gpu-passes:\n";
+        for (const SceneUtil::DiagnosticGpuPass& pass : SceneUtil::diagnosticGpuPasses())
+        {
+            const Metric metric{ std::string(pass.mName), Metric::Owner::PrimaryCamera };
+            reportDistribution(output, metric,
+                collectCameraPass(pass.mCameraName, SceneUtil::diagnosticGpuPassTimeStatistic, firstFrame, lastFrame));
+        }
+
+        output << "cpu-passes:\n";
+        for (const SceneUtil::DiagnosticGpuPass& pass : SceneUtil::diagnosticGpuPasses())
+        {
+            const Metric metric{ std::string(pass.mName), Metric::Owner::PrimaryCamera };
+            reportDistribution(output, metric,
+                collectCameraPass(pass.mCameraName, SceneUtil::diagnosticCpuPassTimeStatistic, firstFrame, lastFrame));
+        }
+
+        output << "groundcover-passes:\n";
+        for (const SceneUtil::DiagnosticGpuPass& pass : SceneUtil::diagnosticGpuPasses())
+        {
+            const std::string prefix = std::string(pass.mName) + '.';
+            reportDistribution(output, { prefix + "instance-geometry-pairs-submitted", Metric::Owner::PrimaryCamera },
+                collectCameraPass(pass.mCameraName, MWRender::groundcoverInstanceRenderCounter, firstFrame, lastFrame));
+            reportDistribution(output, { prefix + "primitive-near-far-tests", Metric::Owner::PrimaryCamera },
+                collectCameraPass(pass.mCameraName, MWRender::groundcoverInstanceTestCounter, firstFrame, lastFrame));
+        }
+
+        output << "gpu-render-bins:\n";
+        for (const DiagnosticRenderBinPass& pass : diagnosticRenderBinPasses())
+        {
+            const Metric metric{ std::string(pass.mName), Metric::Owner::PrimaryCamera };
+            reportDistribution(
+                output, metric, collectPrimaryCameraStatistic(pass.mGpuStatistic, firstFrame, lastFrame, viewer));
+        }
+
+        output << "cpu-render-bins:\n";
+        for (const DiagnosticRenderBinPass& pass : diagnosticRenderBinPasses())
+        {
+            const Metric metric{ std::string(pass.mName), Metric::Owner::PrimaryCamera };
+            reportDistribution(
+                output, metric, collectPrimaryCameraStatistic(pass.mCpuStatistic, firstFrame, lastFrame, viewer));
+        }
 
         output << "work-counters:\n";
         for (const DiagnosticWorkCounter& counter : diagnosticWorkCounters())

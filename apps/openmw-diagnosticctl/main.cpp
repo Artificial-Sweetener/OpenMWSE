@@ -491,7 +491,8 @@ namespace
     void printUsage(std::ostream& stream)
     {
         stream << "Usage:\n"
-                  "  openmw-diagnosticctl <status|graphics|gameplay|performance|reload-shaders> [--endpoint name]\n"
+                  "  openmw-diagnosticctl <status|graphics|gameplay|reload-shaders> [--endpoint name]\n"
+                  "  openmw-diagnosticctl performance [--endpoint name] [--performance-samples count]\n"
                   "  openmw-diagnosticctl capsule [--endpoint name] [--output capture.omwdiag]\n"
                   "  openmw-diagnosticctl step [--endpoint name] [--frames count]\n"
                   "  openmw-diagnosticctl shutdown [--endpoint name]\n"
@@ -597,7 +598,15 @@ namespace
         else if (operation == "gameplay")
             command.mType = Diagnostics::CommandType::TraceGameplay;
         else if (operation == "performance")
+        {
             command.mType = Diagnostics::CommandType::TracePerformance;
+            const std::uint32_t sampleCount
+                = static_cast<std::uint32_t>(std::stoul(findOption(arguments, "--performance-samples").value_or("1")));
+            if (sampleCount == 0 || sampleCount > 600)
+                throw std::invalid_argument("performance samples must be within [1, 600]");
+            for (std::size_t byte = 0; byte < sizeof(sampleCount); ++byte)
+                command.mPayload.push_back(static_cast<std::byte>((sampleCount >> (byte * 8)) & 0xffu));
+        }
         else if (operation == "reload-shaders")
             command.mType = Diagnostics::CommandType::ReloadShaders;
         else if (operation == "shutdown")

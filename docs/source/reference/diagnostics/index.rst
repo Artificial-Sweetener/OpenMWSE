@@ -40,8 +40,10 @@ Replay that capture after rebuilding::
 
 ``--frames`` advances the exact fixed-step workload before capture. ``--performance-samples`` retains the final bounded subset;
 the preceding frames serve as warm-up. The performance report keeps every sampled OSG statistic and summarizes stable CPU,
-cull, draw, GPU, and frame-duration metrics with median, p95, p99, and worst values. A sample count must not exceed the frame
-count or 600. Visual capture begins after the timed window so synchronous readback does not contaminate its distributions.
+cull, draw, camera-owned GPU-pass, and frame-duration metrics with median, p95, p99, and worst values. Named
+GPU passes cover the main scene, shadow maps, water reflection, sky render target, post-processing, precipitation occlusion,
+and ripple simulation. A sample count must not exceed the frame count or 600. Visual capture begins after the timed window so
+synchronous readback does not contaminate its distributions.
 Repeat ``--setting "Section:name=value"`` to apply a validated setting override only to the temporary profile used by that run
 or replay. The controller leaves the source profile unchanged, making the option suitable for controlled configuration and
 fallback comparisons.
@@ -64,7 +66,8 @@ Attach commands
 The controller accepts ``status``, ``graphics``, ``gameplay``, ``performance``, ``capsule``, and ``reload-shaders`` against an
 enabled session. Supply ``--endpoint <name>`` when the session does not use the default endpoint. ``graphics`` schedules the same
 production pass capture used by Shift+F12. ``capsule --output <name>.omwdiag`` writes beneath the session artifact directory.
-``step`` and ``shutdown`` are child-only operations.
+``performance --performance-samples <count>`` reports a bounded retained window of up to 600 frames. ``step`` and ``shutdown``
+are child-only operations.
 
 Benchmark scenarios
 -------------------
@@ -96,14 +99,18 @@ The versioned providers expose these evidence domains:
   normal and diagnostic-isolation stages.
 * ``gameplay@2`` records the cell, camera position and angles, first-person and underwater state, weather, game and simulation
   clocks, and state. The replay controller checks these stable fields before advancing the simulation.
-* ``performance@3`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
+* ``performance@4`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
   scopes for scripts, Lua, mechanics, physics, world, and UI, resource caches and work queues, navigation and paging activity,
-  scene statistics, and delayed per-camera GPU/render timing. It also reports a bounded stable counter schema for static
-  rendering, attachment resolves, transparent and first-person replay, actors, lights, groundcover, deformation, uploads,
-  caches, and optimized-path fallbacks. Counters not produced by their owning subsystem are recorded as unavailable rather than
-  inferred. Resolve byte counts describe the logical destination attachment volume written by the copies; they are not an
-  estimate of hardware bus traffic. Timing and counter collection remain disabled outside requested diagnostics or statistics
-  collection.
+  scene statistics, delayed per-camera GPU/render timing, and camera-owned GPU passes for the main scene, shadow maps, water
+  reflection, sky render target, post-processing, precipitation occlusion, and ripples. Main-camera render-bin intervals further
+  identify the scene root and its nested early-sky, attachment-resolve, transparency, occlusion-query, first-person, sun-glare,
+  and distortion intervals. Groundcover submission and primitive near/far work are attributed separately to each named camera
+  pass. It also reports a bounded stable counter schema for static rendering, attachment resolves,
+  transparent and first-person replay, actors, lights, groundcover,
+  deformation, uploads, caches, and optimized-path fallbacks. Counters and pass timings not produced by their owning subsystem
+  are recorded as unavailable rather than inferred. Resolve byte counts describe the logical destination attachment volume
+  written by the copies; they are not an estimate of hardware bus traffic. Timing and counter collection are active only when
+  the diagnostic endpoint is enabled.
 
 A ``.omwdiag`` capsule contains a manifest, effective settings, full loadable world snapshot, stable world state, provider
 versions, frame identity, and performance evidence. The manifest records the ordered content list and hashes. It does not embed

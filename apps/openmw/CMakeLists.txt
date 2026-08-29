@@ -2,6 +2,7 @@ set(OPENMW_SOURCES
     engine.cpp
     diagnosticcommands.cpp
     diagnosticperformance.cpp
+    diagnosticrenderingtiming.cpp
     diagnosticworkcounter.cpp
     options.cpp
 )
@@ -14,6 +15,7 @@ set(OPENMW_RESOURCES
 set(OPENMW_HEADERS
     doc.hpp
     diagnosticperformance.hpp
+    diagnosticrenderingtiming.hpp
     diagnosticworkcounter.hpp
     engine.hpp
     options.hpp

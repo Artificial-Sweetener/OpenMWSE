@@ -13,6 +13,7 @@
 
 #include <components/sceneutil/controller.hpp>
 #include <components/sceneutil/depth.hpp>
+#include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/material.hpp>
 #include <components/sceneutil/rtt.hpp>
 #include <components/sceneutil/shadow.hpp>
@@ -219,7 +220,7 @@ namespace
         void setDefaults(osg::Camera* camera) override
         {
             camera->setReferenceFrame(osg::Camera::RELATIVE_RF);
-            camera->setName("SkyCamera");
+            camera->setName(std::string(SceneUtil::skyCameraName));
             camera->setNodeMask(MWRender::Mask_RenderToTexture);
             camera->setCullMask(MWRender::Mask_Sky);
             camera->addChild(mEarlyRenderBinRoot);

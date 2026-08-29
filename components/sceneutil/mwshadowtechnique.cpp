@@ -18,6 +18,7 @@
 */
 
 #include "mwshadowtechnique.hpp"
+#include "diagnosticgputiming.hpp"
 
 #include <osgShadow/ShadowedScene>
 #include <osg/CullFace>
@@ -569,7 +570,7 @@ MWShadowTechnique::ShadowData::ShadowData(MWShadowTechnique::ViewDependentData* 
 
     // set up the camera
     _camera = new osg::Camera;
-    _camera->setName("ShadowCamera");
+    _camera->setName(std::string(SceneUtil::shadowCameraName));
     _camera->setReferenceFrame(osg::Camera::ABSOLUTE_RF_INHERIT_VIEWPOINT);
 #ifndef __APPLE__ // workaround shadow issue on macOS, https://gitlab.com/OpenMW/openmw/-/issues/6057
     _camera->setImplicitBufferAttachmentMask(0, 0);
@@ -1413,6 +1414,7 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
             }
 
             osg::ref_ptr<osg::Camera> camera = sd->_camera;
+            SceneUtil::inheritDiagnosticGpuPassStatistics(*camera, *cv.getCurrentCamera());
 
             camera->setProjectionMatrix(projectionMatrix);
             camera->setViewMatrix(viewMatrix);

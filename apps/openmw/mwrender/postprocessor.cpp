@@ -21,6 +21,7 @@
 #include <components/resource/scenemanager.hpp>
 #include <components/sceneutil/color.hpp>
 #include <components/sceneutil/deformationstats.hpp>
+#include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/depth.hpp>
 #include <components/sceneutil/nodecallback.hpp>
 #include <components/sceneutil/shadow.hpp>
@@ -246,6 +247,7 @@ namespace MWRender
         mCanvases[1]->setPreviousCanvas(mCanvases[0]);
 
         mHUDCamera->setReferenceFrame(osg::Camera::ABSOLUTE_RF);
+        mHUDCamera->setName(std::string(SceneUtil::postProcessingCameraName));
         mHUDCamera->setRenderOrder(osg::Camera::POST_RENDER);
         mHUDCamera->setClearColor(osg::Vec4(0.45f, 0.45f, 0.14f, 1.f));
         mHUDCamera->setClearMask(0);

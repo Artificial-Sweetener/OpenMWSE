@@ -8,6 +8,7 @@
 #include <components/resource/resourcesystem.hpp>
 #include <components/resource/scenemanager.hpp>
 #include <components/sceneutil/depth.hpp>
+#include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/positionattitudetransform.hpp>
 #include <components/sceneutil/util.hpp>
 #include <components/settings/values.hpp>
@@ -105,6 +106,7 @@ namespace MWRender
             SceneUtil::AutoDepth::isReversed() ? osg::Vec4(0, 0, 0, 0) : osg::Vec4(1, 1, 1, 1));
 
         mCamera = new osg::Camera;
+        mCamera->setName(std::string(SceneUtil::precipitationOcclusionCameraName));
         mCamera->setComputeNearFarMode(osg::CullSettings::DO_NOT_COMPUTE_NEAR_FAR);
         mCamera->setRenderOrder(osg::Camera::PRE_RENDER);
         mCamera->setRenderTargetImplementation(osg::Camera::FRAME_BUFFER_OBJECT);

@@ -36,6 +36,7 @@
 #include <components/stereo/stereomanager.hpp>
 
 #include <components/sceneutil/glextensions.hpp>
+#include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/offscreencontext.hpp>
 #include <components/sceneutil/workqueue.hpp>
 
@@ -67,6 +68,7 @@
 #include "mwinput/inputmanagerimp.hpp"
 
 #include "diagnosticperformance.hpp"
+#include "diagnosticrenderingtiming.hpp"
 
 #include "mwgui/windowmanagerimp.hpp"
 
@@ -202,10 +204,13 @@ namespace
         for (osg::Camera* camera : cameras)
         {
             camera->getStats()->allocate(1024);
-            camera->getStats()->collectStats("gpu", true);
             camera->getStats()->collectStats("rendering", true);
             camera->getStats()->collectStats("scene", true);
+            SceneUtil::enableDiagnosticGpuPassStatistics(*camera);
         }
+        if (osg::Node* scene = viewer.getSceneData())
+            SceneUtil::enableDiagnosticGpuPassStatistics(*scene);
+        OMW::enableDiagnosticRenderBinTimings();
     }
 
 }

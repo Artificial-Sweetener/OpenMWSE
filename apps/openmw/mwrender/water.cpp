@@ -19,6 +19,7 @@
 #include <components/resource/scenemanager.hpp>
 
 #include <components/sceneutil/depth.hpp>
+#include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/fog.hpp>
 #include <components/sceneutil/material.hpp>
 #include <components/sceneutil/rtt.hpp>
@@ -250,7 +251,7 @@ namespace MWRender
         {
             camera->setReferenceFrame(osg::Camera::RELATIVE_RF);
             camera->setSmallFeatureCullingPixelSize(Settings::water().mSmallFeatureCullingPixelSize);
-            camera->setName("ReflectionCamera");
+            camera->setName(std::string(SceneUtil::reflectionCameraName));
             camera->addCullCallback(new InheritViewPointCallback);
 
             // Inform the shader that we're in a reflection

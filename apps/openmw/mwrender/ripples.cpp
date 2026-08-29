@@ -10,6 +10,7 @@
 #include <components/resource/scenemanager.hpp>
 #include <components/sceneutil/color.hpp>
 #include <components/sceneutil/depth.hpp>
+#include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/glextensions.hpp>
 #include <components/shader/shadermanager.hpp>
 
@@ -315,6 +316,7 @@ namespace MWRender
         : osg::Camera()
         , mRipples(new RipplesSurface(resourceSystem))
     {
+        setName(std::string(SceneUtil::ripplesCameraName));
         getOrCreateStateSet()->setMode(GL_DEPTH_TEST, osg::StateAttribute::OFF);
         setRenderOrder(osg::Camera::PRE_RENDER);
         setReferenceFrame(osg::Camera::ABSOLUTE_RF);
