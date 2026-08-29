@@ -9,26 +9,23 @@ import struct
 from pathlib import Path
 
 import numpy
+from PIL import Image
 
 
 MAGIC = b"OMWATMD1"
 VERSION = 1
 STAGE_PATTERN = re.compile(r"atmosphere-(.+)-frame-\d+-\d+\.omwdiag")
-COMPARED_IMAGES = {
-    "scene-color-before-post-processing",
-    "scene-opaque-depth",
-    "atmosphere-volume-resolved",
-    "atmosphere-volume-metadata",
-    "atmosphere-shafts",
-    "final-composite",
-}
-MAXIMUM_MEAN_ABSOLUTE_ERROR = {
-    "scene-color-before-post-processing": 0.002,
-    "scene-opaque-depth": 0.00001,
-    "atmosphere-volume-resolved": 0.002,
-    "atmosphere-volume-metadata": 0.0001,
-    "atmosphere-shafts": 0.0001,
-    "final-composite": 0.001,
+ATTACHMENT_RULES = {
+    "scene-color-before-post-processing": {"mean": 0.002, "p999": 0.01, "localize": 0.0001},
+    "scene-opaque-depth": {"mean": 0.00001, "p999": 0.0001, "localize": 0.000001},
+    "previous-scene-opaque-depth": {"mean": 0.00001, "p999": 0.0001, "localize": 0.000001},
+    "atmosphere-volume-raw": {"mean": 0.002, "p999": 0.01, "localize": 0.0001},
+    "atmosphere-volume-resolved": {"mean": 0.002, "p999": 0.01, "localize": 0.0001},
+    "atmosphere-volume-metadata": {"mean": 0.0001, "p999": 0.001, "localize": 0.00001},
+    "atmosphere-shafts": {"mean": 0.0001, "p999": 0.001, "localize": 0.00001},
+    "previous-atmosphere-volume-resolved": {"mean": 0.002, "p999": 0.01, "localize": 0.0001},
+    "previous-atmosphere-volume-metadata": {"mean": 0.0001, "p999": 0.001, "localize": 0.00001},
+    "final-composite": {"mean": 0.001, "p999": 0.01, "localize": 0.0001},
 }
 
 
@@ -63,13 +60,10 @@ def read_images(path: Path) -> dict[str, numpy.ndarray]:
             value_count = read_u64(stream)
             if value_count != width * height * channels:
                 raise ValueError(f"invalid dimensions for {label} in {path}")
-            if label in COMPARED_IMAGES:
-                pixels = numpy.fromfile(stream, dtype="<f4", count=value_count)
-                if pixels.size != value_count:
-                    raise ValueError(f"truncated pixels for {label} in {path}")
-                images[label] = pixels.reshape(height, width, channels)
-            else:
-                stream.seek(value_count * 4, 1)
+            pixels = numpy.fromfile(stream, dtype="<f4", count=value_count)
+            if pixels.size != value_count:
+                raise ValueError(f"truncated pixels for {label} in {path}")
+            images[label] = pixels.reshape(height, width, channels)
         if stream.read(1):
             raise ValueError(f"unexpected trailing data in {path}")
     return images
@@ -91,7 +85,37 @@ def index_stages(directory: Path) -> dict[str, Path]:
     return result
 
 
-def compare_directories(reference: Path, replay: Path) -> dict:
+def difference_region(pixel_difference: numpy.ndarray, threshold: float) -> dict | None:
+    """Return the bounding rectangle and count of pixels above one attachment-specific threshold."""
+    changed = pixel_difference > threshold
+    if not changed.any():
+        return None
+    rows, columns = numpy.nonzero(changed)
+    return {
+        "pixel_count": int(changed.sum()),
+        "pixel_fraction": float(changed.mean()),
+        "bounds": {
+            "left": int(columns.min()),
+            "top": int(rows.min()),
+            "right": int(columns.max()),
+            "bottom": int(rows.max()),
+        },
+    }
+
+
+def write_heatmap(path: Path, pixel_difference: numpy.ndarray) -> None:
+    """Write a full-resolution logarithmic heat map without altering comparison values."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    maximum = float(pixel_difference.max())
+    if maximum == 0.0:
+        normalized = numpy.zeros(pixel_difference.shape, dtype=numpy.uint8)
+    else:
+        normalized = numpy.clip(numpy.log1p(pixel_difference * 255.0 / maximum) / numpy.log(256.0), 0.0, 1.0)
+        normalized = numpy.asarray(numpy.rint(normalized * 255.0), dtype=numpy.uint8)
+    Image.fromarray(normalized).save(path)
+
+
+def compare_directories(reference: Path, replay: Path, heatmap_directory: Path | None = None) -> dict:
     """Return enforcing numerical parity evidence for matching production stages."""
     reference_stages = index_stages(reference)
     replay_stages = index_stages(replay)
@@ -102,7 +126,7 @@ def compare_directories(reference: Path, replay: Path) -> dict:
         "reference": str(reference),
         "replay": str(replay),
         "passed": True,
-        "limits": {"maximum_mean_absolute": MAXIMUM_MEAN_ABSOLUTE_ERROR},
+        "attachment_rules": ATTACHMENT_RULES,
         "stages": {},
     }
     for stage in sorted(reference_stages):
@@ -112,6 +136,8 @@ def compare_directories(reference: Path, replay: Path) -> dict:
             raise ValueError(f"attachment sets differ for stage {stage}")
         stage_report: dict = {}
         for name in sorted(reference_images):
+            if name not in ATTACHMENT_RULES:
+                raise ValueError(f"attachment {name} has no explicit comparison rule")
             reference_pixels = reference_images[name]
             replay_pixels = replay_images[name]
             if reference_pixels.shape != replay_pixels.shape:
@@ -120,12 +146,28 @@ def compare_directories(reference: Path, replay: Path) -> dict:
             if not finite.all():
                 raise ValueError(f"non-finite pixels found in {stage}/{name}")
             difference = numpy.abs(reference_pixels - replay_pixels)
+            pixel_difference = difference.max(axis=2)
+            denominator = numpy.maximum(numpy.abs(reference_pixels), 1e-7)
+            relative_difference = difference / denominator
+            rule = ATTACHMENT_RULES[name]
             stage_report[name] = {
+                "nonzero_value_count": int(numpy.count_nonzero(difference)),
                 "mean_absolute": float(difference.mean()),
                 "p999_absolute": float(numpy.quantile(difference, 0.999)),
                 "maximum_absolute": float(difference.max()),
+                "maximum_relative": float(relative_difference.max()),
+                "localized_difference": difference_region(pixel_difference, rule["localize"]),
             }
-            if stage_report[name]["mean_absolute"] > MAXIMUM_MEAN_ABSOLUTE_ERROR[name]:
+            attachment_passed = (
+                stage_report[name]["mean_absolute"] <= rule["mean"]
+                and stage_report[name]["p999_absolute"] <= rule["p999"]
+            )
+            stage_report[name]["passed"] = attachment_passed
+            if heatmap_directory and (stage == "normal" or not attachment_passed):
+                heatmap_path = heatmap_directory / stage / f"{name}.png"
+                write_heatmap(heatmap_path, pixel_difference)
+                stage_report[name]["heatmap"] = str(heatmap_path)
+            if not attachment_passed:
                 report["passed"] = False
         report["stages"][stage] = stage_report
     return report
@@ -137,13 +179,14 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("reference", type=Path)
     parser.add_argument("replay", type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--heatmaps", type=Path)
     return parser.parse_args()
 
 
 def main() -> None:
     """Compare both runs, emit evidence, and fail when replay parity regresses."""
     arguments = parse_arguments()
-    report = compare_directories(arguments.reference, arguments.replay)
+    report = compare_directories(arguments.reference, arguments.replay, arguments.heatmaps)
     encoded = json.dumps(report, indent=2)
     if arguments.output:
         arguments.output.write_text(encoded + "\n", encoding="utf-8")

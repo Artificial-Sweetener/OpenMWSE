@@ -46,10 +46,14 @@ count or 600. Visual capture begins after the timed window so synchronous readba
 Compare the real production attachments from both runs::
 
   python scripts\compare_diagnostic_graphics.py <capture-directory>\graphics-<frame> \
-      <replay-directory>\graphics-<frame> --output <replay-directory>\graphics-parity.json
+      <replay-directory>\graphics-<frame> --output <replay-directory>\graphics-parity.json \
+      --heatmaps <replay-directory>\graphics-heatmaps
 
-The comparison validates matching stages and dimensions, rejects non-finite values, records mean, 99.9th-percentile, and maximum
-absolute error, and exits unsuccessfully when an attachment exceeds its checked-in replay-parity limit.
+The comparison requires an explicit attachment-specific rule for every captured image, validates matching stages and dimensions,
+and rejects non-finite values. Its machine-readable report records exact differing-value counts, mean, 99.9th-percentile, and
+maximum absolute error, maximum relative error, and the bounds and size of localized differences. ``--heatmaps`` writes
+full-resolution logarithmic difference images for the normal stage and any failed attachment. The command exits unsuccessfully
+when an attachment exceeds its checked-in replay-parity limits.
 
 Attach commands
 ---------------
