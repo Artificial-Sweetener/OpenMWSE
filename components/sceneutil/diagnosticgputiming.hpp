@@ -38,6 +38,10 @@ namespace SceneUtil
     inline constexpr std::string_view diagnosticCpuPassTimeStatistic = "OpenMW diagnostic CPU pass time taken";
     inline constexpr std::string_view diagnosticCpuPassBeginStatistic = "OpenMW diagnostic CPU pass begin time";
     inline constexpr std::string_view diagnosticCpuPassEndStatistic = "OpenMW diagnostic CPU pass end time";
+    inline constexpr std::string_view diagnosticCpuPassBeginOverheadStatistic
+        = "OpenMW diagnostic CPU pass begin callback overhead";
+    inline constexpr std::string_view diagnosticCpuPassEndOverheadStatistic
+        = "OpenMW diagnostic CPU pass end callback overhead";
 
     /// Return the versioned camera-pass identities emitted by performance diagnostics.
     std::span<const DiagnosticGpuPass> diagnosticGpuPasses();

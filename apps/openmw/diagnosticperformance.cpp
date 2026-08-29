@@ -9,10 +9,12 @@
 #include <array>
 #include <cmath>
 #include <iomanip>
+#include <map>
 #include <ostream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include <osg/Camera>
@@ -48,19 +50,34 @@ namespace OMW
             Owner mOwner = Owner::Viewer;
         };
 
-        /// Retains disjoint draw-stage timing distributions derived from camera callback intervals.
-        struct DrawBreakdown
+        /// Identifies one stable gap between adjacent draw-attribution boundaries.
+        struct CameraTransition
+        {
+            std::string mFrom;
+            std::string mTo;
+
+            /// Order transition identities for deterministic reporting.
+            bool operator<(const CameraTransition& other) const
+            {
+                return std::tie(mFrom, mTo) < std::tie(other.mFrom, other.mTo);
+            }
+        };
+
+        /// Retains draw-stage timing distributions and their named transition gaps.
+        struct DrawAttribution
         {
             std::vector<double> mCameraCovered;
             std::vector<double> mBeforeFirstCamera;
             std::vector<double> mBetweenCameras;
             std::vector<double> mAfterLastCamera;
             std::vector<double> mOutsideCameras;
+            std::map<CameraTransition, std::vector<double>> mTransitionGaps;
         };
 
         /// Represents one clipped camera-owned wall-clock interval.
         struct CameraInterval
         {
+            std::string mName;
             double mBegin = 0.0;
             double mEnd = 0.0;
         };
@@ -107,6 +124,32 @@ namespace OMW
                 {
                     if (camera->getName() != cameraName)
                         continue;
+                    double value = 0.0;
+                    if (camera->getStats()->getAttribute(frame, std::string(statistic), value) && std::isfinite(value))
+                    {
+                        total += value;
+                        available = true;
+                    }
+                }
+                if (available)
+                    values.push_back(total);
+            }
+            return values;
+        }
+
+        /// Collect and sum one diagnostic statistic across every registered camera.
+        std::vector<double> collectAllCameraPasses(
+            std::string_view statistic, unsigned firstFrame, unsigned lastFrame)
+        {
+            const std::vector<osg::ref_ptr<osg::Camera>> cameras = SceneUtil::diagnosticGpuPassCameras();
+            std::vector<double> values;
+            values.reserve(lastFrame - firstFrame + 1);
+            for (unsigned frame = firstFrame; frame <= lastFrame; ++frame)
+            {
+                double total = 0.0;
+                bool available = false;
+                for (const osg::ref_ptr<osg::Camera>& camera : cameras)
+                {
                     double value = 0.0;
                     if (camera->getStats()->getAttribute(frame, std::string(statistic), value) && std::isfinite(value))
                     {
@@ -190,10 +233,10 @@ namespace OMW
             return values;
         }
 
-        /// Divide the OSG draw traversal into camera-covered and surrounding orchestration intervals.
-        DrawBreakdown collectDrawBreakdown(unsigned firstFrame, unsigned lastFrame, osgViewer::Viewer& viewer)
+        /// Divide the OSG draw traversal into camera-covered intervals and named surrounding transitions.
+        DrawAttribution collectDrawAttribution(unsigned firstFrame, unsigned lastFrame, osgViewer::Viewer& viewer)
         {
-            DrawBreakdown result;
+            DrawAttribution result;
             osg::Stats* primaryStats = viewer.getCamera()->getStats();
             const std::vector<osg::ref_ptr<osg::Camera>> cameras = SceneUtil::diagnosticGpuPassCameras();
             for (unsigned frame = firstFrame; frame <= lastFrame; ++frame)
@@ -215,28 +258,40 @@ namespace OMW
                             frame, std::string(SceneUtil::diagnosticCpuPassEndStatistic), end)
                         || end < begin || end < drawBegin || begin > drawEnd)
                         continue;
-                    intervals.push_back({ .mBegin = std::max(begin, drawBegin), .mEnd = std::min(end, drawEnd) });
+                    intervals.push_back({ .mName = camera->getName().empty() ? "<unnamed-camera>" : camera->getName(),
+                        .mBegin = std::max(begin, drawBegin), .mEnd = std::min(end, drawEnd) });
                 }
                 if (intervals.empty())
                     continue;
 
-                std::ranges::sort(intervals, {}, &CameraInterval::mBegin);
+                std::ranges::sort(intervals, [](const CameraInterval& left, const CameraInterval& right) {
+                    return std::tie(left.mBegin, left.mEnd, left.mName)
+                        < std::tie(right.mBegin, right.mEnd, right.mName);
+                });
                 const double firstCameraBegin = intervals.front().mBegin;
                 double mergedBegin = intervals.front().mBegin;
                 double mergedEnd = intervals.front().mEnd;
+                std::string mergedName = intervals.front().mName;
                 double cameraCovered = 0.0;
                 double betweenCameras = 0.0;
                 for (const CameraInterval& interval : std::span(intervals).subspan(1))
                 {
                     if (interval.mBegin <= mergedEnd)
                     {
-                        mergedEnd = std::max(mergedEnd, interval.mEnd);
+                        if (interval.mEnd > mergedEnd)
+                        {
+                            mergedEnd = interval.mEnd;
+                            mergedName = interval.mName;
+                        }
                         continue;
                     }
                     cameraCovered += mergedEnd - mergedBegin;
-                    betweenCameras += interval.mBegin - mergedEnd;
+                    const double gap = interval.mBegin - mergedEnd;
+                    betweenCameras += gap;
+                    result.mTransitionGaps[{ mergedName, interval.mName }].push_back(gap);
                     mergedBegin = interval.mBegin;
                     mergedEnd = interval.mEnd;
+                    mergedName = interval.mName;
                 }
                 cameraCovered += mergedEnd - mergedBegin;
                 const double beforeFirstCamera = std::max(0.0, firstCameraBegin - drawBegin);
@@ -247,6 +302,8 @@ namespace OMW
                 result.mBetweenCameras.push_back(betweenCameras);
                 result.mAfterLastCamera.push_back(afterLastCamera);
                 result.mOutsideCameras.push_back(outsideCameras);
+                result.mTransitionGaps[{ "<draw-begin>", intervals.front().mName }].push_back(beforeFirstCamera);
+                result.mTransitionGaps[{ mergedName, "<draw-end>" }].push_back(afterLastCamera);
             }
             return result;
         }
@@ -303,7 +360,7 @@ namespace OMW
         forEachUserStatsValue(
             [&](const UserStats& value) { metrics.push_back({ value.mTaken, Metric::Owner::Viewer }); });
 
-        output << std::setprecision(17) << "provider: performance@5\n"
+        output << std::setprecision(17) << "provider: performance@6\n"
                << "first-sampled-frame: " << firstFrame << '\n'
                << "last-sampled-frame: " << lastFrame << '\n'
                << "requested-samples: " << lastFrame - firstFrame + 1 << '\n'
@@ -311,15 +368,33 @@ namespace OMW
         for (const Metric& metric : metrics)
             reportDistribution(output, metric, collectMetric(metric, firstFrame, lastFrame, viewer));
 
-        const DrawBreakdown drawBreakdown = collectDrawBreakdown(firstFrame, lastFrame, viewer);
+        const DrawAttribution drawAttribution = collectDrawAttribution(firstFrame, lastFrame, viewer);
         output << "draw-breakdown:\n";
-        reportDistribution(output, { "camera-covered", Metric::Owner::PrimaryCamera }, drawBreakdown.mCameraCovered);
         reportDistribution(
-            output, { "before-first-camera", Metric::Owner::PrimaryCamera }, drawBreakdown.mBeforeFirstCamera);
-        reportDistribution(output, { "between-cameras", Metric::Owner::PrimaryCamera }, drawBreakdown.mBetweenCameras);
+            output, { "camera-covered", Metric::Owner::PrimaryCamera }, drawAttribution.mCameraCovered);
         reportDistribution(
-            output, { "after-last-camera", Metric::Owner::PrimaryCamera }, drawBreakdown.mAfterLastCamera);
-        reportDistribution(output, { "outside-cameras", Metric::Owner::PrimaryCamera }, drawBreakdown.mOutsideCameras);
+            output, { "before-first-camera", Metric::Owner::PrimaryCamera }, drawAttribution.mBeforeFirstCamera);
+        reportDistribution(
+            output, { "between-cameras", Metric::Owner::PrimaryCamera }, drawAttribution.mBetweenCameras);
+        reportDistribution(
+            output, { "after-last-camera", Metric::Owner::PrimaryCamera }, drawAttribution.mAfterLastCamera);
+        reportDistribution(
+            output, { "outside-cameras", Metric::Owner::PrimaryCamera }, drawAttribution.mOutsideCameras);
+
+        output << "camera-transition-gaps:\n";
+        for (const auto& [transition, values] : drawAttribution.mTransitionGaps)
+        {
+            output << "  - from: " << std::quoted(transition.mFrom) << '\n'
+                   << "    to: " << std::quoted(transition.mTo) << '\n';
+            reportDistribution(output, { "gap-time", Metric::Owner::PrimaryCamera }, values, "    ");
+        }
+
+        output << "diagnostic-camera-callback-overhead:\n";
+        reportDistribution(output, { "before-interval", Metric::Owner::PrimaryCamera },
+            collectAllCameraPasses(
+                SceneUtil::diagnosticCpuPassBeginOverheadStatistic, firstFrame, lastFrame));
+        reportDistribution(output, { "after-interval", Metric::Owner::PrimaryCamera },
+            collectAllCameraPasses(SceneUtil::diagnosticCpuPassEndOverheadStatistic, firstFrame, lastFrame));
 
         output << "gpu-passes:\n";
         for (const SceneUtil::DiagnosticGpuPass& pass : SceneUtil::diagnosticGpuPasses())

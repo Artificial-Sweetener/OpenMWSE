@@ -63,6 +63,10 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     firstShadow->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticGpuPassTimeStatistic), 0.002);
     firstShadow->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassBeginStatistic), 9.996);
     firstShadow->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassEndStatistic), 9.998);
+    firstShadow->getStats()->setAttribute(
+        frame, std::string(SceneUtil::diagnosticCpuPassBeginOverheadStatistic), 0.0001);
+    firstShadow->getStats()->setAttribute(
+        frame, std::string(SceneUtil::diagnosticCpuPassEndOverheadStatistic), 0.0002);
 
     osg::ref_ptr<osg::Camera> secondShadow = new osg::Camera;
     secondShadow->setName(std::string(SceneUtil::shadowCameraName));
@@ -81,7 +85,7 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     OMW::reportDiagnosticPerformance(frame, frame, viewer, output);
     const std::string report = output.str();
 
-    EXPECT_NE(report.find("provider: performance@5"), std::string::npos);
+    EXPECT_NE(report.find("provider: performance@6"), std::string::npos);
     EXPECT_NE(report.find("draw-breakdown:\n  camera-covered:\n    available: true\n    count: 1\n"
                           "    median: 0.010999"),
         std::string::npos)
@@ -89,6 +93,23 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     EXPECT_NE(
         report.find("  outside-cameras:\n    available: true\n    count: 1\n    median: 0.006000"), std::string::npos)
         << report;
+    EXPECT_NE(report.find("camera-transition-gaps:\n  - from: \"<draw-begin>\"\n"
+                          "    to: \"ShadowCamera\"\n    gap-time:\n      available: true\n      count: 1"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("  - from: \"SceneCam\"\n    to: \"<draw-end>\"\n"
+                          "    gap-time:\n      available: true\n      count: 1"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("  - from: \"ShadowCamera\"\n    to: \"SceneCam\"\n"
+                          "    gap-time:\n      available: true\n      count: 1"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("diagnostic-camera-callback-overhead:\n  before-interval:\n"
+                          "    available: true\n    count: 1"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("  after-interval:\n    available: true\n    count: 1"), std::string::npos) << report;
     EXPECT_NE(report.find("  main-scene:\n    available: true\n    count: 1\n    median: 0.01"), std::string::npos);
     EXPECT_NE(report.find("  shadow-maps:\n    available: true\n    count: 1\n    median: 0.005"), std::string::npos);
     EXPECT_NE(report.find("  water-reflection:\n    available: false"), std::string::npos);

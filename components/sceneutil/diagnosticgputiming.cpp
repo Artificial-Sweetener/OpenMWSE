@@ -77,6 +77,7 @@ namespace SceneUtil
                     || !camera->getStats()->collectStats(std::string(collectionCategory)))
                     return;
 
+                const auto callbackStart = std::chrono::steady_clock::now();
                 std::lock_guard lock(mMutex);
                 ContextQueries& queries = mContexts[state->getContextID()];
                 osg::GLExtensions* extensions = state->get<osg::GLExtensions>();
@@ -91,6 +92,8 @@ namespace SceneUtil
                 pair.mCpuBegin = osg::Timer::instance()->delta_s(state->getStartTick(), osg::Timer::instance()->tick());
                 camera->getStats()->setAttribute(
                     pair.mFrame, std::string(diagnosticCpuPassBeginStatistic), pair.mCpuBegin);
+                camera->getStats()->setAttribute(pair.mFrame, std::string(diagnosticCpuPassBeginOverheadStatistic),
+                    std::chrono::duration<double>(std::chrono::steady_clock::now() - callbackStart).count());
                 if (supportsTimestamps(extensions))
                 {
                     GLuint ids[2]{};
@@ -115,6 +118,7 @@ namespace SceneUtil
                     return;
 
                 TimestampPair& active = *context->second.mActive;
+                const unsigned frame = active.mFrame;
                 osg::GLExtensions* extensions = state->get<osg::GLExtensions>();
                 const bool gpuTimingActive = active.mStart != 0 && active.mEnd != 0 && supportsTimestamps(extensions);
                 if (gpuTimingActive)
@@ -129,6 +133,7 @@ namespace SceneUtil
                     camera->getStats()->setAttribute(active.mFrame, std::string(diagnosticCpuPassEndStatistic),
                         osg::Timer::instance()->delta_s(state->getStartTick(), osg::Timer::instance()->tick()));
                 }
+                const auto trailingOverheadStart = std::chrono::steady_clock::now();
                 if (gpuTimingActive)
                     context->second.mPending.push_back(active);
                 context->second.mActive.reset();
@@ -136,6 +141,11 @@ namespace SceneUtil
                 {
                     retireCompleted(*extensions, context->second);
                     trimPending(*extensions, context->second);
+                }
+                if (camera != nullptr && camera->getStats() != nullptr)
+                {
+                    camera->getStats()->setAttribute(frame, std::string(diagnosticCpuPassEndOverheadStatistic),
+                        std::chrono::duration<double>(std::chrono::steady_clock::now() - trailingOverheadStart).count());
                 }
             }
 

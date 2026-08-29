@@ -162,7 +162,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << '\n'
                            << "performance-capture: " << (mDiagnosticCollection->active() ? "collecting" : "idle")
                            << '\n'
-                           << "providers: [core@1, graphics@1, gameplay@2, performance@5]\n";
+                           << "providers: [core@1, graphics@1, gameplay@2, performance@6]\n";
                     response.mPayload = diagnosticBytes(output.str());
                     break;
 
@@ -269,7 +269,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                     manifest << "capsule-version: " << Diagnostics::capsuleVersion << '\n'
                              << "build: " << quoteDiagnosticYaml(Version::getOpenmwVersionDescription()) << '\n'
                              << "frame: " << frameNumber << '\n'
-                             << "providers: [core@1, graphics@1, gameplay@2, performance@5]\n"
+                             << "providers: [core@1, graphics@1, gameplay@2, performance@6]\n"
                              << "content:\n";
                     for (const std::string& content : mContentFiles)
                     {
