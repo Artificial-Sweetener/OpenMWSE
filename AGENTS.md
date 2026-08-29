@@ -220,6 +220,20 @@ Also:
 - Run focused checks continuously, broader affected suites before handoff, and full required gates before release. Never weaken
   meaningful coverage merely to make a change pass.
 
+## Diagnostic bridge
+
+- Use `openmw-diagnosticctl` as the authoritative full-scene path for graphical, gameplay, and performance diagnosis. Retain
+  focused tests for equations, shaders, permutations, subsystem contracts, and edge cases.
+- Reproduce development issues with an isolated `run` capture or validated `.omwdiag` capsule and `replay`. Preserve the capsule,
+  provider evidence, engine logs, performance trace, and graphics-parity report needed to support conclusions.
+- Never automate, mutate, or autonomously launch the user's normal game or profile. Hidden runs use temporary writable state and
+  treat configuration, saves, mods, content, and screenshots as read-only. Live attachment permits inspection and explicitly safe
+  development commands only.
+- Extend the versioned protocol or owning diagnostics provider when new evidence is required. Do not add environment-gated
+  screenshot generators, synthetic full-scene emulation, manual cross-harness capture formats, or parallel performance harnesses.
+- Treat capsules, logs, and traces as private diagnostic data because they can contain save state, content names and hashes, local
+  paths, cell names, and runtime state. See `docs/source/reference/diagnostics/index.rst` for commands and artifact contracts.
+
 ## Quality gates and verification
 
 - Use repository-owned quality commands and CI configuration as the authority for exact tool versions, options, and required
