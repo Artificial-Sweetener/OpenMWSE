@@ -72,9 +72,6 @@ namespace MWRender
         osg::RefMatrix& matrix = *cullVisitor.getModelViewMatrix();
 
         osg::Stats* stats = cullVisitor.getCurrentCamera()->getStats();
-        if (stats)
-            addDiagnosticRenderWorkCounter(*stats, cullVisitor.getTraversalNumber(), groundcoverInstanceRenderCounter,
-                static_cast<double>(mInstanceMatrices.size()));
 
         if (nearFarMode != osg::CullSettings::COMPUTE_NEAR_FAR_USING_PRIMITIVES
             && nearFarMode != osg::CullSettings::COMPUTE_NEAR_USING_PRIMITIVES)

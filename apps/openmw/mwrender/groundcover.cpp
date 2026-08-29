@@ -1,8 +1,8 @@
 #include "groundcover.hpp"
 
+#include "groundcoverbatching.hpp"
+#include "groundcoverinstances.hpp"
 #include "groundcovernearfar.hpp"
-
-#include <span>
 
 #include <osg/AlphaFunc>
 #include <osg/BlendFunc>
@@ -32,11 +32,10 @@ namespace MWRender
         {
         public:
             /// Configure cloned model geometry for one chunk's immutable instance collection.
-            explicit InstancingVisitor(
-                std::span<const Groundcover::GroundcoverEntry> instances, osg::Vec3f& chunkPosition)
+            InstancingVisitor(const GroundcoverInstanceBatch& instances, GroundcoverBatch& drawBatch)
                 : osg::NodeVisitor(TRAVERSE_ALL_CHILDREN)
                 , mInstances(instances)
-                , mChunkPosition(chunkPosition)
+                , mDrawBatch(drawBatch)
             {
             }
 
@@ -56,46 +55,27 @@ namespace MWRender
             {
                 for (unsigned int i = 0; i < geom.getNumPrimitiveSets(); ++i)
                 {
-                    geom.getPrimitiveSet(i)->setNumInstances(static_cast<int>(mInstances.size()));
+                    geom.getPrimitiveSet(i)->setNumInstances(static_cast<int>(mInstances.mTransforms->size()));
                 }
 
-                osg::ref_ptr<osg::Vec4Array> transforms = new osg::Vec4Array(static_cast<unsigned>(mInstances.size()));
-                osg::BoundingBox box;
                 osg::BoundingBox originalBox = geom.getBoundingBox();
-                float radius = originalBox.radius();
-                for (unsigned int i = 0; i < transforms->getNumElements(); i++)
-                {
-                    osg::Vec3f pos(mInstances[i].mPos.asVec3());
-                    osg::Vec3f relativePos = pos - mChunkPosition;
-                    (*transforms)[i] = osg::Vec4f(relativePos, mInstances[i].mScale);
-
-                    // Use an additional margin due to groundcover animation
-                    float instanceRadius = radius * mInstances[i].mScale * 1.1f;
-                    osg::BoundingSphere instanceBounds(relativePos, instanceRadius);
-                    box.expandBy(instanceBounds);
-                }
-
-                geom.setInitialBound(box);
-
-                osg::ref_ptr<osg::Vec3Array> rotations = new osg::Vec3Array(static_cast<unsigned>(mInstances.size()));
-                for (unsigned int i = 0; i < rotations->getNumElements(); i++)
-                {
-                    (*rotations)[i] = mInstances[i].mPos.asRotationVec3();
-                }
+                geom.setInitialBound(mInstances.mBounds);
 
                 // Display lists do not support instancing in OSG 3.4
                 geom.setUseDisplayList(false);
                 geom.setUseVertexBufferObjects(true);
 
-                geom.setVertexAttribArray(6, transforms.get(), osg::Array::BIND_PER_VERTEX);
-                geom.setVertexAttribArray(7, rotations.get(), osg::Array::BIND_PER_VERTEX);
+                geom.setVertexAttribArray(6, mInstances.mTransforms.get(), osg::Array::BIND_PER_VERTEX);
+                geom.setVertexAttribArray(7, mInstances.mRotations.get(), osg::Array::BIND_PER_VERTEX);
 
-                geom.addCullCallback(new GroundcoverNearFarCullCallback(transforms, rotations, originalBox));
+                geom.addCullCallback(
+                    new GroundcoverNearFarCullCallback(mInstances.mTransforms, mInstances.mRotations, originalBox));
+                mDrawBatch.configure(geom);
             }
 
         private:
-            std::span<const Groundcover::GroundcoverEntry> mInstances;
-            osg::Vec3f mChunkPosition;
+            const GroundcoverInstanceBatch& mInstances;
+            GroundcoverBatch& mDrawBatch;
         };
 
         class DensityCalculator
@@ -282,8 +262,17 @@ namespace MWRender
             // Keep link to original mesh to keep it in cache
             group->getOrCreateUserDataContainer()->addUserObject(new Resource::TemplateRef(temp));
 
-            InstancingVisitor visitor(entries, worldCenter);
+            constexpr float clusterSizeInCells = 4.f;
+            const GroundcoverInstanceLayout layout
+                = makeGroundcoverInstanceLayout(entries, ESM::Land::REAL_SIZE * clusterSizeInCells);
+            const osg::BoundingSphere modelBounds = node->getBound();
+            const float modelExtent = modelBounds.valid() ? modelBounds.center().length() + modelBounds.radius() : 0.f;
+            GroundcoverInstanceBatch batch = makeGroundcoverInstanceBatch(entries, layout, worldCenter, modelExtent);
+            osg::ref_ptr<GroundcoverBatch> drawBatch
+                = new GroundcoverBatch(std::move(batch.mClusters), getViewDistance());
+            InstancingVisitor visitor(batch, *drawBatch);
             node->accept(visitor);
+            drawBatch->attach(*node);
             group->addChild(node);
         }
 
