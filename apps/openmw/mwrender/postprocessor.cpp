@@ -12,6 +12,7 @@
 #include <osg/Texture2DArray>
 #include <osg/Texture2DMultisample>
 #include <osg/Texture3D>
+#include <osg/Stats>
 
 #include <components/files/conversion.hpp>
 #include <components/misc/pathhelpers.hpp>
@@ -40,6 +41,7 @@
 #include "opaqueblit.hpp"
 #include "pingpongcull.hpp"
 #include "renderbin.hpp"
+#include "renderworkcounter.hpp"
 #include "renderingmanager.hpp"
 #include "sky.hpp"
 #include "transparentpass.hpp"
@@ -411,6 +413,9 @@ namespace MWRender
 
     void PostProcessor::cull(unsigned frameId, osgUtil::CullVisitor* cv)
     {
+        if (osg::Stats* stats = cv->getCurrentCamera()->getStats())
+            resetPostProcessingWorkCounters(*stats, cv->getTraversalNumber());
+
         if (const auto& fbo = getFbo(FBO_Intercept, frameId))
         {
             osgUtil::RenderStage* rs = cv->getRenderStage();

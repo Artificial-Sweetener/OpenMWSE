@@ -1,5 +1,9 @@
 #include "opaqueblit.hpp"
 
+#include "renderworkcounter.hpp"
+
+#include <osg/Camera>
+#include <osg/Stats>
 #include <osgUtil/RenderStage>
 
 #include <components/stereo/multiview.hpp>
@@ -49,6 +53,17 @@ namespace MWRender
             ext->glBlitFramebuffer(0, 0, colorTex->getTextureWidth(), colorTex->getTextureHeight(), 0, 0,
                 colorTex->getTextureWidth(), colorTex->getTextureHeight(), GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT,
                 GL_NEAREST);
+        }
+
+        if (osg::Stats* stats = bin->getStage()->getCamera()->getStats())
+        {
+            const unsigned int frameNumber = state.getFrameStamp()->getFrameNumber();
+            const double layers = Stereo::getMultiview() ? 2.0 : 1.0;
+            const double destinationBytes
+                = static_cast<double>(colorTex->getTextureWidth()) * colorTex->getTextureHeight() * 8.0 * layers;
+            addPostProcessingWorkCounter(*stats, frameNumber, colorCopyCounter, 1.0);
+            addPostProcessingWorkCounter(*stats, frameNumber, depthCopyCounter, 1.0);
+            addPostProcessingWorkCounter(*stats, frameNumber, resolveByteCounter, destinationBytes);
         }
 
         (msaaFbo ? msaaFbo : fbo)->apply(state, osg::FrameBufferObject::DRAW_FRAMEBUFFER);

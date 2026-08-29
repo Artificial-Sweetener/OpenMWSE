@@ -2,6 +2,7 @@
 
 #include <osg/Depth>
 #include <osg/MatrixTransform>
+#include <osg/Stats>
 #include <osg/UserDataContainer>
 
 #include <osgUtil/CullVisitor>
@@ -42,6 +43,7 @@
 #include "actorutil.hpp"
 #include "postprocessor.hpp"
 #include "renderbin.hpp"
+#include "renderworkcounter.hpp"
 #include "renderingmanager.hpp"
 #include "rotatecontroller.hpp"
 #include "vismask.hpp"
@@ -358,6 +360,10 @@ namespace MWRender
             bin->setStateSet(mStateSet);
             bin->drawImplementation(renderInfo, previous);
             bin->setStateSet(restore);
+
+            if (osg::Stats* stats = renderInfo.getCurrentCamera()->getStats())
+                addPostProcessingWorkCounter(*stats, state->getFrameStamp()->getFrameNumber(), firstPersonReplayCounter,
+                    static_cast<double>(bin->getRenderLeafList().size()));
 
             primaryFBO->apply(*state);
 

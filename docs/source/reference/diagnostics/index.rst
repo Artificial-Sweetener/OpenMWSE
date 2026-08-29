@@ -98,7 +98,9 @@ The versioned providers expose these evidence domains:
   scene statistics, and delayed per-camera GPU/render timing. It also reports a bounded stable counter schema for static
   rendering, attachment resolves, transparent and first-person replay, actors, lights, groundcover, deformation, uploads,
   caches, and optimized-path fallbacks. Counters not produced by their owning subsystem are recorded as unavailable rather than
-  inferred. Timing and counter collection remain disabled outside requested diagnostics or statistics collection.
+  inferred. Resolve byte counts describe the logical destination attachment volume written by the copies; they are not an
+  estimate of hardware bus traffic. Timing and counter collection remain disabled outside requested diagnostics or statistics
+  collection.
 
 A ``.omwdiag`` capsule contains a manifest, effective settings, full loadable world snapshot, stable world state, provider
 versions, frame identity, and performance evidence. The manifest records the ordered content list and hashes. It does not embed

@@ -1,5 +1,7 @@
 #include "diagnosticworkcounter.hpp"
 
+#include "mwrender/renderworkcounter.hpp"
+
 #include <array>
 
 namespace OMW
@@ -18,12 +20,17 @@ namespace OMW
             DiagnosticWorkCounter{ "static.ordered-leaves", "Number of ordered leaves",
                 DiagnosticStatisticOwner::PrimaryCamera },
             DiagnosticWorkCounter{ "static.object-chunks", "Object Chunk Count" },
-            DiagnosticWorkCounter{ "resolve.color-copies", "Diagnostic Color Copies" },
-            DiagnosticWorkCounter{ "resolve.depth-copies", "Diagnostic Depth Copies" },
-            DiagnosticWorkCounter{ "resolve.transferred-bytes", "Diagnostic Resolve Bytes" },
+            DiagnosticWorkCounter{ "resolve.color-copies", MWRender::colorCopyCounter,
+                DiagnosticStatisticOwner::PrimaryCamera },
+            DiagnosticWorkCounter{ "resolve.depth-copies", MWRender::depthCopyCounter,
+                DiagnosticStatisticOwner::PrimaryCamera },
+            DiagnosticWorkCounter{ "resolve.transferred-bytes", MWRender::resolveByteCounter,
+                DiagnosticStatisticOwner::PrimaryCamera },
             DiagnosticWorkCounter{ "transparent.classified-leaves", "Diagnostic Transparent Classified Leaves" },
-            DiagnosticWorkCounter{ "transparent.replayed-drawables", "Diagnostic Transparent Replay Drawables" },
-            DiagnosticWorkCounter{ "first-person.replayed-drawables", "Diagnostic First Person Replay Drawables" },
+            DiagnosticWorkCounter{ "transparent.replayed-drawables", MWRender::transparentReplayCounter,
+                DiagnosticStatisticOwner::PrimaryCamera },
+            DiagnosticWorkCounter{ "first-person.replayed-drawables", MWRender::firstPersonReplayCounter,
+                DiagnosticStatisticOwner::PrimaryCamera },
             DiagnosticWorkCounter{ "actors.registered", "Mechanics Actors" },
             DiagnosticWorkCounter{ "actors.broad-phase-candidates", "Diagnostic Actor Broad Phase Candidates" },
             DiagnosticWorkCounter{ "actors.exact-distance-checks", "Diagnostic Actor Exact Distance Checks" },

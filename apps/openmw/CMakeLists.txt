@@ -27,7 +27,7 @@ add_openmw_dir (mwrender
     bulletdebugdraw globalmap characterpreview camera localmap water terrainstorage ripplesimulation
     renderbin actoranimation landmanager navmesh actorspaths recastmesh fogmanager objectpaging groundcover
     postprocessor pingpongcull luminancecalculator pingpongcanvas atmospherediagnostics renderdiagnosticimage renderdiagnosticcapture renderdiagnosticbundle transparentpass opaqueblit waterawaretransparentbin precipitationocclusion ripples
-    actorutil distortion animationpriority bonegroup blendmask animblendcontroller atmosphere
+    actorutil distortion animationpriority bonegroup blendmask animblendcontroller atmosphere renderworkcounter
     )
 
 add_openmw_dir (mwinput

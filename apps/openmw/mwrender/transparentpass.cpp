@@ -1,9 +1,12 @@
 #include "transparentpass.hpp"
 
+#include "renderworkcounter.hpp"
 #include "water.hpp"
 
 #include <osg/AlphaFunc>
 #include <osg/BlendFunc>
+#include <osg/Camera>
+#include <osg/Stats>
 #include <osg/Texture2D>
 #include <osg/Texture2DArray>
 
@@ -88,6 +91,7 @@ namespace MWRender
         unsigned int insertStateSetPosition = state.getStateSetStackSize() - numToPop;
 
         state.insertStateSet(insertStateSetPosition, mStateSet);
+        double replayedDrawables = 0.0;
         for (auto rit = bin->getRenderLeafList().begin(); rit != bin->getRenderLeafList().end(); rit++)
         {
             osgUtil::RenderLeaf* rl = *rit;
@@ -109,8 +113,13 @@ namespace MWRender
 
             rl->render(renderInfo, previous);
             previous = rl;
+            replayedDrawables += 1.0;
         }
         state.removeStateSet(insertStateSetPosition);
+
+        if (osg::Stats* stats = bin->getStage()->getCamera()->getStats())
+            addPostProcessingWorkCounter(
+                *stats, state.getFrameStamp()->getFrameNumber(), transparentReplayCounter, replayedDrawables);
 
         msaaFbo ? msaaFbo->apply(state, osg::FrameBufferObject::DRAW_FRAMEBUFFER)
                 : fbo->apply(state, osg::FrameBufferObject::DRAW_FRAMEBUFFER);
