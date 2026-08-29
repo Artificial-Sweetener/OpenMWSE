@@ -46,6 +46,7 @@
 #include <components/sceneutil/depth.hpp>
 #include <components/sceneutil/lightmanager.hpp>
 #include <components/sceneutil/optimizer.hpp>
+#include <components/sceneutil/optimizeroptions.hpp>
 #include <components/sceneutil/riggeometryosgaextension.hpp>
 #include <components/sceneutil/util.hpp>
 #include <components/sceneutil/visitor.hpp>
@@ -919,32 +920,15 @@ namespace Resource
 
     unsigned int getOptimizationOptions()
     {
-        using namespace SceneUtil;
-        const char* env = getenv("OPENMW_OPTIMIZE");
-        unsigned int options
-            = Optimizer::FLATTEN_STATIC_TRANSFORMS | Optimizer::REMOVE_REDUNDANT_NODES | Optimizer::MERGE_GEOMETRY;
-        if (env)
-        {
-            std::string str(env);
-
-            if (str.find("OFF") != std::string::npos || str.find('0') != std::string::npos)
-                options = 0;
-
-            if (str.find("~FLATTEN_STATIC_TRANSFORMS") != std::string::npos)
-                options ^= Optimizer::FLATTEN_STATIC_TRANSFORMS;
-            else if (str.find("FLATTEN_STATIC_TRANSFORMS") != std::string::npos)
-                options |= Optimizer::FLATTEN_STATIC_TRANSFORMS;
-
-            if (str.find("~REMOVE_REDUNDANT_NODES") != std::string::npos)
-                options ^= Optimizer::REMOVE_REDUNDANT_NODES;
-            else if (str.find("REMOVE_REDUNDANT_NODES") != std::string::npos)
-                options |= Optimizer::REMOVE_REDUNDANT_NODES;
-
-            if (str.find("~MERGE_GEOMETRY") != std::string::npos)
-                options ^= Optimizer::MERGE_GEOMETRY;
-            else if (str.find("MERGE_GEOMETRY") != std::string::npos)
-                options |= Optimizer::MERGE_GEOMETRY;
-        }
+        constexpr unsigned defaults = SceneUtil::Optimizer::FLATTEN_STATIC_TRANSFORMS
+            | SceneUtil::Optimizer::REMOVE_REDUNDANT_NODES | SceneUtil::Optimizer::MERGE_GEOMETRY;
+        const char* control = getenv("OPENMW_OPTIMIZE");
+        const unsigned options
+            = SceneUtil::parseOptimizationOptions(control ? std::string_view(control) : std::string_view{}, defaults);
+        if (options & SceneUtil::Optimizer::VERTEX_POSTTRANSFORM)
+            Log(Debug::Info) << "Scene optimizer vertex post-transform ordering enabled";
+        if (options & SceneUtil::Optimizer::VERTEX_PRETRANSFORM)
+            Log(Debug::Info) << "Scene optimizer vertex fetch ordering enabled";
         return options;
     }
 
