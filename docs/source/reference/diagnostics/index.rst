@@ -93,9 +93,12 @@ The versioned providers expose these evidence domains:
   normal and diagnostic-isolation stages.
 * ``gameplay@2`` records the cell, camera position and angles, first-person and underwater state, weather, game and simulation
   clocks, and state. The replay controller checks these stable fields before advancing the simulation.
-* ``performance@2`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
+* ``performance@3`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
   scopes for scripts, Lua, mechanics, physics, world, and UI, resource caches and work queues, navigation and paging activity,
-  scene statistics, and delayed per-camera GPU/render timing. An unavailable timing source is recorded explicitly.
+  scene statistics, and delayed per-camera GPU/render timing. It also reports a bounded stable counter schema for static
+  rendering, attachment resolves, transparent and first-person replay, actors, lights, groundcover, deformation, uploads,
+  caches, and optimized-path fallbacks. Counters not produced by their owning subsystem are recorded as unavailable rather than
+  inferred. Timing and counter collection remain disabled outside requested diagnostics or statistics collection.
 
 A ``.omwdiag`` capsule contains a manifest, effective settings, full loadable world snapshot, stable world state, provider
 versions, frame identity, and performance evidence. The manifest records the ordered content list and hashes. It does not embed

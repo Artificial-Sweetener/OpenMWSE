@@ -1,0 +1,56 @@
+#include "diagnosticworkcounter.hpp"
+
+#include <array>
+
+namespace OMW
+{
+    std::span<const DiagnosticWorkCounter> diagnosticWorkCounters() noexcept
+    {
+        static constexpr std::array counters{
+            DiagnosticWorkCounter{ "static.visible-drawables", "Visible number of drawables",
+                DiagnosticStatisticOwner::PrimaryCamera },
+            DiagnosticWorkCounter{ "static.visible-vertices", "Visible vertex count",
+                DiagnosticStatisticOwner::PrimaryCamera },
+            DiagnosticWorkCounter{ "static.visible-triangles", "Visible number of GL_TRIANGLES",
+                DiagnosticStatisticOwner::PrimaryCamera },
+            DiagnosticWorkCounter{ "static.state-graphs", "Number of StateGraphs",
+                DiagnosticStatisticOwner::PrimaryCamera },
+            DiagnosticWorkCounter{ "static.ordered-leaves", "Number of ordered leaves",
+                DiagnosticStatisticOwner::PrimaryCamera },
+            DiagnosticWorkCounter{ "static.object-chunks", "Object Chunk Count" },
+            DiagnosticWorkCounter{ "resolve.color-copies", "Diagnostic Color Copies" },
+            DiagnosticWorkCounter{ "resolve.depth-copies", "Diagnostic Depth Copies" },
+            DiagnosticWorkCounter{ "resolve.transferred-bytes", "Diagnostic Resolve Bytes" },
+            DiagnosticWorkCounter{ "transparent.classified-leaves", "Diagnostic Transparent Classified Leaves" },
+            DiagnosticWorkCounter{ "transparent.replayed-drawables", "Diagnostic Transparent Replay Drawables" },
+            DiagnosticWorkCounter{ "first-person.replayed-drawables", "Diagnostic First Person Replay Drawables" },
+            DiagnosticWorkCounter{ "actors.registered", "Mechanics Actors" },
+            DiagnosticWorkCounter{ "actors.broad-phase-candidates", "Diagnostic Actor Broad Phase Candidates" },
+            DiagnosticWorkCounter{ "actors.exact-distance-checks", "Diagnostic Actor Exact Distance Checks" },
+            DiagnosticWorkCounter{ "lights.visible", "Visible number of lights",
+                DiagnosticStatisticOwner::PrimaryCamera },
+            DiagnosticWorkCounter{ "lights.scanned", "Diagnostic Lights Scanned" },
+            DiagnosticWorkCounter{ "lights.exact-intersections", "Diagnostic Light Exact Intersections" },
+            DiagnosticWorkCounter{ "lights.selected", "Diagnostic Lights Selected" },
+            DiagnosticWorkCounter{ "groundcover.chunks", "Groundcover Chunk Count" },
+            DiagnosticWorkCounter{ "groundcover.instances-tested", "Diagnostic Groundcover Instances Tested" },
+            DiagnosticWorkCounter{ "groundcover.instances-rendered", "Diagnostic Groundcover Instances Rendered" },
+            DiagnosticWorkCounter{ "deformation.skinning-vertices", "Diagnostic Skinning Vertices" },
+            DiagnosticWorkCounter{ "deformation.morph-vertices", "Diagnostic Morph Vertices" },
+            DiagnosticWorkCounter{ "uploads.bytes", "Diagnostic Upload Bytes" },
+            DiagnosticWorkCounter{ "cache.object-chunk-gets", "Object Chunk Get" },
+            DiagnosticWorkCounter{ "cache.object-chunk-hits", "Object Chunk Hit" },
+            DiagnosticWorkCounter{ "cache.groundcover-chunk-gets", "Groundcover Chunk Get" },
+            DiagnosticWorkCounter{ "cache.groundcover-chunk-hits", "Groundcover Chunk Hit" },
+            DiagnosticWorkCounter{ "fallback.vertex-order", "Diagnostic Vertex Order Fallbacks" },
+            DiagnosticWorkCounter{ "fallback.attachment-copy", "Diagnostic Attachment Copy Fallbacks" },
+            DiagnosticWorkCounter{ "fallback.actor-broad-phase", "Diagnostic Actor Broad Phase Fallbacks" },
+            DiagnosticWorkCounter{ "fallback.light-broad-phase", "Diagnostic Light Broad Phase Fallbacks" },
+            DiagnosticWorkCounter{ "fallback.static-packet", "Diagnostic Static Packet Fallbacks" },
+            DiagnosticWorkCounter{ "fallback.transparent-depth", "Diagnostic Transparent Depth Fallbacks" },
+            DiagnosticWorkCounter{ "fallback.first-person-depth", "Diagnostic First Person Depth Fallbacks" },
+            DiagnosticWorkCounter{ "fallback.gpu-deformation", "Diagnostic GPU Deformation Fallbacks" },
+        };
+        return counters;
+    }
+}

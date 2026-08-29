@@ -1,5 +1,6 @@
 #include "diagnosticperformance.hpp"
 
+#include "diagnosticworkcounter.hpp"
 #include "profile.hpp"
 
 #include <algorithm>
@@ -42,6 +43,14 @@ namespace OMW
             std::string mName;
             Owner mOwner = Owner::Viewer;
         };
+
+        /// Convert a stable work-counter definition into a statistics query.
+        Metric counterMetric(const DiagnosticWorkCounter& counter)
+        {
+            return { std::string(counter.mStatistic), counter.mOwner == DiagnosticStatisticOwner::Viewer
+                    ? Metric::Owner::Viewer
+                    : Metric::Owner::PrimaryCamera };
+        }
 
         /// Collect one metric across the requested frame interval.
         std::vector<double> collectMetric(
@@ -120,13 +129,33 @@ namespace OMW
         forEachUserStatsValue(
             [&](const UserStats& value) { metrics.push_back({ value.mTaken, Metric::Owner::Viewer }); });
 
-        output << std::setprecision(17) << "provider: performance@2\n"
+        output << std::setprecision(17) << "provider: performance@3\n"
                << "first-sampled-frame: " << firstFrame << '\n'
                << "last-sampled-frame: " << lastFrame << '\n'
                << "requested-samples: " << lastFrame - firstFrame + 1 << '\n'
                << "distributions:\n";
         for (const Metric& metric : metrics)
             reportDistribution(output, metric, collectMetric(metric, firstFrame, lastFrame, viewer));
+
+        output << "work-counters:\n";
+        for (const DiagnosticWorkCounter& counter : diagnosticWorkCounters())
+        {
+            const Metric metric = counterMetric(counter);
+            output << "  " << counter.mName << ":\n";
+            const std::vector<double> values = collectMetric(metric, firstFrame, lastFrame, viewer);
+            if (values.empty())
+            {
+                output << "    available: false\n";
+                continue;
+            }
+            const DiagnosticDistribution distribution = summarizeDiagnosticSamples(values);
+            output << "    available: true\n"
+                   << "    count: " << distribution.mCount << '\n'
+                   << "    median: " << distribution.mMedian << '\n'
+                   << "    p95: " << distribution.mP95 << '\n'
+                   << "    p99: " << distribution.mP99 << '\n'
+                   << "    worst: " << distribution.mWorst << '\n';
+        }
 
         output << "raw-statistics:\n";
         for (unsigned frame = firstFrame; frame <= lastFrame; ++frame)

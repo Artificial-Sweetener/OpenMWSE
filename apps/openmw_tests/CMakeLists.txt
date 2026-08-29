@@ -6,6 +6,7 @@ file(GLOB UNITTEST_SRC_FILES
 
     options.cpp
     diagnosticperformance.cpp
+    diagnosticworkcounter.cpp
 
     mwworld/teststore.cpp
     mwworld/testduration.cpp

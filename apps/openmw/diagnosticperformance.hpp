@@ -25,7 +25,7 @@ namespace OMW
     /// Calculate deterministic linear-interpolated quantiles for one non-empty series.
     DiagnosticDistribution summarizeDiagnosticSamples(std::span<const double> samples);
 
-    /// Emit bounded performance@2 distributions and retained per-frame OSG statistics.
+    /// Emit bounded performance@3 timing and work-counter distributions plus retained per-frame OSG statistics.
     void reportDiagnosticPerformance(
         unsigned firstFrame, unsigned lastFrame, osgViewer::Viewer& viewer, std::ostream& output);
 }
