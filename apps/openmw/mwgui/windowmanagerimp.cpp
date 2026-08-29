@@ -147,10 +147,11 @@ namespace MWGui
         }
     }
 
-    WindowManager::WindowManager(SDL_Window* window, osgViewer::Viewer* viewer, osg::Group* guiRoot,
-        Resource::ResourceSystem* resourceSystem, SceneUtil::WorkQueue* workQueue, const std::filesystem::path& logpath,
-        bool consoleOnlyScripts, Translation::Storage& translationDataStorage, ToUTF8::FromType encoding,
-        bool exportFonts, const std::string& versionDescription, Files::ConfigurationManager& cfgMgr)
+    WindowManager::WindowManager(SDL_Window* videoWindow, float drawableScale, osgViewer::Viewer* viewer,
+        osg::Group* guiRoot, Resource::ResourceSystem* resourceSystem, SceneUtil::WorkQueue* workQueue,
+        const std::filesystem::path& logpath, bool consoleOnlyScripts, Translation::Storage& translationDataStorage,
+        ToUTF8::FromType encoding, bool exportFonts, const std::string& versionDescription,
+        Files::ConfigurationManager& cfgMgr)
         : mOldUpdateMask(0)
         , mOldCullMask(0)
         , mStore(nullptr)
@@ -204,12 +205,7 @@ namespace MWGui
         , mWindowVisible(true)
         , mCfgMgr(cfgMgr)
     {
-        int w, h;
-        SDL_GetWindowSize(window, &w, &h);
-        int dw, dh;
-        SDL_GL_GetDrawableSize(window, &dw, &dh);
-
-        mScalingFactor = Settings::gui().mScalingFactor * (dw / w);
+        mScalingFactor = Settings::gui().mScalingFactor * drawableScale;
         constexpr VFS::Path::NormalizedView resourcePath("mygui");
         mGuiPlatform = std::make_unique<MyGUIPlatform::Platform>(viewer, guiRoot, resourceSystem->getImageManager(),
             resourceSystem->getVFS(), mScalingFactor, resourcePath, logpath / "MyGUI.log");
@@ -301,7 +297,7 @@ namespace MWGui
         MyGUI::ClipboardManager::getInstance().eventClipboardRequested
             += MyGUI::newDelegate(this, &WindowManager::onClipboardRequested);
 
-        mVideoWrapper = std::make_unique<SDLUtil::VideoWrapper>(window, viewer);
+        mVideoWrapper = std::make_unique<SDLUtil::VideoWrapper>(videoWindow, viewer);
         mVideoWrapper->setGammaContrast(Settings::video().mGamma, Settings::video().mContrast);
 
         mGuiPlatform->getRenderManagerPtr()->enableShaders(mResourceSystem->getSceneManager()->getShaderManager());

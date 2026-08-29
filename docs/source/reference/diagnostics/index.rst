@@ -13,10 +13,11 @@ Execution modes
 
 * An enabled interactive session accepts local inspection, graphics capture, gameplay and performance traces, capsule capture,
   and shader reload commands. Interactive sessions reject deterministic stepping, world-state mutation, and remote shutdown.
-* ``run`` launches ``openmw`` as a hidden child with a production OpenGL context, copied configuration, temporary user data,
-  disabled sound and input capture, and a fixed simulation step. ``replay`` adds the validated save and world state from a
-  capsule. The controller waits for readiness and capture barriers, records evidence, shuts down the child, and verifies that
-  the source profile did not change.
+* ``run`` launches ``openmw`` as a windowless child with a production offscreen OpenGL context, copied configuration, temporary
+  user data, device-free input state, disabled sound, and a fixed simulation step. ``replay`` adds the validated save and world
+  state from a capsule. The controller rejects a visible or foreground child window, waits for readiness and capture barriers,
+  records evidence, shuts down and reaps the child, proves temporary-workspace cleanup, and verifies that the source profile did
+  not change.
 
 Set ``OPENMW_DIAGNOSTICS=1`` before starting an interactive development build to enable its default current-user endpoint. Use
 an explicit endpoint with ``--diagnostic-session`` and an artifact directory with ``--diagnostic-artifacts`` when coordinating
@@ -25,7 +26,7 @@ more than one development session. Disabled builds perform no diagnostic transpo
 Capture and replay
 ------------------
 
-Run a hidden production capture from an existing save::
+Run a windowless production capture from an existing save::
 
   openmw-diagnosticctl run --openmw <build>\openmw.exe --config <profile>\openmw.cfg \
       --save <profile>\userdata\saves\<character>\<save>.omwsave --artifacts <capture-directory> --frames 20
@@ -89,10 +90,12 @@ The bridge has no network listener, shell, script-evaluation, arbitrary file, na
 a named pipe restricted to the current user and rejects remote clients; Unix uses a current-user Unix-domain socket. Protocol
 frames, queues, connections, capsule entries, attachment sizes, step counts, paths, and timeouts are bounded.
 
-Hidden runs copy only the configuration and save state needed to bootstrap OpenMW. Installed content remains in place and is read
-through the normal virtual filesystem. Temporary configuration, user data, materialized saves, and storage are removed when the
-run ends; engine logs are retained as diagnostic artifacts. A recursive fingerprint proves that configuration, saves, mods, and
-other writable profile state are unchanged; screenshots are excluded because the controller never writes to their directory.
+Windowless runs copy only the configuration and save state needed to bootstrap OpenMW. Installed content remains in place and is
+read through the normal virtual filesystem. The engine reports its offscreen graphics and device-free input owners, while the
+controller independently checks that the child owns no visible or foreground desktop window. Temporary configuration, user data,
+materialized saves, and storage are removed when the run ends; engine logs are retained as diagnostic artifacts. A recursive
+fingerprint proves that configuration, saves, mods, and other writable profile state are unchanged; screenshots are excluded
+because the controller never writes to their directory.
 
 Treat artifact directories as private diagnostic data. Capsules contain the captured save state, content names and hashes, while
 logs and traces can contain local paths, cell names, and runtime state. Review an artifact set before sharing it.

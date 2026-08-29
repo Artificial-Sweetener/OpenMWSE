@@ -25,15 +25,22 @@ namespace SDLUtil
     class VideoWrapper
     {
     public:
+        /// Control viewer synchronization and, when supplied, the interactive SDL window.
         VideoWrapper(SDL_Window* window, osg::ref_ptr<osgViewer::Viewer> viewer);
+
+        /// Restore interactive window state when a platform window is present.
         ~VideoWrapper();
 
+        /// Apply the requested synchronization mode to the viewer graphics contexts.
         void setSyncToVBlank(VSyncMode vsyncMode);
 
+        /// Apply display gamma and contrast when an interactive window is present.
         void setGammaContrast(float gamma, float contrast);
 
+        /// Apply display mode changes when an interactive window is present.
         void setVideoMode(int width, int height, Settings::WindowMode windowMode, bool windowBorder);
 
+        /// Center the interactive window when one is present.
         void centerWindow();
 
     private:

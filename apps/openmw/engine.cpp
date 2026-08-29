@@ -36,6 +36,7 @@
 #include <components/stereo/stereomanager.hpp>
 
 #include <components/sceneutil/glextensions.hpp>
+#include <components/sceneutil/offscreencontext.hpp>
 #include <components/sceneutil/workqueue.hpp>
 
 #include <components/files/configurationmanager.hpp>
@@ -62,6 +63,7 @@
 
 #include <iomanip>
 
+#include "mwinput/diagnosticinputmanager.hpp"
 #include "mwinput/inputmanagerimp.hpp"
 
 #include "mwgui/windowmanagerimp.hpp"
@@ -448,6 +450,7 @@ bool OMW::Engine::frame(unsigned frameNumber, float frametime)
 
 OMW::Engine::Engine(Files::ConfigurationManager& configurationManager)
     : mWindow(nullptr)
+    , mDrawableScale(1.f)
     , mEncoding(ToUTF8::WINDOWS_1252)
     , mScreenCaptureOperation(nullptr)
     , mSelectDepthFormatOperation(new SceneUtil::SelectDepthFormatOperation())
@@ -575,7 +578,7 @@ void OMW::Engine::setSkipMenu(bool skipMenu, bool newGame)
     mNewGame = newGame;
 }
 
-void OMW::Engine::createWindow()
+void OMW::Engine::createGraphicsContext()
 {
     const int screen = Settings::video().mScreen;
     const int width = Settings::video().mResolutionX;
@@ -585,126 +588,130 @@ void OMW::Engine::createWindow()
     const SDLUtil::VSyncMode vsync = Settings::video().mVsyncMode;
     unsigned antialiasing = static_cast<unsigned>(Settings::video().mAntialiasing);
 
-    int posX = SDL_WINDOWPOS_CENTERED_DISPLAY(screen);
-    int posY = SDL_WINDOWPOS_CENTERED_DISPLAY(screen);
-
-    if (windowMode == Settings::WindowMode::Fullscreen || windowMode == Settings::WindowMode::WindowedFullscreen)
+    osg::ref_ptr<osg::GraphicsContext> graphicsContext;
+    if (mDiagnosticChild)
     {
-        posX = SDL_WINDOWPOS_UNDEFINED_DISPLAY(screen);
-        posY = SDL_WINDOWPOS_UNDEFINED_DISPLAY(screen);
-    }
-
-    Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
-    flags |= mDiagnosticChild ? SDL_WINDOW_HIDDEN : SDL_WINDOW_SHOWN;
-    if (windowMode == Settings::WindowMode::Fullscreen)
-        flags |= SDL_WINDOW_FULLSCREEN;
-    else if (windowMode == Settings::WindowMode::WindowedFullscreen)
-        flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
-
-    // Allows for Windows snapping features to properly work in borderless window
-    SDL_SetHint("SDL_BORDERLESS_WINDOWED_STYLE", "1");
-    SDL_SetHint("SDL_BORDERLESS_RESIZABLE_STYLE", "1");
-
-    if (!windowBorder)
-        flags |= SDL_WINDOW_BORDERLESS;
-
-    SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, Settings::video().mMinimizeOnFocusLoss ? "1" : "0");
-
-    checkSDLError(SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8));
-    checkSDLError(SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8));
-    checkSDLError(SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8));
-    checkSDLError(SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 0));
-    checkSDLError(SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24));
-    if (Debug::shouldDebugOpenGL())
-        checkSDLError(SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG));
-
-    if (antialiasing > 0)
-    {
-        checkSDLError(SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1));
-        checkSDLError(SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, antialiasing));
-    }
-
-    osg::ref_ptr<SDLUtil::GraphicsWindowSDL2> graphicsWindow;
-    while (!graphicsWindow || !graphicsWindow->valid())
-    {
-        while (!mWindow)
+        while (!graphicsContext || !graphicsContext->valid())
         {
-            mWindow = SDL_CreateWindow("OpenMW", posX, posY, width, height, flags);
-            if (!mWindow)
-            {
-                // Try with a lower AA
-                if (antialiasing > 0)
-                {
-                    Log(Debug::Warning) << "Warning: " << antialiasing << "x antialiasing not supported, trying "
-                                        << antialiasing / 2;
-                    antialiasing /= 2;
-                    Settings::video().mAntialiasing.set(antialiasing);
-                    checkSDLError(SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, antialiasing));
-                    continue;
-                }
-                else
-                {
-                    std::stringstream error;
-                    error << "Failed to create SDL window: " << SDL_GetError();
-                    throw std::runtime_error(error.str());
-                }
-            }
-        }
-
-        // Since we use physical resolution internally, we have to create the window with scaled resolution,
-        // but we can't get the scale before the window exists, so instead we have to resize aftewards.
-        int w, h;
-        SDL_GetWindowSize(mWindow, &w, &h);
-        int dw, dh;
-        SDL_GL_GetDrawableSize(mWindow, &dw, &dh);
-        if (dw != w || dh != h)
-        {
-            SDL_SetWindowSize(mWindow, width / (dw / w), height / (dh / h));
-        }
-
-        setWindowIcon();
-
-        osg::ref_ptr<osg::GraphicsContext::Traits> traits = new osg::GraphicsContext::Traits;
-        SDL_GetWindowPosition(mWindow, &traits->x, &traits->y);
-        SDL_GL_GetDrawableSize(mWindow, &traits->width, &traits->height);
-        traits->windowName = SDL_GetWindowTitle(mWindow);
-        traits->windowDecoration = !(SDL_GetWindowFlags(mWindow) & SDL_WINDOW_BORDERLESS);
-        traits->screenNum = SDL_GetWindowDisplayIndex(mWindow);
-        traits->vsync = 0;
-        traits->inheritedWindowData = new SDLUtil::GraphicsWindowSDL2::WindowData(mWindow);
-
-        graphicsWindow = new SDLUtil::GraphicsWindowSDL2(traits, vsync);
-        if (!graphicsWindow->valid())
-            throw std::runtime_error("Failed to create GraphicsContext");
-
-        if (traits->samples < antialiasing)
-        {
-            Log(Debug::Warning) << "Warning: Framebuffer MSAA level is only " << traits->samples << "x instead of "
-                                << antialiasing << "x. Trying " << antialiasing / 2 << "x instead.";
-            graphicsWindow->closeImplementation();
-            SDL_DestroyWindow(mWindow);
-            mWindow = nullptr;
+            graphicsContext
+                = SceneUtil::createOffscreenContext({ .mWidth = width, .mHeight = height, .mSamples = antialiasing });
+            if (graphicsContext && graphicsContext->valid())
+                break;
+            if (antialiasing == 0)
+                throw std::runtime_error("Failed to create offscreen diagnostic graphics context");
+            Log(Debug::Warning) << "Warning: " << antialiasing << "x offscreen antialiasing not supported, trying "
+                                << antialiasing / 2;
             antialiasing /= 2;
             Settings::video().mAntialiasing.set(antialiasing);
-            checkSDLError(SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, antialiasing));
-            continue;
+        }
+        Log(Debug::Info) << "OpenMWSE diagnostic child uses a windowless pbuffer graphics context";
+    }
+    else
+    {
+        int posX = SDL_WINDOWPOS_CENTERED_DISPLAY(screen);
+        int posY = SDL_WINDOWPOS_CENTERED_DISPLAY(screen);
+        if (windowMode == Settings::WindowMode::Fullscreen || windowMode == Settings::WindowMode::WindowedFullscreen)
+        {
+            posX = SDL_WINDOWPOS_UNDEFINED_DISPLAY(screen);
+            posY = SDL_WINDOWPOS_UNDEFINED_DISPLAY(screen);
         }
 
-        if (traits->red < 8)
-            Log(Debug::Warning) << "Warning: Framebuffer only has a " << traits->red << " bit red channel.";
-        if (traits->green < 8)
-            Log(Debug::Warning) << "Warning: Framebuffer only has a " << traits->green << " bit green channel.";
-        if (traits->blue < 8)
-            Log(Debug::Warning) << "Warning: Framebuffer only has a " << traits->blue << " bit blue channel.";
-        if (traits->depth < 24)
-            Log(Debug::Warning) << "Warning: Framebuffer only has " << traits->depth << " bits of depth precision.";
+        Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_SHOWN;
+        if (windowMode == Settings::WindowMode::Fullscreen)
+            flags |= SDL_WINDOW_FULLSCREEN;
+        else if (windowMode == Settings::WindowMode::WindowedFullscreen)
+            flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
 
-        traits->alpha = 0; // set to 0 to stop ScreenCaptureHandler reading the alpha channel
+        // Allows for Windows snapping features to properly work in borderless window
+        SDL_SetHint("SDL_BORDERLESS_WINDOWED_STYLE", "1");
+        SDL_SetHint("SDL_BORDERLESS_RESIZABLE_STYLE", "1");
+        if (!windowBorder)
+            flags |= SDL_WINDOW_BORDERLESS;
+        SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, Settings::video().mMinimizeOnFocusLoss ? "1" : "0");
+
+        checkSDLError(SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8));
+        checkSDLError(SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8));
+        checkSDLError(SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8));
+        checkSDLError(SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 0));
+        checkSDLError(SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24));
+        if (Debug::shouldDebugOpenGL())
+            checkSDLError(SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG));
+        if (antialiasing > 0)
+        {
+            checkSDLError(SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1));
+            checkSDLError(SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, antialiasing));
+        }
+
+        osg::ref_ptr<SDLUtil::GraphicsWindowSDL2> windowContext;
+        while (!windowContext || !windowContext->valid())
+        {
+            while (!mWindow)
+            {
+                mWindow = SDL_CreateWindow("OpenMW", posX, posY, width, height, flags);
+                if (mWindow)
+                    break;
+                if (antialiasing == 0)
+                    throw std::runtime_error("Failed to create SDL window: " + std::string(SDL_GetError()));
+                Log(Debug::Warning) << "Warning: " << antialiasing << "x antialiasing not supported, trying "
+                                    << antialiasing / 2;
+                antialiasing /= 2;
+                Settings::video().mAntialiasing.set(antialiasing);
+                checkSDLError(SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, antialiasing));
+            }
+
+            int windowWidth = 0;
+            int windowHeight = 0;
+            SDL_GetWindowSize(mWindow, &windowWidth, &windowHeight);
+            int drawableWidth = 0;
+            int drawableHeight = 0;
+            SDL_GL_GetDrawableSize(mWindow, &drawableWidth, &drawableHeight);
+            mDrawableScale = static_cast<float>(drawableWidth / windowWidth);
+            if (drawableWidth != windowWidth || drawableHeight != windowHeight)
+                SDL_SetWindowSize(
+                    mWindow, width / (drawableWidth / windowWidth), height / (drawableHeight / windowHeight));
+
+            setWindowIcon();
+
+            osg::ref_ptr<osg::GraphicsContext::Traits> traits = new osg::GraphicsContext::Traits;
+            SDL_GetWindowPosition(mWindow, &traits->x, &traits->y);
+            SDL_GL_GetDrawableSize(mWindow, &traits->width, &traits->height);
+            traits->windowName = SDL_GetWindowTitle(mWindow);
+            traits->windowDecoration = !(SDL_GetWindowFlags(mWindow) & SDL_WINDOW_BORDERLESS);
+            traits->screenNum = SDL_GetWindowDisplayIndex(mWindow);
+            traits->vsync = 0;
+            traits->inheritedWindowData = new SDLUtil::GraphicsWindowSDL2::WindowData(mWindow);
+
+            windowContext = new SDLUtil::GraphicsWindowSDL2(traits, vsync);
+            if (!windowContext->valid())
+                throw std::runtime_error("Failed to create GraphicsContext");
+            if (traits->samples < antialiasing)
+            {
+                Log(Debug::Warning) << "Warning: Framebuffer MSAA level is only " << traits->samples << "x instead of "
+                                    << antialiasing << "x. Trying " << antialiasing / 2 << "x instead.";
+                windowContext->closeImplementation();
+                SDL_DestroyWindow(mWindow);
+                mWindow = nullptr;
+                antialiasing /= 2;
+                Settings::video().mAntialiasing.set(antialiasing);
+                checkSDLError(SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, antialiasing));
+                continue;
+            }
+        }
+        graphicsContext = windowContext;
     }
 
+    const osg::GraphicsContext::Traits* traits = graphicsContext->getTraits();
+    if (traits->red < 8)
+        Log(Debug::Warning) << "Warning: Framebuffer only has a " << traits->red << " bit red channel.";
+    if (traits->green < 8)
+        Log(Debug::Warning) << "Warning: Framebuffer only has a " << traits->green << " bit green channel.";
+    if (traits->blue < 8)
+        Log(Debug::Warning) << "Warning: Framebuffer only has a " << traits->blue << " bit blue channel.";
+    if (traits->depth < 24)
+        Log(Debug::Warning) << "Warning: Framebuffer only has " << traits->depth << " bits of depth precision.";
     osg::ref_ptr<osg::Camera> camera = mViewer->getCamera();
-    camera->setGraphicsContext(graphicsWindow);
-    camera->setViewport(0, 0, graphicsWindow->getTraits()->width, graphicsWindow->getTraits()->height);
+    camera->setGraphicsContext(graphicsContext);
+    camera->setViewport(0, 0, graphicsContext->getTraits()->width, graphicsContext->getTraits()->height);
 
     osg::ref_ptr<SceneUtil::OperationSequence> realizeOperations = new SceneUtil::OperationSequence(false);
     mViewer->setRealizeOperation(realizeOperations);
@@ -781,7 +788,7 @@ void OMW::Engine::createWindow()
     mGlMaxTextureImageUnits = identifyOp->getMaxTextureImageUnits();
 
     mViewer->getEventQueue()->getCurrentEventState()->setWindowRectangle(
-        0, 0, graphicsWindow->getTraits()->width, graphicsWindow->getTraits()->height);
+        0, 0, graphicsContext->getTraits()->width, graphicsContext->getTraits()->height);
 }
 
 void OMW::Engine::setWindowIcon()
@@ -821,7 +828,7 @@ void OMW::Engine::prepareEngine()
     osg::ref_ptr<osg::Group> rootNode(new osg::Group);
     mViewer->setSceneData(rootNode);
 
-    createWindow();
+    createGraphicsContext();
 
     mVFS = std::make_unique<VFS::Manager>();
 
@@ -909,13 +916,21 @@ void OMW::Engine::prepareEngine()
     mStereoManager->disableStereoForNode(guiRoot);
     rootNode->addChild(guiRoot);
 
-    mWindowManager = std::make_unique<MWGui::WindowManager>(mWindow, mViewer, guiRoot, mResourceSystem.get(),
-        mWorkQueue.get(), mCfgMgr.getLogPath(), mScriptConsoleMode, mTranslationDataStorage, mEncoding, mExportFonts,
-        Version::getOpenmwVersionDescription(), mCfgMgr);
+    mWindowManager = std::make_unique<MWGui::WindowManager>(mWindow, mDrawableScale, mViewer, guiRoot,
+        mResourceSystem.get(), mWorkQueue.get(), mCfgMgr.getLogPath(), mScriptConsoleMode, mTranslationDataStorage,
+        mEncoding, mExportFonts, Version::getOpenmwVersionDescription(), mCfgMgr);
     mEnvironment.setWindowManager(*mWindowManager);
 
-    mInputManager = std::make_unique<MWInput::InputManager>(mWindow, mViewer, mScreenCaptureHandler, keybinderUser,
-        keybinderUserExists, userGameControllerdb, gameControllerdb, mGrab);
+    if (mDiagnosticChild)
+    {
+        mInputManager = std::make_unique<MWInput::DiagnosticInputManager>(
+            mViewer, mScreenCaptureHandler, keybinderUser, keybinderUserExists);
+    }
+    else
+    {
+        mInputManager = std::make_unique<MWInput::InputManager>(mWindow, mViewer, mScreenCaptureHandler, keybinderUser,
+            keybinderUserExists, userGameControllerdb, gameControllerdb, mGrab);
+    }
     mEnvironment.setInputManager(*mInputManager);
 
     // Create sound system
@@ -1315,6 +1330,10 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                     output << "protocol: " << Diagnostics::protocolVersion << '\n'
                            << "build: " << quoteDiagnosticYaml(Version::getOpenmwVersionDescription()) << '\n'
                            << "mode: " << (mDiagnosticChild ? "isolated-child" : "live") << '\n'
+                           << "graphics-context: " << (mDiagnosticChild ? "offscreen-pbuffer" : "interactive-window")
+                           << '\n'
+                           << "native-window: " << (mDiagnosticChild ? "absent" : "present") << '\n'
+                           << "input-source: " << (mDiagnosticChild ? "device-free" : "host-devices") << '\n'
                            << "frame: " << frameNumber << '\n'
                            << "graphics-capture: "
                            << (mWorld->getPostProcessor()->atmosphereDiagnosticCaptureInProgress() ? "in-progress"

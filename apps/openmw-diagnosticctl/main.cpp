@@ -96,6 +96,41 @@ namespace
         ChildProcess(const ChildProcess&) = delete;
         ChildProcess& operator=(const ChildProcess&) = delete;
 
+        /// Fail if the child owns a visible desktop window or the foreground window.
+        void requireNonDisruptiveWindowState() const
+        {
+#ifdef _WIN32
+            struct WindowState
+            {
+                DWORD mProcessId = 0;
+                bool mVisible = false;
+            } state{ mProcess.dwProcessId, false };
+            EnumWindows(
+                [](HWND window, LPARAM parameter) -> BOOL {
+                    auto& state = *reinterpret_cast<WindowState*>(parameter);
+                    DWORD owner = 0;
+                    GetWindowThreadProcessId(window, &owner);
+                    if (owner == state.mProcessId && IsWindowVisible(window))
+                    {
+                        state.mVisible = true;
+                        return FALSE;
+                    }
+                    return TRUE;
+                },
+                reinterpret_cast<LPARAM>(&state));
+            if (state.mVisible)
+                throw std::runtime_error("diagnostic child created a visible desktop window");
+
+            if (const HWND foreground = GetForegroundWindow())
+            {
+                DWORD owner = 0;
+                GetWindowThreadProcessId(foreground, &owner);
+                if (owner == mProcess.dwProcessId)
+                    throw std::runtime_error("diagnostic child acquired desktop focus");
+            }
+#endif
+        }
+
         /// Wait for a graceful child exit within the supplied timeout.
         int wait(std::chrono::milliseconds timeout)
         {
@@ -178,13 +213,27 @@ namespace
         /// Preserve diagnostic engine logs before removing the exact controller-owned directory.
         ~TemporaryDirectory()
         {
-            preserveEngineLogs();
-            std::error_code error;
-            std::filesystem::remove_all(mPath, error);
+            if (!mRemoved)
+            {
+                preserveEngineLogs();
+                std::error_code error;
+                std::filesystem::remove_all(mPath, error);
+            }
         }
 
         /// Return the absolute controller-owned workspace path.
         const std::filesystem::path& path() const noexcept { return mPath; }
+
+        /// Preserve logs, remove the controller-owned workspace, and prove cleanup completed.
+        void cleanup()
+        {
+            preserveEngineLogs();
+            std::error_code error;
+            std::filesystem::remove_all(mPath, error);
+            if (error || std::filesystem::exists(mPath))
+                throw std::runtime_error("failed removing isolated diagnostic workspace");
+            mRemoved = true;
+        }
 
     private:
         /// Copy known engine logs from temporary writable roots without allowing cleanup to throw.
@@ -224,6 +273,7 @@ namespace
 
         std::filesystem::path mPath;
         std::filesystem::path mArtifacts;
+        bool mRemoved = false;
     };
 
     /// Record content and metadata needed to prove a source profile remained unchanged.
@@ -347,13 +397,15 @@ namespace
     }
 
     /// Send a command after the child or live session has reached its safe-point loop.
-    Diagnostics::Response transactWhenReady(
-        const std::string& endpoint, const Diagnostics::Command& command, std::chrono::seconds readinessTimeout)
+    Diagnostics::Response transactWhenReady(const std::string& endpoint, const Diagnostics::Command& command,
+        std::chrono::seconds readinessTimeout, const ChildProcess* child = nullptr)
     {
         const auto deadline = std::chrono::steady_clock::now() + readinessTimeout;
         std::exception_ptr lastFailure;
         while (std::chrono::steady_clock::now() < deadline)
         {
+            if (child)
+                child->requireNonDisruptiveWindowState();
             try
             {
                 return Diagnostics::transact(endpoint, command, std::chrono::milliseconds(250));
@@ -367,6 +419,17 @@ namespace
         if (lastFailure)
             std::rethrow_exception(lastFailure);
         throw std::runtime_error("diagnostic session did not become ready");
+    }
+
+    /// Require the engine to attest to the isolated graphics and input owners used by the child.
+    void validateIsolatedSession(const Diagnostics::Response& response)
+    {
+        const YAML::Node status = YAML::Load(payloadText(response.mPayload));
+        if (status["mode"].as<std::string>("") != "isolated-child"
+            || status["graphics-context"].as<std::string>("") != "offscreen-pbuffer"
+            || status["native-window"].as<std::string>("") != "absent"
+            || status["input-source"].as<std::string>("") != "device-free")
+            throw std::runtime_error("diagnostic child did not attest to the isolated headless runtime");
     }
 
     /// Print one structured response and convert protocol errors to a failing exit status.
@@ -484,12 +547,18 @@ namespace
     /// Run the real engine invisibly against copied state, collect evidence, and shut it down.
     int runIsolated(std::span<char*> arguments)
     {
-        const std::filesystem::path executable = findOption(arguments, "--openmw").value_or("openmw.exe");
-        const std::filesystem::path sourceConfig = findOption(arguments, "--config").value_or(std::string());
+        const std::filesystem::path executableOption = findOption(arguments, "--openmw").value_or("openmw.exe");
+        const std::filesystem::path sourceConfigOption = findOption(arguments, "--config").value_or(std::string());
+        const std::filesystem::path artifactsOption = findOption(arguments, "--artifacts").value_or(std::string());
+        if (sourceConfigOption.empty() || artifactsOption.empty())
+            throw std::invalid_argument("run requires --openmw, --config, and --artifacts");
+
+        const std::filesystem::path executable = std::filesystem::absolute(executableOption).lexically_normal();
+        const std::filesystem::path sourceConfig = std::filesystem::absolute(sourceConfigOption).lexically_normal();
+        const std::filesystem::path artifacts = std::filesystem::absolute(artifactsOption).lexically_normal();
         const std::filesystem::path sourceDirectory
             = std::filesystem::is_directory(sourceConfig) ? sourceConfig : sourceConfig.parent_path();
-        const std::filesystem::path artifacts = findOption(arguments, "--artifacts").value_or(std::string());
-        if (!std::filesystem::is_regular_file(executable) || sourceConfig.empty() || artifacts.empty())
+        if (!std::filesystem::is_regular_file(executable))
             throw std::invalid_argument("run requires --openmw, --config, and --artifacts");
         std::filesystem::create_directories(artifacts);
 
@@ -536,9 +605,13 @@ namespace
 
         ChildProcess child(executable, childArguments);
         Diagnostics::Command hello{ 1, Diagnostics::CommandType::Hello, std::move(replayManifest) };
-        const Diagnostics::Response ready = transactWhenReady(endpoint, hello, std::chrono::seconds(90));
+        const Diagnostics::Response ready = transactWhenReady(endpoint, hello, std::chrono::seconds(90), &child);
         if (printResponse(ready) != 0)
             return 2;
+        validateIsolatedSession(ready);
+        child.requireNonDisruptiveWindowState();
+        std::cout << "desktop-window: absent\n"
+                     "desktop-focus-acquired: false\n";
 
         std::uint64_t requestId = 2;
         requireSuccessfulResponse(Diagnostics::transact(
@@ -571,6 +644,7 @@ namespace
         requireSuccessfulResponse(
             Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::CaptureGraphics, {} }));
         waitForGraphicsCapture(endpoint, requestId);
+        child.requireNonDisruptiveWindowState();
         const Diagnostics::Response performance
             = Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::TracePerformance, {} });
         if (performance.mError != Diagnostics::ErrorCode::None)
@@ -588,7 +662,10 @@ namespace
             throw std::runtime_error("source profile changed during isolated diagnostic run");
         if (exitCode != 0)
             throw std::runtime_error("diagnostic child exited with status " + std::to_string(exitCode));
-        std::cout << "profile-preserved: true\n";
+        workspace.cleanup();
+        std::cout << "child-reaped: true\n"
+                     "workspace-cleaned: true\n"
+                     "profile-preserved: true\n";
         return 0;
     }
 

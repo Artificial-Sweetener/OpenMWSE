@@ -20,6 +20,8 @@ file(GLOB UNITTEST_SRC_FILES
 
     mwrender/testatmosphere.cpp
 
+    mwinput/testdiagnosticinputmanager.cpp
+
     mwscript/testscripts.cpp
 
     mwsound/testheadcache.cpp

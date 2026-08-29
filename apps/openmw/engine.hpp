@@ -83,11 +83,6 @@ namespace MWGui
     class WindowManager;
 }
 
-namespace MWInput
-{
-    class InputManager;
-}
-
 namespace MWSound
 {
     class SoundManager;
@@ -131,6 +126,7 @@ namespace OMW
     class Engine
     {
         SDL_Window* mWindow;
+        float mDrawableScale;
         std::unique_ptr<VFS::Manager> mVFS;
         std::unique_ptr<Resource::ResourceSystem> mResourceSystem;
         osg::ref_ptr<SceneUtil::WorkQueue> mWorkQueue;
@@ -142,7 +138,7 @@ namespace OMW
         std::unique_ptr<MWMechanics::MechanicsManager> mMechanicsManager;
         std::unique_ptr<MWDialogue::DialogueManager> mDialogueManager;
         std::unique_ptr<MWDialogue::Journal> mJournal;
-        std::unique_ptr<MWInput::InputManager> mInputManager;
+        std::unique_ptr<MWBase::InputManager> mInputManager;
         std::unique_ptr<MWState::StateManager> mStateManager;
         std::unique_ptr<MWLua::LuaManager> mLuaManager;
         std::unique_ptr<MWLua::Worker> mLuaWorker;
@@ -208,7 +204,8 @@ namespace OMW
         /// Prepare engine for game play
         void prepareEngine();
 
-        void createWindow();
+        /// Create either the interactive window context or the isolated offscreen diagnostic context.
+        void createGraphicsContext();
         void setWindowIcon();
 
         /// Execute validated bridge commands at the main-thread frame boundary.

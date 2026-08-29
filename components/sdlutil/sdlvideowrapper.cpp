@@ -18,11 +18,15 @@ namespace SDLUtil
         , mContrast(1.f)
         , mHasSetGammaContrast(false)
     {
-        SDL_GetWindowGammaRamp(mWindow, mOldSystemGammaRamp, &mOldSystemGammaRamp[256], &mOldSystemGammaRamp[512]);
+        if (mWindow)
+            SDL_GetWindowGammaRamp(mWindow, mOldSystemGammaRamp, &mOldSystemGammaRamp[256], &mOldSystemGammaRamp[512]);
     }
 
     VideoWrapper::~VideoWrapper()
     {
+        if (!mWindow)
+            return;
+
         SDL_SetWindowFullscreen(mWindow, 0);
 
         // If user hasn't touched the defaults no need to restore
@@ -54,6 +58,9 @@ namespace SDLUtil
         mGamma = gamma;
         mContrast = contrast;
 
+        if (!mWindow)
+            return;
+
         mHasSetGammaContrast = true;
 
         Uint16 red[256], green[256], blue[256];
@@ -77,6 +84,9 @@ namespace SDLUtil
 
     void VideoWrapper::setVideoMode(int width, int height, Settings::WindowMode windowMode, bool windowBorder)
     {
+        if (!mWindow)
+            return;
+
         SDL_SetWindowFullscreen(mWindow, 0);
 
         if (SDL_GetWindowFlags(mWindow) & SDL_WINDOW_MAXIMIZED)
@@ -108,6 +118,9 @@ namespace SDLUtil
 
     void VideoWrapper::centerWindow()
     {
+        if (!mWindow)
+            return;
+
         // Resize breaks the sdl window in some cases; see issue: #5539
         SDL_Rect rect{};
         int x = 0;

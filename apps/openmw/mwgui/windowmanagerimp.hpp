@@ -127,7 +127,8 @@ namespace MWGui
         typedef std::pair<std::string, int> Faction;
         typedef std::vector<Faction> FactionList;
 
-        WindowManager(SDL_Window* window, osgViewer::Viewer* viewer, osg::Group* guiRoot,
+        /// Create GUI ownership with an optional platform window and an explicit drawable scale.
+        WindowManager(SDL_Window* videoWindow, float drawableScale, osgViewer::Viewer* viewer, osg::Group* guiRoot,
             Resource::ResourceSystem* resourceSystem, SceneUtil::WorkQueue* workQueue,
             const std::filesystem::path& logpath, bool consoleOnlyScripts, Translation::Storage& translationDataStorage,
             ToUTF8::FromType encoding, bool exportFonts, const std::string& versionDescription,
