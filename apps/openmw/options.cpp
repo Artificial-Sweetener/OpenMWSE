@@ -95,6 +95,16 @@ namespace OpenMW
         addOption("random-seed", bpo::value<unsigned int>()->default_value(Misc::Rng::generateDefaultSeed()),
             "seed value for random number generator");
 
+        addOption("diagnostic-session", bpo::value<std::string>()->default_value(""),
+            "enable the local OpenMWSE diagnostic bridge at the supplied protected endpoint");
+        addOption("diagnostic-artifacts",
+            bpo::value<Files::MaybeQuotedPath>()->default_value(Files::MaybeQuotedPath(), ""),
+            "set the writable artifact root for an enabled diagnostic session");
+        addOption("diagnostic-child", bpo::value<bool>()->implicit_value(true)->default_value(false),
+            "run as an isolated hidden diagnostic child");
+        addOption("diagnostic-fixed-dt", bpo::value<double>()->default_value(1.0 / 60.0),
+            "set the deterministic simulation interval used by a diagnostic child");
+
         return desc;
     }
 }

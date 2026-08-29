@@ -41,6 +41,9 @@ namespace MWRender
         /// Report whether a capture request is waiting for the render thread.
         bool captureRequested() const;
 
+        /// Report whether any stage of the current multi-frame comparison remains active.
+        bool captureInProgress() const;
+
         /// Advance the multi-frame comparison and return the render-state transition to apply before culling.
         ComparisonAction advanceComparison();
 

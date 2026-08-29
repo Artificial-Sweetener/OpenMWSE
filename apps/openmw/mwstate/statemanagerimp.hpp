@@ -4,6 +4,12 @@
 #include <filesystem>
 #include <map>
 #include <utility>
+#include <vector>
+
+namespace ESM
+{
+    struct SavedGame;
+}
 
 #include "../mwbase/statemanager.hpp"
 
@@ -37,6 +43,12 @@ namespace MWState
         void writeScreenshot(std::vector<char>& imageData) const;
 
         std::map<int, int> buildContentFileIndexMap(const ESM::ESMReader& reader) const;
+
+        /// Build the canonical save profile without creating or updating a user-visible slot.
+        ESM::SavedGame makeSaveProfile(std::string_view description, bool includeScreenshot) const;
+
+        /// Serialize the current game using the same records and ordering as a normal save.
+        std::vector<std::byte> serializeGameState(const ESM::SavedGame& profile);
 
     public:
         StateManager(const std::filesystem::path& saves, const std::vector<std::string>& contentFiles);
@@ -82,6 +94,9 @@ namespace MWState
         /// Loads the last saved file
         /** Used for quickload **/
         void quickLoad() override;
+
+        /// Capture a loadable in-memory snapshot without modifying characters, slots, settings, or user files.
+        std::vector<std::byte> captureDiagnosticSnapshot(std::string_view description);
 
         void loadGame(const std::filesystem::path& filepath) override;
         ///< Load a saved game directly from the given file path. This will search the CharacterManager

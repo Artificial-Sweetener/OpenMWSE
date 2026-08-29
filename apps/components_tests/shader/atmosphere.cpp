@@ -9,7 +9,6 @@
 
 #include <apps/openmw/mwrender/atmosphere.hpp>
 
-#include <osg/GLExtensions>
 #include <osg/Geometry>
 #include <osg/GraphicsContext>
 #include <osg/Image>
@@ -18,19 +17,15 @@
 #include <osg/Vec3d>
 #include <osg/Viewport>
 #include <osgDB/ReadFile>
-#include <osgDB/WriteFile>
 #include <osgViewer/Viewer>
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <functional>
-#include <iomanip>
 #include <limits>
 #include <numbers>
 #include <numeric>
@@ -63,83 +58,6 @@ namespace
 
         /// Return the captured pixel at the requested image coordinate.
         const osg::Vec4f& at(int x, int y) const { return pixels[static_cast<std::size_t>(y * width + x)]; }
-    };
-
-    /// Own a production object-paged foliage color and depth capture exchanged between real-GL harness stages.
-    struct ExternalFoliageCapture
-    {
-        PassImage color;
-        std::vector<float> depth;
-        osg::Vec3f eyePosition;
-        osg::Vec3f viewDirection;
-        float verticalFov = 70.f;
-        float nearPlane = 1.f;
-        float farPlane = 229376.f;
-        float fogStart = 0.f;
-        float fogEnd = 229376.f;
-        osg::Vec4f fogColor;
-    };
-
-    /// Load a validated object-paged foliage capture produced by the production NIF harness.
-    std::optional<ExternalFoliageCapture> loadExternalFoliageCapture()
-    {
-        char* pathValue = nullptr;
-        std::size_t pathSize = 0;
-        if (_dupenv_s(&pathValue, &pathSize, "OPENMW_FOLIAGE_CAPTURE_PATH") != 0 || pathValue == nullptr)
-            return std::nullopt;
-        const std::filesystem::path path(pathValue);
-        std::free(pathValue);
-
-        std::ifstream input(path, std::ios::binary);
-        if (!input)
-            throw std::runtime_error("Unable to read foliage pass capture: " + path.string());
-        constexpr std::array<char, 8> expectedMagic{ 'O', 'M', 'W', 'F', 'O', 'L', 'I', '3' };
-        std::array<char, 8> magic{};
-        std::uint32_t width = 0;
-        std::uint32_t height = 0;
-        input.read(magic.data(), static_cast<std::streamsize>(magic.size()));
-        input.read(reinterpret_cast<char*>(&width), sizeof(width));
-        input.read(reinterpret_cast<char*>(&height), sizeof(height));
-        if (!input || magic != expectedMagic || width == 0 || height == 0 || width > 8192 || height > 8192)
-            throw std::runtime_error("Invalid foliage pass capture header: " + path.string());
-
-        const std::size_t pixelCount = static_cast<std::size_t>(width) * height;
-        ExternalFoliageCapture capture;
-        capture.color.width = static_cast<int>(width);
-        capture.color.height = static_cast<int>(height);
-        input.read(reinterpret_cast<char*>(capture.eyePosition.ptr()), sizeof(float) * 3);
-        input.read(reinterpret_cast<char*>(capture.viewDirection.ptr()), sizeof(float) * 3);
-        input.read(reinterpret_cast<char*>(&capture.verticalFov), sizeof(capture.verticalFov));
-        input.read(reinterpret_cast<char*>(&capture.nearPlane), sizeof(capture.nearPlane));
-        input.read(reinterpret_cast<char*>(&capture.farPlane), sizeof(capture.farPlane));
-        input.read(reinterpret_cast<char*>(&capture.fogStart), sizeof(capture.fogStart));
-        input.read(reinterpret_cast<char*>(&capture.fogEnd), sizeof(capture.fogEnd));
-        input.read(reinterpret_cast<char*>(capture.fogColor.ptr()), sizeof(float) * 4);
-        if (!input || !std::isfinite(capture.verticalFov) || !std::isfinite(capture.nearPlane)
-            || !std::isfinite(capture.farPlane) || !std::isfinite(capture.fogStart) || !std::isfinite(capture.fogEnd)
-            || capture.verticalFov <= 0.f || capture.verticalFov >= 180.f || capture.nearPlane <= 0.f
-            || capture.farPlane <= capture.nearPlane || capture.fogEnd <= capture.fogStart
-            || capture.viewDirection.length2() < 0.99f || capture.viewDirection.length2() > 1.01f)
-            throw std::runtime_error("Invalid foliage pass capture camera: " + path.string());
-        capture.color.pixels.resize(pixelCount);
-        capture.depth.resize(pixelCount);
-        input.read(reinterpret_cast<char*>(capture.color.pixels.data()),
-            static_cast<std::streamsize>(capture.color.pixels.size() * sizeof(osg::Vec4f)));
-        input.read(reinterpret_cast<char*>(capture.depth.data()),
-            static_cast<std::streamsize>(capture.depth.size() * sizeof(float)));
-        if (!input)
-            throw std::runtime_error("Truncated foliage pass capture: " + path.string());
-        return capture;
-    }
-
-    /// Record real-context shader compilation and frame execution measurements.
-    struct PassTiming
-    {
-        double shaderCompilationMilliseconds = 0.0;
-        double firstFrameMilliseconds = 0.0;
-        double cpuSubmissionMilliseconds = 0.0;
-        double gpuMilliseconds = -1.0;
-        std::string renderer;
     };
 
     /// Describe deterministic textures, atmosphere state, and camera history for a native pass execution.
@@ -204,8 +122,6 @@ namespace
         int quality = 2;
         int frameNumber = 4;
         float volumeResolutionScale = 0.5f;
-        int measuredFrames = 8;
-        bool captureOutput = true;
     };
 
     /// Return the representative shader permutation used by atmosphere rendering tests.
@@ -350,8 +266,7 @@ namespace
     }
 
     /// Compile and execute one production atmosphere pass in an off-screen graphics context.
-    PassImage renderNativeAtmospherePass(
-        std::string_view passName, const NativePassInputs& inputs, PassTiming* timing = nullptr)
+    PassImage renderNativeAtmospherePass(std::string_view passName, const NativePassInputs& inputs)
     {
         const int width = inputs.width;
         const int height = inputs.height;
@@ -396,20 +311,9 @@ namespace
         camera->setClearColor(osg::Vec4f());
         camera->setRenderTargetImplementation(osg::Camera::FRAME_BUFFER_OBJECT);
         osg::ref_ptr<osg::Image> capture = new osg::Image;
-        if (inputs.captureOutput)
-        {
-            capture->allocateImage(width, height, 1, GL_RGBA, GL_FLOAT);
-            capture->setInternalTextureFormat(GL_RGBA16F);
-            camera->attach(osg::Camera::COLOR_BUFFER, capture);
-        }
-        else
-        {
-            osg::ref_ptr<osg::Texture2D> output = new osg::Texture2D;
-            output->setTextureSize(width, height);
-            output->setInternalFormat(GL_RGBA16F);
-            output->setResizeNonPowerOfTwoHint(false);
-            camera->attach(osg::Camera::COLOR_BUFFER, output);
-        }
+        capture->allocateImage(width, height, 1, GL_RGBA, GL_FLOAT);
+        capture->setInternalTextureFormat(GL_RGBA16F);
+        camera->attach(osg::Camera::COLOR_BUFFER, capture);
 
         osg::ref_ptr<osg::Geometry> triangle = new osg::Geometry;
         osg::ref_ptr<osg::Vec3Array> vertices = new osg::Vec3Array;
@@ -566,75 +470,11 @@ namespace
 
         viewer.setSceneData(scene);
         viewer.realize();
-        if (timing != nullptr)
-        {
-            context->makeCurrent();
-            osg::Program* program = dynamic_cast<osg::Program*>(state->getAttribute(osg::StateAttribute::PROGRAM));
-            if (program != nullptr)
-            {
-                const auto compilationStart = std::chrono::steady_clock::now();
-                program->compileGLObjects(*context->getState());
-                glFinish();
-                const auto compilationEnd = std::chrono::steady_clock::now();
-                timing->shaderCompilationMilliseconds
-                    = std::chrono::duration<double, std::milli>(compilationEnd - compilationStart).count();
-            }
-        }
-        const auto firstFrameStart = std::chrono::steady_clock::now();
         viewer.frame();
         context->makeCurrent();
         glFinish();
-        const auto firstFrameEnd = std::chrono::steady_clock::now();
-
-        if (timing != nullptr)
-        {
-            timing->firstFrameMilliseconds
-                = std::chrono::duration<double, std::milli>(firstFrameEnd - firstFrameStart).count();
-            if (const GLubyte* renderer = glGetString(GL_RENDERER))
-                timing->renderer = reinterpret_cast<const char*>(renderer);
-
-            viewer.frame();
-            context->makeCurrent();
-            glFinish();
-
-            osg::GLExtensions* extensions = osg::GLExtensions::Get(context->getState()->getContextID(), true);
-            GLuint query = 0;
-            const bool supportsGpuTiming = extensions != nullptr && extensions->glGenQueries != nullptr
-                && extensions->glBeginQuery != nullptr && extensions->glEndQuery != nullptr
-                && extensions->glGetQueryObjectui64v != nullptr && extensions->glDeleteQueries != nullptr;
-            if (supportsGpuTiming)
-            {
-                extensions->glGenQueries(1, &query);
-                extensions->glBeginQuery(GL_TIME_ELAPSED, query);
-            }
-
-            const auto submissionStart = std::chrono::steady_clock::now();
-            for (int frame = 0; frame < inputs.measuredFrames; ++frame)
-                viewer.frame();
-            context->makeCurrent();
-            if (supportsGpuTiming)
-                extensions->glEndQuery(GL_TIME_ELAPSED);
-            const auto submissionEnd = std::chrono::steady_clock::now();
-            timing->cpuSubmissionMilliseconds
-                = std::chrono::duration<double, std::milli>(submissionEnd - submissionStart).count()
-                / static_cast<double>(inputs.measuredFrames);
-
-            if (supportsGpuTiming)
-            {
-                GLuint64 elapsedNanoseconds = 0;
-                extensions->glGetQueryObjectui64v(query, GL_QUERY_RESULT, &elapsedNanoseconds);
-                extensions->glDeleteQueries(1, &query);
-                timing->gpuMilliseconds = static_cast<double>(elapsedNanoseconds) / 1'000'000.0
-                    / static_cast<double>(inputs.measuredFrames);
-            }
-        }
 
         PassImage result{ width, height, {} };
-        if (!inputs.captureOutput)
-        {
-            context->close();
-            return result;
-        }
         result.pixels.reserve(width * height);
         for (int y = 0; y < height; ++y)
             for (int x = 0; x < width; ++x)
@@ -940,27 +780,6 @@ namespace
             }
         context->close();
         return result;
-    }
-
-    /// Write a captured HDR pass image as a tone-mapped validation PNG.
-    void writePassImage(const PassImage& source, const std::filesystem::path& path)
-    {
-        osg::ref_ptr<osg::Image> image = new osg::Image;
-        image->allocateImage(source.width, source.height, 1, GL_RGB, GL_UNSIGNED_BYTE);
-        for (int y = 0; y < source.height; ++y)
-            for (int x = 0; x < source.width; ++x)
-            {
-                const osg::Vec4f& hdr = source.at(x, y);
-                unsigned char* output = image->data(x, y);
-                for (int channel = 0; channel < 3; ++channel)
-                {
-                    const float value = std::max(hdr[channel], 0.f);
-                    const float mapped = value / (1.f + value);
-                    output[channel] = static_cast<unsigned char>(std::round(std::pow(mapped, 1.f / 2.2f) * 255.f));
-                }
-            }
-        if (!osgDB::writeImageFile(*image, path.string()))
-            throw std::runtime_error("Failed writing atmosphere pass validation image: " + path.string());
     }
 
     /// Interpolate reference colors without depending on production shader code.
@@ -1410,23 +1229,6 @@ namespace
                     EXPECT_TRUE(std::isfinite(diagnostic->pixels[index][channel]));
         }
         EXPECT_GT(diagnosticSurfaceCount, 100u);
-
-        char* artifactDirectoryValue = nullptr;
-        std::size_t artifactDirectorySize = 0;
-        if (_dupenv_s(&artifactDirectoryValue, &artifactDirectorySize, "OPENMW_FOLIAGE_ARTIFACT_DIR") == 0
-            && artifactDirectoryValue != nullptr)
-        {
-            const std::filesystem::path artifactDirectory(artifactDirectoryValue);
-            std::free(artifactDirectoryValue);
-            std::filesystem::create_directories(artifactDirectory);
-            writePassImage(normal, artifactDirectory / "diagnostic-normal.png");
-            writePassImage(coverageBypassed, artifactDirectory / "diagnostic-coverage-bypassed.png");
-            writePassImage(fogBypassed, artifactDirectory / "diagnostic-fog-bypassed.png");
-            writePassImage(fogVisibility, artifactDirectory / "diagnostic-fog-visibility.png");
-            writePassImage(fogInScattering, artifactDirectory / "diagnostic-fog-in-scattering.png");
-            writePassImage(preFogRadiance, artifactDirectory / "diagnostic-pre-fog-radiance.png");
-            writePassImage(sampledSurfaceColor, artifactDirectory / "diagnostic-sampled-surface-color.png");
-        }
     }
 
     TEST(AtmosphereShaderTest, compilesAndLinksNativeAtmospherePassesInGraphicsContext)
@@ -2307,159 +2109,6 @@ namespace
         }
     }
 
-    TEST(AtmosphereShaderTest, externalProductionObjectPagedBitterCoastTreesCompositeThroughMist)
-    {
-        const std::optional<ExternalFoliageCapture> capture = loadExternalFoliageCapture();
-        if (!capture)
-            GTEST_SKIP() << "Set OPENMW_FOLIAGE_CAPTURE_PATH to a production object-paged foliage capture";
-
-        NativePassInputs inputs = makeProductionAtmosphereInputs("Rain", "Sunset");
-        inputs.width = capture->color.width;
-        inputs.height = capture->color.height;
-        inputs.quality = 2;
-        inputs.cloudParameters = {};
-        inputs.nearPlane = capture->nearPlane;
-        inputs.farPlane = capture->farPlane;
-        inputs.verticalFov = capture->verticalFov;
-        inputs.fogNear = capture->fogStart;
-        inputs.fogFar = capture->fogEnd;
-        inputs.fogColor = capture->fogColor;
-        inputs.eyePosition = capture->eyePosition;
-        inputs.viewDirection = capture->viewDirection;
-        inputs.lastShader = [&capture](int x, int y) { return capture->color.at(x, y); };
-        inputs.depth = [&capture](int x, int y) {
-            return capture->depth[static_cast<std::size_t>(y * capture->color.width + x)];
-        };
-        inputs.previousDepth = inputs.depth;
-
-        const ProductionAtmosphereFrame frame = renderProductionAtmosphereFrame(inputs);
-        ASSERT_EQ(frame.mComposite.pixels.size(), capture->color.pixels.size());
-
-        NativePassInputs referenceInputs = inputs;
-        referenceInputs.quality = 3;
-        const ProductionAtmosphereFrame referenceFrame = renderProductionAtmosphereFrame(referenceInputs);
-        ASSERT_EQ(referenceFrame.mComposite.pixels.size(), capture->color.pixels.size());
-
-        double surfaceDifference = 0.0;
-        double backgroundDifference = 0.0;
-        std::size_t surfacePixelCount = 0;
-        std::size_t backgroundPixelCount = 0;
-        double silhouetteReferenceDifference = 0.0;
-        std::size_t silhouettePixelCount = 0;
-        for (std::size_t index = 0; index < capture->color.pixels.size(); ++index)
-        {
-            const osg::Vec4f& before = capture->color.pixels[index];
-            const osg::Vec4f& after = frame.mComposite.pixels[index];
-            for (int channel = 0; channel < 4; ++channel)
-                EXPECT_TRUE(std::isfinite(after[channel]));
-            const double difference = std::abs(after.x() - before.x()) + std::abs(after.y() - before.y())
-                + std::abs(after.z() - before.z());
-            if (capture->depth[index] < 0.999999f)
-            {
-                surfaceDifference += difference;
-                ++surfacePixelCount;
-            }
-            else
-            {
-                backgroundDifference += difference;
-                ++backgroundPixelCount;
-            }
-        }
-        for (int y = 1; y < capture->color.height - 1; ++y)
-            for (int x = 1; x < capture->color.width - 1; ++x)
-            {
-                const std::size_t index = static_cast<std::size_t>(y * capture->color.width + x);
-                if (capture->depth[index] >= 0.999999f)
-                    continue;
-                bool bordersBackground = false;
-                for (int offsetY = -1; offsetY <= 1; ++offsetY)
-                    for (int offsetX = -1; offsetX <= 1; ++offsetX)
-                    {
-                        const std::size_t neighborIndex
-                            = static_cast<std::size_t>((y + offsetY) * capture->color.width + x + offsetX);
-                        bordersBackground = bordersBackground || capture->depth[neighborIndex] >= 0.999999f;
-                    }
-                if (!bordersBackground)
-                    continue;
-                const osg::Vec4f& production = frame.mComposite.pixels[index];
-                const osg::Vec4f& reference = referenceFrame.mComposite.pixels[index];
-                silhouetteReferenceDifference += std::abs(production.x() - reference.x())
-                    + std::abs(production.y() - reference.y()) + std::abs(production.z() - reference.z());
-                ++silhouettePixelCount;
-            }
-        ASSERT_GT(surfacePixelCount, 500u);
-        ASSERT_GT(backgroundPixelCount, 500u);
-        ASSERT_GT(silhouettePixelCount, 100u);
-        EXPECT_GT(surfaceDifference / static_cast<double>(surfacePixelCount), 0.002);
-        EXPECT_GT(backgroundDifference / static_cast<double>(backgroundPixelCount), 0.002);
-        EXPECT_LT(silhouetteReferenceDifference / static_cast<double>(silhouettePixelCount), 0.005);
-
-        char* artifactDirectoryValue = nullptr;
-        std::size_t artifactDirectorySize = 0;
-        if (_dupenv_s(&artifactDirectoryValue, &artifactDirectorySize, "OPENMW_FOLIAGE_ARTIFACT_DIR") == 0
-            && artifactDirectoryValue != nullptr)
-        {
-            const std::filesystem::path artifactDirectory(artifactDirectoryValue);
-            std::free(artifactDirectoryValue);
-            std::filesystem::create_directories(artifactDirectory);
-            writePassImage(frame.mComposite, artifactDirectory / "production-object-paged-tree-cluster-with-mist.png");
-        }
-    }
-
-    /// Verify that foreground mist covers every production-tree fragment even when half-resolution samples miss it.
-    TEST(AtmosphereShaderTest, externalProductionObjectPagedBitterCoastTreesShareForegroundMist)
-    {
-        const std::optional<ExternalFoliageCapture> capture = loadExternalFoliageCapture();
-        if (!capture)
-            GTEST_SKIP() << "Set OPENMW_FOLIAGE_CAPTURE_PATH to a production object-paged foliage capture";
-
-        constexpr float mistDistance = 1000.f;
-        const osg::Vec4f foregroundMist(0.46f, 0.44f, 0.4f, 0.2f);
-        NativePassInputs inputs;
-        inputs.width = capture->color.width;
-        inputs.height = capture->color.height;
-        inputs.nearPlane = capture->nearPlane;
-        inputs.farPlane = capture->farPlane;
-        inputs.verticalFov = capture->verticalFov;
-        inputs.eyePosition = capture->eyePosition;
-        inputs.viewDirection = capture->viewDirection;
-        inputs.lastShader = [&capture](int x, int y) { return capture->color.at(x, y); };
-        inputs.depth = [&capture](int x, int y) {
-            return capture->depth[static_cast<std::size_t>(y * capture->color.width + x)];
-        };
-        inputs.volumeHistoryWidth = capture->color.width / 2;
-        inputs.volumeHistoryHeight = capture->color.height / 2;
-        inputs.volumeHistoryInput = [=](int, int) { return foregroundMist; };
-        inputs.volumeMetadataWidth = capture->color.width / 2;
-        inputs.volumeMetadataHeight = capture->color.height / 2;
-        inputs.volumeMetadataInput = [=](int, int) {
-            return osg::Vec4f(
-                encodeAtmosphereDistance(mistDistance), 1.f, encodeAtmosphereDistance(capture->farPlane), 1.f);
-        };
-        inputs.shaftInput = [](int, int) { return osg::Vec4f(); };
-
-        const PassImage composite = renderNativeAtmospherePass("composite", inputs);
-        ASSERT_EQ(composite.pixels.size(), capture->color.pixels.size());
-        std::size_t productionSurfacePixelCount = 0;
-        std::size_t uncoveredProductionSurfacePixelCount = 0;
-        float maximumProductionSurfaceError = 0.f;
-        for (std::size_t index = 0; index < capture->color.pixels.size(); ++index)
-        {
-            if (capture->depth[index] >= 0.999999f)
-                continue;
-            const osg::Vec4f expected = capture->color.pixels[index] * foregroundMist.w() + foregroundMist;
-            const osg::Vec4f& pixel = composite.pixels[index];
-            const float error = std::max({ std::abs(pixel.x() - expected.x()), std::abs(pixel.y() - expected.y()),
-                std::abs(pixel.z() - expected.z()) });
-            maximumProductionSurfaceError = std::max(maximumProductionSurfaceError, error);
-            uncoveredProductionSurfacePixelCount += error > 0.002f;
-            ++productionSurfacePixelCount;
-        }
-        EXPECT_GT(productionSurfacePixelCount, 500u);
-        EXPECT_EQ(uncoveredProductionSurfacePixelCount, 0u)
-            << "maximum foreground-mist error=" << maximumProductionSurfaceError;
-    }
-
     TEST(AtmosphereShaderTest, productionCompositePreservesRadianceAtSubpixelFoliageDepth)
     {
         constexpr int width = 192;
@@ -3330,395 +2979,6 @@ namespace
             EXPECT_GT(minimumProtectedLuminance, 0.18f) << "reverseZ=" << reverseZ;
             EXPECT_LT(protectedTraceEnergy / protectedPixelCount, 0.003) << "reverseZ=" << reverseZ;
         }
-    }
-
-    TEST(AtmosphereShaderTest, writesNativePassVisualArtifactsWhenRequested)
-    {
-        char* requestedDirectory = nullptr;
-        std::size_t size = 0;
-        if (_dupenv_s(&requestedDirectory, &size, "OPENMW_ATMOSPHERE_ARTIFACT_DIR") != 0
-            || requestedDirectory == nullptr)
-            GTEST_SKIP() << "Set OPENMW_ATMOSPHERE_ARTIFACT_DIR to write validation images";
-        const std::filesystem::path outputDirectory(requestedDirectory);
-        std::free(requestedDirectory);
-        std::filesystem::create_directories(outputDirectory);
-
-        writePassImage(renderDistantFoliageCard(false), outputDirectory / "distant-foliage-unadjusted.png");
-        writePassImage(renderDistantFoliageCard(true), outputDirectory / "distant-foliage-coverage-resolved.png");
-
-        NativePassInputs productionRainInputs = makeProductionAtmosphereInputs("Rain", "Sunset");
-        productionRainInputs.width = 192;
-        productionRainInputs.height = 108;
-        productionRainInputs.eyePosition = { 0.f, 0.f, 900.f };
-        productionRainInputs.lastShader = [](int x, int y) {
-            const float vertical = static_cast<float>(y) / 107.f;
-            const float horizontal = static_cast<float>(x) / 191.f;
-            return osg::Vec4f(0.33f + vertical * 0.19f, 0.37f + vertical * 0.2f, 0.43f + horizontal * 0.08f, 1.f);
-        };
-        productionRainInputs.depth = [](int x, int y) {
-            const int ridge = 39 + static_cast<int>(5.f * std::sin(static_cast<float>(x) * 0.08f));
-            return y <= ridge ? normalizedDepthForViewDistance(17500.f, false) : 1.f;
-        };
-        productionRainInputs.previousDepth = productionRainInputs.depth;
-        ProductionAtmosphereFrame rainFrame;
-        for (int frameNumber = 0; frameNumber < 6; ++frameNumber)
-        {
-            productionRainInputs.frameNumber = frameNumber;
-            productionRainInputs.historyValid = frameNumber > 0;
-            rainFrame = renderProductionAtmosphereFrame(productionRainInputs, frameNumber > 0 ? &rainFrame : nullptr);
-        }
-        writePassImage(rainFrame.mComposite, outputDirectory / "rain-horizon-production-pipeline.png");
-
-        constexpr int volumeWidth = 960;
-        constexpr int volumeHeight = 540;
-        constexpr int compositeWidth = 1920;
-        constexpr int compositeHeight = 1080;
-
-        const auto renderConvergedVolume = [](NativePassInputs volumeInputs) {
-            volumeInputs.frameNumber = 0;
-            PassImage resolved = renderNativeAtmospherePass("integrateAtmosphereVolume", volumeInputs);
-            NativePassInputs initialMetadataInputs = volumeInputs;
-            initialMetadataInputs.passInput = [&resolved](int x, int y) { return resolved.at(x, y); };
-            PassImage metadata = renderNativeAtmospherePass("classifyAtmosphereVolume", initialMetadataInputs);
-            volumeInputs.historyValid = true;
-            for (int frameNumber = 1; frameNumber < 8; ++frameNumber)
-            {
-                volumeInputs.frameNumber = frameNumber;
-                const PassImage raw = renderNativeAtmospherePass("integrateAtmosphereVolume", volumeInputs);
-                NativePassInputs resolveInputs = volumeInputs;
-                resolveInputs.historyValid = true;
-                resolveInputs.passInput = [&raw](int x, int y) { return raw.at(x, y); };
-                resolveInputs.atmosphereHistory = [&resolved](int x, int y) { return resolved.at(x, y); };
-                NativePassInputs currentMetadataInputs = volumeInputs;
-                currentMetadataInputs.passInput = resolveInputs.passInput;
-                const PassImage currentMetadata
-                    = renderNativeAtmospherePass("classifyAtmosphereVolume", currentMetadataInputs);
-                resolveInputs.volumeMetadataInput
-                    = [&currentMetadata](int x, int y) { return currentMetadata.at(x, y); };
-                resolveInputs.atmosphereMetadataHistory = [&metadata](int x, int y) { return metadata.at(x, y); };
-                resolved = renderNativeAtmospherePass("resolveAtmosphereVolumeHistory", resolveInputs);
-                metadata = currentMetadata;
-            }
-            return std::make_pair(std::move(resolved), std::move(metadata));
-        };
-
-        const auto controlledSceneColor = [](int x, int y) {
-            const float skyGradient = static_cast<float>(y) / static_cast<float>(compositeHeight - 1);
-            const bool terrain = y < compositeHeight / 4;
-            const bool tower = std::abs(x - compositeWidth / 4) < 40 && y < compositeHeight / 2;
-            if (terrain || tower)
-                return osg::Vec4f(0.07f, 0.08f, 0.09f, 1.f);
-            osg::Vec4f color(
-                0.16f + 0.35f * skyGradient, 0.22f + 0.42f * skyGradient, 0.32f + 0.48f * skyGradient, 1.f);
-            const float sunX = static_cast<float>(x - compositeWidth / 2);
-            const float sunY = static_cast<float>(y - compositeHeight / 2);
-            const float sunDistance = std::sqrt(sunX * sunX + sunY * sunY);
-            const float sunCore = 1.f - std::clamp((sunDistance - 9.f) / 5.f, 0.f, 1.f);
-            const float sunHalo = std::exp(-sunDistance * sunDistance / 900.f) * 0.2f;
-            color += osg::Vec4f(4.f, 3.4f, 2.6f, 0.f) * (sunCore + sunHalo);
-            return color;
-        };
-        const auto controlledSceneDepth = [](int x, int y) {
-            const bool terrain = y < compositeHeight / 4;
-            const bool tower = std::abs(x - compositeWidth / 4) < 40 && y < compositeHeight / 2;
-            return terrain || tower ? 0.f : 1.f;
-        };
-
-        NativePassInputs mistInputs;
-        mistInputs.width = volumeWidth;
-        mistInputs.height = volumeHeight;
-        mistInputs.mistParameters = { 0.55f, 800.f, 4500.f, 1.f };
-        const auto [resolvedMist, resolvedMistMetadata] = renderConvergedVolume(mistInputs);
-
-        NativePassInputs mistCompositeInputs;
-        mistCompositeInputs.width = compositeWidth;
-        mistCompositeInputs.height = compositeHeight;
-        mistCompositeInputs.lastShader = controlledSceneColor;
-        mistCompositeInputs.depth = controlledSceneDepth;
-        mistCompositeInputs.volumeHistoryInput = [&resolvedMist](int x, int y) { return resolvedMist.at(x, y); };
-        mistCompositeInputs.volumeHistoryWidth = volumeWidth;
-        mistCompositeInputs.volumeHistoryHeight = volumeHeight;
-        mistCompositeInputs.volumeMetadataInput
-            = [&resolvedMistMetadata](int x, int y) { return resolvedMistMetadata.at(x, y); };
-        mistCompositeInputs.volumeMetadataWidth = volumeWidth;
-        mistCompositeInputs.volumeMetadataHeight = volumeHeight;
-        mistCompositeInputs.shaftInput = [](int, int) { return osg::Vec4f(); };
-        writePassImage(renderNativeAtmospherePass("composite", mistCompositeInputs), outputDirectory / "low-mist.png");
-
-        NativePassInputs cloudInputs;
-        cloudInputs.width = volumeWidth;
-        cloudInputs.height = volumeHeight;
-        cloudInputs.cloudParameters = { 0.58f, 0.9f, 48000.f, 22000.f };
-        cloudInputs.mistParameters = {};
-        cloudInputs.sunDirection = { 0.944f, 0.f, 0.33f, 0.f };
-        cloudInputs.frameNumber = 0;
-        const PassImage rawClouds = renderNativeAtmospherePass("integrateAtmosphereVolume", cloudInputs);
-        const auto [resolvedClouds, resolvedCloudMetadata] = renderConvergedVolume(cloudInputs);
-        NativePassInputs rawCloudMetadataInputs = cloudInputs;
-        rawCloudMetadataInputs.passInput = [&rawClouds](int x, int y) { return rawClouds.at(x, y); };
-        const PassImage rawCloudMetadata
-            = renderNativeAtmospherePass("classifyAtmosphereVolume", rawCloudMetadataInputs);
-
-        const auto cloudSky = [](int, int y) {
-            const float height = static_cast<float>(y) / static_cast<float>(compositeHeight - 1);
-            return osg::Vec4f(0.58f - height * 0.4f, 0.66f - height * 0.32f, 0.76f - height * 0.12f, 1.f);
-        };
-        NativePassInputs rawCloudCompositeInputs = cloudInputs;
-        rawCloudCompositeInputs.width = compositeWidth;
-        rawCloudCompositeInputs.height = compositeHeight;
-        rawCloudCompositeInputs.lastShader = cloudSky;
-        rawCloudCompositeInputs.volumeHistoryInput = [&rawClouds](int x, int y) { return rawClouds.at(x, y); };
-        rawCloudCompositeInputs.volumeHistoryWidth = rawClouds.width;
-        rawCloudCompositeInputs.volumeHistoryHeight = rawClouds.height;
-        rawCloudCompositeInputs.volumeMetadataInput
-            = [&rawCloudMetadata](int x, int y) { return rawCloudMetadata.at(x, y); };
-        rawCloudCompositeInputs.volumeMetadataWidth = rawCloudMetadata.width;
-        rawCloudCompositeInputs.volumeMetadataHeight = rawCloudMetadata.height;
-        rawCloudCompositeInputs.shaftInput = [](int, int) { return osg::Vec4f(); };
-        writePassImage(renderNativeAtmospherePass("composite", rawCloudCompositeInputs),
-            outputDirectory / "procedural-clouds-dithered.png");
-
-        NativePassInputs resolvedCloudCompositeInputs = rawCloudCompositeInputs;
-        resolvedCloudCompositeInputs.volumeHistoryInput
-            = [&resolvedClouds](int x, int y) { return resolvedClouds.at(x, y); };
-        resolvedCloudCompositeInputs.volumeHistoryWidth = resolvedClouds.width;
-        resolvedCloudCompositeInputs.volumeHistoryHeight = resolvedClouds.height;
-        resolvedCloudCompositeInputs.volumeMetadataInput
-            = [&resolvedCloudMetadata](int x, int y) { return resolvedCloudMetadata.at(x, y); };
-        writePassImage(renderNativeAtmospherePass("composite", resolvedCloudCompositeInputs),
-            outputDirectory / "procedural-clouds-temporal.png");
-
-        NativePassInputs combinedVolumeInputs = cloudInputs;
-        combinedVolumeInputs.mistParameters = { 0.22f, 800.f, 4500.f, 1.f };
-        const auto [resolvedAtmosphere, resolvedAtmosphereMetadata] = renderConvergedVolume(combinedVolumeInputs);
-
-        NativePassInputs shaftInputs;
-        shaftInputs.width = compositeWidth / 4;
-        shaftInputs.height = compositeHeight / 4;
-        const int shaftCenterX = shaftInputs.width / 2;
-        const int shaftCenterY = shaftInputs.height / 2;
-        shaftInputs.lastShader = [shaftCenterX, shaftCenterY](int x, int y) {
-            if (std::abs(x - shaftCenterX) <= 5 && std::abs(y - shaftCenterY) <= 5)
-                return osg::Vec4f(4.f, 3.4f, 2.6f, 1.f);
-            return osg::Vec4f(0.3f, 0.4f, 0.55f, 1.f);
-        };
-        shaftInputs.depth = [shaftCenterX, shaftCenterY](int x, int y) {
-            const bool terrain = y < shaftCenterY / 2;
-            const bool tower = std::abs(x - shaftCenterX / 2) < 10 && y < shaftCenterY;
-            return terrain || tower ? 0.f : 1.f;
-        };
-        shaftInputs.volumeHistoryInput = [&resolvedAtmosphere](int x, int y) { return resolvedAtmosphere.at(x, y); };
-        shaftInputs.volumeHistoryWidth = volumeWidth;
-        shaftInputs.volumeHistoryHeight = volumeHeight;
-        const PassImage shafts = renderNativeAtmospherePass("integrateShafts", shaftInputs);
-        writePassImage(shafts, outputDirectory / "sun-shafts.png");
-
-        NativePassInputs compositeInputs;
-        compositeInputs.width = compositeWidth;
-        compositeInputs.height = compositeHeight;
-        compositeInputs.lastShader = controlledSceneColor;
-        compositeInputs.depth = controlledSceneDepth;
-        compositeInputs.volumeHistoryInput
-            = [&resolvedAtmosphere](int x, int y) { return resolvedAtmosphere.at(x, y); };
-        compositeInputs.volumeHistoryWidth = volumeWidth;
-        compositeInputs.volumeHistoryHeight = volumeHeight;
-        compositeInputs.volumeMetadataInput
-            = [&resolvedAtmosphereMetadata](int x, int y) { return resolvedAtmosphereMetadata.at(x, y); };
-        compositeInputs.volumeMetadataWidth = volumeWidth;
-        compositeInputs.volumeMetadataHeight = volumeHeight;
-        compositeInputs.shaftInput = [&shafts](int x, int y) { return shafts.at(x, y); };
-        compositeInputs.shaftWidth = shafts.width;
-        compositeInputs.shaftHeight = shafts.height;
-        writePassImage(
-            renderNativeAtmospherePass("composite", compositeInputs), outputDirectory / "atmosphere-composite.png");
-
-        const auto traceRegressionColor = [](int x, int y) {
-            const int mountainCenter = compositeWidth / 2;
-            const int mountainHeight = std::max(0, compositeHeight / 2 - y);
-            const bool mountain = y < compositeHeight / 2 && std::abs(x - mountainCenter) < mountainHeight * 2;
-            const bool water = y < compositeHeight / 6;
-            if (mountain)
-                return osg::Vec4f(0.18f, 0.21f, 0.25f, 1.f);
-            if (water)
-                return osg::Vec4f(0.15f, 0.29f, 0.4f, 1.f);
-            return osg::Vec4f(0.78f, 0.72f, 0.7f, 1.f);
-        };
-        const auto traceRegressionDepth = [](int x, int y) {
-            const int mountainCenter = compositeWidth / 2;
-            const int mountainHeight = std::max(0, compositeHeight / 2 - y);
-            const bool mountain = y < compositeHeight / 2 && std::abs(x - mountainCenter) < mountainHeight * 2;
-            if (mountain)
-                return normalizedDepthForViewDistance(17000.f, false);
-            if (y < compositeHeight / 6)
-                return normalizedDepthForViewDistance(12000.f, false);
-            return 1.f;
-        };
-        NativePassInputs traceRegressionInputs;
-        traceRegressionInputs.width = compositeWidth;
-        traceRegressionInputs.height = compositeHeight;
-        traceRegressionInputs.lastShader = traceRegressionColor;
-        traceRegressionInputs.depth = traceRegressionDepth;
-        traceRegressionInputs.volumeHistoryWidth = volumeWidth;
-        traceRegressionInputs.volumeHistoryHeight = volumeHeight;
-        traceRegressionInputs.volumeHistoryInput = [](int, int) { return osg::Vec4f(0.0001f, 0.0001f, 0.0001f, 0.f); };
-        traceRegressionInputs.volumeMetadataWidth = volumeWidth;
-        traceRegressionInputs.volumeMetadataHeight = volumeHeight;
-        traceRegressionInputs.volumeMetadataInput = [](int, int) {
-            const float encodedRejectedDistance = encodeAtmosphereDistance(5000.f);
-            return osg::Vec4f(encodedRejectedDistance, 1.f, encodedRejectedDistance, 1.f);
-        };
-        traceRegressionInputs.shaftInput = [](int, int) { return osg::Vec4f(); };
-        writePassImage(renderNativeAtmospherePass("composite", traceRegressionInputs),
-            outputDirectory / "black-trace-regression.png");
-
-        constexpr std::array productionScenarios{ std::array<std::string_view, 3>{ "Clear", "Day", "clear-day" },
-            std::array<std::string_view, 3>{ "Clear", "Sunrise", "clear-sunrise" },
-            std::array<std::string_view, 3>{ "Clear", "Sunset", "clear-sunset" },
-            std::array<std::string_view, 3>{ "Cloudy", "Day", "cloudy-day" },
-            std::array<std::string_view, 3>{ "Cloudy", "Sunrise", "cloudy-sunrise" },
-            std::array<std::string_view, 3>{ "Cloudy", "Sunset", "cloudy-sunset" },
-            std::array<std::string_view, 3>{ "Foggy", "Day", "foggy-day" },
-            std::array<std::string_view, 3>{ "Overcast", "Day", "overcast-day" } };
-        for (const auto& scenario : productionScenarios)
-        {
-            NativePassInputs productionVolumeInputs = makeProductionAtmosphereInputs(scenario[0], scenario[1]);
-            productionVolumeInputs.width = volumeWidth;
-            productionVolumeInputs.height = volumeHeight;
-            productionVolumeInputs.fogNear = 12000.f;
-            productionVolumeInputs.fogFar = 180000.f;
-            const auto [productionAtmosphere, productionAtmosphereMetadata]
-                = renderConvergedVolume(productionVolumeInputs);
-
-            NativePassInputs productionCompositeInputs = productionVolumeInputs;
-            productionCompositeInputs.width = compositeWidth;
-            productionCompositeInputs.height = compositeHeight;
-            productionCompositeInputs.lastShader = [productionVolumeInputs](int x, int y) {
-                const bool terrain = y < compositeHeight / 4;
-                const bool tower = std::abs(x - compositeWidth / 4) < 40 && y < compositeHeight / 2;
-                if (terrain || tower)
-                {
-                    const osg::Vec3f litTerrain = productionVolumeInputs.groundIrradiance * 0.22f
-                        + productionVolumeInputs.solarRadiance * 0.08f;
-                    return osg::Vec4f(litTerrain, 1.f);
-                }
-
-                constexpr float tangentHalfVerticalFov = 0.70020754f;
-                const float normalizedHorizontal = 2.f * (static_cast<float>(x) + 0.5f) / compositeWidth - 1.f;
-                const float normalizedVertical = 2.f * (static_cast<float>(y) + 0.5f) / compositeHeight - 1.f;
-                osg::Vec3f worldDirection(1.f,
-                    -normalizedHorizontal * (static_cast<float>(compositeWidth) / compositeHeight)
-                        * tangentHalfVerticalFov,
-                    normalizedVertical * tangentHalfVerticalFov);
-                worldDirection.normalize();
-                osg::Vec3f sunDirection(productionVolumeInputs.sunDirection.x(),
-                    productionVolumeInputs.sunDirection.y(), productionVolumeInputs.sunDirection.z());
-                sunDirection.normalize();
-                const Rgb skyColor{ productionVolumeInputs.skyColor.x(), productionVolumeInputs.skyColor.y(),
-                    productionVolumeInputs.skyColor.z() };
-                const Rgb fogColor{ productionVolumeInputs.fogColor.x(), productionVolumeInputs.fogColor.y(),
-                    productionVolumeInputs.fogColor.z() };
-                const Rgb skyRadiance = referenceSkyScatter(worldDirection, sunDirection, skyColor, fogColor);
-                return osg::Vec4f(skyRadiance.r, skyRadiance.g, skyRadiance.b, 1.f);
-            };
-            productionCompositeInputs.depth = controlledSceneDepth;
-            productionCompositeInputs.volumeHistoryInput
-                = [&productionAtmosphere](int x, int y) { return productionAtmosphere.at(x, y); };
-            productionCompositeInputs.volumeHistoryWidth = productionAtmosphere.width;
-            productionCompositeInputs.volumeHistoryHeight = productionAtmosphere.height;
-            productionCompositeInputs.volumeMetadataInput
-                = [&productionAtmosphereMetadata](int x, int y) { return productionAtmosphereMetadata.at(x, y); };
-            productionCompositeInputs.volumeMetadataWidth = productionAtmosphereMetadata.width;
-            productionCompositeInputs.volumeMetadataHeight = productionAtmosphereMetadata.height;
-            productionCompositeInputs.shaftInput = [](int, int) { return osg::Vec4f(); };
-            writePassImage(renderNativeAtmospherePass("composite", productionCompositeInputs),
-                outputDirectory / (std::string(scenario[2]) + "-production-atmosphere.png"));
-        }
-    }
-
-    TEST(AtmosphereShaderTest, writesRepresentativePerformanceReportWhenRequested)
-    {
-        char* requestedPath = nullptr;
-        std::size_t size = 0;
-        if (_dupenv_s(&requestedPath, &size, "OPENMW_ATMOSPHERE_PERFORMANCE_REPORT") != 0 || requestedPath == nullptr)
-            GTEST_SKIP() << "Set OPENMW_ATMOSPHERE_PERFORMANCE_REPORT to benchmark the native atmosphere passes";
-        const std::filesystem::path reportPath(requestedPath);
-        std::free(requestedPath);
-        if (!reportPath.parent_path().empty())
-            std::filesystem::create_directories(reportPath.parent_path());
-        std::ofstream report(reportPath);
-        ASSERT_TRUE(report) << "Unable to create " << reportPath;
-        report << "renderer,mode,pass,quality,width,height,shader_compile_ms,first_frame_ms,cpu_submission_ms,gpu_ms\n";
-        report << std::fixed << std::setprecision(4);
-
-        constexpr int outputWidth = 3840;
-        constexpr int outputHeight = 2160;
-        constexpr std::array<float, 4> volumeScales{ 0.25f, 0.375f, 0.5f, 0.5f };
-        constexpr std::array<float, 4> shaftScales{ 0.125f, 0.1875f, 0.25f, 0.25f };
-        constexpr std::array<std::string_view, 5> passes{ "integrateAtmosphereVolume", "classifyAtmosphereVolume",
-            "resolveAtmosphereVolumeHistory", "integrateShafts", "composite" };
-
-        for (int quality = 0; quality < 4; ++quality)
-            for (bool enabled : { false, true })
-                for (std::string_view pass : passes)
-                {
-                    float scale = 1.f;
-                    if (pass == "integrateAtmosphereVolume" || pass == "classifyAtmosphereVolume"
-                        || pass == "resolveAtmosphereVolumeHistory")
-                        scale = volumeScales[quality];
-                    else if (pass == "integrateShafts")
-                        scale = shaftScales[quality];
-
-                    NativePassInputs inputs;
-                    inputs.width = std::max(1, static_cast<int>(std::lround(outputWidth * scale)));
-                    inputs.height = std::max(1, static_cast<int>(std::lround(outputHeight * scale)));
-                    inputs.quality = quality;
-                    inputs.measuredFrames = 64;
-                    inputs.captureOutput = false;
-                    inputs.atmosphereEnabled = enabled;
-                    inputs.cloudParameters = { 0.58f, 0.9f, 48000.f, 22000.f };
-                    inputs.mistParameters = { 2.5f, 800.f, 4500.f, 1.f };
-                    inputs.historyValid = true;
-                    const int centerX = inputs.width / 2;
-                    const int centerY = inputs.height / 2;
-                    inputs.lastShader = [centerX, centerY](int x, int y) {
-                        if (std::abs(x - centerX) <= 3 && std::abs(y - centerY) <= 3)
-                            return osg::Vec4f(4.f, 3.4f, 2.6f, 1.f);
-                        return osg::Vec4f(0.3f, 0.4f, 0.55f, 1.f);
-                    };
-                    inputs.passInput = [](int, int) { return osg::Vec4f(0.12f, 0.1f, 0.08f, 0.7f); };
-                    inputs.atmosphereHistory = [](int, int) { return osg::Vec4f(0.11f, 0.09f, 0.07f, 0.72f); };
-                    inputs.volumeHistoryInput = [](int, int) { return osg::Vec4f(0.12f, 0.1f, 0.08f, 0.7f); };
-                    inputs.shaftInput = [](int, int) { return osg::Vec4f(0.03f, 0.02f, 0.01f, 1.f); };
-
-                    PassTiming timing;
-                    renderNativeAtmospherePass(pass, inputs, &timing);
-                    ASSERT_GE(timing.gpuMilliseconds, 0.0) << "GPU timer queries are unavailable for " << pass;
-                    report << '"' << timing.renderer << "\"," << (enabled ? "enabled" : "disabled") << ',' << pass
-                           << ',' << quality << ',' << inputs.width << ',' << inputs.height << ','
-                           << timing.shaderCompilationMilliseconds << ',' << timing.firstFrameMilliseconds << ','
-                           << timing.cpuSubmissionMilliseconds << ',' << timing.gpuMilliseconds << '\n';
-                }
-
-        for (int quality = 0; quality < 4; ++quality)
-            for (const bool historyRejected : { false, true })
-            {
-                NativePassInputs inputs = makeProductionAtmosphereInputs("Rain", "Sunset");
-                inputs.width = std::max(1, static_cast<int>(std::lround(outputWidth * volumeScales[quality])));
-                inputs.height = std::max(1, static_cast<int>(std::lround(outputHeight * volumeScales[quality])));
-                inputs.quality = quality;
-                inputs.measuredFrames = 32;
-                inputs.captureOutput = false;
-                inputs.historyValid = true;
-                inputs.historyLightingWeight = historyRejected ? 0.f : 1.f;
-                PassTiming timing;
-                renderNativeAtmospherePass("integrateAtmosphereVolume", inputs, &timing);
-                ASSERT_GE(timing.gpuMilliseconds, 0.0);
-                report << '"' << timing.renderer << "\","
-                       << (historyRejected ? "stable_rejected_history" : "temporal_accepted_history")
-                       << ",integrateAtmosphereVolume," << quality << ',' << inputs.width << ',' << inputs.height << ','
-                       << timing.shaderCompilationMilliseconds << ',' << timing.firstFrameMilliseconds << ','
-                       << timing.cpuSubmissionMilliseconds << ',' << timing.gpuMilliseconds << '\n';
-            }
     }
 
     TEST(AtmosphereShaderTest, referenceSunsetSeparatesSolarAndAntiSolarColors)

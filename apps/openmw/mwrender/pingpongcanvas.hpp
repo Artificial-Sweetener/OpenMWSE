@@ -44,6 +44,9 @@ namespace MWRender
             mAtmosphereHistoryValid = false;
         }
 
+        /// Reject temporal atmosphere inputs without rebuilding unrelated framebuffer attachments.
+        void invalidateAtmosphereHistory() { mAtmosphereHistoryValid = false; }
+
         /// Replace only attachments whose technique render-target definitions changed.
         void setDirtyAttachments(const std::vector<Fx::Types::RenderTarget>& attachments);
 

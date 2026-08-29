@@ -218,6 +218,15 @@ namespace MWRender
         /// Request a one-shot production pass capture when OPENMW_ATMOSPHERE_DIAGNOSTICS_DIR is set.
         void requestAtmosphereDiagnosticCapture();
 
+        /// Request a one-shot production pass capture in an explicitly owned artifact directory.
+        void requestAtmosphereDiagnosticCapture(const std::filesystem::path& outputDirectory);
+
+        /// Report whether the production multi-frame diagnostic capture still owns transient render state.
+        bool atmosphereDiagnosticCaptureInProgress() const;
+
+        /// Invalidate both frame canvases so controlled replay cannot consume bootstrap atmosphere history.
+        void invalidateAtmosphereHistory();
+
         /// Apply any transient render-state transition required by the diagnostic comparison.
         void advanceAtmosphereDiagnosticComparison();
 

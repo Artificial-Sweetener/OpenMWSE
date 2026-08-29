@@ -12,7 +12,6 @@
 
 #include <osg/AlphaFunc>
 #include <osg/BlendFunc>
-#include <osg/GLExtensions>
 #include <osg/Geometry>
 #include <osg/GraphicsContext>
 #include <osg/Group>
@@ -23,7 +22,6 @@
 #include <osg/Texture2D>
 #include <osg/Uniform>
 #include <osg/Viewport>
-#include <osgDB/WriteFile>
 #include <osgUtil/IntersectionVisitor>
 #include <osgUtil/LineSegmentIntersector>
 #include <osgViewer/Viewer>
@@ -33,14 +31,11 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
-#include <iomanip>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -80,43 +75,11 @@ namespace MWRender
             const CapturedColor& at(int x, int y) const { return mPixels[static_cast<std::size_t>(y * mWidth + x)]; }
         };
 
-        /// Record real-context compilation and execution costs for the compatibility sky pass.
-        struct SkyTiming
-        {
-            double mShaderCompilationMilliseconds = 0.0;
-            double mFirstFrameMilliseconds = 0.0;
-            double mCpuSubmissionMilliseconds = 0.0;
-            double mGpuMilliseconds = -1.0;
-            std::string mRenderer;
-        };
-
         /// Interpolate independent reference colors without production shader code.
         CapturedColor mix(const CapturedColor& from, const CapturedColor& to, float factor)
         {
             return { std::lerp(from.mRed, to.mRed, factor), std::lerp(from.mGreen, to.mGreen, factor),
                 std::lerp(from.mBlue, to.mBlue, factor) };
-        }
-
-        /// Write a scene-linear harness capture as a tone-mapped validation PNG.
-        void writeDisplayImage(const CapturedImage& source, const std::filesystem::path& path)
-        {
-            osg::ref_ptr<osg::Image> image = new osg::Image;
-            image->allocateImage(source.mWidth, source.mHeight, 1, GL_RGB, GL_UNSIGNED_BYTE);
-            for (int y = 0; y < source.mHeight; ++y)
-                for (int x = 0; x < source.mWidth; ++x)
-                {
-                    const CapturedColor& hdr = source.at(x, y);
-                    unsigned char* output = image->data(x, y);
-                    const auto encode = [](float value) {
-                        const float mapped = std::max(value, 0.f) / (1.f + std::max(value, 0.f));
-                        return static_cast<unsigned char>(std::round(std::pow(mapped, 1.f / 2.2f) * 255.f));
-                    };
-                    output[0] = encode(hdr.mRed);
-                    output[1] = encode(hdr.mGreen);
-                    output[2] = encode(hdr.mBlue);
-                }
-            if (!osgDB::writeImageFile(*image, path.string()))
-                throw std::runtime_error("Failed writing atmosphere validation image: " + path.string());
         }
 
         /// Create a filtered stock-like star texture with dark translucent edge texels around a bright core.
@@ -329,8 +292,7 @@ namespace MWRender
         public:
             /// Create a configurable sky capture or timing context around the supplied dome geometry.
             explicit AtmosphereRenderHarness(osg::ref_ptr<osg::Node> dome, int width = captureSize,
-                int height = captureSize, double verticalFov = 70.0, bool captureOutput = true,
-                double projectionAspectRatio = 0.0)
+                int height = captureSize, double verticalFov = 70.0, double projectionAspectRatio = 0.0)
                 : mWidth(width)
                 , mHeight(height)
             {
@@ -355,21 +317,10 @@ namespace MWRender
                 camera->setClearColor(osg::Vec4(0.f, 0.f, 0.f, 1.f));
                 camera->setClearMask(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
                 camera->setRenderTargetImplementation(osg::Camera::FRAME_BUFFER_OBJECT);
-                if (captureOutput)
-                {
-                    mCapture = new osg::Image;
-                    mCapture->allocateImage(width, height, 1, GL_RGBA, GL_FLOAT);
-                    mCapture->setInternalTextureFormat(GL_RGBA16F);
-                    camera->attach(osg::Camera::COLOR_BUFFER, mCapture);
-                }
-                else
-                {
-                    mOutputTexture = new osg::Texture2D;
-                    mOutputTexture->setTextureSize(width, height);
-                    mOutputTexture->setInternalFormat(GL_RGBA16F);
-                    mOutputTexture->setResizeNonPowerOfTwoHint(false);
-                    camera->attach(osg::Camera::COLOR_BUFFER, mOutputTexture);
-                }
+                mCapture = new osg::Image;
+                mCapture->allocateImage(width, height, 1, GL_RGBA, GL_FLOAT);
+                mCapture->setInternalTextureFormat(GL_RGBA16F);
+                camera->attach(osg::Camera::COLOR_BUFFER, mCapture);
 
                 mRoot = new osg::Group;
                 mSimulationTime = new osg::Uniform("osg_SimulationTime", 0.f);
@@ -466,66 +417,6 @@ namespace MWRender
                 mSunDiscColor = sunDiscColor;
                 mQuality = quality;
                 applyAtmosphereState();
-            }
-
-            /// Measure compilation, first-frame, CPU submission, and GPU execution for one sky direction.
-            SkyTiming benchmark(const osg::Vec3f& direction, int measuredFrames, bool reflection = false)
-            {
-                SkyTiming timing;
-                if (!mValid || mCapture)
-                    return timing;
-                const osg::Vec3f up
-                    = std::abs(direction.z()) > 0.99f ? osg::Vec3f(0.f, 1.f, 0.f) : osg::Vec3f(0.f, 0.f, 1.f);
-                mReflection->set(reflection);
-                osg::Matrixf view = osg::Matrixf::lookAt(osg::Vec3f(), direction, up);
-                if (reflection)
-                    view *= osg::Matrixf::scale(1.f, 1.f, -1.f);
-                mViewer.getCamera()->setViewMatrix(view);
-                mContext->makeCurrent();
-                const auto compilationStart = std::chrono::steady_clock::now();
-                mProgram->compileGLObjects(*mContext->getState());
-                glFinish();
-                const auto compilationEnd = std::chrono::steady_clock::now();
-                timing.mShaderCompilationMilliseconds
-                    = std::chrono::duration<double, std::milli>(compilationEnd - compilationStart).count();
-
-                const auto firstFrameStart = std::chrono::steady_clock::now();
-                mViewer.frame();
-                mContext->makeCurrent();
-                glFinish();
-                const auto firstFrameEnd = std::chrono::steady_clock::now();
-                timing.mFirstFrameMilliseconds
-                    = std::chrono::duration<double, std::milli>(firstFrameEnd - firstFrameStart).count();
-                if (const GLubyte* renderer = glGetString(GL_RENDERER))
-                    timing.mRenderer = reinterpret_cast<const char*>(renderer);
-
-                mViewer.frame();
-                mContext->makeCurrent();
-                glFinish();
-                osg::GLExtensions* extensions = osg::GLExtensions::Get(mContext->getState()->getContextID(), true);
-                if (extensions == nullptr || extensions->glGenQueries == nullptr || extensions->glBeginQuery == nullptr
-                    || extensions->glEndQuery == nullptr || extensions->glGetQueryObjectui64v == nullptr
-                    || extensions->glDeleteQueries == nullptr)
-                    return timing;
-
-                GLuint query = 0;
-                extensions->glGenQueries(1, &query);
-                extensions->glBeginQuery(GL_TIME_ELAPSED, query);
-                const auto submissionStart = std::chrono::steady_clock::now();
-                for (int frame = 0; frame < measuredFrames; ++frame)
-                    mViewer.frame();
-                mContext->makeCurrent();
-                extensions->glEndQuery(GL_TIME_ELAPSED);
-                const auto submissionEnd = std::chrono::steady_clock::now();
-                timing.mCpuSubmissionMilliseconds
-                    = std::chrono::duration<double, std::milli>(submissionEnd - submissionStart).count()
-                    / static_cast<double>(measuredFrames);
-                GLuint64 elapsedNanoseconds = 0;
-                extensions->glGetQueryObjectui64v(query, GL_QUERY_RESULT, &elapsedNanoseconds);
-                extensions->glDeleteQueries(1, &query);
-                timing.mGpuMilliseconds
-                    = static_cast<double>(elapsedNanoseconds) / 1'000'000.0 / static_cast<double>(measuredFrames);
-                return timing;
             }
 
             /// Capture the main-view sky for a world-space viewing direction.
@@ -625,7 +516,6 @@ namespace MWRender
             osg::ref_ptr<osg::Uniform> mReflection;
             osg::ref_ptr<osg::Uniform> mSimulationTime;
             osg::ref_ptr<osg::Image> mCapture;
-            osg::ref_ptr<osg::Texture2D> mOutputTexture;
             osg::ref_ptr<osg::Program> mProgram;
             osg::Vec3f mSunDirection = normalized({ 1.f, 0.f, 0.08f });
             osg::Vec4f mCloudParameters;
@@ -907,44 +797,6 @@ namespace MWRender
             context->releaseContext();
             context->close();
             return result;
-        }
-
-        /// Write a production foliage color capture through the harness's display transfer function.
-        void writeFoliagePassCapture(const FoliagePassCapture& capture, const std::filesystem::path& path)
-        {
-            CapturedImage display{ capture.mWidth, capture.mHeight, {} };
-            display.mPixels.reserve(capture.mColors.size());
-            for (const osg::Vec4f& color : capture.mColors)
-                display.mPixels.push_back({ color.x(), color.y(), color.z() });
-            writeDisplayImage(display, path);
-        }
-
-        /// Serialize scene-linear color and normalized depth for the cross-pass atmosphere regression harness.
-        void writeFoliagePassData(const FoliagePassCapture& capture, const std::filesystem::path& path)
-        {
-            constexpr std::array<char, 8> magic{ 'O', 'M', 'W', 'F', 'O', 'L', 'I', '3' };
-            std::ofstream output(path, std::ios::binary);
-            if (!output)
-                throw std::runtime_error("Unable to create foliage pass capture: " + path.string());
-            const std::uint32_t width = static_cast<std::uint32_t>(capture.mWidth);
-            const std::uint32_t height = static_cast<std::uint32_t>(capture.mHeight);
-            output.write(magic.data(), static_cast<std::streamsize>(magic.size()));
-            output.write(reinterpret_cast<const char*>(&width), sizeof(width));
-            output.write(reinterpret_cast<const char*>(&height), sizeof(height));
-            output.write(reinterpret_cast<const char*>(capture.mEyePosition.ptr()), sizeof(float) * 3);
-            output.write(reinterpret_cast<const char*>(capture.mViewDirection.ptr()), sizeof(float) * 3);
-            output.write(reinterpret_cast<const char*>(&capture.mVerticalFov), sizeof(capture.mVerticalFov));
-            output.write(reinterpret_cast<const char*>(&capture.mNearPlane), sizeof(capture.mNearPlane));
-            output.write(reinterpret_cast<const char*>(&capture.mFarPlane), sizeof(capture.mFarPlane));
-            output.write(reinterpret_cast<const char*>(&capture.mFogStart), sizeof(capture.mFogStart));
-            output.write(reinterpret_cast<const char*>(&capture.mFogEnd), sizeof(capture.mFogEnd));
-            output.write(reinterpret_cast<const char*>(capture.mFogColor.ptr()), sizeof(float) * 4);
-            output.write(reinterpret_cast<const char*>(capture.mColors.data()),
-                static_cast<std::streamsize>(capture.mColors.size() * sizeof(osg::Vec4f)));
-            output.write(reinterpret_cast<const char*>(capture.mDepths.data()),
-                static_cast<std::streamsize>(capture.mDepths.size() * sizeof(float)));
-            if (!output)
-                throw std::runtime_error("Unable to finish foliage pass capture: " + path.string());
         }
 
         /// Build the flattened, merged static-instance structure used by distant object paging.
@@ -1631,81 +1483,6 @@ namespace MWRender
                 << "The reflection render must preserve spatial sky detail instead of collapsing to a flat tint";
         }
 
-        TEST(MWRenderAtmosphereTest, writesDeterministicVisualArtifactsWhenRequested)
-        {
-            char* requestedDirectory = nullptr;
-            std::size_t size = 0;
-            if (_dupenv_s(&requestedDirectory, &size, "OPENMW_ATMOSPHERE_ARTIFACT_DIR") != 0
-                || requestedDirectory == nullptr)
-                GTEST_SKIP() << "Set OPENMW_ATMOSPHERE_ARTIFACT_DIR to write validation images";
-            const std::filesystem::path outputDirectory(requestedDirectory);
-            std::free(requestedDirectory);
-            std::filesystem::create_directories(outputDirectory);
-
-            AtmosphereRenderHarness sunHarness(createHarnessDome(), 1920, 1080, 70.0);
-            ASSERT_TRUE(sunHarness.isValid());
-            sunHarness.setAtmosphereVolumes({}, {}, { 1.f, 0.82f, 0.62f, 1.f });
-            writeDisplayImage(sunHarness.renderImage({ 1.f, 0.f, 0.08f }), outputDirectory / "analytic-sun.png");
-
-            constexpr int reflectionTargetSize = 512;
-            constexpr double widescreenAspectRatio = 16.0 / 9.0;
-            AtmosphereRenderHarness reflectionHarness(
-                createHarnessDome(), reflectionTargetSize, reflectionTargetSize, 70.0, true, widescreenAspectRatio);
-            ASSERT_TRUE(reflectionHarness.isValid());
-            reflectionHarness.setAtmosphereVolumes({ 0.58f, 0.9f, 48000.f, 22000.f }, {}, { 1.f, 0.82f, 0.62f, 1.f });
-            writeDisplayImage(
-                reflectionHarness.renderReflectedImage({ 3400.f, -1700.f, 850.f }, { 0.82f, 0.31f, 0.48f }),
-                outputDirectory / "water-reflection-sky.png");
-
-            AtmosphereRenderHarness starHarness(createHarnessDome(), 960, 540, 70.0);
-            ASSERT_TRUE(starHarness.isValid());
-            const osg::ref_ptr<osg::Texture2D> starTexture = createFilteredStarTexture();
-            writeDisplayImage(starHarness.renderNightStars(*starTexture, osg::Vec4f(0.78f, 0.42f, 0.24f, 1.f), 0.72f),
-                outputDirectory / "emissive-stars-over-dawn.png");
-        }
-
-        TEST(MWRenderAtmosphereTest, writesRepresentativeSkyPerformanceReportWhenRequested)
-        {
-            char* requestedPath = nullptr;
-            std::size_t size = 0;
-            if (_dupenv_s(&requestedPath, &size, "OPENMW_ATMOSPHERE_SKY_PERFORMANCE_REPORT") != 0
-                || requestedPath == nullptr)
-                GTEST_SKIP() << "Set OPENMW_ATMOSPHERE_SKY_PERFORMANCE_REPORT to benchmark the atmosphere sky pass";
-            const std::filesystem::path reportPath(requestedPath);
-            std::free(requestedPath);
-            if (!reportPath.parent_path().empty())
-                std::filesystem::create_directories(reportPath.parent_path());
-            std::ofstream report(reportPath);
-            ASSERT_TRUE(report) << "Unable to create " << reportPath;
-            report << "renderer,mode,quality,output_width,output_height,target_width,target_height,shader_compile_ms,"
-                      "first_frame_ms,cpu_submission_ms,gpu_ms\n";
-            report << std::fixed << std::setprecision(4);
-
-            constexpr int outputWidth = 3840;
-            constexpr int outputHeight = 2160;
-            constexpr int reflectionTargetSize = 512;
-            constexpr double outputAspectRatio = static_cast<double>(outputWidth) / outputHeight;
-            constexpr int measuredFrames = 64;
-            for (int quality = 0; quality < 4; ++quality)
-                for (bool cloudsEnabled : { false, true })
-                {
-                    AtmosphereRenderHarness harness(createHarnessDome(), reflectionTargetSize, reflectionTargetSize,
-                        70.0, false, outputAspectRatio);
-                    ASSERT_TRUE(harness.isValid());
-                    const osg::Vec4f cloudParameters
-                        = cloudsEnabled ? osg::Vec4f(0.58f, 0.9f, 48000.f, 22000.f) : osg::Vec4f();
-                    harness.setAtmosphereVolumes(cloudParameters, {}, { 1.f, 0.82f, 0.62f, 1.f }, quality);
-                    const SkyTiming timing = harness.benchmark({ 1.f, 0.f, 0.3f }, measuredFrames, true);
-                    ASSERT_GE(timing.mGpuMilliseconds, 0.0) << "GPU timer queries are unavailable";
-                    report << '"' << timing.mRenderer << "\","
-                           << (cloudsEnabled ? "reflection-clouds" : "reflection-clear") << ',' << quality << ','
-                           << outputWidth << ',' << outputHeight << ',' << reflectionTargetSize << ','
-                           << reflectionTargetSize << ',' << timing.mShaderCompilationMilliseconds << ','
-                           << timing.mFirstFrameMilliseconds << ',' << timing.mCpuSubmissionMilliseconds << ','
-                           << timing.mGpuMilliseconds << '\n';
-                }
-        }
-
         TEST(MWRenderAtmosphereTest, externalVfsDomePreservesDirectionalScattering)
         {
             const std::optional<std::filesystem::path> dataDirectory = getExternalAtmosphereDataDirectory();
@@ -1794,63 +1571,6 @@ namespace MWRender
             })) << "The active tree did not resolve its production Bitter Coast leaf texture";
         }
 
-        TEST(MWRenderAtmosphereTest, externalVfsBitterCoastTreeVariantsRenderAtInspectableScale)
-        {
-            const std::vector<std::filesystem::path> dataDirectories = getExternalFoliageDataDirectories();
-            if (dataDirectories.empty())
-                GTEST_SKIP()
-                    << "Set OPENMW_FOLIAGE_TEST_DATA to ordered semicolon-separated production data directories";
-
-            char* artifactDirectoryValue = nullptr;
-            std::size_t artifactDirectorySize = 0;
-            if (_dupenv_s(&artifactDirectoryValue, &artifactDirectorySize, "OPENMW_FOLIAGE_ARTIFACT_DIR") != 0
-                || artifactDirectoryValue == nullptr)
-                GTEST_SKIP() << "Set OPENMW_FOLIAGE_ARTIFACT_DIR to inspect the active Bitter Coast tree variants";
-            const std::filesystem::path artifactDirectory(artifactDirectoryValue);
-            std::free(artifactDirectoryValue);
-            std::filesystem::create_directories(artifactDirectory);
-
-            osg::ref_ptr<osg::GraphicsContext::Traits> traits = new osg::GraphicsContext::Traits;
-            traits->width = 64;
-            traits->height = 64;
-            traits->pbuffer = true;
-            traits->doubleBuffer = false;
-            traits->glContextVersion = "2.1";
-            traits->glContextProfileMask = 0;
-            osg::ref_ptr<osg::GraphicsContext> context = osg::GraphicsContext::createGraphicsContext(traits);
-            ASSERT_TRUE(context && context->realize() && context->makeCurrent());
-            SceneUtil::GetGLExtensionsOperation getExtensions;
-            getExtensions(context);
-
-            std::size_t renderedVariantCount = 0;
-            for (int variant = 1; variant <= 13; ++variant)
-            {
-                const std::string suffix = variant < 10 ? "0" + std::to_string(variant) : std::to_string(variant);
-                const VFS::Path::Normalized modelPath("meshes/f/flora_bc_tree_" + suffix + ".nif");
-                osg::ref_ptr<osg::Node> tree = loadVfsFoliageModel(dataDirectories, modelPath);
-                if (!tree)
-                    continue;
-                const float radius = tree->getBound().radius();
-                for (const int azimuth : { 0, 180 })
-                {
-                    const FoliagePassCapture capture
-                        = renderProductionFoliagePass(*tree, 2500.f, static_cast<float>(azimuth));
-                    ASSERT_FALSE(capture.mColors.empty()) << modelPath.value();
-                    const std::size_t surfaceCount = static_cast<std::size_t>(std::count_if(
-                        capture.mDepths.begin(), capture.mDepths.end(), [](float depth) { return depth < 0.999999f; }));
-                    EXPECT_GT(surfaceCount, 100u)
-                        << modelPath.value() << " radius=" << radius << " azimuth=" << azimuth;
-                    writeFoliagePassCapture(capture,
-                        artifactDirectory
-                            / ("production-tree-" + suffix + "-azimuth-" + std::to_string(azimuth) + ".png"));
-                }
-                ++renderedVariantCount;
-            }
-            context->releaseContext();
-            context->close();
-            EXPECT_EQ(renderedVariantCount, 13u);
-        }
-
         TEST(MWRenderAtmosphereTest, externalVfsObjectPagedBitterCoastTreesPreserveFoggedDetail)
         {
             const std::vector<std::filesystem::path> dataDirectories = getExternalFoliageDataDirectories();
@@ -1895,39 +1615,6 @@ namespace MWRender
             const std::size_t surfaceCount = static_cast<std::size_t>(std::count_if(
                 capture.mDepths.begin(), capture.mDepths.end(), [](float depth) { return depth < 0.999999f; }));
             EXPECT_GT(surfaceCount, 500u) << "clusterRadius=" << pagedCluster->getBound().radius();
-
-            char* artifactDirectoryValue = nullptr;
-            std::size_t artifactDirectorySize = 0;
-            if (_dupenv_s(&artifactDirectoryValue, &artifactDirectorySize, "OPENMW_FOLIAGE_ARTIFACT_DIR") == 0
-                && artifactDirectoryValue != nullptr)
-            {
-                const std::filesystem::path artifactDirectory(artifactDirectoryValue);
-                std::free(artifactDirectoryValue);
-                std::filesystem::create_directories(artifactDirectory);
-                writeFoliagePassCapture(capture, artifactDirectory / "production-object-paged-tree-cluster.png");
-                const FoliagePassCapture unattenuated = renderProductionFoliagePass(
-                    *pagedCluster, 9000.f, 0.f, { 229376.f, 229377.f, capture.mFogColor });
-                const FoliagePassCapture heavyFog = renderProductionFoliagePass(
-                    *pagedCluster, 9000.f, 0.f, { -8355.84f, 30965.76f, { 0.443f, 0.529f, 0.616f, 1.f } });
-                EXPECT_EQ(unattenuated.mDepths, capture.mDepths);
-                EXPECT_EQ(heavyFog.mDepths, capture.mDepths);
-                writeFoliagePassCapture(
-                    unattenuated, artifactDirectory / "production-object-paged-tree-cluster-no-fog.png");
-                writeFoliagePassCapture(
-                    heavyFog, artifactDirectory / "production-object-paged-tree-cluster-heavy-fog.png");
-            }
-
-            char* capturePathValue = nullptr;
-            std::size_t capturePathSize = 0;
-            if (_dupenv_s(&capturePathValue, &capturePathSize, "OPENMW_FOLIAGE_CAPTURE_PATH") == 0
-                && capturePathValue != nullptr)
-            {
-                const std::filesystem::path capturePath(capturePathValue);
-                std::free(capturePathValue);
-                if (!capturePath.parent_path().empty())
-                    std::filesystem::create_directories(capturePath.parent_path());
-                writeFoliagePassData(capture, capturePath);
-            }
         }
 
         TEST(MWRenderAtmosphereTest, externalVfsBitterCoastTreePreservesRadianceAcrossAlphaCoverageAdjustment)
@@ -1960,18 +1647,6 @@ namespace MWRender
             const FoliagePassCapture adjusted = renderProductionFoliagePass(*adjustedTree, 20000.f);
             ASSERT_FALSE(unadjusted.mColors.empty());
             ASSERT_EQ(adjusted.mColors.size(), unadjusted.mColors.size());
-
-            char* artifactDirectoryValue = nullptr;
-            std::size_t artifactDirectorySize = 0;
-            if (_dupenv_s(&artifactDirectoryValue, &artifactDirectorySize, "OPENMW_FOLIAGE_ARTIFACT_DIR") == 0
-                && artifactDirectoryValue != nullptr)
-            {
-                const std::filesystem::path artifactDirectory(artifactDirectoryValue);
-                std::free(artifactDirectoryValue);
-                std::filesystem::create_directories(artifactDirectory);
-                writeFoliagePassCapture(unadjusted, artifactDirectory / "production-tree-unadjusted.png");
-                writeFoliagePassCapture(adjusted, artifactDirectory / "production-tree-adjusted.png");
-            }
 
             std::size_t adjustedSurfaceCount = 0;
             std::size_t unadjustedSurfaceCount = 0;

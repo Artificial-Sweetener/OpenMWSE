@@ -14,6 +14,7 @@ Use the categorized sections below to quickly access technical references, moddi
 
         reference/modding/index
         reference/postprocessing/index
+        reference/diagnostics/index
 
     .. toctree::
         :caption: Lua

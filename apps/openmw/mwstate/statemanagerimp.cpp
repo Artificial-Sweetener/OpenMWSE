@@ -208,6 +208,104 @@ void MWState::StateManager::resumeGame()
     MWBase::Environment::get().getLuaManager()->gameLoaded();
 }
 
+ESM::SavedGame MWState::StateManager::makeSaveProfile(std::string_view description, bool includeScreenshot) const
+{
+    ESM::SavedGame profile;
+    MWBase::World& world = *MWBase::Environment::get().getWorld();
+    MWWorld::Ptr player = world.getPlayerPtr();
+
+    profile.mContentFiles = world.getContentFiles();
+    profile.mPlayerName = player.get<ESM::NPC>()->mBase->mName;
+    profile.mPlayerLevel = player.getClass().getNpcStats(player).getLevel();
+
+    const ESM::RefId& classId = player.get<ESM::NPC>()->mBase->mClass;
+    if (world.getStore().get<ESM::Class>().isDynamic(classId))
+        profile.mPlayerClassName = world.getStore().get<ESM::Class>().find(classId)->mName;
+    else
+        profile.mPlayerClassId = classId;
+
+    const MWMechanics::CreatureStats& stats = player.getClass().getCreatureStats(player);
+    profile.mPlayerCellName = world.getCellName();
+    profile.mInGameTime = world.getTimeManager()->getEpochTimeStamp();
+    profile.mTimePlayed = mTimePlayed;
+    profile.mDescription = description;
+    profile.mCurrentDay = world.getTimeManager()->getTimeStamp().getDay();
+    profile.mCurrentHealth = stats.getHealth().getCurrent();
+    profile.mMaximumHealth = stats.getHealth().getModified();
+
+    if (includeScreenshot)
+    {
+        Log(Debug::Info) << "Making a screenshot for saved game '" << description << "'";
+        writeScreenshot(profile.mScreenshot);
+    }
+    return profile;
+}
+
+std::vector<std::byte> MWState::StateManager::serializeGameState(const ESM::SavedGame& profile)
+{
+    std::stringstream stream;
+    ESM::ESMWriter writer;
+
+    for (const std::string& contentFile : MWBase::Environment::get().getWorld()->getContentFiles())
+        writer.addMaster(contentFile, 0);
+
+    writer.setFormatVersion(ESM::CurrentSaveGameFormatVersion);
+    writer.setVersion(0);
+    writer.setType(0);
+    writer.setAuthor("");
+    writer.setDescription("");
+
+    const size_t recordCount = 1 + MWBase::Environment::get().getJournal()->countSavedGameRecords()
+        + MWBase::Environment::get().getLuaManager()->countSavedGameRecords()
+        + MWBase::Environment::get().getWorld()->countSavedGameRecords()
+        + MWBase::Environment::get().getScriptManager()->getGlobalScripts().countSavedGameRecords()
+        + MWBase::Environment::get().getDialogueManager()->countSavedGameRecords()
+        + MWBase::Environment::get().getMechanicsManager()->countSavedGameRecords()
+        + MWBase::Environment::get().getInputManager()->countSavedGameRecords()
+        + MWBase::Environment::get().getWindowManager()->countSavedGameRecords();
+    writer.setRecordCount(static_cast<int>(recordCount));
+    writer.save(stream);
+
+    Loading::Listener& listener = *MWBase::Environment::get().getWindowManager()->getLoadingScreen();
+    listener.setProgressRange(MWBase::Environment::get().getWorld()->countSavedGameCells());
+    listener.setLabel("#{OMWEngine:SavingInProgress}", true);
+    Loading::ScopedLoad load(&listener);
+
+    writer.startRecord(ESM::REC_SAVE);
+    profile.save(writer);
+    writer.endRecord(ESM::REC_SAVE);
+    MWBase::Environment::get().getJournal()->write(writer, listener);
+    MWBase::Environment::get().getDialogueManager()->write(writer, listener);
+    // Lua state must precede world-local scripts because those records depend on the Lua manager's serialized state.
+    MWBase::Environment::get().getLuaManager()->write(writer, listener);
+    MWBase::Environment::get().getWorld()->write(writer, listener);
+    MWBase::Environment::get().getScriptManager()->getGlobalScripts().write(writer, listener);
+    MWBase::Environment::get().getMechanicsManager()->write(writer, listener);
+    MWBase::Environment::get().getInputManager()->write(writer, listener);
+    MWBase::Environment::get().getWindowManager()->write(writer, listener);
+
+    if (static_cast<size_t>(writer.getRecordCount()) != recordCount + 1)
+        Log(Debug::Warning) << "Warning: number of written savegame records does not match. Estimated: "
+                            << recordCount + 1 << ", written: " << writer.getRecordCount();
+    writer.close();
+    if (stream.fail())
+        throw std::runtime_error("Write operation failed (memory stream): " + std::generic_category().message(errno));
+
+    const std::string bytes = stream.str();
+    const auto* begin = reinterpret_cast<const std::byte*>(bytes.data());
+    return { begin, begin + bytes.size() };
+}
+
+std::vector<std::byte> MWState::StateManager::captureDiagnosticSnapshot(std::string_view description)
+{
+    if (mState != State_Running)
+        throw std::runtime_error("diagnostic snapshot requires a running game");
+    MWBase::Environment::get().getLuaManager()->applyDelayedActions();
+    MWBase::Environment::get().getWindowManager()->asyncPrepareSaveMap();
+    MWBase::Environment::get().getMechanicsManager()->persistAnimationStates();
+    return serializeGameState(makeSaveProfile(description, false));
+}
+
 void MWState::StateManager::saveGame(std::string_view description, const Slot* slot)
 {
     MWBase::Environment::get().getLuaManager()->applyDelayedActions();
@@ -229,35 +327,7 @@ void MWState::StateManager::saveGame(std::string_view description, const Slot* s
             mCharacterManager.setCurrentCharacter(character);
         }
 
-        ESM::SavedGame profile;
-
-        MWBase::World& world = *MWBase::Environment::get().getWorld();
-
-        MWWorld::Ptr player = world.getPlayerPtr();
-
-        profile.mContentFiles = world.getContentFiles();
-
-        profile.mPlayerName = player.get<ESM::NPC>()->mBase->mName;
-        profile.mPlayerLevel = player.getClass().getNpcStats(player).getLevel();
-
-        const ESM::RefId& classId = player.get<ESM::NPC>()->mBase->mClass;
-        if (world.getStore().get<ESM::Class>().isDynamic(classId))
-            profile.mPlayerClassName = world.getStore().get<ESM::Class>().find(classId)->mName;
-        else
-            profile.mPlayerClassId = classId;
-
-        const MWMechanics::CreatureStats& stats = player.getClass().getCreatureStats(player);
-
-        profile.mPlayerCellName = world.getCellName();
-        profile.mInGameTime = world.getTimeManager()->getEpochTimeStamp();
-        profile.mTimePlayed = mTimePlayed;
-        profile.mDescription = description;
-        profile.mCurrentDay = world.getTimeManager()->getTimeStamp().getDay();
-        profile.mCurrentHealth = stats.getHealth().getCurrent();
-        profile.mMaximumHealth = stats.getHealth().getModified();
-
-        Log(Debug::Info) << "Making a screenshot for saved game '" << description << "'";
-        writeScreenshot(profile.mScreenshot);
+        ESM::SavedGame profile = makeSaveProfile(description, true);
 
         if (!slot)
             slot = character->createSlot(profile);
@@ -269,72 +339,11 @@ void MWState::StateManager::saveGame(std::string_view description, const Slot* s
 
         Log(Debug::Info) << "Writing saved game '" << description << "' for character '" << profile.mPlayerName << "'";
 
-        // Write to a memory stream first. If there is an exception during the save process, we don't want to trash the
-        // existing save file we are overwriting.
-        std::stringstream stream;
-
-        ESM::ESMWriter writer;
-
-        for (const std::string& contentFile : MWBase::Environment::get().getWorld()->getContentFiles())
-            writer.addMaster(contentFile, 0); // not using the size information anyway -> use value of 0
-
-        writer.setFormatVersion(ESM::CurrentSaveGameFormatVersion);
-
-        // all unused
-        writer.setVersion(0);
-        writer.setType(0);
-        writer.setAuthor("");
-        writer.setDescription("");
-
-        size_t recordCount = 1 // saved game header
-            + MWBase::Environment::get().getJournal()->countSavedGameRecords()
-            + MWBase::Environment::get().getLuaManager()->countSavedGameRecords()
-            + MWBase::Environment::get().getWorld()->countSavedGameRecords()
-            + MWBase::Environment::get().getScriptManager()->getGlobalScripts().countSavedGameRecords()
-            + MWBase::Environment::get().getDialogueManager()->countSavedGameRecords()
-            + MWBase::Environment::get().getMechanicsManager()->countSavedGameRecords()
-            + MWBase::Environment::get().getInputManager()->countSavedGameRecords()
-            + MWBase::Environment::get().getWindowManager()->countSavedGameRecords();
-        writer.setRecordCount(static_cast<int>(recordCount));
-
-        writer.save(stream);
-
-        Loading::Listener& listener = *MWBase::Environment::get().getWindowManager()->getLoadingScreen();
-        // Using only Cells for progress information, since they typically have the largest records by far
-        listener.setProgressRange(MWBase::Environment::get().getWorld()->countSavedGameCells());
-        listener.setLabel("#{OMWEngine:SavingInProgress}", true);
-
-        Loading::ScopedLoad load(&listener);
-
-        writer.startRecord(ESM::REC_SAVE);
-        slot->mProfile.save(writer);
-        writer.endRecord(ESM::REC_SAVE);
-
-        MWBase::Environment::get().getJournal()->write(writer, listener);
-        MWBase::Environment::get().getDialogueManager()->write(writer, listener);
-        // LuaManager::write should be called before World::write because world also saves
-        // local scripts that depend on LuaManager.
-        MWBase::Environment::get().getLuaManager()->write(writer, listener);
-        MWBase::Environment::get().getWorld()->write(writer, listener);
-        MWBase::Environment::get().getScriptManager()->getGlobalScripts().write(writer, listener);
-        MWBase::Environment::get().getMechanicsManager()->write(writer, listener);
-        MWBase::Environment::get().getInputManager()->write(writer, listener);
-        MWBase::Environment::get().getWindowManager()->write(writer, listener);
-
-        // Ensure we have written the number of records that was estimated
-        if (static_cast<size_t>(writer.getRecordCount()) != recordCount + 1) // 1 extra for TES3 record
-            Log(Debug::Warning) << "Warning: number of written savegame records does not match. Estimated: "
-                                << recordCount + 1 << ", written: " << writer.getRecordCount();
-
-        writer.close();
-
-        if (stream.fail())
-            throw std::runtime_error(
-                "Write operation failed (memory stream): " + std::generic_category().message(errno));
+        const std::vector<std::byte> snapshot = serializeGameState(slot->mProfile);
 
         // All good, write to file
         std::ofstream filestream(slot->mPath, std::ios::binary);
-        filestream << stream.rdbuf();
+        filestream.write(reinterpret_cast<const char*>(snapshot.data()), static_cast<std::streamsize>(snapshot.size()));
 
         if (filestream.fail())
             throw std::runtime_error("Write operation failed (file stream): " + std::generic_category().message(errno));

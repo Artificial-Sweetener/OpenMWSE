@@ -1,4 +1,5 @@
 #include <components/debug/debugging.hpp>
+#include <components/diagnostics/localtransport.hpp>
 #include <components/fallback/fallback.hpp>
 #include <components/fallback/validate.hpp>
 #include <components/files/configurationmanager.hpp>
@@ -157,6 +158,25 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
     engine.setActivationDistanceOverride(variables["activate-dist"].as<int>());
     engine.enableFontExport(variables["export-fonts"].as<bool>());
     engine.setRandomSeed(variables["random-seed"].as<unsigned int>());
+
+    std::string diagnosticEndpoint = variables["diagnostic-session"].as<std::string>();
+    if (diagnosticEndpoint.empty())
+    {
+        if (const char* enabled = std::getenv("OPENMW_DIAGNOSTICS");
+            enabled != nullptr && std::string_view(enabled) == "1")
+            diagnosticEndpoint = Diagnostics::defaultLocalEndpoint();
+    }
+    else if (diagnosticEndpoint == "default")
+        diagnosticEndpoint = Diagnostics::defaultLocalEndpoint();
+
+    if (!diagnosticEndpoint.empty())
+    {
+        std::filesystem::path artifactRoot = variables["diagnostic-artifacts"].as<Files::MaybeQuotedPath>().u8string();
+        if (artifactRoot.empty())
+            artifactRoot = cfgMgr.getUserDataPath() / "diagnostics";
+        engine.configureDiagnostics(std::move(diagnosticEndpoint), std::move(artifactRoot),
+            variables["diagnostic-child"].as<bool>(), variables["diagnostic-fixed-dt"].as<double>());
+    }
 
     return true;
 }

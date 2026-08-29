@@ -718,6 +718,12 @@ namespace MWRender
         return mSky.get();
     }
 
+    void RenderingManager::invalidateAtmosphereHistory()
+    {
+        mAtmosphereHistoryLighting.reset();
+        mPostProcessor->invalidateAtmosphereHistory();
+    }
+
     void RenderingManager::update(float dt, bool paused)
     {
         reportStats();

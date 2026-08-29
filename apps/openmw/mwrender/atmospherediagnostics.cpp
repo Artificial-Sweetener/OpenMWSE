@@ -178,6 +178,12 @@ namespace MWRender
         }
     }
 
+    bool AtmosphereDiagnostics::captureInProgress() const
+    {
+        std::lock_guard lock(mRequestMutex);
+        return mCaptureStage != CaptureStage::Idle;
+    }
+
     AtmosphereDiagnostics::ComparisonAction AtmosphereDiagnostics::advanceComparison()
     {
         std::lock_guard lock(mRequestMutex);

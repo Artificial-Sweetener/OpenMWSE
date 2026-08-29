@@ -67,6 +67,11 @@ file(GLOB UNITTEST_SRC_FILES
     files/conversiontests.cpp
     files/hash.cpp
 
+    diagnostics/protocol.cpp
+    diagnostics/commandqueue.cpp
+    diagnostics/capsule.cpp
+    diagnostics/session.cpp
+
     toutf8/toutf8.cpp
 
     esm4/includes.cpp

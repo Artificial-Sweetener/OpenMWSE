@@ -220,6 +220,9 @@ namespace MWRender
 
         PostProcessor* getPostProcessor();
 
+        /// Reject retained atmosphere lighting and volume history after a controlled replay discontinuity.
+        void invalidateAtmosphereHistory();
+
         void addWaterRippleEmitter(const MWWorld::Ptr& ptr);
         void removeWaterRippleEmitter(const MWWorld::Ptr& ptr);
         void emitWaterRipple(const osg::Vec3f& pos);

@@ -135,8 +135,24 @@ namespace MWRender
         if (!outputDirectory || outputDirectory[0] == '\0')
             return;
 
-        mAtmosphereDiagnostics->requestCapture(std::filesystem::path(outputDirectory));
+        requestAtmosphereDiagnosticCapture(std::filesystem::path(outputDirectory));
+    }
+
+    void PostProcessor::requestAtmosphereDiagnosticCapture(const std::filesystem::path& outputDirectory)
+    {
+        mAtmosphereDiagnostics->requestCapture(outputDirectory);
         Log(Debug::Info) << "Production atmosphere shader-stage comparison requested for the next screenshot frames";
+    }
+
+    bool PostProcessor::atmosphereDiagnosticCaptureInProgress() const
+    {
+        return mAtmosphereDiagnostics->captureInProgress();
+    }
+
+    void PostProcessor::invalidateAtmosphereHistory()
+    {
+        for (const osg::ref_ptr<PingPongCanvas>& canvas : mCanvases)
+            canvas->invalidateAtmosphereHistory();
     }
 
     void PostProcessor::advanceAtmosphereDiagnosticComparison()

@@ -53,6 +53,11 @@ namespace Files
     struct ConfigurationManager;
 }
 
+namespace Diagnostics
+{
+    class Session;
+}
+
 namespace osgViewer
 {
     class ScreenCaptureHandler;
@@ -185,6 +190,12 @@ namespace OMW
 
         Files::ConfigurationManager& mCfgMgr;
         int mGlMaxTextureImageUnits;
+        std::unique_ptr<Diagnostics::Session> mDiagnosticSession;
+        std::filesystem::path mDiagnosticArtifactRoot;
+        std::string mDiagnosticEndpoint;
+        std::uint32_t mDiagnosticFramesRemaining = 0;
+        double mDiagnosticFixedFrameDuration = 1.0 / 60.0;
+        bool mDiagnosticChild = false;
 
         // not implemented
         Engine(const Engine&);
@@ -199,6 +210,9 @@ namespace OMW
 
         void createWindow();
         void setWindowIcon();
+
+        /// Execute validated bridge commands at the main-thread frame boundary.
+        void processDiagnosticCommands(unsigned frameNumber);
 
     public:
         Engine(Files::ConfigurationManager& configurationManager);
@@ -236,6 +250,10 @@ namespace OMW
 
         /// Initialise and enter main loop.
         void go();
+
+        /// Enable the protected diagnostic bridge and optional isolated child behavior.
+        void configureDiagnostics(
+            std::string endpoint, std::filesystem::path artifactRoot, bool child, double fixedFrameDuration);
 
         /// Compile all scripts (excludign dialogue scripts) at startup?
         void setCompileAll(bool all);

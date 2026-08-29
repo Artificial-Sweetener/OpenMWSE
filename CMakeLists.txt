@@ -674,6 +674,10 @@ if (BUILD_OPENMW OR BUILD_OPENMW_TESTS)
     add_subdirectory( apps/openmw )
 endif()
 
+if (BUILD_OPENMW)
+    add_subdirectory( apps/openmw-diagnosticctl )
+endif()
+
 if (BUILD_BSATOOL)
     add_subdirectory( apps/bsatool )
 endif()

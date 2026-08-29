@@ -323,6 +323,10 @@ add_component_dir (files
     istreamptr streamwithbuffer utils
     )
 
+add_component_dir (diagnostics
+    protocol commandqueue capsule localtransport session
+    )
+
 if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     set_source_files_properties(files/configfileparser.cpp PROPERTIES COMPILE_FLAGS -Wno-shadow)
 endif()
@@ -662,7 +666,7 @@ if (OSG_STATIC AND CMAKE_SYSTEM_NAME MATCHES "Linux")
 endif()
 
 if (WIN32)
-    target_link_libraries(components shlwapi)
+    target_link_libraries(components shlwapi advapi32)
 endif()
 
 # Fix for not visible pthreads functions for linker with glibc 2.15
