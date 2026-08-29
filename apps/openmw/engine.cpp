@@ -1285,6 +1285,8 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
             MWWorld::DateTimeManager& time = *mWorld->getTimeManager();
             const MWRender::Camera* camera = mWorld->getCamera();
             const osg::Vec3d cameraPosition = camera->getPosition();
+            const bool cameraUnderwater = mWorld->isUnderwater(mWorld->getPlayerPtr().getCell(),
+                osg::Vec3f(cameraPosition.x(), cameraPosition.y(), cameraPosition.z()));
             const MWWorld::Weather& weather = mWorld->getCurrentWeather();
 
             switch (command.mType)
@@ -1343,7 +1345,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << (mWorld->getPostProcessor()->atmosphereDiagnosticCaptureInProgress() ? "in-progress"
                                                                                                    : "idle")
                            << '\n'
-                           << "providers: [core@1, graphics@1, gameplay@1, performance@2]\n";
+                           << "providers: [core@1, graphics@1, gameplay@2, performance@2]\n";
                     response.mPayload = diagnosticBytes(output.str());
                     break;
 
@@ -1394,6 +1396,10 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << "cell: " << quoteDiagnosticYaml(mWorld->getCellName()) << '\n'
                            << "camera: [" << cameraPosition.x() << ", " << cameraPosition.y() << ", "
                            << cameraPosition.z() << "]\n"
+                           << "camera-angles: [" << camera->getPitch() << ", " << camera->getYaw() << ", "
+                           << camera->getRoll() << "]\n"
+                           << "first-person: " << (mWorld->isFirstPerson() ? "true" : "false") << '\n'
+                           << "camera-underwater: " << (cameraUnderwater ? "true" : "false") << '\n'
                            << "weather: " << quoteDiagnosticYaml(weather.mId.serializeText()) << '\n'
                            << "game-time-seconds: " << time.getGameTime() << '\n'
                            << "simulation-time: " << time.getSimulationTime() << '\n';
@@ -1448,7 +1454,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                     manifest << "capsule-version: " << Diagnostics::capsuleVersion << '\n'
                              << "build: " << quoteDiagnosticYaml(Version::getOpenmwVersionDescription()) << '\n'
                              << "frame: " << frameNumber << '\n'
-                             << "providers: [core@1, graphics@1, gameplay@1, performance@2]\n"
+                             << "providers: [core@1, graphics@1, gameplay@2, performance@2]\n"
                              << "content:\n";
                     for (const std::string& content : mContentFiles)
                     {
@@ -1483,6 +1489,8 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                           << cameraPosition.z() << "]\n"
                           << "camera-angles: [" << camera->getPitch() << ", " << camera->getYaw() << ", "
                           << camera->getRoll() << "]\n"
+                          << "first-person: " << (mWorld->isFirstPerson() ? "true" : "false") << '\n'
+                          << "camera-underwater: " << (cameraUnderwater ? "true" : "false") << '\n'
                           << "weather: " << quoteDiagnosticYaml(weather.mId.serializeText()) << '\n'
                           << "game-time-seconds: " << time.getGameTime() << '\n'
                           << "simulation-time: " << time.getSimulationTime() << '\n'

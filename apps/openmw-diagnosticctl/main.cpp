@@ -463,7 +463,7 @@ namespace
                   "  openmw-diagnosticctl <run|replay> --openmw openmw.exe --config openmw.cfg\n"
                   "      --artifacts directory [--save save.omwsave | --capsule capture.omwdiag]\n"
                   "      [--frames count] [--performance-samples count] [--fixed-dt seconds]\n"
-                  "  openmw-diagnosticctl inspect-capsule --capsule capture.omwdiag\n";
+                  "  openmw-diagnosticctl inspect-capsule --capsule capture.omwdiag [--entry name]\n";
     }
 
     /// Wait for every production render stage to restore normal state before continuing.
@@ -525,6 +525,21 @@ namespace
         {
             if (std::abs(expectedCamera[index].as<double>() - actualCamera[index].as<double>()) > 0.01)
                 throw std::runtime_error("replay camera position does not match its capsule");
+        }
+        const YAML::Node expectedAngles = expected["camera-angles"];
+        const YAML::Node actualAngles = actual["camera-angles"];
+        if (!expectedAngles.IsSequence() || !actualAngles.IsSequence() || expectedAngles.size() != 3
+            || actualAngles.size() != 3)
+            throw std::runtime_error("replay state contains invalid camera angles");
+        for (std::size_t index = 0; index < 3; ++index)
+        {
+            if (std::abs(expectedAngles[index].as<double>() - actualAngles[index].as<double>()) > 0.0001)
+                throw std::runtime_error("replay camera angles do not match its capsule");
+        }
+        for (const char* key : { "first-person", "camera-underwater" })
+        {
+            if (expected[key] && expected[key].as<bool>() != actual[key].as<bool>())
+                throw std::runtime_error(std::string("replay state mismatch for ") + key);
         }
         if (std::abs(expected["game-time-seconds"].as<double>() - actual["game-time-seconds"].as<double>()) > 0.01
             || std::abs(expected["simulation-time"].as<double>() - actual["simulation-time"].as<double>()) > 0.01)
@@ -709,6 +724,19 @@ namespace
         if (path.empty())
             throw std::invalid_argument("inspect-capsule requires --capsule");
         const Diagnostics::Capsule capsule = Diagnostics::readCapsule(path);
+        if (const std::optional<std::string> requestedEntry = findOption(arguments, "--entry"))
+        {
+            const Diagnostics::CapsuleEntry* entry = capsule.find(*requestedEntry);
+            if (entry == nullptr)
+                throw std::invalid_argument("requested capsule entry does not exist");
+            if (entry->mType == Diagnostics::CapsuleEntryType::WorldSnapshot)
+                throw std::invalid_argument("binary world snapshots cannot be printed");
+            std::cout.write(
+                reinterpret_cast<const char*>(entry->mData.data()), static_cast<std::streamsize>(entry->mData.size()));
+            if (!std::cout)
+                throw std::runtime_error("failed writing capsule entry");
+            return 0;
+        }
         std::cout << "capsule-version: " << Diagnostics::capsuleVersion << "\nentries:\n";
         for (const Diagnostics::CapsuleEntry& entry : capsule.entries())
             std::cout << "  - " << entry.mName << " (" << entry.mData.size() << " bytes)\n";

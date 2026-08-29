@@ -59,6 +59,27 @@ enabled session. Supply ``--endpoint <name>`` when the session does not use the 
 production pass capture used by Shift+F12. ``capsule --output <name>.omwdiag`` writes beneath the session artifact directory.
 ``step`` and ``shutdown`` are child-only operations.
 
+Benchmark scenarios
+-------------------
+
+Performance comparisons use named scenario roles rather than treating one save as representative of every subsystem:
+
+* ``heavy-outdoor`` covers dense object paging, distant terrain, groundcover, shadows, water reflection/refraction, atmospheric
+  effects, and post-processing in one production exterior.
+* ``water-boundary`` covers above-water, near-plane, and below-water views with reflected, refracted, clipped, and transparent
+  content.
+* ``light-interior`` covers the non-clustered light-selection path with overlapping local lights and mixed object bounds.
+* ``actor-crowd`` covers range queries, head tracking, combat discovery, collision avoidance, animation, skinning, and morphing.
+* ``transparency-first-person`` covers blended ordering, alpha clipping, transparent post depth, first-person depth and FOV, and
+  position-reconstructing post effects.
+* ``capability-fallback`` exercises the legacy or reduced-capability path affected by a candidate optimization.
+
+Each concrete scenario is a private capsule plus its ordered content hashes and effective settings. Record the capsule identity,
+build, hardware, driver, fixed step, warm-up, sample window, and repetition count beside its artifacts. Use at least one nearby
+non-target scenario when retaining an optimization. Loading, shader compilation, and streaming frames are reported separately;
+they are not silently removed from steady-state distributions. ``inspect-capsule --entry state/world.yaml`` prints a bounded
+text entry for scenario inventory without extracting or materializing the private world snapshot.
+
 Providers and artifacts
 -----------------------
 
@@ -66,8 +87,8 @@ The versioned providers expose these evidence domains:
 
 * ``graphics@1`` captures scene color and depth, resolved atmospheric volumes and metadata, shafts, and the final composite over
   normal and diagnostic-isolation stages.
-* ``gameplay@1`` records the cell, camera, weather, game and simulation clocks, and state. The replay controller checks these
-  stable fields before advancing the simulation.
+* ``gameplay@2`` records the cell, camera position and angles, first-person and underwater state, weather, game and simulation
+  clocks, and state. The replay controller checks these stable fields before advancing the simulation.
 * ``performance@2`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
   scopes for scripts, Lua, mechanics, physics, world, and UI, resource caches and work queues, navigation and paging activity,
   scene statistics, and delayed per-camera GPU/render timing. An unavailable timing source is recorded explicitly.
