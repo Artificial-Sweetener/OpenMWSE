@@ -41,8 +41,9 @@ namespace Debug
     // Redirect cout and cerr to the log file
     void setupLogging(const std::filesystem::path& logDir, std::string_view appName);
 
-    int wrapApplication(
-        int (*innerApplication)(int argc, char* argv[]), int argc, char* argv[], std::string_view appName);
+    /// Run an application with logging and exception handling, optionally suppressing native fatal-error dialogs.
+    int wrapApplication(int (*innerApplication)(int argc, char* argv[]), int argc, char* argv[], std::string_view appName,
+        bool showFatalErrorDialog = true);
 }
 
 #endif

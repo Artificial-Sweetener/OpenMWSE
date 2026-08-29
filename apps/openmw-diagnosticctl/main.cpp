@@ -98,6 +98,34 @@ namespace
         ChildProcess(const ChildProcess&) = delete;
         ChildProcess& operator=(const ChildProcess&) = delete;
 
+        /// Return a completed child exit code without blocking, or no value while it remains active.
+        std::optional<int> tryExitCode()
+        {
+            if (mExitCode)
+                return mExitCode;
+#ifdef _WIN32
+            const DWORD waitResult = WaitForSingleObject(mProcess.hProcess, 0);
+            if (waitResult == WAIT_TIMEOUT)
+                return std::nullopt;
+            if (waitResult != WAIT_OBJECT_0)
+                throw std::runtime_error("failed polling diagnostic child process");
+            DWORD exitCode = 0;
+            if (!GetExitCodeProcess(mProcess.hProcess, &exitCode))
+                throw std::runtime_error("failed reading diagnostic child exit status");
+            mExitCode = static_cast<int>(exitCode);
+#else
+            int status = 0;
+            const pid_t result = waitpid(mProcess, &status, WNOHANG);
+            if (result == 0)
+                return std::nullopt;
+            if (result != mProcess)
+                throw std::runtime_error("failed polling diagnostic child process");
+            mExitCode = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+#endif
+            mReaped = true;
+            return mExitCode;
+        }
+
         /// Fail if the child owns a visible desktop window or the foreground window.
         void requireNonDisruptiveWindowState() const
         {
@@ -136,30 +164,14 @@ namespace
         /// Wait for a graceful child exit within the supplied timeout.
         int wait(std::chrono::milliseconds timeout)
         {
-#ifdef _WIN32
-            const auto count
-                = static_cast<DWORD>(std::min<std::int64_t>(timeout.count(), std::numeric_limits<DWORD>::max()));
-            if (WaitForSingleObject(mProcess.hProcess, count) != WAIT_OBJECT_0)
-                throw std::runtime_error("diagnostic child did not exit within its timeout");
-            DWORD exitCode = 0;
-            if (!GetExitCodeProcess(mProcess.hProcess, &exitCode))
-                throw std::runtime_error("failed reading diagnostic child exit status");
-            mReaped = true;
-            return static_cast<int>(exitCode);
-#else
             const auto deadline = std::chrono::steady_clock::now() + timeout;
-            int status = 0;
-            while (std::chrono::steady_clock::now() < deadline)
+            do
             {
-                if (waitpid(mProcess, &status, WNOHANG) == mProcess)
-                {
-                    mReaped = true;
-                    return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
-                }
+                if (const std::optional<int> exitCode = tryExitCode())
+                    return *exitCode;
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
+            } while (std::chrono::steady_clock::now() < deadline);
             throw std::runtime_error("diagnostic child did not exit within its timeout");
-#endif
         }
 
     private:
@@ -195,6 +207,7 @@ namespace
         pid_t mProcess = -1;
 #endif
         bool mReaped = false;
+        std::optional<int> mExitCode;
     };
 
     /// Preserve engine logs and remove an isolated controller workspace when its run completes.
@@ -415,14 +428,19 @@ namespace
 
     /// Send a command after the child or live session has reached its safe-point loop.
     Diagnostics::Response transactWhenReady(const std::string& endpoint, const Diagnostics::Command& command,
-        std::chrono::seconds readinessTimeout, const ChildProcess* child = nullptr)
+        std::chrono::seconds readinessTimeout, ChildProcess* child = nullptr)
     {
         const auto deadline = std::chrono::steady_clock::now() + readinessTimeout;
         std::exception_ptr lastFailure;
         while (std::chrono::steady_clock::now() < deadline)
         {
             if (child)
+            {
+                if (const std::optional<int> exitCode = child->tryExitCode())
+                    throw std::runtime_error(
+                        "diagnostic child exited before readiness with code " + std::to_string(*exitCode));
                 child->requireNonDisruptiveWindowState();
+            }
             try
             {
                 return Diagnostics::transact(endpoint, command, std::chrono::milliseconds(250));

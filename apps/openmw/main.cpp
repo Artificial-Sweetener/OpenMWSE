@@ -15,6 +15,8 @@
 
 #include <boost/program_options/variables_map.hpp>
 
+#include <algorithm>
+
 #if defined(_WIN32)
 #include <components/misc/windows.hpp>
 // makes __argc and __argv available on windows
@@ -260,7 +262,9 @@ extern "C" int SDL_main(int argc, char** argv)
 int main(int argc, char** argv)
 #endif
 {
-    return Debug::wrapApplication(&runApplication, argc, argv, "OpenMW");
+    const bool diagnosticChild = std::any_of(
+        argv, argv + argc, [](const char* argument) { return std::string_view(argument) == "--diagnostic-child"; });
+    return Debug::wrapApplication(&runApplication, argc, argv, "OpenMW", !diagnosticChild);
 }
 
 // Platform specific for Windows when there is no console built into the executable.

@@ -50,7 +50,24 @@ TEST(DiagnosticIsolatedSettingsTest, ParsesAndAppliesValidatedOverlay)
 
     std::ifstream stream(config.path() / "settings.cfg");
     const std::string contents((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
-    EXPECT_EQ(contents, "\n[Post Processing]\ntransparent postpass = false\n");
+    EXPECT_EQ(contents, "[Post Processing]\ntransparent postpass = false\n");
+}
+
+TEST(DiagnosticIsolatedSettingsTest, ReplacesExistingSettingWithoutCreatingDuplicate)
+{
+    TemporaryConfigDirectory config;
+    {
+        std::ofstream stream(config.path() / "settings.cfg");
+        stream << "[Shadows]\ncompute scene bounds = bounds\nnumber of shadow maps = 4\n\n[Video]\nvsync = true\n";
+    }
+
+    DiagnosticCtl::applyIsolatedSetting(config.path(),
+        DiagnosticCtl::parseIsolatedSetting("Shadows:compute scene bounds=primitives"));
+
+    std::ifstream stream(config.path() / "settings.cfg");
+    const std::string contents((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(contents,
+        "[Shadows]\ncompute scene bounds = primitives\nnumber of shadow maps = 4\n\n[Video]\nvsync = true\n");
 }
 
 TEST(DiagnosticIsolatedSettingsTest, RejectsMalformedAndInjectableOverlays)

@@ -427,8 +427,8 @@ namespace Debug
 #endif
     }
 
-    int wrapApplication(
-        int (*innerApplication)(int argc, char* argv[]), int argc, char* argv[], std::string_view appName)
+    int wrapApplication(int (*innerApplication)(int argc, char* argv[]), int argc, char* argv[], std::string_view appName,
+        bool showFatalErrorDialog)
     {
 #if defined _WIN32
         (void)attachParentConsole();
@@ -482,10 +482,13 @@ namespace Debug
         }
         catch (const std::exception& e)
         {
+            if (showFatalErrorDialog)
+            {
 #if (defined(__APPLE__) || defined(__linux) || defined(__unix) || defined(__posix))
-            if (!isatty(fileno(stdin)))
+                if (!isatty(fileno(stdin)))
 #endif
-                SDL_ShowSimpleMessageBox(0, (std::string(appName) + ": Fatal error").c_str(), e.what(), nullptr);
+                    SDL_ShowSimpleMessageBox(0, (std::string(appName) + ": Fatal error").c_str(), e.what(), nullptr);
+            }
 
             Log(Debug::Error) << "Fatal error: " << e.what();
 
