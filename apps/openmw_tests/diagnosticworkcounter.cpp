@@ -45,4 +45,10 @@ TEST(DiagnosticWorkCounterTest, CollectsRenderWorkOnlyWhenRequested)
     ASSERT_TRUE(stats->getAttribute(
         frameNumber, std::string(MWRender::transparentClassifiedLeafCounter), value));
     EXPECT_DOUBLE_EQ(value, 0.0);
+
+    MWRender::addDiagnosticRenderWorkCounter(
+        *stats, frameNumber, MWRender::groundcoverInstanceTestCounter, 12.0);
+    ASSERT_TRUE(stats->getAttribute(
+        frameNumber, std::string(MWRender::groundcoverInstanceTestCounter), value));
+    EXPECT_DOUBLE_EQ(value, 12.0);
 }

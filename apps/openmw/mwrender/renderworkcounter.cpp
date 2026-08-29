@@ -19,6 +19,8 @@ namespace MWRender
             transparentReplayCounter,
             transparentClassifiedLeafCounter,
             firstPersonReplayCounter,
+            groundcoverInstanceTestCounter,
+            groundcoverInstanceRenderCounter,
         };
         for (const std::string_view counter : counters)
             stats.setAttribute(frameNumber, std::string(counter), 0.0);

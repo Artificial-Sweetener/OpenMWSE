@@ -16,6 +16,8 @@ namespace MWRender
     inline constexpr std::string_view transparentReplayCounter = "Diagnostic Transparent Replay Drawables";
     inline constexpr std::string_view transparentClassifiedLeafCounter = "Diagnostic Transparent Classified Leaves";
     inline constexpr std::string_view firstPersonReplayCounter = "Diagnostic First Person Replay Drawables";
+    inline constexpr std::string_view groundcoverInstanceTestCounter = "Diagnostic Groundcover Instances Tested";
+    inline constexpr std::string_view groundcoverInstanceRenderCounter = "Diagnostic Groundcover Instances Rendered";
 
     /// Initialize diagnostic rendering work counters for a frame when scene statistics are requested.
     void resetDiagnosticRenderWorkCounters(osg::Stats& stats, unsigned frameNumber);

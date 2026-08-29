@@ -1,5 +1,7 @@
 #include "groundcover.hpp"
 
+#include "renderworkcounter.hpp"
+
 #include <span>
 
 #include <osg/AlphaFunc>
@@ -48,6 +50,7 @@ namespace MWRender
         class InstancedComputeNearFarCullCallback : public osg::DrawableCullCallback
         {
         public:
+            /// Retain per-instance transforms for exact near/far work and diagnostic attribution.
             explicit InstancedComputeNearFarCullCallback(std::span<const Groundcover::GroundcoverEntry> instances,
                 const osg::Vec3& chunkPosition, const osg::BoundingBox& instanceBounds)
                 : mInstanceMatrices()
@@ -58,6 +61,7 @@ namespace MWRender
                     mInstanceMatrices.emplace_back(computeInstanceMatrix(instance, chunkPosition));
             }
 
+            /// Cull the whole drawable and refine primitive near/far bounds when the active camera requests it.
             bool cull(osg::NodeVisitor* nv, osg::Drawable* drawable, osg::RenderInfo* renderInfo) const override
             {
                 osgUtil::CullVisitor& cullVisitor = *nv->asCullVisitor();
@@ -65,9 +69,16 @@ namespace MWRender
                 const osg::BoundingBox& boundingBox = drawable->getBoundingBox();
                 osg::RefMatrix& matrix = *cullVisitor.getModelViewMatrix();
 
+                osg::Stats* stats = cullVisitor.getCurrentCamera()->getStats();
+                if (stats)
+                    addDiagnosticRenderWorkCounter(*stats, cullVisitor.getTraversalNumber(),
+                        groundcoverInstanceRenderCounter, static_cast<double>(mInstanceMatrices.size()));
+
                 if (cnfMode != osg::CullSettings::COMPUTE_NEAR_FAR_USING_PRIMITIVES
                     && cnfMode != osg::CullSettings::COMPUTE_NEAR_USING_PRIMITIVES)
                     return false;
+
+                double testedInstances = 0.0;
 
                 if (drawable->isCullingActive() && cullVisitor.isCulled(boundingBox))
                     return true;
@@ -105,6 +116,7 @@ namespace MWRender
                             dNear = computedZNear;
                             for (const auto& instanceMatrix : mInstanceMatrices)
                             {
+                                testedInstances += 1.0;
                                 osg::Matrix fullMatrix = instanceMatrix * matrix;
                                 osg::Vec3d instanceLookVector(-fullMatrix(0, 2), -fullMatrix(1, 2), -fullMatrix(2, 2));
                                 unsigned int instanceBbCornerFar = (instanceLookVector.x() >= 0 ? 1 : 0)
@@ -145,6 +157,7 @@ namespace MWRender
                             dFar = computedZFar;
                             for (const auto& instanceMatrix : mInstanceMatrices)
                             {
+                                testedInstances += 1.0;
                                 osg::Matrix fullMatrix = instanceMatrix * matrix;
                                 osg::Vec3d instanceLookVector(-fullMatrix(0, 2), -fullMatrix(1, 2), -fullMatrix(2, 2));
                                 unsigned int instanceBbCornerFar = (instanceLookVector.x() >= 0 ? 1 : 0)
@@ -182,6 +195,10 @@ namespace MWRender
                     }
                 }
 
+                if (stats)
+                    addDiagnosticRenderWorkCounter(*stats, cullVisitor.getTraversalNumber(),
+                        groundcoverInstanceTestCounter, testedInstances);
+
                 return false;
             }
 
@@ -193,6 +210,7 @@ namespace MWRender
         class InstancingVisitor : public osg::NodeVisitor
         {
         public:
+            /// Configure cloned model geometry for one chunk's immutable instance collection.
             explicit InstancingVisitor(
                 std::span<const Groundcover::GroundcoverEntry> instances, osg::Vec3f& chunkPosition)
                 : osg::NodeVisitor(TRAVERSE_ALL_CHILDREN)
