@@ -1,6 +1,6 @@
 #include "groundcover.hpp"
 
-#include "renderworkcounter.hpp"
+#include "groundcovernearfar.hpp"
 
 #include <span>
 
@@ -10,12 +10,10 @@
 #include <osg/Geometry>
 #include <osg/Program>
 #include <osg/VertexAttribDivisor>
-#include <osgUtil/CullVisitor>
 
 #include <components/esm3/esmreader.hpp>
 #include <components/esm3/loadland.hpp>
 #include <components/esm3/readerscache.hpp>
-#include <components/misc/convert.hpp>
 #include <components/sceneutil/lightmanager.hpp>
 #include <components/sceneutil/nodecallback.hpp>
 #include <components/settings/values.hpp>
@@ -30,183 +28,6 @@ namespace MWRender
 {
     namespace
     {
-        using value_type = osgUtil::CullVisitor::value_type;
-
-        // From OSG's CullVisitor.cpp
-        inline value_type distance(const osg::Vec3& coord, const osg::Matrix& matrix)
-        {
-            return -((value_type)coord[0] * (value_type)matrix(0, 2) + (value_type)coord[1] * (value_type)matrix(1, 2)
-                + (value_type)coord[2] * (value_type)matrix(2, 2) + matrix(3, 2));
-        }
-
-        inline osg::Matrix computeInstanceMatrix(
-            const Groundcover::GroundcoverEntry& entry, const osg::Vec3& chunkPosition)
-        {
-            return osg::Matrix::scale(entry.mScale, entry.mScale, entry.mScale)
-                * osg::Matrix(Misc::Convert::makeOsgQuat(entry.mPos))
-                * osg::Matrix::translate(entry.mPos.asVec3() - chunkPosition);
-        }
-
-        class InstancedComputeNearFarCullCallback : public osg::DrawableCullCallback
-        {
-        public:
-            /// Retain per-instance transforms for exact near/far work and diagnostic attribution.
-            explicit InstancedComputeNearFarCullCallback(std::span<const Groundcover::GroundcoverEntry> instances,
-                const osg::Vec3& chunkPosition, const osg::BoundingBox& instanceBounds)
-                : mInstanceMatrices()
-                , mInstanceBounds(instanceBounds)
-            {
-                mInstanceMatrices.reserve(instances.size());
-                for (const Groundcover::GroundcoverEntry& instance : instances)
-                    mInstanceMatrices.emplace_back(computeInstanceMatrix(instance, chunkPosition));
-            }
-
-            /// Cull the whole drawable and refine primitive near/far bounds when the active camera requests it.
-            bool cull(osg::NodeVisitor* nv, osg::Drawable* drawable, osg::RenderInfo* renderInfo) const override
-            {
-                osgUtil::CullVisitor& cullVisitor = *nv->asCullVisitor();
-                osg::CullSettings::ComputeNearFarMode cnfMode = cullVisitor.getComputeNearFarMode();
-                const osg::BoundingBox& boundingBox = drawable->getBoundingBox();
-                osg::RefMatrix& matrix = *cullVisitor.getModelViewMatrix();
-
-                osg::Stats* stats = cullVisitor.getCurrentCamera()->getStats();
-                if (stats)
-                    addDiagnosticRenderWorkCounter(*stats, cullVisitor.getTraversalNumber(),
-                        groundcoverInstanceRenderCounter, static_cast<double>(mInstanceMatrices.size()));
-
-                if (cnfMode != osg::CullSettings::COMPUTE_NEAR_FAR_USING_PRIMITIVES
-                    && cnfMode != osg::CullSettings::COMPUTE_NEAR_USING_PRIMITIVES)
-                    return false;
-
-                double testedInstances = 0.0;
-
-                if (drawable->isCullingActive() && cullVisitor.isCulled(boundingBox))
-                    return true;
-
-                osg::Vec3 lookVector = cullVisitor.getLookVectorLocal();
-                unsigned int bbCornerFar
-                    = (lookVector.x() >= 0 ? 1 : 0) | (lookVector.y() >= 0 ? 2 : 0) | (lookVector.z() >= 0 ? 4 : 0);
-                unsigned int bbCornerNear = (~bbCornerFar) & 7;
-                value_type dNear = distance(boundingBox.corner(bbCornerNear), matrix);
-                value_type dFar = distance(boundingBox.corner(bbCornerFar), matrix);
-
-                if (dNear > dFar)
-                    std::swap(dNear, dFar);
-
-                if (dFar < 0)
-                    return true;
-
-                value_type computedZNear = cullVisitor.getCalculatedNearPlane();
-                value_type computedZFar = cullVisitor.getCalculatedFarPlane();
-
-                if (dNear < computedZNear || dFar > computedZFar)
-                {
-                    osg::Polytope frustum;
-                    osg::Polytope::ClippingMask resultMask
-                        = cullVisitor.getCurrentCullingSet().getFrustum().getResultMask();
-                    if (resultMask)
-                    {
-                        // Other objects are likely cheaper and should let us skip all but a few groundcover instances
-                        cullVisitor.computeNearPlane();
-                        computedZNear = cullVisitor.getCalculatedNearPlane();
-                        computedZFar = cullVisitor.getCalculatedFarPlane();
-
-                        if (dNear < computedZNear)
-                        {
-                            dNear = computedZNear;
-                            for (const auto& instanceMatrix : mInstanceMatrices)
-                            {
-                                testedInstances += 1.0;
-                                osg::Matrix fullMatrix = instanceMatrix * matrix;
-                                osg::Vec3d instanceLookVector(-fullMatrix(0, 2), -fullMatrix(1, 2), -fullMatrix(2, 2));
-                                unsigned int instanceBbCornerFar = (instanceLookVector.x() >= 0 ? 1 : 0)
-                                    | (instanceLookVector.y() >= 0 ? 2 : 0) | (instanceLookVector.z() >= 0 ? 4 : 0);
-                                unsigned int instanceBbCornerNear = (~instanceBbCornerFar) & 7;
-                                value_type instanceDNear
-                                    = distance(mInstanceBounds.corner(instanceBbCornerNear), fullMatrix);
-                                value_type instanceDFar
-                                    = distance(mInstanceBounds.corner(instanceBbCornerFar), fullMatrix);
-
-                                if (instanceDNear > instanceDFar)
-                                    std::swap(instanceDNear, instanceDFar);
-
-                                if (instanceDFar < 0 || instanceDNear > dNear)
-                                    continue;
-
-                                frustum.setAndTransformProvidingInverse(
-                                    cullVisitor.getProjectionCullingStack().back().getFrustum(), fullMatrix);
-                                osg::Polytope::PlaneList planes;
-                                osg::Polytope::ClippingMask selectorMask = 0x1;
-                                for (const auto& plane : frustum.getPlaneList())
-                                {
-                                    if (resultMask & selectorMask)
-                                        planes.push_back(plane);
-                                    selectorMask <<= 1;
-                                }
-
-                                value_type newNear
-                                    = cullVisitor.computeNearestPointInFrustum(fullMatrix, planes, *drawable);
-                                dNear = std::min(dNear, newNear);
-                            }
-                            if (dNear < computedZNear)
-                                cullVisitor.setCalculatedNearPlane(dNear);
-                        }
-
-                        if (cnfMode == osg::CullSettings::COMPUTE_NEAR_FAR_USING_PRIMITIVES && dFar > computedZFar)
-                        {
-                            dFar = computedZFar;
-                            for (const auto& instanceMatrix : mInstanceMatrices)
-                            {
-                                testedInstances += 1.0;
-                                osg::Matrix fullMatrix = instanceMatrix * matrix;
-                                osg::Vec3d instanceLookVector(-fullMatrix(0, 2), -fullMatrix(1, 2), -fullMatrix(2, 2));
-                                unsigned int instanceBbCornerFar = (instanceLookVector.x() >= 0 ? 1 : 0)
-                                    | (instanceLookVector.y() >= 0 ? 2 : 0) | (instanceLookVector.z() >= 0 ? 4 : 0);
-                                unsigned int instanceBbCornerNear = (~instanceBbCornerFar) & 7;
-                                value_type instanceDNear
-                                    = distance(mInstanceBounds.corner(instanceBbCornerNear), fullMatrix);
-                                value_type instanceDFar
-                                    = distance(mInstanceBounds.corner(instanceBbCornerFar), fullMatrix);
-
-                                if (instanceDNear > instanceDFar)
-                                    std::swap(instanceDNear, instanceDFar);
-
-                                if (instanceDFar < 0 || instanceDFar < dFar)
-                                    continue;
-
-                                frustum.setAndTransformProvidingInverse(
-                                    cullVisitor.getProjectionCullingStack().back().getFrustum(), fullMatrix);
-                                osg::Polytope::PlaneList planes;
-                                osg::Polytope::ClippingMask selectorMask = 0x1;
-                                for (const auto& plane : frustum.getPlaneList())
-                                {
-                                    if (resultMask & selectorMask)
-                                        planes.push_back(plane);
-                                    selectorMask <<= 1;
-                                }
-
-                                value_type newFar = cullVisitor.computeFurthestPointInFrustum(
-                                    instanceMatrix * matrix, planes, *drawable);
-                                dFar = std::max(dFar, newFar);
-                            }
-                            if (dFar > computedZFar)
-                                cullVisitor.setCalculatedFarPlane(dFar);
-                        }
-                    }
-                }
-
-                if (stats)
-                    addDiagnosticRenderWorkCounter(*stats, cullVisitor.getTraversalNumber(),
-                        groundcoverInstanceTestCounter, testedInstances);
-
-                return false;
-            }
-
-        private:
-            std::vector<osg::Matrix> mInstanceMatrices;
-            osg::BoundingBox mInstanceBounds;
-        };
-
         class InstancingVisitor : public osg::NodeVisitor
         {
         public:
@@ -269,7 +90,7 @@ namespace MWRender
                 geom.setVertexAttribArray(6, transforms.get(), osg::Array::BIND_PER_VERTEX);
                 geom.setVertexAttribArray(7, rotations.get(), osg::Array::BIND_PER_VERTEX);
 
-                geom.addCullCallback(new InstancedComputeNearFarCullCallback(mInstances, mChunkPosition, originalBox));
+                geom.addCullCallback(new GroundcoverNearFarCullCallback(transforms, rotations, originalBox));
             }
 
         private:

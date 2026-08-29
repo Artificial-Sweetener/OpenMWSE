@@ -23,6 +23,7 @@ file(GLOB UNITTEST_SRC_FILES
     mwgui/weightedsearch.cpp
 
     mwrender/testatmosphere.cpp
+    mwrender/testgroundcovernearfar.cpp
 
     mwinput/testdiagnosticinputmanager.cpp
 
