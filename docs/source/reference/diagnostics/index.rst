@@ -42,6 +42,9 @@ Replay that capture after rebuilding::
 the preceding frames serve as warm-up. The performance report keeps every sampled OSG statistic and summarizes stable CPU,
 cull, draw, GPU, and frame-duration metrics with median, p95, p99, and worst values. A sample count must not exceed the frame
 count or 600. Visual capture begins after the timed window so synchronous readback does not contaminate its distributions.
+Repeat ``--setting "Section:name=value"`` to apply a validated setting override only to the temporary profile used by that run
+or replay. The controller leaves the source profile unchanged, making the option suitable for controlled configuration and
+fallback comparisons.
 
 Compare the real production attachments from both runs::
 

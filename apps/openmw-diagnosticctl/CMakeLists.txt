@@ -1,4 +1,4 @@
-openmw_add_executable(openmw-diagnosticctl main.cpp)
+openmw_add_executable(openmw-diagnosticctl main.cpp isolatedsettings.cpp isolatedsettings.hpp)
 
 target_link_libraries(openmw-diagnosticctl components)
 

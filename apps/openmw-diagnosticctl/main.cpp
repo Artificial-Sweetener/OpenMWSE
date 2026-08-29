@@ -4,6 +4,8 @@
 #include <components/diagnostics/session.hpp>
 #include <components/files/hash.hpp>
 
+#include "isolatedsettings.hpp"
+
 #include <yaml-cpp/yaml.h>
 
 #include <array>
@@ -389,6 +391,21 @@ namespace
         return result;
     }
 
+    /// Parse every occurrence of a repeatable named command-line option.
+    std::vector<std::string> findOptions(std::span<char*> arguments, std::string_view name)
+    {
+        std::vector<std::string> result;
+        for (std::size_t index = 0; index < arguments.size(); ++index)
+        {
+            if (arguments[index] != name)
+                continue;
+            if (index + 1 >= arguments.size())
+                throw std::invalid_argument("missing option value " + std::string(name));
+            result.emplace_back(arguments[++index]);
+        }
+        return result;
+    }
+
     /// Generate a unique protected endpoint within the transport's reserved namespace.
     std::string uniqueEndpoint()
     {
@@ -463,6 +480,7 @@ namespace
                   "  openmw-diagnosticctl <run|replay> --openmw openmw.exe --config openmw.cfg\n"
                   "      --artifacts directory [--save save.omwsave | --capsule capture.omwdiag]\n"
                   "      [--frames count] [--performance-samples count] [--fixed-dt seconds]\n"
+                  "      [--setting \"Section:name=value\"]...\n"
                   "  openmw-diagnosticctl inspect-capsule --capsule capture.omwdiag [--entry name]\n";
     }
 
@@ -605,6 +623,8 @@ namespace
         const std::filesystem::path isolatedConfig = workspace.path() / "config";
         const std::filesystem::path isolatedData = workspace.path() / "userdata";
         copyProfileConfiguration(sourceConfig, isolatedConfig);
+        for (const std::string& setting : findOptions(arguments, "--setting"))
+            DiagnosticCtl::applyIsolatedSetting(isolatedConfig, DiagnosticCtl::parseIsolatedSetting(setting));
         std::filesystem::create_directories(isolatedData);
 
         const std::string endpoint = uniqueEndpoint();
