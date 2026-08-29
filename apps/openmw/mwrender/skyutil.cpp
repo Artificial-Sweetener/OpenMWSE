@@ -427,7 +427,7 @@ namespace MWRender
         if (mBlendMode == StarBlendMode::EmissiveRadiance)
         {
             stateset->setAttributeAndModes(new osg::BlendFunc(osg::BlendFunc::SRC_ALPHA, osg::BlendFunc::ONE,
-                                                osg::BlendFunc::ZERO, osg::BlendFunc::ONE),
+                                               osg::BlendFunc::ZERO, osg::BlendFunc::ONE),
                 osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE);
         }
     }
@@ -824,6 +824,7 @@ namespace MWRender
     void Sun::createSunGlare()
     {
         osg::ref_ptr<osg::Camera> camera = new osg::Camera;
+        camera->setName("Sun Glare Camera");
         camera->setProjectionMatrix(osg::Matrix::identity());
         camera->setReferenceFrame(osg::Transform::ABSOLUTE_RF); // add to skyRoot instead?
         camera->setViewMatrix(osg::Matrix::identity());

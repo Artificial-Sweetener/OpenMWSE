@@ -30,6 +30,7 @@ namespace Terrain
         mTerrainRoot->setName("Terrain Root");
 
         osg::ref_ptr<osg::Camera> compositeCam = new osg::Camera;
+        compositeCam->setName("Terrain Composite Map Camera");
         compositeCam->setRenderOrder(osg::Camera::PRE_RENDER, -1);
         compositeCam->setProjectionMatrix(osg::Matrix::identity());
         compositeCam->setViewMatrix(osg::Matrix::identity());

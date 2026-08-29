@@ -7,6 +7,7 @@
 #include <osg/RenderInfo>
 #include <osg/State>
 #include <osg/Stats>
+#include <osg/Timer>
 #include <osg/observer_ptr>
 #include <osgUtil/RenderBin>
 
@@ -38,6 +39,14 @@ namespace SceneUtil
 
         std::mutex registryMutex;
         std::vector<osg::observer_ptr<osg::Camera>> registeredCameras;
+        bool collectionEnabled = false;
+
+        /// Remove destroyed cameras before comparing addresses that may have been reused by a new camera.
+        void removeExpiredCameras()
+        {
+            std::erase_if(
+                registeredCameras, [](const osg::observer_ptr<osg::Camera>& camera) { return !camera.valid(); });
+        }
 
         /// Return whether the current context exposes timestamp-query entry points.
         bool supportsTimestamps(const osg::GLExtensions* extensions)
@@ -63,24 +72,33 @@ namespace SceneUtil
                 osg::State* state = renderInfo.getState();
                 if (state == nullptr || state->getFrameStamp() == nullptr)
                     return;
-                osg::GLExtensions* extensions = state->get<osg::GLExtensions>();
-                if (!supportsTimestamps(extensions))
+                osg::ref_ptr<osg::Camera> camera;
+                if (!mCamera.lock(camera) || camera->getStats() == nullptr
+                    || !camera->getStats()->collectStats(std::string(collectionCategory)))
                     return;
 
                 std::lock_guard lock(mMutex);
                 ContextQueries& queries = mContexts[state->getContextID()];
-                retireCompleted(*extensions, queries);
+                osg::GLExtensions* extensions = state->get<osg::GLExtensions>();
+                if (supportsTimestamps(extensions))
+                    retireCompleted(*extensions, queries);
                 if (queries.mActive.has_value())
                     return;
 
                 TimestampPair pair;
                 pair.mFrame = state->getFrameStamp()->getFrameNumber();
                 pair.mCpuStart = std::chrono::steady_clock::now();
-                GLuint ids[2]{};
-                extensions->glGenQueries(2, ids);
-                pair.mStart = ids[0];
-                pair.mEnd = ids[1];
-                extensions->glQueryCounter(pair.mStart, GL_TIMESTAMP);
+                pair.mCpuBegin = osg::Timer::instance()->delta_s(state->getStartTick(), osg::Timer::instance()->tick());
+                camera->getStats()->setAttribute(
+                    pair.mFrame, std::string(diagnosticCpuPassBeginStatistic), pair.mCpuBegin);
+                if (supportsTimestamps(extensions))
+                {
+                    GLuint ids[2]{};
+                    extensions->glGenQueries(2, ids);
+                    pair.mStart = ids[0];
+                    pair.mEnd = ids[1];
+                    extensions->glQueryCounter(pair.mStart, GL_TIMESTAMP);
+                }
                 queries.mActive = pair;
             }
 
@@ -90,29 +108,35 @@ namespace SceneUtil
                 osg::State* state = renderInfo.getState();
                 if (state == nullptr)
                     return;
-                osg::GLExtensions* extensions = state->get<osg::GLExtensions>();
-                if (!supportsTimestamps(extensions))
-                    return;
 
                 std::lock_guard lock(mMutex);
                 auto context = mContexts.find(state->getContextID());
                 if (context == mContexts.end() || !context->second.mActive.has_value())
                     return;
 
-                extensions->glQueryCounter(context->second.mActive->mEnd, GL_TIMESTAMP);
+                TimestampPair& active = *context->second.mActive;
+                osg::GLExtensions* extensions = state->get<osg::GLExtensions>();
+                const bool gpuTimingActive = active.mStart != 0 && active.mEnd != 0 && supportsTimestamps(extensions);
+                if (gpuTimingActive)
+                    extensions->glQueryCounter(active.mEnd, GL_TIMESTAMP);
                 osg::ref_ptr<osg::Camera> camera;
                 if (mCamera.lock(camera) && camera->getStats() != nullptr)
                 {
-                    const double cpuSeconds = std::chrono::duration<double>(
-                        std::chrono::steady_clock::now() - context->second.mActive->mCpuStart)
-                                                  .count();
+                    const double cpuSeconds
+                        = std::chrono::duration<double>(std::chrono::steady_clock::now() - active.mCpuStart).count();
                     camera->getStats()->setAttribute(
-                        context->second.mActive->mFrame, std::string(diagnosticCpuPassTimeStatistic), cpuSeconds);
+                        active.mFrame, std::string(diagnosticCpuPassTimeStatistic), cpuSeconds);
+                    camera->getStats()->setAttribute(active.mFrame, std::string(diagnosticCpuPassEndStatistic),
+                        osg::Timer::instance()->delta_s(state->getStartTick(), osg::Timer::instance()->tick()));
                 }
-                context->second.mPending.push_back(*context->second.mActive);
+                if (gpuTimingActive)
+                    context->second.mPending.push_back(active);
                 context->second.mActive.reset();
-                retireCompleted(*extensions, context->second);
-                trimPending(*extensions, context->second);
+                if (supportsTimestamps(extensions))
+                {
+                    retireCompleted(*extensions, context->second);
+                    trimPending(*extensions, context->second);
+                }
             }
 
             /// Release timestamp queries belonging to the supplied graphics context.
@@ -141,6 +165,7 @@ namespace SceneUtil
                 GLuint mEnd = 0;
                 unsigned mFrame = 0;
                 std::chrono::steady_clock::time_point mCpuStart;
+                double mCpuBegin = 0.0;
             };
 
             struct ContextQueries
@@ -197,8 +222,11 @@ namespace SceneUtil
             {
                 if (queries.mActive.has_value())
                 {
-                    const GLuint ids[]{ queries.mActive->mStart, queries.mActive->mEnd };
-                    extensions.glDeleteQueries(2, ids);
+                    if (queries.mActive->mStart != 0 && queries.mActive->mEnd != 0)
+                    {
+                        const GLuint ids[]{ queries.mActive->mStart, queries.mActive->mEnd };
+                        extensions.glDeleteQueries(2, ids);
+                    }
                 }
                 for (const TimestampPair& pair : queries.mPending)
                 {
@@ -234,8 +262,7 @@ namespace SceneUtil
                 osg::GLExtensions* extensions = state != nullptr ? state->get<osg::GLExtensions>() : nullptr;
                 const bool enabled = bin->getBinNum() == mBinNumber && state != nullptr
                     && state->getFrameStamp() != nullptr && camera != nullptr && camera->getStats() != nullptr
-                    && camera->getStats()->collectStats(std::string(collectionCategory))
-                    && supportsTimestamps(extensions);
+                    && camera->getStats()->collectStats(std::string(collectionCategory));
                 if (!enabled)
                 {
                     drawDelegate(bin, renderInfo, previous);
@@ -243,17 +270,22 @@ namespace SceneUtil
                 }
 
                 const unsigned contextId = state->getContextID();
-                retireCompleted(*extensions, contextId);
+                const bool gpuTimingEnabled = supportsTimestamps(extensions);
+                if (gpuTimingEnabled)
+                    retireCompleted(*extensions, contextId);
 
                 PendingInterval interval{
                     .mCamera = camera,
                     .mFrame = state->getFrameStamp()->getFrameNumber(),
                 };
-                GLuint ids[2]{};
-                extensions->glGenQueries(2, ids);
-                interval.mStart = ids[0];
-                interval.mEnd = ids[1];
-                extensions->glQueryCounter(interval.mStart, GL_TIMESTAMP);
+                if (gpuTimingEnabled)
+                {
+                    GLuint ids[2]{};
+                    extensions->glGenQueries(2, ids);
+                    interval.mStart = ids[0];
+                    interval.mEnd = ids[1];
+                    extensions->glQueryCounter(interval.mStart, GL_TIMESTAMP);
+                }
                 const auto cpuStart = std::chrono::steady_clock::now();
                 drawDelegate(bin, renderInfo, previous);
                 const double cpuSeconds
@@ -261,6 +293,8 @@ namespace SceneUtil
                 double existingCpuSeconds = 0.0;
                 camera->getStats()->getAttribute(interval.mFrame, mCpuStatistic, existingCpuSeconds);
                 camera->getStats()->setAttribute(interval.mFrame, mCpuStatistic, existingCpuSeconds + cpuSeconds);
+                if (!gpuTimingEnabled)
+                    return;
                 extensions->glQueryCounter(interval.mEnd, GL_TIMESTAMP);
 
                 {
@@ -387,14 +421,7 @@ namespace SceneUtil
             osg::ref_ptr<GpuTimestampState> mState;
         };
 
-        /// Return whether a named camera owns a stable diagnostic GPU pass.
-        bool isDiagnosticPassCamera(const osg::Camera& camera)
-        {
-            return std::ranges::any_of(
-                passes, [&camera](const DiagnosticGpuPass& pass) { return camera.getName() == pass.mCameraName; });
-        }
-
-        /// Attach explicit GPU timestamp callbacks to a named render camera.
+        /// Attach explicit CPU and GPU timestamp callbacks to one render camera.
         void attachGpuTimestampCallbacks(osg::Camera& camera)
         {
             osg::ref_ptr<GpuTimestampState> state = new GpuTimestampState(camera);
@@ -433,22 +460,41 @@ namespace SceneUtil
             camera.setStats(new osg::Stats(camera.getName()));
             stats = camera.getStats();
         }
-        const bool firstEnable = !stats->collectStats(std::string(collectionCategory));
         stats->allocate(retainedFrameCount);
-        stats->collectStats(std::string(collectionCategory), true);
-        if (firstEnable && isDiagnosticPassCamera(camera))
-            attachGpuTimestampCallbacks(camera);
-
         std::lock_guard lock(registryMutex);
-        if (std::ranges::none_of(registeredCameras,
-                [&camera](const osg::observer_ptr<osg::Camera>& registered) { return registered == &camera; }))
+        removeExpiredCameras();
+        const bool firstRegistration = std::ranges::none_of(registeredCameras,
+            [&camera](const osg::observer_ptr<osg::Camera>& registered) { return registered == &camera; });
+        if (firstRegistration)
+        {
             registeredCameras.emplace_back(&camera);
+            attachGpuTimestampCallbacks(camera);
+        }
+        stats->collectStats(std::string(collectionCategory), collectionEnabled);
     }
 
     void enableDiagnosticGpuPassStatistics(osg::Node& root)
     {
         EnableStatisticsVisitor visitor;
         root.accept(visitor);
+    }
+
+    void setDiagnosticGpuPassStatisticsCollection(bool enabled)
+    {
+        std::lock_guard lock(registryMutex);
+        collectionEnabled = enabled;
+        for (auto camera = registeredCameras.begin(); camera != registeredCameras.end();)
+        {
+            osg::ref_ptr<osg::Camera> retained;
+            if (camera->lock(retained))
+            {
+                if (retained->getStats() != nullptr)
+                    retained->getStats()->collectStats(std::string(collectionCategory), enabled);
+                ++camera;
+            }
+            else
+                camera = registeredCameras.erase(camera);
+        }
     }
 
     void enableDiagnosticGpuRenderBinStatistics(
@@ -460,13 +506,27 @@ namespace SceneUtil
 
     void inheritDiagnosticGpuPassStatistics(osg::Camera& target, const osg::Camera& source)
     {
-        const osg::Stats* sourceStats = source.getStats();
-        if (sourceStats == nullptr || !sourceStats->collectStats(std::string(collectionCategory)))
+        std::lock_guard lock(registryMutex);
+        removeExpiredCameras();
+        const bool sourceRegistered = std::ranges::any_of(registeredCameras,
+            [&source](const osg::observer_ptr<osg::Camera>& registered) { return registered == &source; });
+        if (!sourceRegistered)
+            return;
+        const bool targetRegistered = std::ranges::any_of(registeredCameras,
+            [&target](const osg::observer_ptr<osg::Camera>& registered) { return registered == &target; });
+        if (targetRegistered)
             return;
 
-        osg::Stats* targetStats = target.getStats();
-        if (targetStats == nullptr || !targetStats->collectStats(std::string(collectionCategory)))
-            enableDiagnosticGpuPassStatistics(target);
+        osg::Stats* stats = target.getStats();
+        if (stats == nullptr)
+        {
+            target.setStats(new osg::Stats(target.getName()));
+            stats = target.getStats();
+        }
+        stats->allocate(retainedFrameCount);
+        stats->collectStats(std::string(collectionCategory), collectionEnabled);
+        registeredCameras.emplace_back(&target);
+        attachGpuTimestampCallbacks(target);
     }
 
     std::vector<osg::ref_ptr<osg::Camera>> diagnosticGpuPassCameras()

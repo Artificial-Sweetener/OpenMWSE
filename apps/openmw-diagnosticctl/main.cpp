@@ -626,7 +626,9 @@ namespace
         }
         else
             throw std::invalid_argument("unknown diagnostic operation");
-        return printResponse(Diagnostics::transact(endpoint, command));
+        const std::chrono::milliseconds timeout
+            = operation == "performance" ? std::chrono::seconds(60) : std::chrono::seconds(10);
+        return printResponse(Diagnostics::transact(endpoint, command, timeout));
     }
 
     /// Run the real engine invisibly against copied state, collect evidence, and shut it down.
@@ -692,7 +694,7 @@ namespace
 
         ChildProcess child(executable, childArguments);
         Diagnostics::Command hello{ 1, Diagnostics::CommandType::Hello, std::move(replayManifest) };
-        const Diagnostics::Response ready = transactWhenReady(endpoint, hello, std::chrono::seconds(90), &child);
+        const Diagnostics::Response ready = transactWhenReady(endpoint, hello, std::chrono::minutes(3), &child);
         if (printResponse(ready) != 0)
             return 2;
         validateIsolatedSession(ready);
@@ -738,7 +740,8 @@ namespace
         Diagnostics::Command performanceCommand{ requestId++, Diagnostics::CommandType::TracePerformance, {} };
         for (std::size_t byte = 0; byte < sizeof(performanceSamples); ++byte)
             performanceCommand.mPayload.push_back(static_cast<std::byte>((performanceSamples >> (byte * 8)) & 0xffu));
-        const Diagnostics::Response performance = Diagnostics::transact(endpoint, performanceCommand);
+        const Diagnostics::Response performance
+            = Diagnostics::transact(endpoint, performanceCommand, std::chrono::seconds(60));
         if (performance.mError != Diagnostics::ErrorCode::None)
             return printResponse(performance);
         std::ofstream performanceFile(artifacts / "performance.txt", std::ios::binary | std::ios::trunc);

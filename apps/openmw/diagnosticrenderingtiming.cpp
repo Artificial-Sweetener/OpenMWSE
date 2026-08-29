@@ -3,6 +3,7 @@
 #include "mwrender/renderbin.hpp"
 
 #include <array>
+#include <mutex>
 #include <string>
 
 #include <osgUtil/RenderBin>
@@ -42,13 +43,17 @@ namespace OMW
 
     void enableDiagnosticRenderBinTimings()
     {
-        for (const DiagnosticRenderBinPass& pass : passes)
-        {
-            if (osgUtil::RenderBin* prototype = osgUtil::RenderBin::getRenderBinPrototype(std::string(pass.mPrototype)))
+        static std::once_flag once;
+        std::call_once(once, [] {
+            for (const DiagnosticRenderBinPass& pass : passes)
             {
-                SceneUtil::enableDiagnosticGpuRenderBinStatistics(
-                    *prototype, pass.mBinNumber, pass.mGpuStatistic, pass.mCpuStatistic);
+                if (osgUtil::RenderBin* prototype
+                    = osgUtil::RenderBin::getRenderBinPrototype(std::string(pass.mPrototype)))
+                {
+                    SceneUtil::enableDiagnosticGpuRenderBinStatistics(
+                        *prototype, pass.mBinNumber, pass.mGpuStatistic, pass.mCpuStatistic);
+                }
             }
-        }
+        });
     }
 }

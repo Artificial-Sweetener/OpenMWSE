@@ -36,6 +36,8 @@ namespace SceneUtil
     inline constexpr std::string_view ripplesCameraName = "RipplesCamera";
     inline constexpr std::string_view diagnosticGpuPassTimeStatistic = "OpenMW diagnostic GPU pass time taken";
     inline constexpr std::string_view diagnosticCpuPassTimeStatistic = "OpenMW diagnostic CPU pass time taken";
+    inline constexpr std::string_view diagnosticCpuPassBeginStatistic = "OpenMW diagnostic CPU pass begin time";
+    inline constexpr std::string_view diagnosticCpuPassEndStatistic = "OpenMW diagnostic CPU pass end time";
 
     /// Return the versioned camera-pass identities emitted by performance diagnostics.
     std::span<const DiagnosticGpuPass> diagnosticGpuPasses();
@@ -45,6 +47,9 @@ namespace SceneUtil
 
     /// Enable asynchronous GPU statistics for every camera below one scene-graph owner.
     void enableDiagnosticGpuPassStatistics(osg::Node& root);
+
+    /// Enable or suspend camera and render-bin timing collection without detaching instrumentation.
+    void setDiagnosticGpuPassStatisticsCollection(bool enabled);
 
     /// Wrap one render-bin prototype with a delayed GPU timer while preserving its draw behavior.
     void enableDiagnosticGpuRenderBinStatistics(

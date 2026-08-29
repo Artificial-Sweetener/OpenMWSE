@@ -6,6 +6,7 @@ configure_file(diagnosticstartup.cpp.in ${CMAKE_CURRENT_BINARY_DIR}/diagnosticst
 
 set(OPENMW_SOURCES
     engine.cpp
+    diagnosticcollection.cpp
     diagnosticcommands.cpp
     diagnosticperformance.cpp
     diagnosticrenderingtiming.cpp
@@ -21,6 +22,7 @@ set(OPENMW_RESOURCES
 
 set(OPENMW_HEADERS
     doc.hpp
+    diagnosticcollection.hpp
     diagnosticperformance.hpp
     diagnosticrenderingtiming.hpp
     diagnosticstartup.hpp

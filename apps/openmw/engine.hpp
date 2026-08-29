@@ -123,6 +123,8 @@ struct SDL_Window;
 
 namespace OMW
 {
+    class DiagnosticCollection;
+
     /// \brief Main engine class, that brings together all the components of OpenMW
     class Engine
     {
@@ -188,6 +190,7 @@ namespace OMW
         Files::ConfigurationManager& mCfgMgr;
         int mGlMaxTextureImageUnits;
         std::unique_ptr<Diagnostics::Session> mDiagnosticSession;
+        std::unique_ptr<DiagnosticCollection> mDiagnosticCollection;
         std::filesystem::path mDiagnosticArtifactRoot;
         std::string mDiagnosticEndpoint;
         Diagnostics::FixedStepScheduler mDiagnosticStepScheduler;

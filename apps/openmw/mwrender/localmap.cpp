@@ -705,6 +705,7 @@ namespace MWRender
 
     void LocalMapRenderToTexture::setDefaults(osg::Camera* camera)
     {
+        camera->setName("Local Map Camera");
         // Disable small feature culling, it's not going to be reliable for this camera
         osg::Camera::CullingMode cullingMode
             = (osg::Camera::DEFAULT_CULLING | osg::Camera::FAR_PLANE_CULLING) & ~(osg::Camera::SMALL_FEATURE_CULLING);

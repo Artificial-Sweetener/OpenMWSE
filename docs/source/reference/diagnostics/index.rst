@@ -40,8 +40,8 @@ Replay that capture after rebuilding::
       --capsule <capture-directory>\capture.omwdiag --artifacts <replay-directory> \
       --frames 120 --performance-samples 64
 
-``--frames`` advances the exact fixed-step workload before capture. ``--performance-samples`` retains the final bounded subset;
-the preceding frames serve as warm-up. The performance report keeps every sampled OSG statistic and summarizes stable CPU,
+``--frames`` advances the exact fixed-step warm-up workload before capture. ``--performance-samples`` then collects a bounded
+future window without advancing the isolated simulation clock. The performance report keeps every sampled OSG statistic and summarizes stable CPU,
 cull, draw, camera-owned GPU-pass, and frame-duration metrics with median, p95, p99, and worst values. Named
 GPU passes cover the main scene, shadow maps, water reflection, sky render target, post-processing, precipitation occlusion,
 and ripple simulation. A sample count must not exceed the frame count or 600. Visual capture begins after the timed window so
@@ -68,7 +68,7 @@ Attach commands
 The controller accepts ``status``, ``graphics``, ``gameplay``, ``performance``, ``capsule``, and ``reload-shaders`` against an
 enabled session. Supply ``--endpoint <name>`` when the session does not use the default endpoint. ``graphics`` schedules the same
 production pass capture used by Shift+F12. ``capsule --output <name>.omwdiag`` writes beneath the session artifact directory.
-``performance --performance-samples <count>`` reports a bounded retained window of up to 600 frames. ``step`` and ``shutdown``
+``performance --performance-samples <count>`` collects and reports a bounded future window of up to 600 frames. ``step`` and ``shutdown``
 are child-only operations.
 
 Benchmark scenarios
@@ -101,18 +101,21 @@ The versioned providers expose these evidence domains:
   normal and diagnostic-isolation stages.
 * ``gameplay@2`` records the cell, camera position and angles, first-person and underwater state, weather, game and simulation
   clocks, and state. The replay controller checks these stable fields before advancing the simulation.
-* ``performance@4`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
+* ``performance@5`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
   scopes for scripts, Lua, mechanics, physics, world, and UI, resource caches and work queues, navigation and paging activity,
   scene statistics, delayed per-camera GPU/render timing, and camera-owned GPU passes for the main scene, shadow maps, water
-  reflection, sky render target, post-processing, precipitation occlusion, and ripples. Main-camera render-bin intervals further
+  reflection, sky render target, post-processing, precipitation occlusion, and ripples. It divides draw traversal wall time into
+  camera-covered work and the intervals before, between, and after camera stages, while reporting aggregate and per-camera
+  timing for camera work outside the versioned named passes.
+  Main-camera render-bin intervals further
   identify the scene root and its nested early-sky, attachment-resolve, transparency, occlusion-query, first-person, sun-glare,
   and distortion intervals. Groundcover submission and primitive near/far work are attributed separately to each named camera
   pass. It also reports a bounded stable counter schema for static rendering, attachment resolves,
   transparent and first-person replay, actors, lights, groundcover,
   deformation, uploads, caches, and optimized-path fallbacks. Counters and pass timings not produced by their owning subsystem
   are recorded as unavailable rather than inferred. Resolve byte counts describe the logical destination attachment volume
-  written by the copies; they are not an estimate of hardware bus traffic. Timing and counter collection are active only when
-  the diagnostic endpoint is enabled.
+  written by the copies; they are not an estimate of hardware bus traffic. The endpoint remains passive between requests;
+  expensive scene, timing-query, and work-counter collection is enabled only for a bounded performance capture and then restored.
 
 A ``.omwdiag`` capsule contains a manifest, effective settings, full loadable world snapshot, stable world state, provider
 versions, frame identity, and performance evidence. The manifest records the ordered content list and hashes. It does not embed

@@ -36,7 +36,6 @@
 #include <components/stereo/stereomanager.hpp>
 
 #include <components/sceneutil/glextensions.hpp>
-#include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/offscreencontext.hpp>
 #include <components/sceneutil/workqueue.hpp>
 
@@ -67,8 +66,7 @@
 #include "mwinput/diagnosticinputmanager.hpp"
 #include "mwinput/inputmanagerimp.hpp"
 
-#include "diagnosticperformance.hpp"
-#include "diagnosticrenderingtiming.hpp"
+#include "diagnosticcollection.hpp"
 
 #include "mwgui/windowmanagerimp.hpp"
 
@@ -189,28 +187,6 @@ namespace
         viewer.getCameras(cameras);
         for (osg::Camera* camera : cameras)
             camera->getStats()->report(stream, frameNumber);
-    }
-
-    /// Enable the engine, resource, frame-pacing, and graphics-context measurements used by diagnostic providers.
-    void enableDiagnosticStatistics(osgViewer::Viewer& viewer)
-    {
-        osg::Stats* viewerStats = viewer.getViewerStats();
-        viewerStats->allocate(1024);
-        for (const char* category : { "engine", "resource", "frame_rate", "event", "update", "scene" })
-            viewerStats->collectStats(category, true);
-
-        osgViewer::Viewer::Cameras cameras;
-        viewer.getCameras(cameras);
-        for (osg::Camera* camera : cameras)
-        {
-            camera->getStats()->allocate(1024);
-            camera->getStats()->collectStats("rendering", true);
-            camera->getStats()->collectStats("scene", true);
-            SceneUtil::enableDiagnosticGpuPassStatistics(*camera);
-        }
-        if (osg::Node* scene = viewer.getSceneData())
-            SceneUtil::enableDiagnosticGpuPassStatistics(*scene);
-        OMW::enableDiagnosticRenderBinTimings();
     }
 
 }
@@ -1094,7 +1070,7 @@ void OMW::Engine::go()
     if (!mDiagnosticEndpoint.empty())
     {
         std::filesystem::create_directories(mDiagnosticArtifactRoot);
-        enableDiagnosticStatistics(*mViewer);
+        mDiagnosticCollection = std::make_unique<DiagnosticCollection>(*mViewer);
         mDiagnosticSession = std::make_unique<Diagnostics::Session>(mDiagnosticEndpoint);
         Log(Debug::Info) << "OpenMWSE diagnostic bridge ready at " << mDiagnosticEndpoint;
     }

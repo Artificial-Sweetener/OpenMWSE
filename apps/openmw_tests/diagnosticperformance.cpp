@@ -45,6 +45,11 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     viewer.getCamera()->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticGpuPassTimeStatistic), 0.010);
     viewer.getCamera()->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassTimeStatistic), 0.008);
     viewer.getCamera()->getStats()->setAttribute(
+        frame, std::string(SceneUtil::diagnosticCpuPassBeginStatistic), 10.000);
+    viewer.getCamera()->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassEndStatistic), 10.008);
+    viewer.getCamera()->getStats()->setAttribute(frame, "Draw traversal begin time", 9.995);
+    viewer.getCamera()->getStats()->setAttribute(frame, "Draw traversal end time", 10.012);
+    viewer.getCamera()->getStats()->setAttribute(
         frame, std::string(OMW::diagnosticRenderBinPasses()[1].mGpuStatistic), 0.007);
     viewer.getCamera()->getStats()->setAttribute(
         frame, std::string(OMW::diagnosticRenderBinPasses()[1].mCpuStatistic), 0.006);
@@ -56,22 +61,42 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     firstShadow->setName(std::string(SceneUtil::shadowCameraName));
     SceneUtil::enableDiagnosticGpuPassStatistics(*firstShadow);
     firstShadow->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticGpuPassTimeStatistic), 0.002);
+    firstShadow->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassBeginStatistic), 9.996);
+    firstShadow->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassEndStatistic), 9.998);
 
     osg::ref_ptr<osg::Camera> secondShadow = new osg::Camera;
     secondShadow->setName(std::string(SceneUtil::shadowCameraName));
     SceneUtil::enableDiagnosticGpuPassStatistics(*secondShadow);
     secondShadow->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticGpuPassTimeStatistic), 0.003);
+    secondShadow->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassBeginStatistic), 9.998);
+    secondShadow->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassEndStatistic), 9.999);
     secondShadow->getStats()->setAttribute(frame, std::string(MWRender::groundcoverInstanceRenderCounter), 300.0);
+
+    osg::ref_ptr<osg::Camera> auxiliary = new osg::Camera;
+    auxiliary->setName("AuxiliarySceneCamera");
+    SceneUtil::enableDiagnosticGpuPassStatistics(*auxiliary);
+    auxiliary->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassTimeStatistic), 0.004);
 
     std::ostringstream output;
     OMW::reportDiagnosticPerformance(frame, frame, viewer, output);
     const std::string report = output.str();
 
-    EXPECT_NE(report.find("provider: performance@4"), std::string::npos);
+    EXPECT_NE(report.find("provider: performance@5"), std::string::npos);
+    EXPECT_NE(report.find("draw-breakdown:\n  camera-covered:\n    available: true\n    count: 1\n"
+                          "    median: 0.010999"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(
+        report.find("  outside-cameras:\n    available: true\n    count: 1\n    median: 0.006000"), std::string::npos)
+        << report;
     EXPECT_NE(report.find("  main-scene:\n    available: true\n    count: 1\n    median: 0.01"), std::string::npos);
     EXPECT_NE(report.find("  shadow-maps:\n    available: true\n    count: 1\n    median: 0.005"), std::string::npos);
     EXPECT_NE(report.find("  water-reflection:\n    available: false"), std::string::npos);
     EXPECT_NE(report.find("cpu-passes:\n  main-scene:\n    available: true\n    count: 1"), std::string::npos);
+    EXPECT_NE(report.find("unclassified-camera-details:\n  - index: 1\n    name: \"AuxiliarySceneCamera\"\n"
+                          "    cpu-time:\n      available: true\n      count: 1\n      median: 0.004"),
+        std::string::npos)
+        << report;
     EXPECT_NE(report.find("groundcover-passes:\n  main-scene.instance-geometry-pairs-submitted:\n"
                           "    available: true\n    count: 1\n    median: 1200"),
         std::string::npos)

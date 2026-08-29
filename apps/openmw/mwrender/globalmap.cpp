@@ -334,6 +334,7 @@ namespace MWRender
         float srcBottom)
     {
         osg::ref_ptr<osg::Camera> camera(new osg::Camera);
+        camera->setName("Global Map Camera");
         camera->setNodeMask(Mask_RenderToTexture);
         camera->setReferenceFrame(osg::Camera::ABSOLUTE_RF);
         camera->setViewMatrix(osg::Matrix::identity());

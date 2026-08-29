@@ -383,6 +383,7 @@ namespace MyGUIPlatform
         mDrawable = new Drawable(this);
 
         osg::ref_ptr<osg::Camera> camera = new osg::Camera();
+        camera->setName("GUI Camera");
         camera->setReferenceFrame(osg::Transform::ABSOLUTE_RF);
         camera->setProjectionResizePolicy(osg::Camera::FIXED);
         camera->setProjectionMatrix(osg::Matrix::identity());

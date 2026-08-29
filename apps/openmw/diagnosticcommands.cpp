@@ -1,5 +1,6 @@
 #include "engine.hpp"
 
+#include "diagnosticcollection.hpp"
 #include "diagnosticperformance.hpp"
 
 #include <components/diagnostics/capsule.hpp>
@@ -78,9 +79,21 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
     if (!mDiagnosticSession)
         return;
 
+    if (const std::optional<CompletedDiagnosticCollection> completed = mDiagnosticCollection->update(frameNumber))
+    {
+        std::ostringstream output;
+        output << "request-frame: " << completed->mFirstFrame << '\n'
+               << "fixed-step: " << (mDiagnosticChild ? "true" : "false") << '\n'
+               << "fixed-step-duration: " << mDiagnosticStepScheduler.frameDuration() << '\n';
+        reportDiagnosticPerformance(completed->mFirstFrame, completed->mLastFrame, *mViewer, output);
+        mDiagnosticSession->respond(
+            { completed->mRequestId, Diagnostics::ErrorCode::None, diagnosticBytes(output.str()) });
+    }
+
     for (const Diagnostics::Command& command : mDiagnosticSession->drain())
     {
         Diagnostics::Response response{ command.mRequestId, Diagnostics::ErrorCode::None, {} };
+        bool deferredResponse = false;
         try
         {
             std::ostringstream output;
@@ -147,7 +160,9 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << (mWorld->getPostProcessor()->atmosphereDiagnosticCaptureInProgress() ? "in-progress"
                                                                                                    : "idle")
                            << '\n'
-                           << "providers: [core@1, graphics@1, gameplay@2, performance@4]\n";
+                           << "performance-capture: " << (mDiagnosticCollection->active() ? "collecting" : "idle")
+                           << '\n'
+                           << "providers: [core@1, graphics@1, gameplay@2, performance@5]\n";
                     response.mPayload = diagnosticBytes(output.str());
                     break;
 
@@ -225,19 +240,17 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                                 << (byte * 8);
                     }
                     constexpr std::uint32_t maximumPerformanceSamples = 600;
-                    const unsigned lastSampledFrame = diagnosticStatisticsFrame(frameNumber);
-                    if (sampleCount == 0 || sampleCount > maximumPerformanceSamples
-                        || sampleCount > lastSampledFrame + 1)
+                    if (sampleCount == 0 || sampleCount > maximumPerformanceSamples)
                     {
                         response.mError = Diagnostics::ErrorCode::InvalidFrame;
                         break;
                     }
-                    const unsigned firstSampledFrame = lastSampledFrame - sampleCount + 1;
-                    output << "request-frame: " << frameNumber << '\n'
-                           << "fixed-step: " << (mDiagnosticChild ? "true" : "false") << '\n'
-                           << "fixed-step-duration: " << mDiagnosticStepScheduler.frameDuration() << '\n';
-                    reportDiagnosticPerformance(firstSampledFrame, lastSampledFrame, *mViewer, output);
-                    response.mPayload = diagnosticBytes(output.str());
+                    if (!mDiagnosticCollection->start(command.mRequestId, sampleCount, frameNumber))
+                    {
+                        response.mError = Diagnostics::ErrorCode::InvalidState;
+                        break;
+                    }
+                    deferredResponse = true;
                     break;
                 }
 
@@ -256,7 +269,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                     manifest << "capsule-version: " << Diagnostics::capsuleVersion << '\n'
                              << "build: " << quoteDiagnosticYaml(Version::getOpenmwVersionDescription()) << '\n'
                              << "frame: " << frameNumber << '\n'
-                             << "providers: [core@1, graphics@1, gameplay@2, performance@4]\n"
+                             << "providers: [core@1, graphics@1, gameplay@2, performance@5]\n"
                              << "content:\n";
                     for (const std::string& content : mContentFiles)
                     {
@@ -366,6 +379,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
             response.mError = Diagnostics::ErrorCode::InternalFailure;
             response.mPayload = diagnosticBytes(error.what());
         }
-        mDiagnosticSession->respond(std::move(response));
+        if (!deferredResponse)
+            mDiagnosticSession->respond(std::move(response));
     }
 }
