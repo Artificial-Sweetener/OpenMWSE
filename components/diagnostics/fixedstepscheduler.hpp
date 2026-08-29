@@ -34,6 +34,9 @@ namespace Diagnostics
         /// Return the cumulative number of scheduled frames completed by this scheduler.
         std::uint64_t completedFrames() const noexcept;
 
+        /// Return the configured deterministic frame duration.
+        double frameDuration() const noexcept;
+
     private:
         double mFrameDuration = 1.0 / 60.0;
         std::uint32_t mRemainingFrames = 0;

@@ -66,6 +66,8 @@
 #include "mwinput/diagnosticinputmanager.hpp"
 #include "mwinput/inputmanagerimp.hpp"
 
+#include "diagnosticperformance.hpp"
+
 #include "mwgui/windowmanagerimp.hpp"
 
 #include "mwlua/luamanagerimp.hpp"
@@ -232,6 +234,7 @@ namespace
     void enableDiagnosticStatistics(osgViewer::Viewer& viewer)
     {
         osg::Stats* viewerStats = viewer.getViewerStats();
+        viewerStats->allocate(1024);
         for (const char* category : { "engine", "resource", "frame_rate", "event", "update", "scene" })
             viewerStats->collectStats(category, true);
 
@@ -239,6 +242,7 @@ namespace
         viewer.getCameras(cameras);
         for (osg::Camera* camera : cameras)
         {
+            camera->getStats()->allocate(1024);
             camera->getStats()->collectStats("gpu", true);
             camera->getStats()->collectStats("rendering", true);
             camera->getStats()->collectStats("scene", true);
@@ -1067,9 +1071,9 @@ void OMW::Engine::go()
     prepareEngine();
 
 #ifdef _WIN32
-    const auto* statsFile = _wgetenv(L"OPENMW_OSG_STATS_FILE");
+    const auto* statsFile = mDiagnosticChild ? nullptr : _wgetenv(L"OPENMW_OSG_STATS_FILE");
 #else
-    const auto* statsFile = std::getenv("OPENMW_OSG_STATS_FILE");
+    const auto* statsFile = mDiagnosticChild ? nullptr : std::getenv("OPENMW_OSG_STATS_FILE");
 #endif
 
     std::filesystem::path path;
@@ -1087,18 +1091,18 @@ void OMW::Engine::go()
                                 << "\": " << std::generic_category().message(errno);
     }
 
-    // Setup profiler
-    osg::ref_ptr<Resource::Profiler> statsHandler = new Resource::Profiler(stats.is_open(), *mVFS);
+    if (!mDiagnosticChild)
+    {
+        osg::ref_ptr<Resource::Profiler> statsHandler = new Resource::Profiler(stats.is_open(), *mVFS);
+        initStatsHandler(*statsHandler);
+        mViewer->addEventHandler(statsHandler);
 
-    initStatsHandler(*statsHandler);
+        osg::ref_ptr<Resource::StatsHandler> resourcesHandler = new Resource::StatsHandler(stats.is_open(), *mVFS);
+        mViewer->addEventHandler(resourcesHandler);
 
-    mViewer->addEventHandler(statsHandler);
-
-    osg::ref_ptr<Resource::StatsHandler> resourcesHandler = new Resource::StatsHandler(stats.is_open(), *mVFS);
-    mViewer->addEventHandler(resourcesHandler);
-
-    if (stats.is_open())
-        Resource::collectStatistics(*mViewer);
+        if (stats.is_open())
+            Resource::collectStatistics(*mViewer);
+    }
 
     // Start the game
     if (!mSaveGameFile.empty())
@@ -1339,7 +1343,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << (mWorld->getPostProcessor()->atmosphereDiagnosticCaptureInProgress() ? "in-progress"
                                                                                                    : "idle")
                            << '\n'
-                           << "providers: [core@1, graphics@1, gameplay@1, performance@1]\n";
+                           << "providers: [core@1, graphics@1, gameplay@1, performance@2]\n";
                     response.mPayload = diagnosticBytes(output.str());
                     break;
 
@@ -1398,12 +1402,33 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
 
                 case Diagnostics::CommandType::TracePerformance:
                 {
-                    const unsigned sampledFrame = diagnosticStatisticsFrame(frameNumber);
-                    output << "provider: performance@1\nframe: " << frameNumber << '\n'
-                           << "sampled-frame: " << sampledFrame << '\n'
+                    std::uint32_t sampleCount = 1;
+                    if (!command.mPayload.empty())
+                    {
+                        if (command.mPayload.size() != sizeof(sampleCount))
+                        {
+                            response.mError = Diagnostics::ErrorCode::InvalidFrame;
+                            break;
+                        }
+                        sampleCount = 0;
+                        for (std::size_t byte = 0; byte < sizeof(sampleCount); ++byte)
+                            sampleCount
+                                |= static_cast<std::uint32_t>(std::to_integer<unsigned char>(command.mPayload[byte]))
+                                << (byte * 8);
+                    }
+                    constexpr std::uint32_t maximumPerformanceSamples = 600;
+                    const unsigned lastSampledFrame = diagnosticStatisticsFrame(frameNumber);
+                    if (sampleCount == 0 || sampleCount > maximumPerformanceSamples
+                        || sampleCount > lastSampledFrame + 1)
+                    {
+                        response.mError = Diagnostics::ErrorCode::InvalidFrame;
+                        break;
+                    }
+                    const unsigned firstSampledFrame = lastSampledFrame - sampleCount + 1;
+                    output << "request-frame: " << frameNumber << '\n'
                            << "fixed-step: " << (mDiagnosticChild ? "true" : "false") << '\n'
-                           << "simulation-dt: " << mEnvironment.getFrameDuration() << '\n';
-                    reportStats(sampledFrame, *mViewer, output);
+                           << "fixed-step-duration: " << mDiagnosticStepScheduler.frameDuration() << '\n';
+                    reportDiagnosticPerformance(firstSampledFrame, lastSampledFrame, *mViewer, output);
                     response.mPayload = diagnosticBytes(output.str());
                     break;
                 }
@@ -1423,7 +1448,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                     manifest << "capsule-version: " << Diagnostics::capsuleVersion << '\n'
                              << "build: " << quoteDiagnosticYaml(Version::getOpenmwVersionDescription()) << '\n'
                              << "frame: " << frameNumber << '\n'
-                             << "providers: [core@1, graphics@1, gameplay@1, performance@1]\n"
+                             << "providers: [core@1, graphics@1, gameplay@1, performance@2]\n"
                              << "content:\n";
                     for (const std::string& content : mContentFiles)
                     {
@@ -1473,8 +1498,10 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
 
                     std::ostringstream performance;
                     const unsigned sampledFrame = diagnosticStatisticsFrame(frameNumber);
-                    performance << "sampled-frame: " << sampledFrame << '\n';
-                    reportStats(sampledFrame, *mViewer, performance);
+                    performance << "request-frame: " << frameNumber << '\n'
+                                << "fixed-step: " << (mDiagnosticChild ? "true" : "false") << '\n'
+                                << "fixed-step-duration: " << mDiagnosticStepScheduler.frameDuration() << '\n';
+                    reportDiagnosticPerformance(sampledFrame, sampledFrame, *mViewer, performance);
                     capsule.add({ "performance/frame.txt", Diagnostics::CapsuleEntryType::PerformanceTrace,
                         diagnosticBytes(performance.str()) });
 

@@ -41,4 +41,9 @@ namespace Diagnostics
     {
         return mCompletedFrames;
     }
+
+    double FixedStepScheduler::frameDuration() const noexcept
+    {
+        return mFrameDuration;
+    }
 }

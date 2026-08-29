@@ -29,12 +29,19 @@ Capture and replay
 Run a windowless production capture from an existing save::
 
   openmw-diagnosticctl run --openmw <build>\openmw.exe --config <profile>\openmw.cfg \
-      --save <profile>\userdata\saves\<character>\<save>.omwsave --artifacts <capture-directory> --frames 20
+      --save <profile>\userdata\saves\<character>\<save>.omwsave --artifacts <capture-directory> \
+      --frames 120 --performance-samples 64
 
 Replay that capture after rebuilding::
 
   openmw-diagnosticctl replay --openmw <build>\openmw.exe --config <profile>\openmw.cfg \
-      --capsule <capture-directory>\capture.omwdiag --artifacts <replay-directory> --frames 20
+      --capsule <capture-directory>\capture.omwdiag --artifacts <replay-directory> \
+      --frames 120 --performance-samples 64
+
+``--frames`` advances the exact fixed-step workload before capture. ``--performance-samples`` retains the final bounded subset;
+the preceding frames serve as warm-up. The performance report keeps every sampled OSG statistic and summarizes stable CPU,
+cull, draw, GPU, and frame-duration metrics with median, p95, p99, and worst values. A sample count must not exceed the frame
+count or 600. Visual capture begins after the timed window so synchronous readback does not contaminate its distributions.
 
 Compare the real production attachments from both runs::
 
@@ -61,8 +68,9 @@ The versioned providers expose these evidence domains:
   normal and diagnostic-isolation stages.
 * ``gameplay@1`` records the cell, camera, weather, game and simulation clocks, and state. The replay controller checks these
   stable fields before advancing the simulation.
-* ``performance@1`` records frame pacing, CPU scopes for scripts, Lua, mechanics, physics, world, and UI, resource caches and
-  work queues, navigation and paging activity, scene statistics, and per-camera GPU/render timing when the driver supplies it.
+* ``performance@2`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
+  scopes for scripts, Lua, mechanics, physics, world, and UI, resource caches and work queues, navigation and paging activity,
+  scene statistics, and delayed per-camera GPU/render timing. An unavailable timing source is recorded explicitly.
 
 A ``.omwdiag`` capsule contains a manifest, effective settings, full loadable world snapshot, stable world state, provider
 versions, frame identity, and performance evidence. The manifest records the ordered content list and hashes. It does not embed

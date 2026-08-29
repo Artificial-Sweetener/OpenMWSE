@@ -1,5 +1,6 @@
 set(OPENMW_SOURCES
     engine.cpp
+    diagnosticperformance.cpp
     options.cpp
 )
 
@@ -10,6 +11,7 @@ set(OPENMW_RESOURCES
 
 set(OPENMW_HEADERS
     doc.hpp
+    diagnosticperformance.hpp
     engine.hpp
     options.hpp
     profile.hpp

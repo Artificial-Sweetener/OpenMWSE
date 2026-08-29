@@ -462,7 +462,7 @@ namespace
                   "  openmw-diagnosticctl shutdown [--endpoint name]\n"
                   "  openmw-diagnosticctl <run|replay> --openmw openmw.exe --config openmw.cfg\n"
                   "      --artifacts directory [--save save.omwsave | --capsule capture.omwdiag]\n"
-                  "      [--frames count] [--fixed-dt seconds]\n"
+                  "      [--frames count] [--performance-samples count] [--fixed-dt seconds]\n"
                   "  openmw-diagnosticctl inspect-capsule --capsule capture.omwdiag\n";
     }
 
@@ -660,6 +660,10 @@ namespace
 
         const std::uint32_t frames
             = static_cast<std::uint32_t>(std::stoul(findOption(arguments, "--frames").value_or("16")));
+        const std::uint32_t performanceSamples = static_cast<std::uint32_t>(
+            std::stoul(findOption(arguments, "--performance-samples").value_or(std::to_string(std::min(frames, 16u)))));
+        if (performanceSamples == 0 || performanceSamples > frames || performanceSamples > 600)
+            throw std::invalid_argument("performance samples must be within [1, min(frames, 600)]");
         Diagnostics::Command step{ requestId++, Diagnostics::CommandType::StepFrames, {} };
         for (std::size_t byte = 0; byte < sizeof(frames); ++byte)
             step.mPayload.push_back(static_cast<std::byte>((frames >> (byte * 8)) & 0xffu));
@@ -667,8 +671,10 @@ namespace
         waitForScheduledFrames(endpoint, requestId, frames);
         std::cout << "executed-fixed-frames: " << frames << '\n';
 
-        const Diagnostics::Response performance
-            = Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::TracePerformance, {} });
+        Diagnostics::Command performanceCommand{ requestId++, Diagnostics::CommandType::TracePerformance, {} };
+        for (std::size_t byte = 0; byte < sizeof(performanceSamples); ++byte)
+            performanceCommand.mPayload.push_back(static_cast<std::byte>((performanceSamples >> (byte * 8)) & 0xffu));
+        const Diagnostics::Response performance = Diagnostics::transact(endpoint, performanceCommand);
         if (performance.mError != Diagnostics::ErrorCode::None)
             return printResponse(performance);
         std::ofstream performanceFile(artifacts / "performance.txt", std::ios::binary | std::ios::trunc);

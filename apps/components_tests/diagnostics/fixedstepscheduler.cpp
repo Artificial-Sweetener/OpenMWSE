@@ -18,6 +18,7 @@ TEST(FixedStepSchedulerTest, ConsumesExactlyOneScheduledFrameAfterItBegins)
 {
     Diagnostics::FixedStepScheduler scheduler;
     scheduler.setFrameDuration(0.025);
+    EXPECT_DOUBLE_EQ(scheduler.frameDuration(), 0.025);
     scheduler.schedule(2);
 
     const Diagnostics::FixedStepScheduler::Frame first = scheduler.beginFrame();
