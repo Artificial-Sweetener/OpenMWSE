@@ -5,12 +5,15 @@
 #include <osg/Plane>
 #include <osg/State>
 #include <osg/StateSet>
+#include <osg/Stats>
+#include <osg/View>
 #include <osgUtil/RenderStage>
 #include <osgUtil/StateGraph>
 
 #include <components/misc/constants.hpp>
 
 #include "opaqueblit.hpp"
+#include "renderworkcounter.hpp"
 #include "water.hpp"
 
 namespace
@@ -71,11 +74,13 @@ namespace MWRender
 
         mCameraUnderwater = cameraPosition.z() < waterHeight;
 
+        std::size_t classifiedLeafCount = 0;
         for (osgUtil::RenderLeaf* leaf : _renderLeafList)
         {
             if (!leaf || !leaf->_drawable || !leaf->_modelview)
                 continue;
 
+            ++classifiedLeafCount;
             if (leaf->_drawable == mWater->getDrawable())
                 mWaterLeaves.push_back(leaf);
             else
@@ -89,6 +94,14 @@ namespace MWRender
                 else
                     mStraddlingLeaves.push_back(leaf);
             }
+        }
+
+        osg::Camera* camera = getStage()->getCamera();
+        osg::View* view = camera ? camera->getView() : nullptr;
+        if (osg::Stats* stats = camera ? camera->getStats() : nullptr; view && view->getFrameStamp())
+        {
+            addDiagnosticRenderWorkCounter(*stats, view->getFrameStamp()->getFrameNumber(),
+                transparentClassifiedLeafCounter, static_cast<double>(classifiedLeafCount));
         }
 
         if (mWaterLeaves.empty())

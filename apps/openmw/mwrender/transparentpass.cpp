@@ -118,7 +118,7 @@ namespace MWRender
         state.removeStateSet(insertStateSetPosition);
 
         if (osg::Stats* stats = bin->getStage()->getCamera()->getStats())
-            addPostProcessingWorkCounter(
+            addDiagnosticRenderWorkCounter(
                 *stats, state.getFrameStamp()->getFrameNumber(), transparentReplayCounter, replayedDrawables);
 
         msaaFbo ? msaaFbo->apply(state, osg::FrameBufferObject::DRAW_FRAMEBUFFER)

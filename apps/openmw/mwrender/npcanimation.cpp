@@ -362,7 +362,7 @@ namespace MWRender
             bin->setStateSet(restore);
 
             if (osg::Stats* stats = renderInfo.getCurrentCamera()->getStats())
-                addPostProcessingWorkCounter(*stats, state->getFrameStamp()->getFrameNumber(), firstPersonReplayCounter,
+                addDiagnosticRenderWorkCounter(*stats, state->getFrameStamp()->getFrameNumber(), firstPersonReplayCounter,
                     static_cast<double>(bin->getRenderLeafList().size()));
 
             primaryFBO->apply(*state);

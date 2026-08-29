@@ -24,21 +24,25 @@ TEST(DiagnosticWorkCounterTest, DefinesBoundedUniqueStableNames)
     }
 }
 
-TEST(DiagnosticWorkCounterTest, CollectsPostProcessingWorkOnlyWhenRequested)
+TEST(DiagnosticWorkCounterTest, CollectsRenderWorkOnlyWhenRequested)
 {
     osg::ref_ptr<osg::Stats> stats = new osg::Stats("test");
     constexpr unsigned frameNumber = 42;
 
-    MWRender::resetPostProcessingWorkCounters(*stats, frameNumber);
+    MWRender::resetDiagnosticRenderWorkCounters(*stats, frameNumber);
     double value = -1.0;
     EXPECT_FALSE(stats->getAttribute(frameNumber, std::string(MWRender::colorCopyCounter), value));
 
     stats->collectStats("scene", true);
-    MWRender::resetPostProcessingWorkCounters(*stats, frameNumber);
+    MWRender::resetDiagnosticRenderWorkCounters(*stats, frameNumber);
     ASSERT_TRUE(stats->getAttribute(frameNumber, std::string(MWRender::colorCopyCounter), value));
     EXPECT_DOUBLE_EQ(value, 0.0);
 
-    MWRender::addPostProcessingWorkCounter(*stats, frameNumber, MWRender::colorCopyCounter, 2.0);
+    MWRender::addDiagnosticRenderWorkCounter(*stats, frameNumber, MWRender::colorCopyCounter, 2.0);
     ASSERT_TRUE(stats->getAttribute(frameNumber, std::string(MWRender::colorCopyCounter), value));
     EXPECT_DOUBLE_EQ(value, 2.0);
+
+    ASSERT_TRUE(stats->getAttribute(
+        frameNumber, std::string(MWRender::transparentClassifiedLeafCounter), value));
+    EXPECT_DOUBLE_EQ(value, 0.0);
 }

@@ -414,7 +414,7 @@ namespace MWRender
     void PostProcessor::cull(unsigned frameId, osgUtil::CullVisitor* cv)
     {
         if (osg::Stats* stats = cv->getCurrentCamera()->getStats())
-            resetPostProcessingWorkCounters(*stats, cv->getTraversalNumber());
+            resetDiagnosticRenderWorkCounters(*stats, cv->getTraversalNumber());
 
         if (const auto& fbo = getFbo(FBO_Intercept, frameId))
         {

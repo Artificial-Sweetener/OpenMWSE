@@ -61,9 +61,9 @@ namespace MWRender
             const double layers = Stereo::getMultiview() ? 2.0 : 1.0;
             const double destinationBytes
                 = static_cast<double>(colorTex->getTextureWidth()) * colorTex->getTextureHeight() * 8.0 * layers;
-            addPostProcessingWorkCounter(*stats, frameNumber, colorCopyCounter, 1.0);
-            addPostProcessingWorkCounter(*stats, frameNumber, depthCopyCounter, 1.0);
-            addPostProcessingWorkCounter(*stats, frameNumber, resolveByteCounter, destinationBytes);
+            addDiagnosticRenderWorkCounter(*stats, frameNumber, colorCopyCounter, 1.0);
+            addDiagnosticRenderWorkCounter(*stats, frameNumber, depthCopyCounter, 1.0);
+            addDiagnosticRenderWorkCounter(*stats, frameNumber, resolveByteCounter, destinationBytes);
         }
 
         (msaaFbo ? msaaFbo : fbo)->apply(state, osg::FrameBufferObject::DRAW_FRAMEBUFFER);
