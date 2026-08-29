@@ -1,5 +1,6 @@
 set(OPENMW_SOURCES
     engine.cpp
+    diagnosticcommands.cpp
     diagnosticperformance.cpp
     diagnosticworkcounter.cpp
     options.cpp
