@@ -6,6 +6,7 @@ file(GLOB UNITTEST_SRC_FILES
 
     options.cpp
     diagnosticperformance.cpp
+    diagnosticstartup.cpp
     diagnosticworkcounter.cpp
     diagnosticisolatedsettings.cpp
     ../openmw-diagnosticctl/isolatedsettings.cpp

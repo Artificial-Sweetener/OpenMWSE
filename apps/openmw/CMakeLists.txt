@@ -1,8 +1,15 @@
+set(OPENMW_DIAGNOSTICS_DEFAULT_VALUE false)
+if(OPENMW_ENABLE_DIAGNOSTICS_BY_DEFAULT)
+    set(OPENMW_DIAGNOSTICS_DEFAULT_VALUE true)
+endif()
+configure_file(diagnosticstartup.cpp.in ${CMAKE_CURRENT_BINARY_DIR}/diagnosticstartup.cpp @ONLY)
+
 set(OPENMW_SOURCES
     engine.cpp
     diagnosticcommands.cpp
     diagnosticperformance.cpp
     diagnosticrenderingtiming.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/diagnosticstartup.cpp
     diagnosticworkcounter.cpp
     options.cpp
 )
@@ -16,6 +23,7 @@ set(OPENMW_HEADERS
     doc.hpp
     diagnosticperformance.hpp
     diagnosticrenderingtiming.hpp
+    diagnosticstartup.hpp
     diagnosticworkcounter.hpp
     engine.hpp
     options.hpp

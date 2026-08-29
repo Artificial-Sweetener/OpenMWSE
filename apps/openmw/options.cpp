@@ -96,7 +96,7 @@ namespace OpenMW
             "seed value for random number generator");
 
         addOption("diagnostic-session", bpo::value<std::string>()->default_value(""),
-            "enable the local OpenMWSE diagnostic bridge at the supplied protected endpoint");
+            "select the local OpenMWSE diagnostic endpoint; use 'default' to enable or 'off' to disable");
         addOption("diagnostic-artifacts",
             bpo::value<Files::MaybeQuotedPath>()->default_value(Files::MaybeQuotedPath(), ""),
             "set the writable artifact root for an enabled diagnostic session");

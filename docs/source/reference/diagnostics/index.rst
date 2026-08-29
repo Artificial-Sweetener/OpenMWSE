@@ -19,9 +19,11 @@ Execution modes
   records evidence, shuts down and reaps the child, proves temporary-workspace cleanup, and verifies that the source profile did
   not change.
 
-Set ``OPENMW_DIAGNOSTICS=1`` before starting an interactive development build to enable its default current-user endpoint. Use
-an explicit endpoint with ``--diagnostic-session`` and an artifact directory with ``--diagnostic-artifacts`` when coordinating
-more than one development session. Disabled builds perform no diagnostic transport or statistics collection.
+Interactive OpenMWSE builds start the protected current-user endpoint by default. Set ``OPENMW_DIAGNOSTICS=0`` or pass
+``--diagnostic-session off`` to disable the bridge for a launch. ``OPENMW_DIAGNOSTICS=1`` and ``--diagnostic-session default``
+enable the endpoint for builds configured with ``OPENMW_ENABLE_DIAGNOSTICS_BY_DEFAULT=OFF``. An explicit protected endpoint
+with ``--diagnostic-session`` and an artifact directory with ``--diagnostic-artifacts`` support coordinated development
+sessions. Disabled sessions perform no diagnostic transport or statistics collection.
 
 Capture and replay
 ------------------

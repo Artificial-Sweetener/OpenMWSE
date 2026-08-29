@@ -1,0 +1,37 @@
+#include <apps/openmw/diagnosticstartup.hpp>
+
+#include <components/diagnostics/localtransport.hpp>
+
+#include <stdexcept>
+
+namespace OMW
+{
+    bool diagnosticsEnabledByDefault()
+    {
+        return @OPENMW_DIAGNOSTICS_DEFAULT_VALUE@;
+    }
+
+    std::string resolveDiagnosticEndpoint(
+        std::string_view requestedEndpoint, std::optional<std::string_view> environmentOverride, bool enabledByDefault)
+    {
+        if (requestedEndpoint == "off")
+            return {};
+        if (requestedEndpoint == "default")
+            return Diagnostics::defaultLocalEndpoint();
+        if (!requestedEndpoint.empty())
+            return std::string(requestedEndpoint);
+
+        if (environmentOverride.has_value())
+        {
+            if (*environmentOverride == "0")
+                return {};
+            if (*environmentOverride == "1")
+                return Diagnostics::defaultLocalEndpoint();
+            throw std::invalid_argument("OPENMW_DIAGNOSTICS must be '0' or '1'");
+        }
+
+        if (enabledByDefault)
+            return Diagnostics::defaultLocalEndpoint();
+        return {};
+    }
+}

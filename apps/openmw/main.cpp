@@ -1,5 +1,4 @@
 #include <components/debug/debugging.hpp>
-#include <components/diagnostics/localtransport.hpp>
 #include <components/fallback/fallback.hpp>
 #include <components/fallback/validate.hpp>
 #include <components/files/configurationmanager.hpp>
@@ -10,17 +9,20 @@
 
 #include "mwgui/debugwindow.hpp"
 
+#include "diagnosticstartup.hpp"
 #include "engine.hpp"
 #include "options.hpp"
 
 #include <boost/program_options/variables_map.hpp>
 
 #include <algorithm>
+#include <cstdlib>
+#include <optional>
+#include <string_view>
 
 #if defined(_WIN32)
 #include <components/misc/windows.hpp>
 // makes __argc and __argv available on windows
-#include <cstdlib>
 
 extern "C" __declspec(dllexport) DWORD AmdPowerXpressRequestHighPerformance = 0x00000001;
 #endif
@@ -161,15 +163,11 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
     engine.enableFontExport(variables["export-fonts"].as<bool>());
     engine.setRandomSeed(variables["random-seed"].as<unsigned int>());
 
-    std::string diagnosticEndpoint = variables["diagnostic-session"].as<std::string>();
-    if (diagnosticEndpoint.empty())
-    {
-        if (const char* enabled = std::getenv("OPENMW_DIAGNOSTICS");
-            enabled != nullptr && std::string_view(enabled) == "1")
-            diagnosticEndpoint = Diagnostics::defaultLocalEndpoint();
-    }
-    else if (diagnosticEndpoint == "default")
-        diagnosticEndpoint = Diagnostics::defaultLocalEndpoint();
+    const char* diagnosticEnvironment = std::getenv("OPENMW_DIAGNOSTICS");
+    const std::optional<std::string_view> diagnosticOverride
+        = diagnosticEnvironment == nullptr ? std::nullopt : std::optional<std::string_view>(diagnosticEnvironment);
+    std::string diagnosticEndpoint = OMW::resolveDiagnosticEndpoint(
+        variables["diagnostic-session"].as<std::string>(), diagnosticOverride, OMW::diagnosticsEnabledByDefault());
 
     if (!diagnosticEndpoint.empty())
     {
