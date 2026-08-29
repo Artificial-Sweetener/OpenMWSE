@@ -78,6 +78,12 @@ unsupported, oversized, contains unsafe names, omits required state, or does not
 hashes. Artifact writes are bounded, validated, atomic, and refuse replacement. The controller reports structured protocol error
 names and preserves engine error context.
 
+Protocol, capsule, provider, and render-bundle versions are independent compatibility boundaries. A provider version describes
+the names and semantics in one provider response. Graphics-provider bundle version 1 stores named, dimensioned float attachments;
+adding a newly named optional attachment remains compatible, while changing an existing attachment's meaning, layout, numeric
+representation, or coordinate convention requires a new bundle or provider version. Readers reject unsupported versions and
+must not infer compatibility from the OpenMWSE release number.
+
 The fixed-step scheduler controls simulation and rendering clocks after loading the real save. Readiness and graphics-completion
 barriers prevent capture races. A disconnected controller cancels pending work, and controller destruction terminates and reaps
 its child. Engine commands run at the main-thread safe point after Lua garbage collection is quiescent and before world updates.
