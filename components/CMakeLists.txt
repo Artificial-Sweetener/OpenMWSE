@@ -324,7 +324,7 @@ add_component_dir (files
     )
 
 add_component_dir (diagnostics
-    protocol commandqueue capsule localtransport session
+    protocol commandqueue capsule localtransport session fixedstepscheduler
     )
 
 if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")

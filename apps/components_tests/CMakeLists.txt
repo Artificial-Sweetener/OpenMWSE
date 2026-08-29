@@ -70,6 +70,7 @@ file(GLOB UNITTEST_SRC_FILES
     diagnostics/protocol.cpp
     diagnostics/commandqueue.cpp
     diagnostics/capsule.cpp
+    diagnostics/fixedstepscheduler.cpp
     diagnostics/session.cpp
 
     toutf8/toutf8.cpp

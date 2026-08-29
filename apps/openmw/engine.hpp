@@ -5,6 +5,7 @@
 
 #include <components/compiler/extensions.hpp>
 #include <components/debug/debuglog.hpp>
+#include <components/diagnostics/fixedstepscheduler.hpp>
 #include <components/esm/refid.hpp>
 #include <components/files/collections.hpp>
 #include <components/settings/settings.hpp>
@@ -189,8 +190,7 @@ namespace OMW
         std::unique_ptr<Diagnostics::Session> mDiagnosticSession;
         std::filesystem::path mDiagnosticArtifactRoot;
         std::string mDiagnosticEndpoint;
-        std::uint32_t mDiagnosticFramesRemaining = 0;
-        double mDiagnosticFixedFrameDuration = 1.0 / 60.0;
+        Diagnostics::FixedStepScheduler mDiagnosticStepScheduler;
         bool mDiagnosticChild = false;
 
         // not implemented

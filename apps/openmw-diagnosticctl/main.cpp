@@ -483,6 +483,29 @@ namespace
         throw std::runtime_error("production graphics capture did not complete within its timeout");
     }
 
+    /// Wait for an exact cumulative fixed-frame count without advancing simulation after completion.
+    void waitForScheduledFrames(
+        const std::string& endpoint, std::uint64_t& requestId, std::uint64_t expectedCompletedFrames)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+        while (std::chrono::steady_clock::now() < deadline)
+        {
+            const Diagnostics::Response status
+                = Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::InspectSession, {} });
+            if (status.mError != Diagnostics::ErrorCode::None)
+                throw std::runtime_error("failed polling deterministic diagnostic frames");
+            const YAML::Node parsed = YAML::Load(payloadText(status.mPayload));
+            if (parsed["scheduled-frames-remaining"].as<std::uint32_t>() == 0)
+            {
+                if (parsed["completed-fixed-frames"].as<std::uint64_t>() != expectedCompletedFrames)
+                    throw std::runtime_error("diagnostic child completed an unexpected fixed-frame count");
+                return;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        throw std::runtime_error("deterministic diagnostic frames did not complete within their timeout");
+    }
+
     /// Compare the replay's observable initial world state with its capsule using stable domain fields.
     void validateReplayState(std::span<const std::byte> expectedBytes, std::span<const std::byte> actualBytes)
     {
@@ -641,10 +664,9 @@ namespace
         for (std::size_t byte = 0; byte < sizeof(frames); ++byte)
             step.mPayload.push_back(static_cast<std::byte>((frames >> (byte * 8)) & 0xffu));
         requireSuccessfulResponse(Diagnostics::transact(endpoint, step));
-        requireSuccessfulResponse(
-            Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::CaptureGraphics, {} }));
-        waitForGraphicsCapture(endpoint, requestId);
-        child.requireNonDisruptiveWindowState();
+        waitForScheduledFrames(endpoint, requestId, frames);
+        std::cout << "executed-fixed-frames: " << frames << '\n';
+
         const Diagnostics::Response performance
             = Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::TracePerformance, {} });
         if (performance.mError != Diagnostics::ErrorCode::None)
@@ -654,6 +676,11 @@ namespace
             static_cast<std::streamsize>(performance.mPayload.size()));
         if (!performanceFile)
             throw std::runtime_error("failed writing performance evidence");
+
+        requireSuccessfulResponse(
+            Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::CaptureGraphics, {} }));
+        waitForGraphicsCapture(endpoint, requestId);
+        child.requireNonDisruptiveWindowState();
         requireSuccessfulResponse(
             Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::ShutdownChild, {} }));
 

@@ -1147,8 +1147,8 @@ void OMW::Engine::go()
                                       std::min(frameRateLimiter.getLastFrameDuration(), maxSimulationInterval))
                                       .count()
             * timeManager.getSimulationTimeScale();
-        const double dt
-            = mDiagnosticChild ? (mDiagnosticFramesRemaining > 0 ? mDiagnosticFixedFrameDuration : 0.0) : realtimeDt;
+        const Diagnostics::FixedStepScheduler::Frame diagnosticFrame = mDiagnosticStepScheduler.beginFrame();
+        const double dt = mDiagnosticChild ? diagnosticFrame.mDuration : realtimeDt;
 
         mViewer->advance(timeManager.getRenderingSimulationTime());
 
@@ -1165,8 +1165,8 @@ void OMW::Engine::go()
             timeManager.setSimulationTime(timeManager.getSimulationTime() + dt);
             timeManager.setRenderingSimulationTime(timeManager.getRenderingSimulationTime() + dt);
         }
-        if (mDiagnosticChild && mDiagnosticFramesRemaining > 0)
-            --mDiagnosticFramesRemaining;
+        if (mDiagnosticChild)
+            mDiagnosticStepScheduler.completeFrame(diagnosticFrame);
 
         if (stats)
         {
@@ -1256,12 +1256,10 @@ void OMW::Engine::configureDiagnostics(
 {
     if (endpoint.empty() || artifactRoot.empty())
         throw std::invalid_argument("diagnostic session requires an endpoint and artifact root");
-    if (!(fixedFrameDuration > 0.0 && fixedFrameDuration <= 0.2))
-        throw std::invalid_argument("diagnostic fixed frame duration must be within (0, 0.2] seconds");
     mDiagnosticEndpoint = std::move(endpoint);
     mDiagnosticArtifactRoot = std::move(artifactRoot);
     mDiagnosticChild = child;
-    mDiagnosticFixedFrameDuration = fixedFrameDuration;
+    mDiagnosticStepScheduler.setFrameDuration(fixedFrameDuration);
     if (child)
     {
         mUseSound = false;
@@ -1334,6 +1332,8 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << '\n'
                            << "native-window: " << (mDiagnosticChild ? "absent" : "present") << '\n'
                            << "input-source: " << (mDiagnosticChild ? "device-free" : "host-devices") << '\n'
+                           << "scheduled-frames-remaining: " << mDiagnosticStepScheduler.remainingFrames() << '\n'
+                           << "completed-fixed-frames: " << mDiagnosticStepScheduler.completedFrames() << '\n'
                            << "frame: " << frameNumber << '\n'
                            << "graphics-capture: "
                            << (mWorld->getPostProcessor()->atmosphereDiagnosticCaptureInProgress() ? "in-progress"
@@ -1359,12 +1359,15 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                     for (std::size_t byte = 0; byte < sizeof(count); ++byte)
                         count |= static_cast<std::uint32_t>(std::to_integer<unsigned char>(command.mPayload[byte]))
                             << (byte * 8);
-                    if (count == 0 || count > 10000)
+                    try
+                    {
+                        mDiagnosticStepScheduler.schedule(count);
+                    }
+                    catch (const std::invalid_argument&)
                     {
                         response.mError = Diagnostics::ErrorCode::InvalidFrame;
                         break;
                     }
-                    mDiagnosticFramesRemaining = count;
                     output << "scheduled-frames: " << count << '\n';
                     response.mPayload = diagnosticBytes(output.str());
                     break;
