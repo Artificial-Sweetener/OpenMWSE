@@ -10,6 +10,8 @@
 #include <components/debug/debuglog.hpp>
 #include <components/resource/scenemanager.hpp>
 
+#include "deformationstats.hpp"
+
 namespace SceneUtil
 {
 
@@ -208,7 +210,19 @@ namespace SceneUtil
             }
         }
 
+        DeformationStats deformationStats(*nv);
         geom->update();
+
+        std::size_t uploadBytes = 0;
+        if (const osg::Array* vertices = geom->getVertexArray())
+            uploadBytes += vertices->getTotalDataSize();
+        if (const osg::Array* normals = geom->getNormalArray())
+            uploadBytes += normals->getTotalDataSize();
+        if (const osg::Array* tangents = geom->getTexCoordArray(7))
+            uploadBytes += tangents->getTotalDataSize();
+        const osg::Array* sourceVertices = geom->getSourceGeometry()->getVertexArray();
+        deformationStats.record(
+            DeformationPath::OsgaSkinning, sourceVertices ? sourceVertices->getNumElements() : 0, uploadBytes);
     }
 
     OsgaRigGeometry* RigGeometryHolder::getGeometry(int geometry)

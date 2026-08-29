@@ -8,6 +8,7 @@
 #include <components/misc/strings/algorithm.hpp>
 #include <components/resource/scenemanager.hpp>
 
+#include "deformationstats.hpp"
 #include "skeleton.hpp"
 #include "util.hpp"
 
@@ -157,6 +158,7 @@ namespace SceneUtil
         }
         mLastFrameNumber = traversalNumber;
         osg::Geometry& geom = *getGeometry(mLastFrameNumber);
+        DeformationStats deformationStats(*nv);
 
         mSkeleton->updateBoneMatrices(traversalNumber);
 
@@ -226,6 +228,13 @@ namespace SceneUtil
             tangentDst->dirty();
 
         geom.osg::Drawable::dirtyGLObjects();
+
+        std::size_t uploadBytes = positionDst->getTotalDataSize();
+        if (normalDst)
+            uploadBytes += normalDst->getTotalDataSize();
+        if (tangentDst)
+            uploadBytes += tangentDst->getTotalDataSize();
+        deformationStats.record(DeformationPath::NativeSkinning, positionSrc->size(), uploadBytes);
 
         nv->pushOntoNodePath(&geom);
         nv->apply(geom);

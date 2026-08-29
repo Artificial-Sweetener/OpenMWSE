@@ -5,6 +5,8 @@
 #include <cassert>
 #include <components/resource/scenemanager.hpp>
 
+#include "deformationstats.hpp"
+
 namespace SceneUtil
 {
 
@@ -184,6 +186,7 @@ namespace SceneUtil
         mDirty = false;
         mLastFrameNumber = nv->getTraversalNumber();
         osg::Geometry& geom = *getGeometry(mLastFrameNumber);
+        DeformationStats deformationStats(*nv);
 
         const osg::Vec3Array* positionSrc = mMorphTargets[0].getOffsets();
         osg::Vec3Array* positionDst = static_cast<osg::Vec3Array*>(geom.getVertexArray());
@@ -204,6 +207,8 @@ namespace SceneUtil
         positionDst->dirty();
 
         geom.osg::Drawable::dirtyGLObjects();
+        deformationStats.record(
+            DeformationPath::Morphing, positionSrc->size(), positionDst->getTotalDataSize());
 
         nv->pushOntoNodePath(&geom);
         nv->apply(geom);

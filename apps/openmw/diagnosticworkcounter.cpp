@@ -2,6 +2,8 @@
 
 #include "mwrender/renderworkcounter.hpp"
 
+#include <components/sceneutil/deformationstats.hpp>
+
 #include <array>
 
 namespace OMW
@@ -45,9 +47,18 @@ namespace OMW
                 DiagnosticStatisticOwner::PrimaryCamera },
             DiagnosticWorkCounter{ "groundcover.instances-rendered", MWRender::groundcoverInstanceRenderCounter,
                 DiagnosticStatisticOwner::PrimaryCamera },
-            DiagnosticWorkCounter{ "deformation.skinning-vertices", "Diagnostic Skinning Vertices" },
-            DiagnosticWorkCounter{ "deformation.morph-vertices", "Diagnostic Morph Vertices" },
-            DiagnosticWorkCounter{ "uploads.bytes", "Diagnostic Upload Bytes" },
+            DiagnosticWorkCounter{ "deformation.skinning-vertices", SceneUtil::skinningVertexCounter,
+                DiagnosticStatisticOwner::PrimaryCamera },
+            DiagnosticWorkCounter{ "deformation.native-skinning-vertices", SceneUtil::nativeSkinningVertexCounter,
+                DiagnosticStatisticOwner::PrimaryCamera },
+            DiagnosticWorkCounter{ "deformation.osga-skinning-vertices", SceneUtil::osgaSkinningVertexCounter,
+                DiagnosticStatisticOwner::PrimaryCamera },
+            DiagnosticWorkCounter{ "deformation.morph-vertices", SceneUtil::morphVertexCounter,
+                DiagnosticStatisticOwner::PrimaryCamera },
+            DiagnosticWorkCounter{ "deformation.cpu-milliseconds", SceneUtil::deformationCpuMillisecondCounter,
+                DiagnosticStatisticOwner::PrimaryCamera },
+            DiagnosticWorkCounter{ "uploads.bytes", SceneUtil::deformationUploadByteCounter,
+                DiagnosticStatisticOwner::PrimaryCamera },
             DiagnosticWorkCounter{ "cache.object-chunk-gets", "Object Chunk Get" },
             DiagnosticWorkCounter{ "cache.object-chunk-hits", "Object Chunk Hit" },
             DiagnosticWorkCounter{ "cache.groundcover-chunk-gets", "Groundcover Chunk Get" },

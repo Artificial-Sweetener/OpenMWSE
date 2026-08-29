@@ -20,6 +20,7 @@
 #include <components/misc/strings/lower.hpp>
 #include <components/resource/scenemanager.hpp>
 #include <components/sceneutil/color.hpp>
+#include <components/sceneutil/deformationstats.hpp>
 #include <components/sceneutil/depth.hpp>
 #include <components/sceneutil/nodecallback.hpp>
 #include <components/sceneutil/shadow.hpp>
@@ -414,7 +415,10 @@ namespace MWRender
     void PostProcessor::cull(unsigned frameId, osgUtil::CullVisitor* cv)
     {
         if (osg::Stats* stats = cv->getCurrentCamera()->getStats())
+        {
             resetDiagnosticRenderWorkCounters(*stats, cv->getTraversalNumber());
+            SceneUtil::resetDiagnosticDeformationCounters(*stats, cv->getTraversalNumber());
+        }
 
         if (const auto& fbo = getFbo(FBO_Intercept, frameId))
         {
