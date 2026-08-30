@@ -2,12 +2,14 @@
 
 #include "groundcoverbatching.hpp"
 #include "groundcoverinstances.hpp"
+#include "groundcoverlod.hpp"
 #include "groundcovernearfar.hpp"
 
 #include <osg/AlphaFunc>
 #include <osg/BlendFunc>
 #include <osg/ComputeBoundsVisitor>
 #include <osg/Geometry>
+#include <osg/LOD>
 #include <osg/Program>
 #include <osg/VertexAttribDivisor>
 
@@ -268,12 +270,26 @@ namespace MWRender
             const osg::BoundingSphere modelBounds = node->getBound();
             const float modelExtent = modelBounds.valid() ? modelBounds.center().length() + modelBounds.radius() : 0.f;
             GroundcoverInstanceBatch batch = makeGroundcoverInstanceBatch(entries, layout, worldCenter, modelExtent);
-            osg::ref_ptr<GroundcoverBatch> drawBatch
-                = new GroundcoverBatch(std::move(batch.mClusters), batch.mTransforms, modelExtent, getViewDistance());
-            InstancingVisitor visitor(batch, *drawBatch);
-            node->accept(visitor);
-            drawBatch->attach(*node);
-            group->addChild(node);
+            constexpr float farTriangleRatio = 0.25f;
+            osg::ref_ptr<osg::Node> farNode = makeGroundcoverFarLod(*node, farTriangleRatio);
+
+            osg::ref_ptr<GroundcoverBatch> detailedBatch
+                = new GroundcoverBatch(batch.mClusters, batch.mTransforms, modelExtent, getViewDistance());
+            InstancingVisitor detailedVisitor(batch, *detailedBatch);
+            node->accept(detailedVisitor);
+            detailedBatch->attach(*node);
+
+            osg::ref_ptr<GroundcoverBatch> farBatch
+                = new GroundcoverBatch(batch.mClusters, batch.mTransforms, modelExtent, getViewDistance());
+            InstancingVisitor farVisitor(batch, *farBatch);
+            farNode->accept(farVisitor);
+            farBatch->attach(*farNode);
+
+            osg::ref_ptr<osg::LOD> lod = new osg::LOD;
+            const float lodDistance = getGroundcoverFarLodDistance(getViewDistance());
+            lod->addChild(node, 0.f, lodDistance);
+            lod->addChild(farNode, lodDistance, std::numeric_limits<float>::max());
+            group->addChild(lod);
         }
 
         osg::ComputeBoundsVisitor cbv;

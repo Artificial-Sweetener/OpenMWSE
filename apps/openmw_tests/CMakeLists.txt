@@ -27,6 +27,7 @@ file(GLOB UNITTEST_SRC_FILES
 
     mwrender/testatmosphere.cpp
     mwrender/testgroundcoverbatching.cpp
+    mwrender/testgroundcoverlod.cpp
     mwrender/testgroundcovernearfar.cpp
 
     mwinput/testdiagnosticinputmanager.cpp
