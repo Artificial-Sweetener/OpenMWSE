@@ -10,6 +10,7 @@ set(OPENMW_SOURCES
     diagnosticcommands.cpp
     diagnosticgameplayroute.cpp
     diagnosticperformance.cpp
+    diagnosticrenderconfiguration.cpp
     diagnosticrenderingtiming.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/diagnosticstartup.cpp
     diagnosticworkcounter.cpp
@@ -26,6 +27,7 @@ set(OPENMW_HEADERS
     diagnosticcollection.hpp
     diagnosticgameplayroute.hpp
     diagnosticperformance.hpp
+    diagnosticrenderconfiguration.hpp
     diagnosticrenderingtiming.hpp
     diagnosticstartup.hpp
     diagnosticworkcounter.hpp

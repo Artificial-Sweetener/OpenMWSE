@@ -49,6 +49,7 @@ namespace SceneUtil
 {
 
     ShadowsBin::ShadowsBin(const CastingPrograms& castingPrograms, osg::Program* opaqueCastingProgram)
+        : osgUtil::RenderBin(osgUtil::RenderBin::SORT_BY_STATE_THEN_FRONT_TO_BACK)
     {
         mNoTestStateSet = new osg::StateSet;
         if (opaqueCastingProgram)
@@ -234,6 +235,7 @@ namespace SceneUtil
         if (!noTestRoot->_leaves.empty())
             newList.push_back(noTestRoot);
         _stateGraphList = std::move(newList);
+        osgUtil::RenderBin::sortImplementation();
     }
 
 }

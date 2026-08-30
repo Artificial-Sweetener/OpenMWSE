@@ -89,6 +89,11 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
         frame, std::string(SceneUtil::diagnosticShadowRenderLeafCountStatistic), 200.0);
     firstShadow->getStats()->setAttribute(
         frame, std::string(SceneUtil::diagnosticShadowStateGraphCountStatistic), 40.0);
+    SceneUtil::setDiagnosticShadowLightState(
+        *firstShadow, osg::Vec3d(0.0, 0.8, 0.6), osg::Vec4f(0.5f, 0.4f, 0.3f, 1.f));
+    SceneUtil::setDiagnosticGpuPassStatisticsCollection(true);
+    SceneUtil::setDiagnosticShadowWorkFrame(*firstShadow, frame);
+    SceneUtil::setDiagnosticGpuPassStatisticsCollection(false);
 
     osg::ref_ptr<osg::Camera> secondShadow = new osg::Camera;
     secondShadow->setName(std::string(SceneUtil::shadowCameraName));
@@ -146,7 +151,7 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     OMW::reportDiagnosticPerformance(frame, frame, viewer, output);
     const std::string report = output.str();
 
-    EXPECT_NE(report.find("provider: performance@12"), std::string::npos);
+    EXPECT_NE(report.find("provider: performance@13"), std::string::npos);
     EXPECT_NE(report.find("threading-model: automatic-selection"), std::string::npos);
     EXPECT_NE(report.find("presentation:\n  swap-buffers:\n    available: true\n    count: 1"), std::string::npos)
         << report;
@@ -204,6 +209,14 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
         << report;
     EXPECT_NE(report.find("    state-graphs:\n      available: true\n      count: 1\n"
                           "      median: 40"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("    light-vertical-magnitude:\n      available: true\n      count: 1\n"
+                          "      median: 0.599"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("    light-luminance:\n      available: true\n      count: 1\n"
+                          "      median: 0.414"),
         std::string::npos)
         << report;
     EXPECT_NE(report.find("  - index: 2\n    physical-camera-count: 1\n"

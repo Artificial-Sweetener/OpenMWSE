@@ -8,9 +8,12 @@ file(GLOB UNITTEST_SRC_FILES
     diagnosticcollection.cpp
     diagnosticgameplayroute.cpp
     diagnosticperformance.cpp
+    diagnosticrenderconfiguration.cpp
     diagnosticstartup.cpp
     diagnosticworkcounter.cpp
+    diagnosticgameplayrouteexecution.cpp
     diagnosticisolatedsettings.cpp
+    ../openmw-diagnosticctl/gameplayrouteexecution.cpp
     ../openmw-diagnosticctl/isolatedsettings.cpp
 
     mwworld/teststore.cpp

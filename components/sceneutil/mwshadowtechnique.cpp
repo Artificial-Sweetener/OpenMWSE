@@ -1604,6 +1604,7 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
             sd->_textureUnit = textureUnit;
             sd->_sm_i = sm_i;
             SceneUtil::setDiagnosticGpuPassInstance(*camera, sm_i);
+            SceneUtil::setDiagnosticShadowLightState(*camera, pl.lightDir, pl.light->getDiffuse());
 
             sdl.push_back(sd);
 
@@ -1801,7 +1802,6 @@ void MWShadowTechnique::createShaders()
     osg::ref_ptr<osg::ClipControl> clipcontrol = new osg::ClipControl(osg::ClipControl::LOWER_LEFT, osg::ClipControl::NEGATIVE_ONE_TO_ONE);
     _shadowCastingStateSet->setAttribute(clipcontrol, osg::StateAttribute::ON|osg::StateAttribute::OVERRIDE);
     _shadowCastingStateSet->setAttribute(depth, osg::StateAttribute::ON|osg::StateAttribute::OVERRIDE);
-    _shadowCastingStateSet->setMode(GL_DEPTH_CLAMP, osg::StateAttribute::ON);
 
     // TODO: compare performance when alpha testing is handled here versus using a discard in the fragment shader
 }
@@ -2720,7 +2720,9 @@ bool MWShadowTechnique::cropShadowCameraToMainFrustum(Frustum& frustum, osg::Cam
         yMin = osg::maximum(-1.0, convexHull.min(1));
         yMax = osg::minimum(1.0, convexHull.max(1));
         zMin = osg::maximum(-1.0, convexHull.min(2));
-        zMax = osg::minimum(1.0, convexHull.max(2));
+        // Preserve the caster-facing half of the light volume in the projection so valid casters are clipped normally
+        // instead of relying on depth clamping, which disables efficient depth rejection on some drivers.
+        zMax = 1.0;
     }
     else
         return false;

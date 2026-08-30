@@ -1,4 +1,8 @@
-openmw_add_executable(openmw-diagnosticctl main.cpp isolatedsettings.cpp isolatedsettings.hpp)
+openmw_add_executable(openmw-diagnosticctl
+    main.cpp
+    gameplayrouteexecution.cpp gameplayrouteexecution.hpp
+    isolatedsettings.cpp isolatedsettings.hpp
+)
 
 target_link_libraries(openmw-diagnosticctl components)
 

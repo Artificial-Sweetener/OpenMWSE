@@ -64,6 +64,8 @@ namespace OMW
         constexpr std::array cameraDetailMetrics{
             CameraMetric{ "render-leaves", SceneUtil::diagnosticShadowRenderLeafCountStatistic },
             CameraMetric{ "state-graphs", SceneUtil::diagnosticShadowStateGraphCountStatistic },
+            CameraMetric{ "light-vertical-magnitude", SceneUtil::diagnosticShadowLightVerticalMagnitudeStatistic },
+            CameraMetric{ "light-luminance", SceneUtil::diagnosticShadowLightLuminanceStatistic },
         };
 
         constexpr std::array terrainCompositeMetrics{
@@ -526,7 +528,7 @@ namespace OMW
         forEachUserStatsValue(
             [&](const UserStats& value) { metrics.push_back({ value.mTaken, Metric::Owner::Viewer }); });
 
-        output << std::setprecision(17) << "provider: performance@12\n"
+        output << std::setprecision(17) << "provider: performance@13\n"
                << "threading-model: " << threadingModelName(viewer.getThreadingModel()) << '\n'
                << "first-sampled-frame: " << firstFrame << '\n'
                << "last-sampled-frame: " << lastFrame << '\n'

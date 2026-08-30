@@ -3,6 +3,9 @@
 
 #include <string_view>
 
+#include <osg/Vec3d>
+#include <osg/Vec4f>
+
 namespace osgUtil
 {
     class RenderBin;
@@ -21,6 +24,16 @@ namespace SceneUtil
     /// Stores the post-sort state-graph count for one shadow map and frame.
     inline constexpr std::string_view diagnosticShadowStateGraphCountStatistic
         = "OpenMW diagnostic shadow state graphs";
+    /// Stores the absolute vertical component of the normalized directional shadow light.
+    inline constexpr std::string_view diagnosticShadowLightVerticalMagnitudeStatistic
+        = "OpenMW diagnostic shadow light vertical magnitude";
+    /// Stores the scene-linear relative luminance of the directional shadow light.
+    inline constexpr std::string_view diagnosticShadowLightLuminanceStatistic
+        = "OpenMW diagnostic shadow light luminance";
+
+    /// Retain the directional-light state that determines shadow-map projection and visible contribution.
+    void setDiagnosticShadowLightState(
+        osg::Camera& camera, const osg::Vec3d& lightDirection, const osg::Vec4f& diffuseColor);
 
     /// Associate one nested shadow camera with the frame currently being culled.
     void setDiagnosticShadowWorkFrame(osg::Camera& camera, unsigned frame);

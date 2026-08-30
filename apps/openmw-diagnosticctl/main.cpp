@@ -5,6 +5,7 @@
 #include <components/diagnostics/session.hpp>
 #include <components/files/hash.hpp>
 
+#include "gameplayrouteexecution.hpp"
 #include "isolatedsettings.hpp"
 
 #include <yaml-cpp/yaml.h>
@@ -761,20 +762,19 @@ namespace
         {
             const std::vector<Diagnostics::GameplayRouteFrame> routeFrames
                 = Diagnostics::decodeGameplayRoute(gameplayRoute);
+            const DiagnosticCtl::GameplayRouteExecutionPlan routePlan = DiagnosticCtl::makeGameplayRouteExecutionPlan(
+                routeFrames.size(), findOption(arguments, "--frames"), findOption(arguments, "--performance-samples"));
             requireSuccessfulResponse(Diagnostics::transact(
                 endpoint, { requestId++, Diagnostics::CommandType::LoadGameplayRoute, gameplayRoute }));
             std::size_t completedFrames = 0;
             unsigned segmentIndex = 0;
-            while (completedFrames < routeFrames.size())
+            while (completedFrames < routePlan.mFrameCount)
             {
                 const std::uint32_t segmentFrames = static_cast<std::uint32_t>(
-                    std::min<std::size_t>(600, routeFrames.size() - completedFrames));
-                Diagnostics::Command runSegment{
-                    requestId++, Diagnostics::CommandType::RunGameplayRouteSegment, {}
-                };
+                    std::min<std::size_t>(routePlan.mSegmentFrameCount, routePlan.mFrameCount - completedFrames));
+                Diagnostics::Command runSegment{ requestId++, Diagnostics::CommandType::RunGameplayRouteSegment, {} };
                 for (std::size_t byte = 0; byte < sizeof(segmentFrames); ++byte)
-                    runSegment.mPayload.push_back(
-                        static_cast<std::byte>((segmentFrames >> (byte * 8)) & 0xffu));
+                    runSegment.mPayload.push_back(static_cast<std::byte>((segmentFrames >> (byte * 8)) & 0xffu));
                 const Diagnostics::Response performance
                     = Diagnostics::transact(endpoint, runSegment, std::chrono::minutes(3));
                 if (performance.mError != Diagnostics::ErrorCode::None)
@@ -782,16 +782,15 @@ namespace
                 std::ostringstream performanceName;
                 performanceName << "performance-segment-" << std::setw(3) << std::setfill('0') << segmentIndex
                                 << ".txt";
-                std::ofstream performanceFile(
-                    artifacts / performanceName.str(), std::ios::binary | std::ios::trunc);
+                std::ofstream performanceFile(artifacts / performanceName.str(), std::ios::binary | std::ios::trunc);
                 performanceFile.write(reinterpret_cast<const char*>(performance.mPayload.data()),
                     static_cast<std::streamsize>(performance.mPayload.size()));
                 if (!performanceFile)
                     throw std::runtime_error("failed writing gameplay-route performance evidence");
                 completedFrames += segmentFrames;
                 ++segmentIndex;
-                requireSuccessfulResponse(Diagnostics::transact(
-                    endpoint, { requestId++, Diagnostics::CommandType::CaptureGraphics, {} }));
+                requireSuccessfulResponse(
+                    Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::CaptureGraphics, {} }));
                 waitForGraphicsCapture(endpoint, requestId);
             }
             std::cout << "executed-route-frames: " << completedFrames << '\n';

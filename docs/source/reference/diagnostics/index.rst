@@ -62,8 +62,13 @@ frame in bounded segments, writes ``performance-segment-*.txt``, captures full g
 then closes and cleans the isolated child. Use the same capsule, build configuration, driver state, and replay command for every
 baseline and candidate repetition.
 
-``--frames`` advances the exact fixed-step warm-up workload before capture. ``--performance-samples`` then collects a bounded
-future window without advancing the isolated simulation clock. The performance report keeps every sampled OSG statistic and summarizes stable CPU,
+For temporal investigation, ``--frames`` limits replay to an exact route prefix and ``--performance-samples`` selects the
+checkpoint interval up to 600 frames. Repeating isolated replays with increasing frame limits captures unperturbed graphics at
+specific points along the same recorded motion without allowing an earlier graphics readback to influence a later checkpoint.
+
+For single-state captures, ``--frames`` advances the exact fixed-step warm-up workload before capture.
+``--performance-samples`` then collects a bounded future window without advancing the isolated simulation clock. The performance
+report keeps every sampled OSG statistic and summarizes stable CPU,
 cull, draw, camera-owned GPU-pass, and frame-duration metrics with median, p95, p99, and worst values. Named
 GPU passes cover the main scene, shadow maps, water reflection, sky render target, post-processing, precipitation occlusion,
 and ripple simulation. A sample count must not exceed the frame count or 600. Visual capture begins after the timed window so
@@ -119,11 +124,13 @@ Providers and artifacts
 
 The versioned providers expose these evidence domains:
 
+* ``core@2`` records the effective video, camera, atmosphere, and complete shadow configuration used by the captured engine
+  instance so replay evidence can attest to rendering-setting parity.
 * ``graphics@1`` captures scene color and depth, resolved atmospheric volumes and metadata, shafts, and the final composite over
   normal and diagnostic-isolation stages.
 * ``gameplay@2`` records the cell, camera position and angles, first-person and underwater state, weather, game and simulation
   clocks, and state. The replay controller checks these stable fields before advancing the simulation.
-* ``performance@12`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
+* ``performance@13`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
   scopes for scripts, Lua, mechanics, physics, world, and UI, resource caches and work queues, navigation and paging activity,
   scene statistics, delayed per-camera GPU/render timing, and camera-owned GPU passes for the main scene, shadow maps, water
   reflection, sky render target, post-processing, precipitation occlusion, ripples, and terrain-composite generation. It divides
@@ -141,8 +148,9 @@ The versioned providers expose these evidence domains:
   Groundcover attribution includes submitted model batches and drawables plus a diagnostic-only conservative per-instance
   frustum and distance test of instances accepted by cluster visibility. The additional instance test runs only during bounded
   scene-statistics collection and measures potential GPU rejection without changing submitted work.
-  Each shadow map reports its own CPU time, GPU time, post-sort render leaves, and state graphs so aggregate shadow
-  cost can be traced to a specific map and its submitted work. Terrain-composite detail reports the scheduler budget, queue
+  Each shadow map reports its own CPU time, GPU time, post-sort render leaves, state graphs, directional-light vertical
+  magnitude, and scene-linear luminance so aggregate shadow cost can be traced to a specific map, its submitted work, and the
+  low-sun light state. Terrain-composite detail reports the scheduler budget, queue
   depth before and after the pass, immediate and processed map counts, submitted drawables, completed maps, and drawable CPU
   duration so an over-budget map can be distinguished from queue pressure, drawable work, or GPU cost. Presentation detail
   reports time blocked in buffer swap. Main-camera render-bin intervals further

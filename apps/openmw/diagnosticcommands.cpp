@@ -3,11 +3,11 @@
 #include "diagnosticcollection.hpp"
 #include "diagnosticgameplayroute.hpp"
 #include "diagnosticperformance.hpp"
+#include "diagnosticrenderconfiguration.hpp"
 
 #include <components/diagnostics/capsule.hpp>
 #include <components/diagnostics/session.hpp>
 #include <components/files/hash.hpp>
-#include <components/settings/values.hpp>
 #include <components/version/version.hpp>
 #include <components/vfs/manager.hpp>
 
@@ -90,7 +90,7 @@ Diagnostics::Capsule OMW::Engine::createDiagnosticCapsule(unsigned frameNumber)
     manifest << "capsule-version: " << Diagnostics::capsuleVersion << '\n'
              << "build: " << quoteDiagnosticYaml(Version::getOpenmwVersionDescription()) << '\n'
              << "frame: " << frameNumber << '\n'
-             << "providers: [core@1, graphics@1, gameplay@2, performance@12]\n"
+             << "providers: [core@2, graphics@1, gameplay@2, performance@13]\n"
              << "content:\n";
     for (const std::string& content : mContentFiles)
     {
@@ -103,18 +103,9 @@ Diagnostics::Capsule OMW::Engine::createDiagnosticCapsule(unsigned frameNumber)
     }
     capsule.add({ "manifest.yaml", Diagnostics::CapsuleEntryType::Manifest, diagnosticBytes(manifest.str()) });
 
-    std::ostringstream configuration;
-    configuration << "video:\n  resolution: [" << Settings::video().mResolutionX << ", "
-                  << Settings::video().mResolutionY << "]\n  antialiasing: " << Settings::video().mAntialiasing
-                  << "\ncamera:\n  near-clip: " << Settings::camera().mNearClip
-                  << "\n  viewing-distance: " << Settings::camera().mViewingDistance
-                  << "\n  field-of-view: " << Settings::camera().mFieldOfView
-                  << "\n  reverse-z: " << (Settings::camera().mReverseZ ? "true" : "false")
-                  << "\nshaders:\n  atmospheric-effects: "
-                  << (Settings::shaders().mAtmosphericEffects ? "true" : "false")
-                  << "\n  atmospheric-quality: " << Settings::shaders().mAtmosphericQuality << '\n';
+    const std::string configuration = serializeDiagnosticRenderConfiguration(captureDiagnosticRenderConfiguration());
     capsule.add({ "configuration/effective.yaml", Diagnostics::CapsuleEntryType::Configuration,
-        diagnosticBytes(configuration.str()) });
+        diagnosticBytes(configuration) });
 
     std::ostringstream world;
     world << "cell: " << quoteDiagnosticYaml(mWorld->getCellName()) << '\n'
@@ -241,7 +232,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << '\n'
                            << "performance-capture: " << (mDiagnosticCollection->active() ? "collecting" : "idle")
                            << '\n'
-                           << "providers: [core@1, graphics@1, gameplay@2, performance@12]\n";
+                           << "providers: [core@2, graphics@1, gameplay@2, performance@13]\n";
                     response.mPayload = diagnosticBytes(output.str());
                     break;
 
