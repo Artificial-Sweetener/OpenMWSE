@@ -29,6 +29,8 @@ namespace Diagnostics
         ReloadShaders = 10,
         Cancel = 11,
         ShutdownChild = 12,
+        LoadGameplayRoute = 13,
+        RunGameplayRouteSegment = 14,
     };
 
     /// Classifies protocol failures so clients can distinguish invalid requests from runtime failures.

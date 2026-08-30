@@ -173,9 +173,15 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
     {
         std::filesystem::path artifactRoot = variables["diagnostic-artifacts"].as<Files::MaybeQuotedPath>().u8string();
         if (artifactRoot.empty())
+        {
+            if (const char* artifactEnvironment = std::getenv("OPENMW_DIAGNOSTIC_ARTIFACTS"))
+                artifactRoot = std::filesystem::u8path(artifactEnvironment);
+        }
+        if (artifactRoot.empty())
             artifactRoot = cfgMgr.getUserDataPath() / "diagnostics";
         engine.configureDiagnostics(std::move(diagnosticEndpoint), std::move(artifactRoot),
-            variables["diagnostic-child"].as<bool>(), variables["diagnostic-fixed-dt"].as<double>());
+            variables["diagnostic-child"].as<bool>(), variables["diagnostic-headed"].as<bool>(),
+            variables["diagnostic-fixed-dt"].as<double>());
     }
 
     return true;

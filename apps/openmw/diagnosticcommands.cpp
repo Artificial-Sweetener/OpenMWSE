@@ -1,6 +1,7 @@
 #include "engine.hpp"
 
 #include "diagnosticcollection.hpp"
+#include "diagnosticgameplayroute.hpp"
 #include "diagnosticperformance.hpp"
 
 #include <components/diagnostics/capsule.hpp>
@@ -74,6 +75,80 @@ namespace
         return currentFrame > renderStatisticsLatency ? currentFrame - renderStatisticsLatency : 0;
     }
 }
+
+Diagnostics::Capsule OMW::Engine::createDiagnosticCapsule(unsigned frameNumber)
+{
+    MWWorld::DateTimeManager& time = *mWorld->getTimeManager();
+    const MWRender::Camera* camera = mWorld->getCamera();
+    const osg::Vec3d cameraPosition = camera->getPosition();
+    const bool cameraUnderwater = mWorld->isUnderwater(mWorld->getPlayerPtr().getCell(),
+        osg::Vec3f(cameraPosition.x(), cameraPosition.y(), cameraPosition.z()));
+    const MWWorld::Weather& weather = mWorld->getCurrentWeather();
+
+    Diagnostics::Capsule capsule;
+    std::ostringstream manifest;
+    manifest << "capsule-version: " << Diagnostics::capsuleVersion << '\n'
+             << "build: " << quoteDiagnosticYaml(Version::getOpenmwVersionDescription()) << '\n'
+             << "frame: " << frameNumber << '\n'
+             << "providers: [core@1, graphics@1, gameplay@2, performance@9]\n"
+             << "content:\n";
+    for (const std::string& content : mContentFiles)
+    {
+        manifest << "  - name: " << quoteDiagnosticYaml(content) << '\n';
+        if (const Files::IStreamPtr stream = mVFS->find(VFS::Path::Normalized(content)))
+        {
+            const auto hash = Files::getHash(content, *stream);
+            manifest << "    hash: " << formatDiagnosticHash(hash) << '\n';
+        }
+    }
+    capsule.add({ "manifest.yaml", Diagnostics::CapsuleEntryType::Manifest, diagnosticBytes(manifest.str()) });
+
+    std::ostringstream configuration;
+    configuration << "video:\n  resolution: [" << Settings::video().mResolutionX << ", "
+                  << Settings::video().mResolutionY << "]\n  antialiasing: " << Settings::video().mAntialiasing
+                  << "\ncamera:\n  near-clip: " << Settings::camera().mNearClip
+                  << "\n  viewing-distance: " << Settings::camera().mViewingDistance
+                  << "\n  field-of-view: " << Settings::camera().mFieldOfView
+                  << "\n  reverse-z: " << (Settings::camera().mReverseZ ? "true" : "false")
+                  << "\nshaders:\n  atmospheric-effects: "
+                  << (Settings::shaders().mAtmosphericEffects ? "true" : "false")
+                  << "\n  atmospheric-quality: " << Settings::shaders().mAtmosphericQuality << '\n';
+    capsule.add({ "configuration/effective.yaml", Diagnostics::CapsuleEntryType::Configuration,
+        diagnosticBytes(configuration.str()) });
+
+    std::ostringstream world;
+    world << "cell: " << quoteDiagnosticYaml(mWorld->getCellName()) << '\n'
+          << "frame: " << frameNumber << '\n'
+          << "camera: [" << cameraPosition.x() << ", " << cameraPosition.y() << ", " << cameraPosition.z()
+          << "]\n"
+          << "camera-angles: [" << camera->getPitch() << ", " << camera->getYaw() << ", " << camera->getRoll()
+          << "]\n"
+          << "first-person: " << (mWorld->isFirstPerson() ? "true" : "false") << '\n'
+          << "camera-underwater: " << (cameraUnderwater ? "true" : "false") << '\n'
+          << "weather: " << quoteDiagnosticYaml(weather.mId.serializeText()) << '\n'
+          << "game-time-seconds: " << time.getGameTime() << '\n'
+          << "simulation-time: " << time.getSimulationTime() << '\n'
+          << "rendering-time: " << time.getRenderingSimulationTime() << '\n';
+    capsule.add(
+        { "state/world.yaml", Diagnostics::CapsuleEntryType::GameplayTrace, diagnosticBytes(world.str()) });
+
+    if (mStateManager->getState() == MWBase::StateManager::State_Running)
+    {
+        capsule.add({ "state/world.omwsave", Diagnostics::CapsuleEntryType::WorldSnapshot,
+            mStateManager->captureDiagnosticSnapshot("OpenMWSE diagnostic capsule") });
+    }
+
+    std::ostringstream performance;
+    const unsigned sampledFrame = diagnosticStatisticsFrame(frameNumber);
+    performance << "request-frame: " << frameNumber << '\n'
+                << "fixed-step: " << (mDiagnosticChild ? "true" : "false") << '\n'
+                << "fixed-step-duration: " << mDiagnosticStepScheduler.frameDuration() << '\n';
+    reportDiagnosticPerformance(sampledFrame, sampledFrame, *mViewer, performance);
+    capsule.add({ "performance/frame.txt", Diagnostics::CapsuleEntryType::PerformanceTrace,
+        diagnosticBytes(performance.str()) });
+    return capsule;
+}
+
 void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
 {
     if (!mDiagnosticSession)
@@ -149,12 +224,16 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                     output << "protocol: " << Diagnostics::protocolVersion << '\n'
                            << "build: " << quoteDiagnosticYaml(Version::getOpenmwVersionDescription()) << '\n'
                            << "mode: " << (mDiagnosticChild ? "isolated-child" : "live") << '\n'
-                           << "graphics-context: " << (mDiagnosticChild ? "offscreen-pbuffer" : "interactive-window")
+                           << "graphics-context: "
+                           << (mDiagnosticChild && !mDiagnosticHeaded ? "offscreen-pbuffer" : "interactive-window")
                            << '\n'
-                           << "native-window: " << (mDiagnosticChild ? "absent" : "present") << '\n'
+                           << "native-window: "
+                           << (mDiagnosticChild && !mDiagnosticHeaded ? "absent" : "present") << '\n'
                            << "input-source: " << (mDiagnosticChild ? "device-free" : "host-devices") << '\n'
                            << "scheduled-frames-remaining: " << mDiagnosticStepScheduler.remainingFrames() << '\n'
                            << "completed-fixed-frames: " << mDiagnosticStepScheduler.completedFrames() << '\n'
+                           << "route-frames-remaining: "
+                           << (mDiagnosticGameplayRoute ? mDiagnosticGameplayRoute->remainingReplayFrames() : 0) << '\n'
                            << "frame: " << frameNumber << '\n'
                            << "graphics-capture: "
                            << (mWorld->getPostProcessor()->atmosphereDiagnosticCaptureInProgress() ? "in-progress"
@@ -193,6 +272,41 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                     }
                     output << "scheduled-frames: " << count << '\n';
                     response.mPayload = diagnosticBytes(output.str());
+                    break;
+                }
+
+                case Diagnostics::CommandType::LoadGameplayRoute:
+                {
+                    if (!mDiagnosticChild || !mDiagnosticGameplayRoute)
+                    {
+                        response.mError = Diagnostics::ErrorCode::PermissionDenied;
+                        break;
+                    }
+                    mDiagnosticGameplayRoute->loadReplay(command.mPayload);
+                    output << "route-frames: " << mDiagnosticGameplayRoute->remainingReplayFrames() << '\n';
+                    response.mPayload = diagnosticBytes(output.str());
+                    break;
+                }
+
+                case Diagnostics::CommandType::RunGameplayRouteSegment:
+                {
+                    if (!mDiagnosticChild || !mDiagnosticGameplayRoute || command.mPayload.size() != sizeof(std::uint32_t))
+                    {
+                        response.mError = Diagnostics::ErrorCode::InvalidFrame;
+                        break;
+                    }
+                    std::uint32_t count = 0;
+                    for (std::size_t byte = 0; byte < sizeof(count); ++byte)
+                        count |= static_cast<std::uint32_t>(std::to_integer<unsigned char>(command.mPayload[byte]))
+                            << (byte * 8);
+                    if (count == 0 || count > 600 || count > mDiagnosticGameplayRoute->remainingReplayFrames()
+                        || !mDiagnosticCollection->start(command.mRequestId, count, frameNumber + 1))
+                    {
+                        response.mError = Diagnostics::ErrorCode::InvalidState;
+                        break;
+                    }
+                    mDiagnosticStepScheduler.schedule(count);
+                    deferredResponse = true;
                     break;
                 }
 
@@ -264,72 +378,8 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                         break;
                     }
 
-                    Diagnostics::Capsule capsule;
-                    std::ostringstream manifest;
-                    manifest << "capsule-version: " << Diagnostics::capsuleVersion << '\n'
-                             << "build: " << quoteDiagnosticYaml(Version::getOpenmwVersionDescription()) << '\n'
-                             << "frame: " << frameNumber << '\n'
-                             << "providers: [core@1, graphics@1, gameplay@2, performance@9]\n"
-                             << "content:\n";
-                    for (const std::string& content : mContentFiles)
-                    {
-                        manifest << "  - name: " << quoteDiagnosticYaml(content) << '\n';
-                        if (const Files::IStreamPtr stream = mVFS->find(VFS::Path::Normalized(content)))
-                        {
-                            const auto hash = Files::getHash(content, *stream);
-                            manifest << "    hash: " << formatDiagnosticHash(hash) << '\n';
-                        }
-                    }
-                    capsule.add(
-                        { "manifest.yaml", Diagnostics::CapsuleEntryType::Manifest, diagnosticBytes(manifest.str()) });
-
-                    std::ostringstream configuration;
-                    configuration << "video:\n  resolution: [" << Settings::video().mResolutionX << ", "
-                                  << Settings::video().mResolutionY
-                                  << "]\n  antialiasing: " << Settings::video().mAntialiasing
-                                  << "\ncamera:\n  near-clip: " << Settings::camera().mNearClip
-                                  << "\n  viewing-distance: " << Settings::camera().mViewingDistance
-                                  << "\n  field-of-view: " << Settings::camera().mFieldOfView
-                                  << "\n  reverse-z: " << (Settings::camera().mReverseZ ? "true" : "false")
-                                  << "\nshaders:\n  atmospheric-effects: "
-                                  << (Settings::shaders().mAtmosphericEffects ? "true" : "false")
-                                  << "\n  atmospheric-quality: " << Settings::shaders().mAtmosphericQuality << '\n';
-                    capsule.add({ "configuration/effective.yaml", Diagnostics::CapsuleEntryType::Configuration,
-                        diagnosticBytes(configuration.str()) });
-
-                    std::ostringstream world;
-                    world << "cell: " << quoteDiagnosticYaml(mWorld->getCellName()) << '\n'
-                          << "frame: " << frameNumber << '\n'
-                          << "camera: [" << cameraPosition.x() << ", " << cameraPosition.y() << ", "
-                          << cameraPosition.z() << "]\n"
-                          << "camera-angles: [" << camera->getPitch() << ", " << camera->getYaw() << ", "
-                          << camera->getRoll() << "]\n"
-                          << "first-person: " << (mWorld->isFirstPerson() ? "true" : "false") << '\n'
-                          << "camera-underwater: " << (cameraUnderwater ? "true" : "false") << '\n'
-                          << "weather: " << quoteDiagnosticYaml(weather.mId.serializeText()) << '\n'
-                          << "game-time-seconds: " << time.getGameTime() << '\n'
-                          << "simulation-time: " << time.getSimulationTime() << '\n'
-                          << "rendering-time: " << time.getRenderingSimulationTime() << '\n';
-                    capsule.add({ "state/world.yaml", Diagnostics::CapsuleEntryType::GameplayTrace,
-                        diagnosticBytes(world.str()) });
-
-                    if (mStateManager->getState() == MWBase::StateManager::State_Running)
-                    {
-                        capsule.add({ "state/world.omwsave", Diagnostics::CapsuleEntryType::WorldSnapshot,
-                            mStateManager->captureDiagnosticSnapshot("OpenMWSE diagnostic capsule") });
-                    }
-
-                    std::ostringstream performance;
-                    const unsigned sampledFrame = diagnosticStatisticsFrame(frameNumber);
-                    performance << "request-frame: " << frameNumber << '\n'
-                                << "fixed-step: " << (mDiagnosticChild ? "true" : "false") << '\n'
-                                << "fixed-step-duration: " << mDiagnosticStepScheduler.frameDuration() << '\n';
-                    reportDiagnosticPerformance(sampledFrame, sampledFrame, *mViewer, performance);
-                    capsule.add({ "performance/frame.txt", Diagnostics::CapsuleEntryType::PerformanceTrace,
-                        diagnosticBytes(performance.str()) });
-
                     const std::filesystem::path destination = mDiagnosticArtifactRoot / requestedName;
-                    Diagnostics::writeCapsuleAtomically(destination, capsule);
+                    Diagnostics::writeCapsuleAtomically(destination, createDiagnosticCapsule(frameNumber));
                     output << "capsule: " << quoteDiagnosticYaml(destination.filename().string()) << '\n';
                     response.mPayload = diagnosticBytes(output.str());
                     break;

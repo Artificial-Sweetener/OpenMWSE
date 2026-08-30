@@ -56,6 +56,7 @@ namespace Files
 
 namespace Diagnostics
 {
+    class Capsule;
     class Session;
 }
 
@@ -124,6 +125,7 @@ struct SDL_Window;
 namespace OMW
 {
     class DiagnosticCollection;
+    class DiagnosticGameplayRoute;
 
     /// \brief Main engine class, that brings together all the components of OpenMW
     class Engine
@@ -191,10 +193,12 @@ namespace OMW
         int mGlMaxTextureImageUnits;
         std::unique_ptr<Diagnostics::Session> mDiagnosticSession;
         std::unique_ptr<DiagnosticCollection> mDiagnosticCollection;
+        std::unique_ptr<DiagnosticGameplayRoute> mDiagnosticGameplayRoute;
         std::filesystem::path mDiagnosticArtifactRoot;
         std::string mDiagnosticEndpoint;
         Diagnostics::FixedStepScheduler mDiagnosticStepScheduler;
         bool mDiagnosticChild = false;
+        bool mDiagnosticHeaded = false;
 
         // not implemented
         Engine(const Engine&);
@@ -202,6 +206,7 @@ namespace OMW
 
         void executeLocalScripts();
 
+        /// Advance and render one engine frame, applying or recording diagnostic route state at its owned boundaries.
         bool frame(unsigned frameNumber, float dt);
 
         /// Prepare engine for game play
@@ -213,6 +218,18 @@ namespace OMW
 
         /// Execute validated bridge commands at the main-thread frame boundary.
         void processDiagnosticCommands(unsigned frameNumber);
+
+        /// Capture the current initial state shared by one-shot and gameplay-route capsules.
+        Diagnostics::Capsule createDiagnosticCapsule(unsigned frameNumber);
+
+        /// Toggle bounded live route recording from the reserved input shortcut.
+        void toggleDiagnosticGameplayRoute();
+
+        /// Apply the next loaded route frame before simulation updates.
+        void applyDiagnosticGameplayRoute();
+
+        /// Record the authoritative state produced by the current rendered frame.
+        void recordDiagnosticGameplayRoute(float dt);
 
     public:
         Engine(Files::ConfigurationManager& configurationManager);
@@ -253,7 +270,8 @@ namespace OMW
 
         /// Enable the protected diagnostic bridge and optional isolated child behavior.
         void configureDiagnostics(
-            std::string endpoint, std::filesystem::path artifactRoot, bool child, double fixedFrameDuration);
+            std::string endpoint, std::filesystem::path artifactRoot, bool child, bool headed,
+            double fixedFrameDuration);
 
         /// Compile all scripts (excludign dialogue scripts) at startup?
         void setCompileAll(bool all);

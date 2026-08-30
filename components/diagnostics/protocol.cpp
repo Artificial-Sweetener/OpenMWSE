@@ -141,7 +141,7 @@ namespace Diagnostics
     bool isSupportedCommand(std::uint16_t value) noexcept
     {
         return value >= static_cast<std::uint16_t>(CommandType::Hello)
-            && value <= static_cast<std::uint16_t>(CommandType::ShutdownChild);
+            && value <= static_cast<std::uint16_t>(CommandType::RunGameplayRouteSegment);
     }
 
     std::string_view getErrorName(ErrorCode code) noexcept

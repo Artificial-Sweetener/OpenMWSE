@@ -18,12 +18,16 @@ Execution modes
   state from a capsule. The controller rejects a visible or foreground child window, waits for readiness and capture barriers,
   records evidence, shuts down and reaps the child, proves temporary-workspace cleanup, and verifies that the source profile did
   not change.
+* ``run --headed`` and ``replay --headed`` use the same isolated child, copied state, device-free input, evidence providers, and
+  cleanup contract in a visible production graphics window. This mode supports representative driver presentation behavior and
+  visible route-parity review without automating or modifying the normal game profile.
 
 Interactive OpenMWSE builds start the protected current-user endpoint by default. Set ``OPENMW_DIAGNOSTICS=0`` or pass
 ``--diagnostic-session off`` to disable the bridge for a launch. ``OPENMW_DIAGNOSTICS=1`` and ``--diagnostic-session default``
 enable the endpoint for builds configured with ``OPENMW_ENABLE_DIAGNOSTICS_BY_DEFAULT=OFF``. An explicit protected endpoint
 with ``--diagnostic-session`` and an artifact directory with ``--diagnostic-artifacts`` support coordinated development
-sessions. Disabled sessions perform no diagnostic transport or statistics collection.
+sessions. ``OPENMW_DIAGNOSTIC_ARTIFACTS`` selects the default artifact directory for launcher-started interactive sessions when
+``--diagnostic-artifacts`` is absent. Disabled sessions perform no diagnostic transport or statistics collection.
 
 Capture and replay
 ------------------
@@ -39,6 +43,24 @@ Replay that capture after rebuilding::
   openmw-diagnosticctl replay --openmw <build>\openmw.exe --config <profile>\openmw.cfg \
       --capsule <capture-directory>\capture.omwdiag --artifacts <replay-directory> \
       --frames 120 --performance-samples 64
+
+Record a representative gameplay route from an interactive session by pressing Shift+F11 after loading the desired save. Play
+the route once, then press Shift+F11 again. OpenMWSE writes a timestamped ``gameplay-route-*.omwdiag`` capsule beneath the
+diagnostic artifact directory. The capsule contains the initial loadable world snapshot and one bounded sequence of rendered
+player transforms, cells, camera angles, view modes, and frame durations. Recording stops automatically at 10,000 frames.
+
+Replay the recorded route in a visible isolated child after rebuilding::
+
+  openmw-diagnosticctl replay --openmw <build>\openmw.exe --config <profile>\openmw.cfg \
+      --capsule <artifact-directory>\gameplay-route-<timestamp>.omwdiag \
+      --artifacts <replay-directory> --headed
+
+Route replay applies the recorded player and camera state authoritatively at each world update; it does not synthesize keyboard,
+mouse, physics, or gameplay decisions. This preserves the recorded viewport, cell traversal, streaming pressure, and rendering
+workload while making repeated candidate comparisons independent of physical input timing. The controller measures every route
+frame in bounded segments, writes ``performance-segment-*.txt``, captures full graphics evidence at each segment boundary, and
+then closes and cleans the isolated child. Use the same capsule, build configuration, driver state, and replay command for every
+baseline and candidate repetition.
 
 ``--frames`` advances the exact fixed-step warm-up workload before capture. ``--performance-samples`` then collects a bounded
 future window without advancing the isolated simulation clock. The performance report keeps every sampled OSG statistic and summarizes stable CPU,
@@ -126,10 +148,11 @@ The versioned providers expose these evidence domains:
   expensive scene, timing-query, and work-counter collection is enabled only for a bounded performance capture and then restored.
 
 A ``.omwdiag`` capsule contains a manifest, effective settings, full loadable world snapshot, stable world state, provider
-versions, frame identity, and performance evidence. The manifest records the ordered content list and hashes. It does not embed
-installed game or mod assets. Graphics bundles remain beside the capsule because they are evidence from the run rather than
-inputs required to reproduce it. The controller also preserves the isolated engine and crash logs beneath the artifact
-directory's ``logs`` folder before removing its temporary workspace.
+versions, frame identity, and performance evidence. A route capsule also contains its versioned bounded gameplay route. The
+manifest records the ordered content list and hashes. It does not embed installed game or mod assets. Graphics bundles remain
+beside the capsule because they are evidence from the run rather than inputs required to reproduce it. The controller also
+preserves the isolated engine and crash logs beneath the artifact directory's ``logs`` folder before removing its temporary
+workspace.
 
 Compatibility and failure behavior
 ----------------------------------
@@ -157,12 +180,13 @@ The bridge has no network listener, shell, script-evaluation, arbitrary file, na
 a named pipe restricted to the current user and rejects remote clients; Unix uses a current-user Unix-domain socket. Protocol
 frames, queues, connections, capsule entries, attachment sizes, step counts, paths, and timeouts are bounded.
 
-Windowless runs copy only the configuration and save state needed to bootstrap OpenMW. Installed content remains in place and is
-read through the normal virtual filesystem. The engine reports its offscreen graphics and device-free input owners, while the
-controller independently checks that the child owns no visible or foreground desktop window. Temporary configuration, user data,
-materialized saves, and storage are removed when the run ends; engine logs are retained as diagnostic artifacts. A recursive
-fingerprint proves that configuration, saves, mods, and other writable profile state are unchanged; screenshots are excluded
-because the controller never writes to their directory.
+Isolated runs copy only the configuration and save state needed to bootstrap OpenMW. Installed content remains in place and is
+read through the normal virtual filesystem. The engine reports its selected graphics context and device-free input owner. In
+windowless mode the controller independently checks that the child owns no visible or foreground desktop window; headed mode
+explicitly permits the isolated child window. Temporary configuration, user data, materialized saves, and storage are removed
+when the run ends; engine logs are retained as diagnostic artifacts. A recursive fingerprint proves that configuration, saves,
+mods, and other writable profile state are unchanged; screenshots are excluded because the controller never writes to their
+directory.
 
 Treat artifact directories as private diagnostic data. Capsules contain the captured save state, content names and hashes, while
 logs and traces can contain local paths, cell names, and runtime state. Review an artifact set before sharing it.

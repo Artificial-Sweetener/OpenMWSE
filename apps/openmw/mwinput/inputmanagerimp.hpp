@@ -9,6 +9,7 @@
 #include <components/sdlutil/events.hpp>
 #include <components/settings/settings.hpp>
 #include <filesystem>
+#include <functional>
 
 #include "../mwbase/inputmanager.hpp"
 
@@ -48,10 +49,12 @@ namespace MWInput
     class InputManager final : public MWBase::InputManager
     {
     public:
+        /// Construct host-device input and reserve the optional diagnostic route-recording callback.
         InputManager(SDL_Window* window, osg::ref_ptr<osgViewer::Viewer> viewer,
             osg::ref_ptr<osgViewer::ScreenCaptureHandler> screenCaptureHandler, const std::filesystem::path& userFile,
             bool userFileExists, const std::filesystem::path& userControllerBindingsFile,
-            const std::filesystem::path& controllerBindingsFile, bool grab);
+            const std::filesystem::path& controllerBindingsFile, bool grab,
+            std::function<void()> diagnosticRouteToggle = {});
 
         ~InputManager() final;
 

@@ -102,6 +102,8 @@ namespace OpenMW
             "set the writable artifact root for an enabled diagnostic session");
         addOption("diagnostic-child", bpo::value<bool>()->implicit_value(true)->default_value(false),
             "run as an isolated hidden diagnostic child");
+        addOption("diagnostic-headed", bpo::value<bool>()->implicit_value(true)->default_value(false),
+            "give an isolated diagnostic child a visible production window");
         addOption("diagnostic-fixed-dt", bpo::value<double>()->default_value(1.0 / 60.0),
             "set the deterministic simulation interval used by a diagnostic child");
 

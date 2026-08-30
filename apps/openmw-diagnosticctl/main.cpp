@@ -1,5 +1,6 @@
 #include <components/debug/debugging.hpp>
 #include <components/diagnostics/capsule.hpp>
+#include <components/diagnostics/gameplayroute.hpp>
 #include <components/diagnostics/localtransport.hpp>
 #include <components/diagnostics/session.hpp>
 #include <components/files/hash.hpp>
@@ -15,6 +16,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <future>
+#include <iomanip>
 #include <iostream>
 #include <map>
 #include <optional>
@@ -419,6 +422,20 @@ namespace
         return result;
     }
 
+    /// Return whether one non-valued command-line flag appears exactly once.
+    bool hasFlag(std::span<char*> arguments, std::string_view name)
+    {
+        std::size_t count = 0;
+        for (const char* argument : arguments)
+        {
+            if (argument == name)
+                ++count;
+        }
+        if (count > 1)
+            throw std::invalid_argument("duplicated flag " + std::string(name));
+        return count == 1;
+    }
+
     /// Generate a unique protected endpoint within the transport's reserved namespace.
     std::string uniqueEndpoint()
     {
@@ -428,7 +445,7 @@ namespace
 
     /// Send a command after the child or live session has reached its safe-point loop.
     Diagnostics::Response transactWhenReady(const std::string& endpoint, const Diagnostics::Command& command,
-        std::chrono::seconds readinessTimeout, ChildProcess* child = nullptr)
+        std::chrono::seconds readinessTimeout, ChildProcess* child = nullptr, bool allowVisibleChild = false)
     {
         const auto deadline = std::chrono::steady_clock::now() + readinessTimeout;
         std::exception_ptr lastFailure;
@@ -439,7 +456,8 @@ namespace
                 if (const std::optional<int> exitCode = child->tryExitCode())
                     throw std::runtime_error(
                         "diagnostic child exited before readiness with code " + std::to_string(*exitCode));
-                child->requireNonDisruptiveWindowState();
+                if (!allowVisibleChild)
+                    child->requireNonDisruptiveWindowState();
             }
             try
             {
@@ -457,14 +475,15 @@ namespace
     }
 
     /// Require the engine to attest to the isolated graphics and input owners used by the child.
-    void validateIsolatedSession(const Diagnostics::Response& response)
+    void validateIsolatedSession(const Diagnostics::Response& response, bool headed)
     {
         const YAML::Node status = YAML::Load(payloadText(response.mPayload));
         if (status["mode"].as<std::string>("") != "isolated-child"
-            || status["graphics-context"].as<std::string>("") != "offscreen-pbuffer"
-            || status["native-window"].as<std::string>("") != "absent"
+            || status["graphics-context"].as<std::string>("")
+                != (headed ? "interactive-window" : "offscreen-pbuffer")
+            || status["native-window"].as<std::string>("") != (headed ? "present" : "absent")
             || status["input-source"].as<std::string>("") != "device-free")
-            throw std::runtime_error("diagnostic child did not attest to the isolated headless runtime");
+            throw std::runtime_error("diagnostic child did not attest to the requested isolated runtime");
     }
 
     /// Print one structured response and convert protocol errors to a failing exit status.
@@ -499,6 +518,7 @@ namespace
                   "  openmw-diagnosticctl <run|replay> --openmw openmw.exe --config openmw.cfg\n"
                   "      --artifacts directory [--save save.omwsave | --capsule capture.omwdiag]\n"
                   "      [--frames count] [--performance-samples count] [--fixed-dt seconds]\n"
+                  "      [--headed]\n"
                   "      [--setting \"Section:name=value\"]...\n"
                   "  openmw-diagnosticctl inspect-capsule --capsule capture.omwdiag [--entry name]\n";
     }
@@ -637,6 +657,7 @@ namespace
         const std::filesystem::path executableOption = findOption(arguments, "--openmw").value_or("openmw.exe");
         const std::filesystem::path sourceConfigOption = findOption(arguments, "--config").value_or(std::string());
         const std::filesystem::path artifactsOption = findOption(arguments, "--artifacts").value_or(std::string());
+        const bool headed = hasFlag(arguments, "--headed");
         if (sourceConfigOption.empty() || artifactsOption.empty())
             throw std::invalid_argument("run requires --openmw, --config, and --artifacts");
 
@@ -663,20 +684,30 @@ namespace
             "--user-data", isolatedData.string(), "--diagnostic-session", endpoint, "--diagnostic-artifacts",
             artifacts.string(), "--diagnostic-child", "--diagnostic-fixed-dt",
             findOption(arguments, "--fixed-dt").value_or("0.0166666666666667"), "--no-sound", "--no-grab" };
+        if (headed)
+            childArguments.emplace_back("--diagnostic-headed");
         std::optional<std::filesystem::path> isolatedSave;
         std::vector<std::byte> replayManifest;
         std::vector<std::byte> expectedWorldState;
+        std::vector<std::byte> gameplayRoute;
         if (const auto capsulePath = findOption(arguments, "--capsule"))
         {
             const Diagnostics::Capsule capsule = Diagnostics::readCapsule(*capsulePath);
             const Diagnostics::CapsuleEntry* manifest = capsule.find("manifest.yaml");
             const Diagnostics::CapsuleEntry* snapshot = capsule.find("state/world.omwsave");
             const Diagnostics::CapsuleEntry* worldState = capsule.find("state/world.yaml");
+            const Diagnostics::CapsuleEntry* route = capsule.find("state/gameplay-route.yaml");
             if (manifest == nullptr || manifest->mType != Diagnostics::CapsuleEntryType::Manifest || snapshot == nullptr
                 || snapshot->mType != Diagnostics::CapsuleEntryType::WorldSnapshot || worldState == nullptr)
                 throw std::runtime_error("diagnostic capsule does not contain its replay state");
             replayManifest = manifest->mData;
             expectedWorldState = worldState->mData;
+            if (route != nullptr)
+            {
+                if (route->mType != Diagnostics::CapsuleEntryType::GameplayTrace)
+                    throw std::runtime_error("diagnostic capsule gameplay route has an invalid type");
+                gameplayRoute = route->mData;
+            }
             isolatedSave = workspace.path() / "replay.omwsave";
             std::ofstream stream(*isolatedSave, std::ios::binary | std::ios::trunc);
             stream.write(reinterpret_cast<const char*>(snapshot->mData.data()),
@@ -694,13 +725,15 @@ namespace
 
         ChildProcess child(executable, childArguments);
         Diagnostics::Command hello{ 1, Diagnostics::CommandType::Hello, std::move(replayManifest) };
-        const Diagnostics::Response ready = transactWhenReady(endpoint, hello, std::chrono::minutes(3), &child);
+        const Diagnostics::Response ready
+            = transactWhenReady(endpoint, hello, std::chrono::minutes(3), &child, headed);
         if (printResponse(ready) != 0)
             return 2;
-        validateIsolatedSession(ready);
-        child.requireNonDisruptiveWindowState();
-        std::cout << "desktop-window: absent\n"
-                     "desktop-focus-acquired: false\n";
+        validateIsolatedSession(ready, headed);
+        if (!headed)
+            child.requireNonDisruptiveWindowState();
+        std::cout << "desktop-window: " << (headed ? "present" : "absent") << '\n'
+                  << "desktop-focus-acquired: " << (headed ? "allowed" : "false") << '\n';
 
         std::uint64_t requestId = 2;
         requireSuccessfulResponse(Diagnostics::transact(
@@ -724,36 +757,80 @@ namespace
         validateReplayState(expectedWorldState, observed.mPayload);
         std::cout << "initial-state-parity: true\n";
 
-        const std::uint32_t frames
-            = static_cast<std::uint32_t>(std::stoul(findOption(arguments, "--frames").value_or("16")));
-        const std::uint32_t performanceSamples = static_cast<std::uint32_t>(
-            std::stoul(findOption(arguments, "--performance-samples").value_or(std::to_string(std::min(frames, 16u)))));
-        if (performanceSamples == 0 || performanceSamples > frames || performanceSamples > 600)
-            throw std::invalid_argument("performance samples must be within [1, min(frames, 600)]");
-        Diagnostics::Command step{ requestId++, Diagnostics::CommandType::StepFrames, {} };
-        for (std::size_t byte = 0; byte < sizeof(frames); ++byte)
-            step.mPayload.push_back(static_cast<std::byte>((frames >> (byte * 8)) & 0xffu));
-        requireSuccessfulResponse(Diagnostics::transact(endpoint, step));
-        waitForScheduledFrames(endpoint, requestId, frames);
-        std::cout << "executed-fixed-frames: " << frames << '\n';
+        if (!gameplayRoute.empty())
+        {
+            const std::vector<Diagnostics::GameplayRouteFrame> routeFrames
+                = Diagnostics::decodeGameplayRoute(gameplayRoute);
+            requireSuccessfulResponse(Diagnostics::transact(
+                endpoint, { requestId++, Diagnostics::CommandType::LoadGameplayRoute, gameplayRoute }));
+            std::size_t completedFrames = 0;
+            unsigned segmentIndex = 0;
+            while (completedFrames < routeFrames.size())
+            {
+                const std::uint32_t segmentFrames = static_cast<std::uint32_t>(
+                    std::min<std::size_t>(600, routeFrames.size() - completedFrames));
+                Diagnostics::Command runSegment{
+                    requestId++, Diagnostics::CommandType::RunGameplayRouteSegment, {}
+                };
+                for (std::size_t byte = 0; byte < sizeof(segmentFrames); ++byte)
+                    runSegment.mPayload.push_back(
+                        static_cast<std::byte>((segmentFrames >> (byte * 8)) & 0xffu));
+                const Diagnostics::Response performance
+                    = Diagnostics::transact(endpoint, runSegment, std::chrono::minutes(3));
+                if (performance.mError != Diagnostics::ErrorCode::None)
+                    return printResponse(performance);
+                std::ostringstream performanceName;
+                performanceName << "performance-segment-" << std::setw(3) << std::setfill('0') << segmentIndex
+                                << ".txt";
+                std::ofstream performanceFile(
+                    artifacts / performanceName.str(), std::ios::binary | std::ios::trunc);
+                performanceFile.write(reinterpret_cast<const char*>(performance.mPayload.data()),
+                    static_cast<std::streamsize>(performance.mPayload.size()));
+                if (!performanceFile)
+                    throw std::runtime_error("failed writing gameplay-route performance evidence");
+                completedFrames += segmentFrames;
+                ++segmentIndex;
+                requireSuccessfulResponse(Diagnostics::transact(
+                    endpoint, { requestId++, Diagnostics::CommandType::CaptureGraphics, {} }));
+                waitForGraphicsCapture(endpoint, requestId);
+            }
+            std::cout << "executed-route-frames: " << completedFrames << '\n';
+        }
+        else
+        {
+            const std::uint32_t frames
+                = static_cast<std::uint32_t>(std::stoul(findOption(arguments, "--frames").value_or("16")));
+            const std::uint32_t performanceSamples = static_cast<std::uint32_t>(std::stoul(
+                findOption(arguments, "--performance-samples").value_or(std::to_string(std::min(frames, 16u)))));
+            if (performanceSamples == 0 || performanceSamples > frames || performanceSamples > 600)
+                throw std::invalid_argument("performance samples must be within [1, min(frames, 600)]");
+            Diagnostics::Command step{ requestId++, Diagnostics::CommandType::StepFrames, {} };
+            for (std::size_t byte = 0; byte < sizeof(frames); ++byte)
+                step.mPayload.push_back(static_cast<std::byte>((frames >> (byte * 8)) & 0xffu));
+            requireSuccessfulResponse(Diagnostics::transact(endpoint, step));
+            waitForScheduledFrames(endpoint, requestId, frames);
+            std::cout << "executed-fixed-frames: " << frames << '\n';
 
-        Diagnostics::Command performanceCommand{ requestId++, Diagnostics::CommandType::TracePerformance, {} };
-        for (std::size_t byte = 0; byte < sizeof(performanceSamples); ++byte)
-            performanceCommand.mPayload.push_back(static_cast<std::byte>((performanceSamples >> (byte * 8)) & 0xffu));
-        const Diagnostics::Response performance
-            = Diagnostics::transact(endpoint, performanceCommand, std::chrono::seconds(60));
-        if (performance.mError != Diagnostics::ErrorCode::None)
-            return printResponse(performance);
-        std::ofstream performanceFile(artifacts / "performance.txt", std::ios::binary | std::ios::trunc);
-        performanceFile.write(reinterpret_cast<const char*>(performance.mPayload.data()),
-            static_cast<std::streamsize>(performance.mPayload.size()));
-        if (!performanceFile)
-            throw std::runtime_error("failed writing performance evidence");
+            Diagnostics::Command performanceCommand{ requestId++, Diagnostics::CommandType::TracePerformance, {} };
+            for (std::size_t byte = 0; byte < sizeof(performanceSamples); ++byte)
+                performanceCommand.mPayload.push_back(
+                    static_cast<std::byte>((performanceSamples >> (byte * 8)) & 0xffu));
+            const Diagnostics::Response performance
+                = Diagnostics::transact(endpoint, performanceCommand, std::chrono::seconds(60));
+            if (performance.mError != Diagnostics::ErrorCode::None)
+                return printResponse(performance);
+            std::ofstream performanceFile(artifacts / "performance.txt", std::ios::binary | std::ios::trunc);
+            performanceFile.write(reinterpret_cast<const char*>(performance.mPayload.data()),
+                static_cast<std::streamsize>(performance.mPayload.size()));
+            if (!performanceFile)
+                throw std::runtime_error("failed writing performance evidence");
 
-        requireSuccessfulResponse(
-            Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::CaptureGraphics, {} }));
-        waitForGraphicsCapture(endpoint, requestId);
-        child.requireNonDisruptiveWindowState();
+            requireSuccessfulResponse(Diagnostics::transact(
+                endpoint, { requestId++, Diagnostics::CommandType::CaptureGraphics, {} }));
+            waitForGraphicsCapture(endpoint, requestId);
+        }
+        if (!headed)
+            child.requireNonDisruptiveWindowState();
         requireSuccessfulResponse(
             Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::ShutdownChild, {} }));
 

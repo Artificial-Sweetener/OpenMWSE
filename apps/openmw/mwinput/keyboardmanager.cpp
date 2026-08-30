@@ -16,8 +16,9 @@
 
 namespace MWInput
 {
-    KeyboardManager::KeyboardManager(BindingsManager* bindingsManager)
+    KeyboardManager::KeyboardManager(BindingsManager* bindingsManager, std::function<void()> diagnosticRouteToggle)
         : mBindingsManager(bindingsManager)
+        , mDiagnosticRouteToggle(std::move(diagnosticRouteToggle))
     {
     }
 
@@ -31,6 +32,13 @@ namespace MWInput
 
     void KeyboardManager::keyPressed(const SDL_KeyboardEvent& arg)
     {
+        if (!arg.repeat && arg.keysym.scancode == SDL_SCANCODE_F11 && (arg.keysym.mod & KMOD_SHIFT) != 0
+            && mDiagnosticRouteToggle)
+        {
+            mDiagnosticRouteShortcutPressed = true;
+            mDiagnosticRouteToggle();
+            return;
+        }
         // HACK: to make default keybinding for the console work without printing an extra "^" upon closing
         // This assumes that SDL_TextInput events always come *after* the key event
         // (which is somewhat reasonable, and hopefully true for all SDL platforms)
@@ -70,6 +78,11 @@ namespace MWInput
 
     void KeyboardManager::keyReleased(const SDL_KeyboardEvent& arg)
     {
+        if (arg.keysym.scancode == SDL_SCANCODE_F11 && mDiagnosticRouteShortcutPressed)
+        {
+            mDiagnosticRouteShortcutPressed = false;
+            return;
+        }
         MWBase::Environment::get().getInputManager()->setJoystickLastUsed(false);
         auto kc = SDLUtil::sdlKeyToMyGUI(arg.keysym.sym);
 

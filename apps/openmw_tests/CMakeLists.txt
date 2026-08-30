@@ -6,6 +6,7 @@ file(GLOB UNITTEST_SRC_FILES
 
     options.cpp
     diagnosticcollection.cpp
+    diagnosticgameplayroute.cpp
     diagnosticperformance.cpp
     diagnosticstartup.cpp
     diagnosticworkcounter.cpp

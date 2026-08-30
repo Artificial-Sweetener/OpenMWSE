@@ -2,6 +2,7 @@
 
 #include <cerrno>
 #include <chrono>
+#include <functional>
 #include <future>
 #include <system_error>
 
@@ -67,6 +68,7 @@
 #include "mwinput/inputmanagerimp.hpp"
 
 #include "diagnosticcollection.hpp"
+#include "diagnosticgameplayroute.hpp"
 
 #include "mwgui/windowmanagerimp.hpp"
 
@@ -83,6 +85,7 @@
 #include "mwworld/datetimemanager.hpp"
 #include "mwworld/weather.hpp"
 #include "mwworld/worldimp.hpp"
+#include "mwworld/worldmodel.hpp"
 
 #include "mwrender/camera.hpp"
 #include "mwrender/postprocessor.hpp"
@@ -322,6 +325,8 @@ bool OMW::Engine::frame(unsigned frameNumber, float frametime)
 
             if (mStateManager->getState() != MWBase::StateManager::State_NoGame)
             {
+                if (frametime > 0.f)
+                    applyDiagnosticGameplayRoute();
                 mWorld->update(frametime, paused);
             }
         }
@@ -377,6 +382,8 @@ bool OMW::Engine::frame(unsigned frameNumber, float frametime)
     mViewer->renderingTraversals();
 
     mLuaWorker->finishUpdate(frameStart, frameNumber, *stats);
+
+    recordDiagnosticGameplayRoute(frametime);
 
     // The Lua state is unused until the next frame starts: the worker collects
     // garbage through the frame tail and the framerate-limiter sleep.
@@ -526,7 +533,7 @@ void OMW::Engine::createGraphicsContext()
     unsigned antialiasing = static_cast<unsigned>(Settings::video().mAntialiasing);
 
     osg::ref_ptr<osg::GraphicsContext> graphicsContext;
-    if (mDiagnosticChild)
+    if (mDiagnosticChild && !mDiagnosticHeaded)
     {
         while (!graphicsContext || !graphicsContext->valid())
         {
@@ -866,7 +873,9 @@ void OMW::Engine::prepareEngine()
     else
     {
         mInputManager = std::make_unique<MWInput::InputManager>(mWindow, mViewer, mScreenCaptureHandler, keybinderUser,
-            keybinderUserExists, userGameControllerdb, gameControllerdb, mGrab);
+            keybinderUserExists, userGameControllerdb, gameControllerdb, mGrab,
+            mDiagnosticEndpoint.empty() ? std::function<void()>{}
+                                        : std::function<void()>{ [this] { toggleDiagnosticGameplayRoute(); } });
     }
     mEnvironment.setInputManager(*mInputManager);
 
@@ -1085,7 +1094,11 @@ void OMW::Engine::go()
                                       .count()
             * timeManager.getSimulationTimeScale();
         const Diagnostics::FixedStepScheduler::Frame diagnosticFrame = mDiagnosticStepScheduler.beginFrame();
-        const double dt = mDiagnosticChild ? diagnosticFrame.mDuration : realtimeDt;
+        const double dt = mDiagnosticChild
+            ? (diagnosticFrame.mScheduled && mDiagnosticGameplayRoute && mDiagnosticGameplayRoute->replaying()
+                      ? mDiagnosticGameplayRoute->replayFrame().mDuration
+                      : diagnosticFrame.mDuration)
+            : realtimeDt;
 
         mViewer->advance(timeManager.getRenderingSimulationTime());
 
@@ -1188,14 +1201,101 @@ void OMW::Engine::setRandomSeed(unsigned int seed)
     mRandomSeed = seed;
 }
 
+void OMW::Engine::toggleDiagnosticGameplayRoute()
+{
+    if (!mDiagnosticGameplayRoute || mDiagnosticChild)
+        return;
+    try
+    {
+        if (mDiagnosticGameplayRoute->recording())
+        {
+            const std::filesystem::path path = mDiagnosticGameplayRoute->stopRecording();
+            mWindowManager->messageBox("Gameplay route saved: " + path.string());
+        }
+        else
+        {
+            if (mStateManager->getState() != MWBase::StateManager::State_Running)
+            {
+                mWindowManager->messageBox("Gameplay route recording requires a loaded game.");
+                return;
+            }
+            const unsigned frameNumber = mViewer->getFrameStamp()->getFrameNumber();
+            mDiagnosticGameplayRoute->startRecording(createDiagnosticCapsule(frameNumber));
+            mWindowManager->messageBox("Gameplay route recording started. Press Shift+F11 to stop.");
+        }
+    }
+    catch (const std::exception& error)
+    {
+        Log(Debug::Error) << "Gameplay route recording failed: " << error.what();
+        mWindowManager->messageBox("Gameplay route recording failed; see openmw.log.");
+    }
+}
+
+void OMW::Engine::recordDiagnosticGameplayRoute(float dt)
+{
+    if (!mDiagnosticGameplayRoute || !mDiagnosticGameplayRoute->recording()
+        || mStateManager->getState() != MWBase::StateManager::State_Running || !(dt > 0.f))
+        return;
+    const MWWorld::Ptr player = mWorld->getPlayerPtr();
+    const ESM::Position& playerTransform = player.getRefData().getPosition();
+    const MWRender::Camera* camera = mWorld->getCamera();
+    Diagnostics::GameplayRouteFrame frame{
+        .mDuration = std::min<double>(dt, Diagnostics::maximumGameplayRouteFrameDuration),
+        .mCell = player.getCell()->getCell()->getId().serializeText(),
+        .mPosition = { playerTransform.pos[0], playerTransform.pos[1], playerTransform.pos[2] },
+        .mRotation = { playerTransform.rot[0], playerTransform.rot[1], playerTransform.rot[2] },
+        .mCameraAngles = { camera->getPitch(), camera->getYaw(), camera->getRoll() },
+        .mFirstPerson = mWorld->isFirstPerson(),
+    };
+    try
+    {
+        if (const std::optional<std::filesystem::path> path
+            = mDiagnosticGameplayRoute->recordFrame(std::move(frame)))
+            mWindowManager->messageBox("Gameplay route reached its frame limit and was saved: " + path->string());
+    }
+    catch (const std::exception& error)
+    {
+        Log(Debug::Error) << "Gameplay route recording failed: " << error.what();
+        mWindowManager->messageBox("Gameplay route recording failed; see openmw.log.");
+    }
+}
+
+void OMW::Engine::applyDiagnosticGameplayRoute()
+{
+    if (!mDiagnosticGameplayRoute || !mDiagnosticGameplayRoute->replaying())
+        return;
+    const Diagnostics::GameplayRouteFrame& frame = mDiagnosticGameplayRoute->replayFrame();
+    MWWorld::Ptr player = mWorld->getPlayerPtr();
+    MWWorld::CellStore& cell
+        = mWorld->getWorldModel().getCell(ESM::RefId::deserializeText(frame.mCell));
+    const osg::Vec3f position(frame.mPosition[0], frame.mPosition[1], frame.mPosition[2]);
+    const osg::Vec3f rotation(frame.mRotation[0], frame.mRotation[1], frame.mRotation[2]);
+    if (player.getCell() == &cell)
+        player = mWorld->moveObject(player, position, true, true);
+    else
+        player = mWorld->moveObject(player, &cell, position, true, true);
+    mWorld->rotateObject(player, rotation, MWBase::RotationFlag_none);
+    if (mWorld->isFirstPerson() != frame.mFirstPerson)
+        mWorld->togglePOV(true);
+    MWRender::Camera* camera = mWorld->getCamera();
+    camera->setPitch(frame.mCameraAngles[0], true);
+    camera->setYaw(frame.mCameraAngles[1], true);
+    camera->setRoll(frame.mCameraAngles[2]);
+    mDiagnosticGameplayRoute->completeReplayFrame();
+}
+
 void OMW::Engine::configureDiagnostics(
-    std::string endpoint, std::filesystem::path artifactRoot, bool child, double fixedFrameDuration)
+    std::string endpoint, std::filesystem::path artifactRoot, bool child, bool headed, double fixedFrameDuration)
 {
     if (endpoint.empty() || artifactRoot.empty())
         throw std::invalid_argument("diagnostic session requires an endpoint and artifact root");
     mDiagnosticEndpoint = std::move(endpoint);
     mDiagnosticArtifactRoot = std::move(artifactRoot);
+    mDiagnosticGameplayRoute = std::make_unique<DiagnosticGameplayRoute>(mDiagnosticArtifactRoot);
     mDiagnosticChild = child;
+    mDiagnosticHeaded = headed;
+    if (headed && !child)
+        throw std::invalid_argument("headed diagnostics require isolated child mode");
     mDiagnosticStepScheduler.setFrameDuration(fixedFrameDuration);
     if (child)
     {
