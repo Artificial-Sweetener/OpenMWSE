@@ -36,9 +36,8 @@ namespace Terrain
         CompositeMapRenderer();
         ~CompositeMapRenderer();
 
+        /// Render queued composite maps while preserving whole-map scheduling behavior.
         void drawImplementation(osg::RenderInfo& renderInfo) const override;
-
-        void compile(CompositeMap& compositeMap, osg::RenderInfo& renderInfo) const;
 
         /// Set the available time in seconds for compiling (non-immediate) composite maps each frame
         void setMinimumTimeAvailableForCompile(double time);
@@ -55,6 +54,18 @@ namespace Terrain
         size_t getCompileSetSize() const;
 
     private:
+        /// Summarizes one composite-map compilation attempt for bounded diagnostics.
+        struct CompileResult
+        {
+            /// Counts drawables submitted to the composite render target.
+            size_t mSubmittedDrawables = 0;
+            /// Indicates whether this attempt exhausted the map's drawable list.
+            bool mCompleted = false;
+        };
+
+        /// Compile one whole composite map and report the submitted work without changing scheduling policy.
+        CompileResult compile(CompositeMap& compositeMap, osg::RenderInfo& renderInfo) const;
+
         float mTargetFrameRate;
         double mMinimumTimeAvailable;
         mutable osg::Timer mTimer;

@@ -36,6 +36,7 @@ namespace SceneUtil
             DiagnosticGpuPass{ "post-processing", postProcessingCameraName },
             DiagnosticGpuPass{ "precipitation-occlusion", precipitationOcclusionCameraName },
             DiagnosticGpuPass{ "ripples", ripplesCameraName },
+            DiagnosticGpuPass{ "terrain-composite", terrainCompositeCameraName },
         };
 
         std::mutex registryMutex;

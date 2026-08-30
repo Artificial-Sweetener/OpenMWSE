@@ -1,5 +1,7 @@
 #include "compositemaprenderer.hpp"
 
+#include "diagnosticcompositemapwork.hpp"
+
 #include <osg/FrameBufferObject>
 #include <osg/RenderInfo>
 #include <osg/Texture2D>
@@ -30,19 +32,32 @@ namespace Terrain
         double conservativeTimeRatio(0.75);
         double availableTime = std::max((targetFrameTime - dt) * conservativeTimeRatio, mMinimumTimeAvailable);
 
-        std::lock_guard<std::mutex> lock(mMutex);
+        DiagnosticCompositeMapWork diagnosticWork;
+        diagnosticWork.mBudgetMilliseconds = availableTime * 1000.0;
+
+        std::unique_lock<std::mutex> lock(mMutex);
+        diagnosticWork.mQueuedBefore = mCompileSet.size();
+        diagnosticWork.mImmediateBefore = mImmediateCompileSet.size();
 
         if (mImmediateCompileSet.empty() && mCompileSet.empty())
+        {
+            lock.unlock();
+            recordDiagnosticCompositeMapWork(renderInfo, diagnosticWork);
             return;
+        }
 
         while (!mImmediateCompileSet.empty())
         {
             osg::ref_ptr<CompositeMap> node = *mImmediateCompileSet.begin();
             mImmediateCompileSet.erase(node);
 
-            mMutex.unlock();
-            compile(*node, renderInfo);
-            mMutex.lock();
+            lock.unlock();
+            const CompileResult result = compile(*node, renderInfo);
+            lock.lock();
+            ++diagnosticWork.mProcessed;
+            diagnosticWork.mSubmittedDrawables += result.mSubmittedDrawables;
+            if (result.mCompleted)
+                ++diagnosticWork.mCompleted;
         }
 
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::duration<double>(availableTime);
@@ -51,9 +66,13 @@ namespace Terrain
             osg::ref_ptr<CompositeMap> node = *mCompileSet.begin();
             mCompileSet.erase(node);
 
-            mMutex.unlock();
-            compile(*node, renderInfo);
-            mMutex.lock();
+            lock.unlock();
+            const CompileResult result = compile(*node, renderInfo);
+            lock.lock();
+            ++diagnosticWork.mProcessed;
+            diagnosticWork.mSubmittedDrawables += result.mSubmittedDrawables;
+            if (result.mCompleted)
+                ++diagnosticWork.mCompleted;
 
             if (node->mCompiled < node->mDrawables.size())
             {
@@ -62,16 +81,20 @@ namespace Terrain
                 mCompileSet.insert(node);
             }
         }
+        diagnosticWork.mQueuedAfter = mCompileSet.size();
+        lock.unlock();
+        recordDiagnosticCompositeMapWork(renderInfo, diagnosticWork);
         mTimer.setStartTick();
     }
 
-    void CompositeMapRenderer::compile(CompositeMap& compositeMap, osg::RenderInfo& renderInfo) const
+    CompositeMapRenderer::CompileResult CompositeMapRenderer::compile(
+        CompositeMap& compositeMap, osg::RenderInfo& renderInfo) const
     {
         // if there are no more external references we can assume the texture is no longer required
         if (compositeMap.mTexture->referenceCount() <= 1)
         {
             compositeMap.mCompiled = compositeMap.mDrawables.size();
-            return;
+            return { .mCompleted = true };
         }
 
         osg::Timer timer;
@@ -79,10 +102,10 @@ namespace Terrain
         osg::GLExtensions* ext = state.get<osg::GLExtensions>();
 
         if (!mFBO)
-            return;
+            return {};
 
         if (!ext->isFrameBufferObjectSupported)
-            return;
+            return {};
 
         osg::FrameBufferAttachment attach(compositeMap.mTexture);
         mFBO->setAttachment(osg::Camera::COLOR_BUFFER, attach);
@@ -95,13 +118,14 @@ namespace Terrain
             GLuint fboId = state.getGraphicsContext() ? state.getGraphicsContext()->getDefaultFboId() : 0;
             ext->glBindFramebuffer(GL_FRAMEBUFFER_EXT, fboId);
             OSG_ALWAYS << "Error attaching FBO" << std::endl;
-            return;
+            return {};
         }
 
         // inform State that Texture attribute has changed due to compiling of FBO texture
         // should OSG be doing this on its own?
         state.haveAppliedTextureAttribute(state.getActiveTextureUnit(), osg::StateAttribute::TEXTURE);
 
+        CompileResult result;
         for (size_t i = compositeMap.mCompiled; i < compositeMap.mDrawables.size(); ++i)
         {
             osg::Drawable* drw = compositeMap.mDrawables[i];
@@ -119,16 +143,19 @@ namespace Terrain
                 renderInfo.getState()->popStateSet();
 
             ++compositeMap.mCompiled;
+            ++result.mSubmittedDrawables;
 
             compositeMap.mDrawables[i] = nullptr;
         }
-        if (compositeMap.mCompiled == compositeMap.mDrawables.size())
+        result.mCompleted = compositeMap.mCompiled == compositeMap.mDrawables.size();
+        if (result.mCompleted)
             compositeMap.mDrawables = std::vector<osg::ref_ptr<osg::Drawable>>();
 
         state.haveAppliedAttribute(osg::StateAttribute::VIEWPORT);
 
         GLuint fboId = state.getGraphicsContext() ? state.getGraphicsContext()->getDefaultFboId() : 0;
         ext->glBindFramebuffer(GL_FRAMEBUFFER_EXT, fboId);
+        return result;
     }
 
     void CompositeMapRenderer::setMinimumTimeAvailableForCompile(double time)

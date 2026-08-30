@@ -35,6 +35,8 @@ namespace SceneUtil
     inline constexpr std::string_view postProcessingCameraName = "PostProcessingCamera";
     inline constexpr std::string_view precipitationOcclusionCameraName = "PrecipitationOcclusionCamera";
     inline constexpr std::string_view ripplesCameraName = "RipplesCamera";
+    /// Identifies the terrain texture-generation camera in stable diagnostic output.
+    inline constexpr std::string_view terrainCompositeCameraName = "Terrain Composite Map Camera";
     inline constexpr std::string_view diagnosticGpuPassTimeStatistic = "OpenMW diagnostic GPU pass time taken";
     inline constexpr std::string_view diagnosticCpuPassTimeStatistic = "OpenMW diagnostic CPU pass time taken";
     inline constexpr std::string_view diagnosticCpuPassBeginStatistic = "OpenMW diagnostic CPU pass begin time";

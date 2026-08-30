@@ -23,6 +23,7 @@
 
 #include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/diagnosticshadowwork.hpp>
+#include <components/terrain/diagnosticcompositemapwork.hpp>
 
 namespace OMW
 {
@@ -61,6 +62,16 @@ namespace OMW
         constexpr std::array cameraDetailMetrics{
             CameraMetric{ "render-leaves", SceneUtil::diagnosticShadowRenderLeafCountStatistic },
             CameraMetric{ "state-graphs", SceneUtil::diagnosticShadowStateGraphCountStatistic },
+        };
+
+        constexpr std::array terrainCompositeMetrics{
+            CameraMetric{ "budget-milliseconds", Terrain::diagnosticCompositeMapBudgetStatistic },
+            CameraMetric{ "queued-maps-before", Terrain::diagnosticCompositeMapQueuedBeforeStatistic },
+            CameraMetric{ "immediate-maps-before", Terrain::diagnosticCompositeMapImmediateBeforeStatistic },
+            CameraMetric{ "processed-maps", Terrain::diagnosticCompositeMapProcessedStatistic },
+            CameraMetric{ "submitted-drawables", Terrain::diagnosticCompositeMapSubmittedDrawablesStatistic },
+            CameraMetric{ "completed-maps", Terrain::diagnosticCompositeMapCompletedStatistic },
+            CameraMetric{ "queued-maps-after", Terrain::diagnosticCompositeMapQueuedAfterStatistic },
         };
 
         /// Identifies one stable gap between adjacent draw-attribution boundaries.
@@ -418,7 +429,7 @@ namespace OMW
         forEachUserStatsValue(
             [&](const UserStats& value) { metrics.push_back({ value.mTaken, Metric::Owner::Viewer }); });
 
-        output << std::setprecision(17) << "provider: performance@7\n"
+        output << std::setprecision(17) << "provider: performance@8\n"
                << "first-sampled-frame: " << firstFrame << '\n'
                << "last-sampled-frame: " << lastFrame << '\n'
                << "requested-samples: " << lastFrame - firstFrame + 1 << '\n'
@@ -497,6 +508,13 @@ namespace OMW
             output << "  - index: unavailable\n"
                    << "    physical-camera-count: 1\n";
             reportCameraDetails(output, cameras, firstFrame, lastFrame, "    ");
+        }
+
+        output << "terrain-composite-details:\n";
+        for (const CameraMetric& metric : terrainCompositeMetrics)
+        {
+            reportDistribution(output, { std::string(metric.mName), Metric::Owner::PrimaryCamera },
+                collectCameraPass(SceneUtil::terrainCompositeCameraName, metric.mStatistic, firstFrame, lastFrame));
         }
 
         output << "unclassified-camera-details:\n";

@@ -5,6 +5,7 @@
 
 #include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/diagnosticshadowwork.hpp>
+#include <components/terrain/diagnosticcompositemapwork.hpp>
 
 #include <gtest/gtest.h>
 
@@ -98,11 +99,33 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     SceneUtil::enableDiagnosticGpuPassStatistics(*auxiliary);
     auxiliary->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassTimeStatistic), 0.004);
 
+    osg::ref_ptr<osg::Camera> terrainComposite = new osg::Camera;
+    terrainComposite->setName(std::string(SceneUtil::terrainCompositeCameraName));
+    SceneUtil::enableDiagnosticGpuPassStatistics(*terrainComposite);
+    terrainComposite->getStats()->setAttribute(
+        frame, std::string(SceneUtil::diagnosticGpuPassTimeStatistic), 0.006);
+    terrainComposite->getStats()->setAttribute(
+        frame, std::string(SceneUtil::diagnosticCpuPassTimeStatistic), 0.010);
+    terrainComposite->getStats()->setAttribute(
+        frame, std::string(Terrain::diagnosticCompositeMapBudgetStatistic), 2.5);
+    terrainComposite->getStats()->setAttribute(
+        frame, std::string(Terrain::diagnosticCompositeMapQueuedBeforeStatistic), 12.0);
+    terrainComposite->getStats()->setAttribute(
+        frame, std::string(Terrain::diagnosticCompositeMapImmediateBeforeStatistic), 0.0);
+    terrainComposite->getStats()->setAttribute(
+        frame, std::string(Terrain::diagnosticCompositeMapProcessedStatistic), 1.0);
+    terrainComposite->getStats()->setAttribute(
+        frame, std::string(Terrain::diagnosticCompositeMapSubmittedDrawablesStatistic), 24.0);
+    terrainComposite->getStats()->setAttribute(
+        frame, std::string(Terrain::diagnosticCompositeMapCompletedStatistic), 1.0);
+    terrainComposite->getStats()->setAttribute(
+        frame, std::string(Terrain::diagnosticCompositeMapQueuedAfterStatistic), 11.0);
+
     std::ostringstream output;
     OMW::reportDiagnosticPerformance(frame, frame, viewer, output);
     const std::string report = output.str();
 
-    EXPECT_NE(report.find("provider: performance@7"), std::string::npos);
+    EXPECT_NE(report.find("provider: performance@8"), std::string::npos);
     EXPECT_NE(report.find("draw-breakdown:\n  camera-covered:\n    available: true\n    count: 1\n"
                           "    median: 0.010999"),
         std::string::npos)
@@ -131,6 +154,7 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     EXPECT_NE(report.find("  shadow-maps:\n    available: true\n    count: 1\n    median: 0.009"), std::string::npos);
     EXPECT_NE(report.find("  water-reflection:\n    available: false"), std::string::npos);
     EXPECT_NE(report.find("cpu-passes:\n  main-scene:\n    available: true\n    count: 1"), std::string::npos);
+    EXPECT_NE(report.find("  terrain-composite:\n    available: true\n    count: 1"), std::string::npos) << report;
     EXPECT_NE(report.find("shadow-map-details:\n  - index: 1\n    physical-camera-count: 2\n"
                           "    gpu-time:\n      available: true\n      count: 1\n      median: 0.006"),
         std::string::npos)
@@ -149,6 +173,16 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     EXPECT_NE(report.find("  - index: 2\n    physical-camera-count: 1\n"
                           "    gpu-time:\n      available: true\n      count: 1\n"
                           "      median: 0.003"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("terrain-composite-details:\n  budget-milliseconds:\n"
+                          "    available: true\n    count: 1\n    median: 2.5"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("  submitted-drawables:\n    available: true\n    count: 1\n    median: 24"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("  queued-maps-after:\n    available: true\n    count: 1\n    median: 11"),
         std::string::npos)
         << report;
     EXPECT_NE(report.find("unclassified-camera-details:\n  - index: 1\n    name: \"AuxiliarySceneCamera\"\n"
