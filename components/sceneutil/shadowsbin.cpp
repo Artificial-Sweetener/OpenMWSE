@@ -48,11 +48,17 @@ namespace
 namespace SceneUtil
 {
 
-    ShadowsBin::ShadowsBin(const CastingPrograms& castingPrograms)
+    ShadowsBin::ShadowsBin(const CastingPrograms& castingPrograms, osg::Program* opaqueCastingProgram)
     {
         mNoTestStateSet = new osg::StateSet;
-        mNoTestStateSet->addUniform(new osg::Uniform("useDiffuseMapForShadowAlpha", false));
-        mNoTestStateSet->addUniform(new osg::Uniform("alphaTestShadows", false));
+        if (opaqueCastingProgram)
+            mNoTestStateSet->setAttributeAndModes(opaqueCastingProgram,
+                osg::StateAttribute::ON | osg::StateAttribute::PROTECTED | osg::StateAttribute::OVERRIDE);
+        else
+        {
+            mNoTestStateSet->addUniform(new osg::Uniform("useDiffuseMapForShadowAlpha", false));
+            mNoTestStateSet->addUniform(new osg::Uniform("alphaTestShadows", false));
+        }
 
         mShaderAlphaTestStateSet = new osg::StateSet;
         mShaderAlphaTestStateSet->addUniform(new osg::Uniform("alphaTestShadows", true));

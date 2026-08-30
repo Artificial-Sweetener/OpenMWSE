@@ -842,6 +842,7 @@ MWShadowTechnique::MWShadowTechnique():
 MWShadowTechnique::MWShadowTechnique(const MWShadowTechnique& vdsm, const osg::CopyOp& copyop):
     ShadowTechnique(vdsm,copyop)
     , _castingPrograms(vdsm._castingPrograms)
+    , _opaqueCastingProgram(vdsm._opaqueCastingProgram)
 {
     _shadowRecievingPlaceholderStateSet = new osg::StateSet;
     _enableShadows = vdsm._enableShadows;
@@ -971,16 +972,20 @@ void SceneUtil::MWShadowTechnique::setupCastingShader(Shader::ShaderManager & sh
 {
     // This can't be part of the constructor as OSG mandates that there be a trivial constructor available
 
-    osg::ref_ptr<osg::Shader> castingVertexShader = shaderManager.getShader("shadowcasting.vert");
     std::string useGPUShader4 = SceneUtil::getGLExtensions().isGpuShader4Supported ? "1" : "0";
     for (int alphaFunc = GL_NEVER; alphaFunc <= GL_ALWAYS; ++alphaFunc)
     {
         auto& program = _castingPrograms[alphaFunc - GL_NEVER];
-        program = shaderManager.getProgram(castingVertexShader,
+        program = shaderManager.getProgram(shaderManager.getShader("shadowcasting.vert", { { "opaqueShadowCaster", "0" } }),
             shaderManager.getShader("shadowcasting.frag",
                 { { "alphaFunc", std::to_string(alphaFunc) }, { "alphaToCoverage", "0" }, { "adjustCoverage", "1" },
-                    { "useGPUShader4", useGPUShader4 } }));
+                    { "useGPUShader4", useGPUShader4 }, { "opaqueShadowCaster", "0" } }));
     }
+    _opaqueCastingProgram = shaderManager.getProgram(
+        shaderManager.getShader("shadowcasting.vert", { { "opaqueShadowCaster", "1" } }),
+        shaderManager.getShader("shadowcasting.frag",
+            { { "alphaFunc", std::to_string(GL_ALWAYS) }, { "alphaToCoverage", "0" }, { "adjustCoverage", "1" },
+                { "useGPUShader4", useGPUShader4 }, { "opaqueShadowCaster", "1" } }));
 }
 
 MWShadowTechnique::ViewDependentData* MWShadowTechnique::createViewDependentData(osgUtil::CullVisitor* /*cv*/)
@@ -3471,7 +3476,7 @@ osg::ref_ptr<osg::StateSet> SceneUtil::MWShadowTechnique::getOrCreateShadowsBinS
     {
         if (_shadowsBin == nullptr)
         {
-            _shadowsBin = new ShadowsBin(_castingPrograms);
+            _shadowsBin = new ShadowsBin(_castingPrograms, _opaqueCastingProgram);
             osgUtil::RenderBin::addRenderBinPrototype(_shadowsBinName, _shadowsBin);
         }
         _shadowsBinStateSet = new osg::StateSet;

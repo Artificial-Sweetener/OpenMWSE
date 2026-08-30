@@ -24,7 +24,8 @@ namespace SceneUtil
         using CastingPrograms = Array<osg::ref_ptr<osg::Program>>;
 
         META_Object(SceneUtil, ShadowsBin)
-        ShadowsBin(const CastingPrograms& castingPrograms);
+        /// Create shadow-state reduction with dedicated opaque and alpha-tested caster programs.
+        ShadowsBin(const CastingPrograms& castingPrograms, osg::Program* opaqueCastingProgram);
         ShadowsBin(const ShadowsBin& rhs, const osg::CopyOp& copyop)
             : osgUtil::RenderBin(rhs, copyop)
             , mNoTestStateSet(rhs.mNoTestStateSet)

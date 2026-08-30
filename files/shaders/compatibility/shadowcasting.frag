@@ -1,5 +1,14 @@
 #version 120
 
+#if @opaqueShadowCaster
+
+void main()
+{
+    // An empty fragment stage preserves depth writes without alpha/material work.
+}
+
+#else
+
 #if @useGPUShader4
     #extension GL_EXT_gpu_shader4: require
 #endif
@@ -30,3 +39,5 @@ void main()
     if (alphaTestShadows && gl_FragData[0].a <= 0.5)
         discard;
 }
+
+#endif

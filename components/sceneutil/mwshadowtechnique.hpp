@@ -90,6 +90,7 @@ namespace SceneUtil {
 
         virtual void disableFrontFaceCulling();
 
+        /// Compile dedicated opaque and alpha-tested shadow-caster programs.
         virtual void setupCastingShader(Shader::ShaderManager &shaderManager);
 
         class ComputeLightSpaceBounds : public osg::NodeVisitor, public osg::CullStack
@@ -338,6 +339,7 @@ namespace SceneUtil {
 
         osg::ref_ptr<DebugHUD>                  _debugHud;
         std::array<osg::ref_ptr<osg::Program>, GL_ALWAYS - GL_NEVER + 1> _castingPrograms;
+        osg::ref_ptr<osg::Program> _opaqueCastingProgram;
         const std::string _shadowsBinName = "ShadowsBin_" + std::to_string(reinterpret_cast<std::uint64_t>(this));
         osg::ref_ptr<osgUtil::RenderBin> _shadowsBin;
         osg::ref_ptr<osg::StateSet> _shadowsBinStateSet;

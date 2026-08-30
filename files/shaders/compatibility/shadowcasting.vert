@@ -1,5 +1,16 @@
 #version 120
 
+#if @opaqueShadowCaster
+
+void main(void)
+{
+    // Opaque casters need only clip-space position and user clip-plane distance.
+    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
+    gl_ClipVertex = gl_ModelViewMatrix * gl_Vertex;
+}
+
+#else
+
 #include "lib/core/vertex.h.glsl"
 #include "lib/material/colormodes.glsl"
 
@@ -35,3 +46,5 @@ void main(void)
 
     alphaPassthrough *= actorFade * alpha;
 }
+
+#endif
