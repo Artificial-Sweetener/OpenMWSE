@@ -269,7 +269,7 @@ namespace MWRender
             const float modelExtent = modelBounds.valid() ? modelBounds.center().length() + modelBounds.radius() : 0.f;
             GroundcoverInstanceBatch batch = makeGroundcoverInstanceBatch(entries, layout, worldCenter, modelExtent);
             osg::ref_ptr<GroundcoverBatch> drawBatch
-                = new GroundcoverBatch(std::move(batch.mClusters), getViewDistance());
+                = new GroundcoverBatch(std::move(batch.mClusters), batch.mTransforms, modelExtent, getViewDistance());
             InstancingVisitor visitor(batch, *drawBatch);
             node->accept(visitor);
             drawBatch->attach(*node);

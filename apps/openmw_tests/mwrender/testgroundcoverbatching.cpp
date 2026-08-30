@@ -144,7 +144,7 @@ TEST(GroundcoverBatchingTest, ConfiguresSupportedGeometryWithoutReplacingItsCull
     geometry->addPrimitiveSet(new osg::DrawArrays(GL_TRIANGLES, 0, 3, 4));
     osg::ref_ptr<ExistingDrawableCullCallback> existingCallback = new ExistingDrawableCullCallback;
     geometry->setCullCallback(existingCallback);
-    osg::ref_ptr<MWRender::GroundcoverBatch> batch = new MWRender::GroundcoverBatch({}, 100.f);
+    osg::ref_ptr<MWRender::GroundcoverBatch> batch = new MWRender::GroundcoverBatch({}, new osg::Vec4Array, 0.f, 100.f);
 
     EXPECT_TRUE(batch->configure(*geometry));
 
@@ -159,7 +159,7 @@ TEST(GroundcoverBatchingTest, LeavesUnsupportedPrimitivePathsUnchanged)
     osg::ref_ptr<osg::DrawArrayLengths> primitive = new osg::DrawArrayLengths(GL_TRIANGLES, 0);
     primitive->push_back(3);
     geometry->addPrimitiveSet(primitive);
-    osg::ref_ptr<MWRender::GroundcoverBatch> batch = new MWRender::GroundcoverBatch({}, 100.f);
+    osg::ref_ptr<MWRender::GroundcoverBatch> batch = new MWRender::GroundcoverBatch({}, new osg::Vec4Array, 0.f, 100.f);
 
     EXPECT_FALSE(batch->configure(*geometry));
 
@@ -172,7 +172,7 @@ TEST(GroundcoverBatchingTest, AttachesOneModelCallbackAboveExistingCullPolicy)
     osg::ref_ptr<osg::Group> node = new osg::Group;
     osg::ref_ptr<ExistingNodeCullCallback> existingCallback = new ExistingNodeCullCallback;
     node->setCullCallback(existingCallback);
-    osg::ref_ptr<MWRender::GroundcoverBatch> batch = new MWRender::GroundcoverBatch({}, 100.f);
+    osg::ref_ptr<MWRender::GroundcoverBatch> batch = new MWRender::GroundcoverBatch({}, new osg::Vec4Array, 0.f, 100.f);
 
     batch->attach(*node);
 
@@ -182,6 +182,20 @@ TEST(GroundcoverBatchingTest, AttachesOneModelCallbackAboveExistingCullPolicy)
 
 TEST(GroundcoverBatchingTest, RejectsInvalidViewDistances)
 {
-    EXPECT_THROW(new MWRender::GroundcoverBatch({}, -1.f), std::invalid_argument);
-    EXPECT_THROW(new MWRender::GroundcoverBatch({}, std::numeric_limits<float>::quiet_NaN()), std::invalid_argument);
+    EXPECT_THROW(new MWRender::GroundcoverBatch({}, new osg::Vec4Array, 0.f, -1.f), std::invalid_argument);
+    EXPECT_THROW(new MWRender::GroundcoverBatch({}, new osg::Vec4Array, 0.f, std::numeric_limits<float>::quiet_NaN()),
+        std::invalid_argument);
+}
+
+TEST(GroundcoverBatchingTest, RejectsInvalidDiagnosticInstanceMetadata)
+{
+    EXPECT_THROW(new MWRender::GroundcoverBatch({}, nullptr, 0.f, 100.f), std::invalid_argument);
+    EXPECT_THROW(new MWRender::GroundcoverBatch({}, new osg::Vec4Array, std::numeric_limits<float>::quiet_NaN(), 100.f),
+        std::invalid_argument);
+
+    std::vector<MWRender::GroundcoverDrawCluster> clusters{
+        { { 0, 1 }, osg::BoundingBox() },
+    };
+    EXPECT_THROW(
+        new MWRender::GroundcoverBatch(std::move(clusters), new osg::Vec4Array, 1.f, 100.f), std::invalid_argument);
 }

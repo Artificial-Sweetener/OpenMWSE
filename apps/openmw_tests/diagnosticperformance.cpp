@@ -67,6 +67,12 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     viewer.getCamera()->getStats()->setAttribute(
         frame, std::string(MWRender::groundcoverInstanceRenderCounter), 1200.0);
     viewer.getCamera()->getStats()->setAttribute(frame, std::string(MWRender::groundcoverInstanceTestCounter), 0.0);
+    viewer.getCamera()->getStats()->setAttribute(frame, std::string(MWRender::groundcoverBatchRenderCounter), 12.0);
+    viewer.getCamera()->getStats()->setAttribute(frame, std::string(MWRender::groundcoverDrawableRenderCounter), 24.0);
+    viewer.getCamera()->getStats()->setAttribute(
+        frame, std::string(MWRender::groundcoverConservativeInstanceTestCounter), 1000.0);
+    viewer.getCamera()->getStats()->setAttribute(
+        frame, std::string(MWRender::groundcoverConservativeInstanceRenderCounter), 600.0);
 
     osg::ref_ptr<osg::Camera> firstShadow = new osg::Camera;
     firstShadow->setName(std::string(SceneUtil::shadowCameraName));
@@ -140,7 +146,7 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     OMW::reportDiagnosticPerformance(frame, frame, viewer, output);
     const std::string report = output.str();
 
-    EXPECT_NE(report.find("provider: performance@11"), std::string::npos);
+    EXPECT_NE(report.find("provider: performance@12"), std::string::npos);
     EXPECT_NE(report.find("threading-model: automatic-selection"), std::string::npos);
     EXPECT_NE(report.find("presentation:\n  swap-buffers:\n    available: true\n    count: 1"), std::string::npos)
         << report;
@@ -228,6 +234,22 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
         << report;
     EXPECT_NE(report.find("  shadow-maps.instance-geometry-pairs-submitted:\n"
                           "    available: true\n    count: 1\n    median: 300"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("  main-scene.model-batches-submitted:\n"
+                          "    available: true\n    count: 1\n    median: 12"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("  main-scene.drawables-submitted:\n"
+                          "    available: true\n    count: 1\n    median: 24"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("  main-scene.conservative-instances-tested:\n"
+                          "    available: true\n    count: 1\n    median: 1000"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("  main-scene.conservative-instances-visible:\n"
+                          "    available: true\n    count: 1\n    median: 600"),
         std::string::npos)
         << report;
     EXPECT_NE(

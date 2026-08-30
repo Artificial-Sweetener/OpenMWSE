@@ -1,5 +1,7 @@
 #include "groundcovervisibility.hpp"
 
+#include "groundcoverdiagnostics.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -12,12 +14,21 @@
 
 namespace MWRender
 {
-    GroundcoverVisibility::GroundcoverVisibility(std::vector<GroundcoverDrawCluster> clusters, float viewDistance)
+    GroundcoverVisibility::GroundcoverVisibility(
+        std::vector<GroundcoverDrawCluster> clusters, osg::Vec4Array* transforms, float modelExtent, float viewDistance)
         : mClusters(std::move(clusters))
+        , mTransforms(transforms)
+        , mModelExtent(modelExtent)
         , mViewDistance(viewDistance)
     {
+        if (!mTransforms)
+            throw std::invalid_argument("groundcover transforms must not be null");
+        if (!std::isfinite(modelExtent) || modelExtent < 0.f)
+            throw std::invalid_argument("groundcover model extent must be finite and non-negative");
         if (!std::isfinite(viewDistance) || viewDistance < 0.f)
             throw std::invalid_argument("groundcover view distance must be finite and non-negative");
+        if (totalInstances() != mTransforms->size())
+            throw std::invalid_argument("groundcover clusters must represent every transform");
     }
 
     std::size_t GroundcoverVisibility::update(osgUtil::CullVisitor& visitor, unsigned int contextId) const
@@ -45,6 +56,7 @@ namespace MWRender
             visibleRanges.push_back(cluster.mInstances);
             visibleInstances += cluster.mInstances.mCount;
         }
+        recordDiagnosticGroundcoverVisibility(visitor, *mTransforms, mModelExtent, mViewDistance, visibleRanges);
 
         VisibilityRecord record{ modelView, projection, contextId, visibleInstances, std::move(visibleRanges) };
         std::scoped_lock lock(mMutex);

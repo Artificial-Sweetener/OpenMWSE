@@ -123,7 +123,7 @@ The versioned providers expose these evidence domains:
   normal and diagnostic-isolation stages.
 * ``gameplay@2`` records the cell, camera position and angles, first-person and underwater state, weather, game and simulation
   clocks, and state. The replay controller checks these stable fields before advancing the simulation.
-* ``performance@11`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
+* ``performance@12`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
   scopes for scripts, Lua, mechanics, physics, world, and UI, resource caches and work queues, navigation and paging activity,
   scene statistics, delayed per-camera GPU/render timing, and camera-owned GPU passes for the main scene, shadow maps, water
   reflection, sky render target, post-processing, precipitation occlusion, ripples, and terrain-composite generation. It divides
@@ -138,6 +138,9 @@ The versioned providers expose these evidence domains:
   intervals so delayed GPU-query maintenance can be separated from engine draw work. GPU queries are polled only after an
   eight-frame readback delay, and collection retains two
   additional rendered frames before reporting the final sample.
+  Groundcover attribution includes submitted model batches and drawables plus a diagnostic-only conservative per-instance
+  frustum and distance test of instances accepted by cluster visibility. The additional instance test runs only during bounded
+  scene-statistics collection and measures potential GPU rejection without changing submitted work.
   Each shadow map reports its own CPU time, GPU time, post-sort render leaves, and state graphs so aggregate shadow
   cost can be traced to a specific map and its submitted work. Terrain-composite detail reports the scheduler budget, queue
   depth before and after the pass, immediate and processed map counts, submitted drawables, completed maps, and drawable CPU

@@ -28,7 +28,8 @@ namespace MWRender
     {
     public:
         /// Create range submission for one immutable visibility owner.
-        GroundcoverBatch(std::vector<GroundcoverDrawCluster> clusters, float viewDistance);
+        GroundcoverBatch(std::vector<GroundcoverDrawCluster> clusters, osg::Vec4Array* transforms, float modelExtent,
+            float viewDistance);
 
         /// Replace supported instanced primitive sets and register the geometry with this model batch.
         bool configure(osg::Geometry& geometry);

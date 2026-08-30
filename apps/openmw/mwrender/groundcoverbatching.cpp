@@ -249,8 +249,9 @@ namespace
 
 namespace MWRender
 {
-    GroundcoverBatch::GroundcoverBatch(std::vector<GroundcoverDrawCluster> clusters, float viewDistance)
-        : mVisibility(new GroundcoverVisibility(std::move(clusters), viewDistance))
+    GroundcoverBatch::GroundcoverBatch(
+        std::vector<GroundcoverDrawCluster> clusters, osg::Vec4Array* transforms, float modelExtent, float viewDistance)
+        : mVisibility(new GroundcoverVisibility(std::move(clusters), transforms, modelExtent, viewDistance))
     {
     }
 
@@ -300,8 +301,17 @@ namespace MWRender
 
         osg::Stats* stats = camera ? camera->getStats() : nullptr;
         if (stats)
+        {
             addDiagnosticRenderWorkCounter(*stats, cullVisitor.getTraversalNumber(), groundcoverInstanceRenderCounter,
                 static_cast<double>(visibleInstances) * static_cast<double>(mDrawableCount));
+            if (visibleInstances > 0)
+            {
+                addDiagnosticRenderWorkCounter(
+                    *stats, cullVisitor.getTraversalNumber(), groundcoverBatchRenderCounter, 1.0);
+                addDiagnosticRenderWorkCounter(*stats, cullVisitor.getTraversalNumber(),
+                    groundcoverDrawableRenderCounter, static_cast<double>(mDrawableCount));
+            }
+        }
         return supported && visibleInstances == 0;
     }
 

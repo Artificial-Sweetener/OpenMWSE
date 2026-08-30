@@ -526,7 +526,7 @@ namespace OMW
         forEachUserStatsValue(
             [&](const UserStats& value) { metrics.push_back({ value.mTaken, Metric::Owner::Viewer }); });
 
-        output << std::setprecision(17) << "provider: performance@11\n"
+        output << std::setprecision(17) << "provider: performance@12\n"
                << "threading-model: " << threadingModelName(viewer.getThreadingModel()) << '\n'
                << "first-sampled-frame: " << firstFrame << '\n'
                << "last-sampled-frame: " << lastFrame << '\n'
@@ -665,6 +665,16 @@ namespace OMW
             const std::string prefix = std::string(pass.mName) + '.';
             reportDistribution(output, { prefix + "instance-geometry-pairs-submitted", Metric::Owner::PrimaryCamera },
                 collectCameraPass(pass.mCameraName, MWRender::groundcoverInstanceRenderCounter, firstFrame, lastFrame));
+            reportDistribution(output, { prefix + "model-batches-submitted", Metric::Owner::PrimaryCamera },
+                collectCameraPass(pass.mCameraName, MWRender::groundcoverBatchRenderCounter, firstFrame, lastFrame));
+            reportDistribution(output, { prefix + "drawables-submitted", Metric::Owner::PrimaryCamera },
+                collectCameraPass(pass.mCameraName, MWRender::groundcoverDrawableRenderCounter, firstFrame, lastFrame));
+            reportDistribution(output, { prefix + "conservative-instances-tested", Metric::Owner::PrimaryCamera },
+                collectCameraPass(
+                    pass.mCameraName, MWRender::groundcoverConservativeInstanceTestCounter, firstFrame, lastFrame));
+            reportDistribution(output, { prefix + "conservative-instances-visible", Metric::Owner::PrimaryCamera },
+                collectCameraPass(
+                    pass.mCameraName, MWRender::groundcoverConservativeInstanceRenderCounter, firstFrame, lastFrame));
             reportDistribution(output, { prefix + "primitive-near-far-tests", Metric::Owner::PrimaryCamera },
                 collectCameraPass(pass.mCameraName, MWRender::groundcoverInstanceTestCounter, firstFrame, lastFrame));
         }

@@ -5,6 +5,7 @@
 #include <mutex>
 #include <vector>
 
+#include <osg/Array>
 #include <osg/BoundingBox>
 #include <osg/Matrix>
 #include <osg/Referenced>
@@ -43,7 +44,8 @@ namespace MWRender
     {
     public:
         /// Retain immutable cluster bounds and the exact configured view distance.
-        GroundcoverVisibility(std::vector<GroundcoverDrawCluster> clusters, float viewDistance);
+        GroundcoverVisibility(std::vector<GroundcoverDrawCluster> clusters, osg::Vec4Array* transforms,
+            float modelExtent, float viewDistance);
 
         /// Calculate or reuse visible ranges for one camera traversal.
         std::size_t update(osgUtil::CullVisitor& visitor, unsigned int contextId) const;
@@ -66,6 +68,8 @@ namespace MWRender
         };
 
         std::vector<GroundcoverDrawCluster> mClusters;
+        osg::ref_ptr<osg::Vec4Array> mTransforms;
+        float mModelExtent;
         float mViewDistance;
         mutable std::mutex mMutex;
         mutable std::vector<VisibilityRecord> mRecords;

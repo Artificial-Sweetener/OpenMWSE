@@ -53,6 +53,10 @@ TEST(DiagnosticWorkCounterTest, CollectsRenderWorkOnlyWhenRequested)
     ASSERT_TRUE(stats->getAttribute(
         frameNumber, std::string(MWRender::groundcoverInstanceTestCounter), value));
     EXPECT_DOUBLE_EQ(value, 12.0);
+
+    ASSERT_TRUE(
+        stats->getAttribute(frameNumber, std::string(MWRender::groundcoverConservativeInstanceRenderCounter), value));
+    EXPECT_DOUBLE_EQ(value, 0.0);
 }
 
 TEST(DiagnosticWorkCounterTest, ResetsDeformationWorkOnlyWhenRequested)

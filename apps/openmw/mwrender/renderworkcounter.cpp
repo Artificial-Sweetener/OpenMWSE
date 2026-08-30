@@ -21,6 +21,10 @@ namespace MWRender
             firstPersonReplayCounter,
             groundcoverInstanceTestCounter,
             groundcoverInstanceRenderCounter,
+            groundcoverBatchRenderCounter,
+            groundcoverDrawableRenderCounter,
+            groundcoverConservativeInstanceTestCounter,
+            groundcoverConservativeInstanceRenderCounter,
         };
         for (const std::string_view counter : counters)
             stats.setAttribute(frameNumber, std::string(counter), 0.0);
