@@ -100,6 +100,34 @@ namespace OMW
             std::map<CameraTransition, std::vector<double>> mTransitionGaps;
         };
 
+        /// Retains elapsed GPU-clock intervals across instrumented camera boundaries.
+        struct GpuAttribution
+        {
+            std::vector<double> mCameraSpan;
+            std::vector<double> mCameraCovered;
+            std::vector<double> mBetweenCameras;
+            std::map<CameraTransition, std::vector<double>> mTransitionGaps;
+        };
+
+        /// Return the stable diagnostic name for the viewer's effective threading model.
+        std::string_view threadingModelName(osgViewer::ViewerBase::ThreadingModel model)
+        {
+            switch (model)
+            {
+                case osgViewer::ViewerBase::SingleThreaded:
+                    return "single-threaded";
+                case osgViewer::ViewerBase::CullDrawThreadPerContext:
+                    return "cull-draw-thread-per-context";
+                case osgViewer::ViewerBase::DrawThreadPerContext:
+                    return "draw-thread-per-context";
+                case osgViewer::ViewerBase::CullThreadPerCameraDrawThreadPerContext:
+                    return "cull-thread-per-camera-draw-thread-per-context";
+                case osgViewer::ViewerBase::AutomaticSelection:
+                    return "automatic-selection";
+            }
+            throw std::logic_error("Unsupported OSG viewer threading model");
+        }
+
         /// Represents one clipped camera-owned wall-clock interval.
         struct CameraInterval
         {
@@ -164,8 +192,7 @@ namespace OMW
         }
 
         /// Collect and sum one diagnostic statistic across every registered camera.
-        std::vector<double> collectAllCameraPasses(
-            std::string_view statistic, unsigned firstFrame, unsigned lastFrame)
+        std::vector<double> collectAllCameraPasses(std::string_view statistic, unsigned firstFrame, unsigned lastFrame)
         {
             const std::vector<osg::ref_ptr<osg::Camera>> cameras = SceneUtil::diagnosticGpuPassCameras();
             std::vector<double> values;
@@ -224,8 +251,7 @@ namespace OMW
                 for (const osg::ref_ptr<osg::Camera>& camera : cameras)
                 {
                     double value = 0.0;
-                    if (camera->getStats()->getAttribute(frame, std::string(statistic), value)
-                        && std::isfinite(value))
+                    if (camera->getStats()->getAttribute(frame, std::string(statistic), value) && std::isfinite(value))
                     {
                         total += value;
                         available = true;
@@ -237,8 +263,9 @@ namespace OMW
             return values;
         }
 
-        /// Collect camera CPU intervals that do not belong to a versioned named pass.
-        std::vector<double> collectUnclassifiedCameraPasses(unsigned firstFrame, unsigned lastFrame)
+        /// Collect one statistic across cameras that do not belong to a versioned named pass.
+        std::vector<double> collectUnclassifiedCameraPasses(
+            std::string_view statistic, unsigned firstFrame, unsigned lastFrame)
         {
             const std::vector<osg::ref_ptr<osg::Camera>> cameras = SceneUtil::diagnosticGpuPassCameras();
             std::vector<double> values;
@@ -252,9 +279,7 @@ namespace OMW
                     if (isNamedCameraPass(*camera))
                         continue;
                     double value = 0.0;
-                    if (camera->getStats()->getAttribute(
-                            frame, std::string(SceneUtil::diagnosticCpuPassTimeStatistic), value)
-                        && std::isfinite(value))
+                    if (camera->getStats()->getAttribute(frame, std::string(statistic), value) && std::isfinite(value))
                     {
                         total += value;
                         available = true;
@@ -311,7 +336,8 @@ namespace OMW
                         || end < begin || end < drawBegin || begin > drawEnd)
                         continue;
                     intervals.push_back({ .mName = camera->getName().empty() ? "<unnamed-camera>" : camera->getName(),
-                        .mBegin = std::max(begin, drawBegin), .mEnd = std::min(end, drawEnd) });
+                        .mBegin = std::max(begin, drawBegin),
+                        .mEnd = std::min(end, drawEnd) });
                 }
                 if (intervals.empty())
                     continue;
@@ -360,6 +386,69 @@ namespace OMW
             return result;
         }
 
+        /// Attribute elapsed GPU-clock intervals between instrumented camera boundaries.
+        GpuAttribution collectGpuAttribution(unsigned firstFrame, unsigned lastFrame)
+        {
+            GpuAttribution result;
+            const std::vector<osg::ref_ptr<osg::Camera>> cameras = SceneUtil::diagnosticGpuPassCameras();
+            for (unsigned frame = firstFrame; frame <= lastFrame; ++frame)
+            {
+                std::vector<CameraInterval> intervals;
+                for (const osg::ref_ptr<osg::Camera>& camera : cameras)
+                {
+                    double begin = 0.0;
+                    double end = 0.0;
+                    if (!camera->getStats()->getAttribute(
+                            frame, std::string(SceneUtil::diagnosticGpuPassBeginTimestampStatistic), begin)
+                        || !camera->getStats()->getAttribute(
+                            frame, std::string(SceneUtil::diagnosticGpuPassEndTimestampStatistic), end)
+                        || !std::isfinite(begin) || !std::isfinite(end) || end < begin)
+                        continue;
+                    intervals.push_back({ .mName = camera->getName().empty() ? "<unnamed-camera>" : camera->getName(),
+                        .mBegin = begin,
+                        .mEnd = end });
+                }
+                if (intervals.empty())
+                    continue;
+
+                std::ranges::sort(intervals, [](const CameraInterval& left, const CameraInterval& right) {
+                    return std::tie(left.mBegin, left.mEnd, left.mName)
+                        < std::tie(right.mBegin, right.mEnd, right.mName);
+                });
+                const double firstCameraBegin = intervals.front().mBegin;
+                double mergedBegin = firstCameraBegin;
+                double mergedEnd = intervals.front().mEnd;
+                std::string mergedName = intervals.front().mName;
+                double cameraCovered = 0.0;
+                double betweenCameras = 0.0;
+                for (const CameraInterval& interval : std::span(intervals).subspan(1))
+                {
+                    if (interval.mBegin <= mergedEnd)
+                    {
+                        if (interval.mEnd > mergedEnd)
+                        {
+                            mergedEnd = interval.mEnd;
+                            mergedName = interval.mName;
+                        }
+                        continue;
+                    }
+                    cameraCovered += mergedEnd - mergedBegin;
+                    const double gap = interval.mBegin - mergedEnd;
+                    betweenCameras += gap;
+                    result.mTransitionGaps[{ mergedName, interval.mName }].push_back(gap);
+                    mergedBegin = interval.mBegin;
+                    mergedEnd = interval.mEnd;
+                    mergedName = interval.mName;
+                }
+                cameraCovered += mergedEnd - mergedBegin;
+                const double cameraSpan = mergedEnd - firstCameraBegin;
+                result.mCameraSpan.push_back(cameraSpan);
+                result.mBetweenCameras.push_back(betweenCameras);
+                result.mCameraCovered.push_back(cameraCovered);
+            }
+            return result;
+        }
+
         /// Emit one named distribution or an explicit unavailable marker.
         void reportDistribution(std::ostream& output, const Metric& metric, std::span<const double> values,
             std::string_view indentation = "  ")
@@ -384,12 +473,10 @@ namespace OMW
             unsigned firstFrame, unsigned lastFrame, std::string_view indentation)
         {
             reportDistribution(output, { "gpu-time", Metric::Owner::PrimaryCamera },
-                collectCameraGroupStatistic(
-                    cameras, SceneUtil::diagnosticGpuPassTimeStatistic, firstFrame, lastFrame),
+                collectCameraGroupStatistic(cameras, SceneUtil::diagnosticGpuPassTimeStatistic, firstFrame, lastFrame),
                 indentation);
             reportDistribution(output, { "cpu-time", Metric::Owner::PrimaryCamera },
-                collectCameraGroupStatistic(
-                    cameras, SceneUtil::diagnosticCpuPassTimeStatistic, firstFrame, lastFrame),
+                collectCameraGroupStatistic(cameras, SceneUtil::diagnosticCpuPassTimeStatistic, firstFrame, lastFrame),
                 indentation);
             for (const CameraMetric& metric : cameraDetailMetrics)
             {
@@ -431,7 +518,8 @@ namespace OMW
         forEachUserStatsValue(
             [&](const UserStats& value) { metrics.push_back({ value.mTaken, Metric::Owner::Viewer }); });
 
-        output << std::setprecision(17) << "provider: performance@9\n"
+        output << std::setprecision(17) << "provider: performance@10\n"
+               << "threading-model: " << threadingModelName(viewer.getThreadingModel()) << '\n'
                << "first-sampled-frame: " << firstFrame << '\n'
                << "last-sampled-frame: " << lastFrame << '\n'
                << "requested-samples: " << lastFrame - firstFrame + 1 << '\n'
@@ -440,14 +528,14 @@ namespace OMW
             reportDistribution(output, metric, collectMetric(metric, firstFrame, lastFrame, viewer));
 
         output << "presentation:\n";
-        const Metric swapBuffersSource{ std::string(SDLUtil::diagnosticSwapBufferTimeStatistic), Metric::Owner::Viewer };
+        const Metric swapBuffersSource{ std::string(SDLUtil::diagnosticSwapBufferTimeStatistic),
+            Metric::Owner::Viewer };
         reportDistribution(output, { "swap-buffers", Metric::Owner::Viewer },
             collectMetric(swapBuffersSource, firstFrame, lastFrame, viewer));
 
         const DrawAttribution drawAttribution = collectDrawAttribution(firstFrame, lastFrame, viewer);
         output << "draw-breakdown:\n";
-        reportDistribution(
-            output, { "camera-covered", Metric::Owner::PrimaryCamera }, drawAttribution.mCameraCovered);
+        reportDistribution(output, { "camera-covered", Metric::Owner::PrimaryCamera }, drawAttribution.mCameraCovered);
         reportDistribution(
             output, { "before-first-camera", Metric::Owner::PrimaryCamera }, drawAttribution.mBeforeFirstCamera);
         reportDistribution(
@@ -465,10 +553,22 @@ namespace OMW
             reportDistribution(output, { "gap-time", Metric::Owner::PrimaryCamera }, values, "    ");
         }
 
+        const GpuAttribution gpuAttribution = collectGpuAttribution(firstFrame, lastFrame);
+        output << "gpu-timeline:\n";
+        reportDistribution(output, { "camera-span", Metric::Owner::PrimaryCamera }, gpuAttribution.mCameraSpan);
+        reportDistribution(output, { "camera-covered", Metric::Owner::PrimaryCamera }, gpuAttribution.mCameraCovered);
+        reportDistribution(output, { "between-cameras", Metric::Owner::PrimaryCamera }, gpuAttribution.mBetweenCameras);
+        output << "  transition-gaps:\n";
+        for (const auto& [transition, values] : gpuAttribution.mTransitionGaps)
+        {
+            output << "    - from: " << std::quoted(transition.mFrom) << '\n'
+                   << "      to: " << std::quoted(transition.mTo) << '\n';
+            reportDistribution(output, { "gap-time", Metric::Owner::PrimaryCamera }, values, "      ");
+        }
+
         output << "diagnostic-camera-callback-overhead:\n";
         reportDistribution(output, { "before-interval", Metric::Owner::PrimaryCamera },
-            collectAllCameraPasses(
-                SceneUtil::diagnosticCpuPassBeginOverheadStatistic, firstFrame, lastFrame));
+            collectAllCameraPasses(SceneUtil::diagnosticCpuPassBeginOverheadStatistic, firstFrame, lastFrame));
         reportDistribution(output, { "after-interval", Metric::Owner::PrimaryCamera },
             collectAllCameraPasses(SceneUtil::diagnosticCpuPassEndOverheadStatistic, firstFrame, lastFrame));
 
@@ -479,6 +579,8 @@ namespace OMW
             reportDistribution(output, metric,
                 collectCameraPass(pass.mCameraName, SceneUtil::diagnosticGpuPassTimeStatistic, firstFrame, lastFrame));
         }
+        reportDistribution(output, { "unclassified-cameras", Metric::Owner::PrimaryCamera },
+            collectUnclassifiedCameraPasses(SceneUtil::diagnosticGpuPassTimeStatistic, firstFrame, lastFrame));
 
         output << "cpu-passes:\n";
         for (const SceneUtil::DiagnosticGpuPass& pass : SceneUtil::diagnosticGpuPasses())
@@ -488,7 +590,7 @@ namespace OMW
                 collectCameraPass(pass.mCameraName, SceneUtil::diagnosticCpuPassTimeStatistic, firstFrame, lastFrame));
         }
         reportDistribution(output, { "unclassified-cameras", Metric::Owner::PrimaryCamera },
-            collectUnclassifiedCameraPasses(firstFrame, lastFrame));
+            collectUnclassifiedCameraPasses(SceneUtil::diagnosticCpuPassTimeStatistic, firstFrame, lastFrame));
 
         output << "shadow-map-details:\n";
         std::map<unsigned, std::vector<osg::ref_ptr<osg::Camera>>> shadowMaps;
@@ -505,8 +607,7 @@ namespace OMW
         }
         for (const auto& [instance, cameras] : shadowMaps)
         {
-            output << "  - index: " << instance + 1 << '\n'
-                   << "    physical-camera-count: " << cameras.size() << '\n';
+            output << "  - index: " << instance + 1 << '\n' << "    physical-camera-count: " << cameras.size() << '\n';
             reportCameraDetails(output, cameras, firstFrame, lastFrame, "    ");
         }
         for (const osg::ref_ptr<osg::Camera>& camera : unindexedShadowMaps)
@@ -532,6 +633,9 @@ namespace OMW
                 continue;
             output << "  - index: " << ++unclassifiedCameraIndex << '\n'
                    << "    name: " << std::quoted(camera->getName()) << '\n';
+            reportDistribution(output, { "gpu-time", Metric::Owner::PrimaryCamera },
+                collectCameraStatistic(*camera, SceneUtil::diagnosticGpuPassTimeStatistic, firstFrame, lastFrame),
+                "    ");
             reportDistribution(output, { "cpu-time", Metric::Owner::PrimaryCamera },
                 collectCameraStatistic(*camera, SceneUtil::diagnosticCpuPassTimeStatistic, firstFrame, lastFrame),
                 "    ");

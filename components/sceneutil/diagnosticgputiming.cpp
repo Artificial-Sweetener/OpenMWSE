@@ -154,7 +154,8 @@ namespace SceneUtil
                 if (camera != nullptr && camera->getStats() != nullptr)
                 {
                     camera->getStats()->setAttribute(frame, std::string(diagnosticCpuPassEndOverheadStatistic),
-                        std::chrono::duration<double>(std::chrono::steady_clock::now() - trailingOverheadStart).count());
+                        std::chrono::duration<double>(std::chrono::steady_clock::now() - trailingOverheadStart)
+                            .count());
                 }
             }
 
@@ -209,8 +210,7 @@ namespace SceneUtil
             }
 
             /// Publish every completed interval without waiting for unfinished GPU work.
-            void retireCompleted(
-                osg::GLExtensions& extensions, ContextQueries& queries, unsigned currentFrame)
+            void retireCompleted(osg::GLExtensions& extensions, ContextQueries& queries, unsigned currentFrame)
             {
                 osg::ref_ptr<osg::Camera> camera;
                 if (!mCamera.lock(camera) || camera->getStats() == nullptr)
@@ -235,6 +235,12 @@ namespace SceneUtil
                         constexpr double nanosecondsToSeconds = 1e-9;
                         camera->getStats()->setAttribute(pair.mFrame, std::string(diagnosticGpuPassTimeStatistic),
                             static_cast<double>(end - start) * nanosecondsToSeconds);
+                        camera->getStats()->setAttribute(pair.mFrame,
+                            std::string(diagnosticGpuPassBeginTimestampStatistic),
+                            static_cast<double>(start) * nanosecondsToSeconds);
+                        camera->getStats()->setAttribute(pair.mFrame,
+                            std::string(diagnosticGpuPassEndTimestampStatistic),
+                            static_cast<double>(end) * nanosecondsToSeconds);
                     }
                     queries.mReusable.push_back({ pair.mStart, pair.mEnd });
                     queries.mPending.pop_front();
@@ -535,8 +541,7 @@ namespace SceneUtil
 
     bool diagnosticGpuPassStatisticsCollectionEnabled(const osg::Camera& camera)
     {
-        return camera.getStats() != nullptr
-            && camera.getStats()->collectStats(std::string(collectionCategory));
+        return camera.getStats() != nullptr && camera.getStats()->collectStats(std::string(collectionCategory));
     }
 
     void setDiagnosticGpuPassStatisticsCollection(bool enabled)

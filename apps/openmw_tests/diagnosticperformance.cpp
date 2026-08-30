@@ -43,11 +43,14 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     constexpr unsigned frame = 42;
     osgViewer::Viewer viewer;
     viewer.setViewerStats(new osg::Stats("viewer"));
-    viewer.getViewerStats()->setAttribute(
-        frame, std::string(SDLUtil::diagnosticSwapBufferTimeStatistic), 0.005);
+    viewer.getViewerStats()->setAttribute(frame, std::string(SDLUtil::diagnosticSwapBufferTimeStatistic), 0.005);
     viewer.getCamera()->setName(std::string(SceneUtil::sceneCameraName));
     SceneUtil::enableDiagnosticGpuPassStatistics(*viewer.getCamera());
     viewer.getCamera()->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticGpuPassTimeStatistic), 0.010);
+    viewer.getCamera()->getStats()->setAttribute(
+        frame, std::string(SceneUtil::diagnosticGpuPassBeginTimestampStatistic), 100.020);
+    viewer.getCamera()->getStats()->setAttribute(
+        frame, std::string(SceneUtil::diagnosticGpuPassEndTimestampStatistic), 100.030);
     viewer.getCamera()->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassTimeStatistic), 0.008);
     viewer.getCamera()->getStats()->setAttribute(
         frame, std::string(SceneUtil::diagnosticCpuPassBeginStatistic), 10.000);
@@ -72,8 +75,7 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     firstShadow->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassEndStatistic), 9.998);
     firstShadow->getStats()->setAttribute(
         frame, std::string(SceneUtil::diagnosticCpuPassBeginOverheadStatistic), 0.0001);
-    firstShadow->getStats()->setAttribute(
-        frame, std::string(SceneUtil::diagnosticCpuPassEndOverheadStatistic), 0.0002);
+    firstShadow->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassEndOverheadStatistic), 0.0002);
     firstShadow->getStats()->setAttribute(
         frame, std::string(SceneUtil::diagnosticShadowRenderLeafCountStatistic), 200.0);
     firstShadow->getStats()->setAttribute(
@@ -100,17 +102,22 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     osg::ref_ptr<osg::Camera> auxiliary = new osg::Camera;
     auxiliary->setName("AuxiliarySceneCamera");
     SceneUtil::enableDiagnosticGpuPassStatistics(*auxiliary);
+    auxiliary->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticGpuPassTimeStatistic), 0.003);
+    auxiliary->getStats()->setAttribute(
+        frame, std::string(SceneUtil::diagnosticGpuPassBeginTimestampStatistic), 100.031);
+    auxiliary->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticGpuPassEndTimestampStatistic), 100.034);
     auxiliary->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassTimeStatistic), 0.004);
 
     osg::ref_ptr<osg::Camera> terrainComposite = new osg::Camera;
     terrainComposite->setName(std::string(SceneUtil::terrainCompositeCameraName));
     SceneUtil::enableDiagnosticGpuPassStatistics(*terrainComposite);
+    terrainComposite->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticGpuPassTimeStatistic), 0.006);
     terrainComposite->getStats()->setAttribute(
-        frame, std::string(SceneUtil::diagnosticGpuPassTimeStatistic), 0.006);
+        frame, std::string(SceneUtil::diagnosticGpuPassBeginTimestampStatistic), 100.000);
     terrainComposite->getStats()->setAttribute(
-        frame, std::string(SceneUtil::diagnosticCpuPassTimeStatistic), 0.010);
-    terrainComposite->getStats()->setAttribute(
-        frame, std::string(Terrain::diagnosticCompositeMapBudgetStatistic), 2.5);
+        frame, std::string(SceneUtil::diagnosticGpuPassEndTimestampStatistic), 100.006);
+    terrainComposite->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassTimeStatistic), 0.010);
+    terrainComposite->getStats()->setAttribute(frame, std::string(Terrain::diagnosticCompositeMapBudgetStatistic), 2.5);
     terrainComposite->getStats()->setAttribute(
         frame, std::string(Terrain::diagnosticCompositeMapQueuedBeforeStatistic), 12.0);
     terrainComposite->getStats()->setAttribute(
@@ -130,9 +137,9 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     OMW::reportDiagnosticPerformance(frame, frame, viewer, output);
     const std::string report = output.str();
 
-    EXPECT_NE(report.find("provider: performance@9"), std::string::npos);
-    EXPECT_NE(report.find("presentation:\n  swap-buffers:\n    available: true\n    count: 1"),
-        std::string::npos)
+    EXPECT_NE(report.find("provider: performance@10"), std::string::npos);
+    EXPECT_NE(report.find("threading-model: automatic-selection"), std::string::npos);
+    EXPECT_NE(report.find("presentation:\n  swap-buffers:\n    available: true\n    count: 1"), std::string::npos)
         << report;
     EXPECT_NE(report.find("draw-breakdown:\n  camera-covered:\n    available: true\n    count: 1\n"
                           "    median: 0.010999"),
@@ -158,17 +165,25 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
         std::string::npos)
         << report;
     EXPECT_NE(report.find("  after-interval:\n    available: true\n    count: 1"), std::string::npos) << report;
+    EXPECT_NE(report.find("gpu-timeline:\n  camera-span:\n    available: true\n    count: 1"), std::string::npos)
+        << report;
+    EXPECT_NE(report.find("  between-cameras:\n    available: true\n    count: 1"), std::string::npos) << report;
+    EXPECT_NE(report.find("    - from: \"Terrain Composite Map Camera\"\n      to: \"SceneCam\""), std::string::npos)
+        << report;
     EXPECT_NE(report.find("  main-scene:\n    available: true\n    count: 1\n    median: 0.01"), std::string::npos);
     EXPECT_NE(report.find("  shadow-maps:\n    available: true\n    count: 1\n    median: 0.009"), std::string::npos);
     EXPECT_NE(report.find("  water-reflection:\n    available: false"), std::string::npos);
+    EXPECT_NE(
+        report.find("  unclassified-cameras:\n    available: true\n    count: 1\n    median: 0.003"), std::string::npos)
+        << report;
     EXPECT_NE(report.find("cpu-passes:\n  main-scene:\n    available: true\n    count: 1"), std::string::npos);
     EXPECT_NE(report.find("  terrain-composite:\n    available: true\n    count: 1"), std::string::npos) << report;
     EXPECT_NE(report.find("shadow-map-details:\n  - index: 1\n    physical-camera-count: 2\n"
                           "    gpu-time:\n      available: true\n      count: 1\n      median: 0.006"),
         std::string::npos)
         << report;
-    EXPECT_NE(report.find("    cpu-time:\n      available: true\n      count: 1\n      median: 0.0035"),
-        std::string::npos)
+    EXPECT_NE(
+        report.find("    cpu-time:\n      available: true\n      count: 1\n      median: 0.0035"), std::string::npos)
         << report;
     EXPECT_NE(report.find("    render-leaves:\n      available: true\n      count: 1\n"
                           "      median: 200"),
@@ -187,18 +202,18 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
                           "    available: true\n    count: 1\n    median: 2.5"),
         std::string::npos)
         << report;
-    EXPECT_NE(report.find("  submitted-drawables:\n    available: true\n    count: 1\n    median: 24"),
-        std::string::npos)
+    EXPECT_NE(
+        report.find("  submitted-drawables:\n    available: true\n    count: 1\n    median: 24"), std::string::npos)
         << report;
-    EXPECT_NE(report.find("  queued-maps-after:\n    available: true\n    count: 1\n    median: 11"),
-        std::string::npos)
+    EXPECT_NE(report.find("  queued-maps-after:\n    available: true\n    count: 1\n    median: 11"), std::string::npos)
         << report;
-    EXPECT_NE(report.find("  drawable-cpu-milliseconds:\n    available: true\n    count: 1"),
-        std::string::npos)
+    EXPECT_NE(report.find("  drawable-cpu-milliseconds:\n    available: true\n    count: 1"), std::string::npos)
         << report;
     EXPECT_NE(report.find("unclassified-camera-details:\n  - index: 1\n    name: \"AuxiliarySceneCamera\"\n"
-                          "    cpu-time:\n      available: true\n      count: 1\n      median: 0.004"),
+                          "    gpu-time:\n      available: true\n      count: 1\n      median:"),
         std::string::npos)
+        << report;
+    EXPECT_NE(report.find("    cpu-time:\n      available: true\n      count: 1\n      median:"), std::string::npos)
         << report;
     EXPECT_NE(report.find("groundcover-passes:\n  main-scene.instance-geometry-pairs-submitted:\n"
                           "    available: true\n    count: 1\n    median: 1200"),
