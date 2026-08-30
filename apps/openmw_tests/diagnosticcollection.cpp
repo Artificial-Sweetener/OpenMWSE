@@ -33,8 +33,9 @@ TEST(DiagnosticCollectionTest, EnablesOnlyOneBoundedFutureIntervalAndRestoresPri
     EXPECT_TRUE(viewer.getViewerStats()->getAttribute(
         100, std::string(SDLUtil::diagnosticSwapBufferTimeStatistic), swapDuration));
     EXPECT_DOUBLE_EQ(swapDuration, 0.004);
-    EXPECT_TRUE(viewer.getViewerStats()->collectStats("scene"));
+    EXPECT_FALSE(viewer.getViewerStats()->collectStats("scene"));
     EXPECT_TRUE(viewer.getCamera()->getStats()->collectStats("rendering"));
+    EXPECT_TRUE(viewer.getCamera()->getStats()->collectStats("scene"));
     EXPECT_FALSE(collection.start(18, 1, 100));
     EXPECT_FALSE(collection.update(110).has_value());
     EXPECT_FALSE(collection.update(111).has_value());

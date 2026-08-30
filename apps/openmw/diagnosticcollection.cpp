@@ -90,7 +90,7 @@ namespace OMW
     void DiagnosticCollection::beginCollection()
     {
         osg::Stats* viewerStats = mViewer.getViewerStats();
-        for (const char* category : { "engine", "resource", "frame_rate", "event", "update", "scene" })
+        for (const char* category : { "engine", "resource", "frame_rate", "event", "update" })
             enable(*viewerStats, category);
 
         osg::Camera* rootCamera = mViewer.getCamera();
