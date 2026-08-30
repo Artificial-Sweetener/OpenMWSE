@@ -2276,6 +2276,57 @@ namespace
         EXPECT_GT(classifiedCloudPixelCount, 16u);
     }
 
+    TEST(AtmosphereShaderTest, cloudSupportClassificationRetainsPreviousDitherContribution)
+    {
+        NativePassInputs firstInputs;
+        firstInputs.width = 96;
+        firstInputs.height = 64;
+        firstInputs.cloudParameters = { 0.58f, 0.9f, 48000.f, 22000.f };
+        firstInputs.mistParameters = {};
+        firstInputs.historyValid = true;
+        firstInputs.frameNumber = 4;
+        const PassImage firstRaw = renderNativeAtmospherePass("integrateAtmosphereVolume", firstInputs);
+        ASSERT_FALSE(firstRaw.pixels.empty());
+
+        NativePassInputs secondInputs = firstInputs;
+        secondInputs.frameNumber = 5;
+        const PassImage secondRaw = renderNativeAtmospherePass("integrateAtmosphereVolume", secondInputs);
+        ASSERT_EQ(secondRaw.pixels.size(), firstRaw.pixels.size());
+
+        NativePassInputs firstMetadataInputs = firstInputs;
+        firstMetadataInputs.passInput = [&firstRaw](int x, int y) { return firstRaw.at(x, y); };
+        const PassImage firstMetadata = renderNativeAtmospherePass("classifyAtmosphereVolume", firstMetadataInputs);
+        NativePassInputs secondMetadataInputs = secondInputs;
+        secondMetadataInputs.passInput = [&secondRaw](int x, int y) { return secondRaw.at(x, y); };
+        secondMetadataInputs.atmosphereMetadataHistory
+            = [&firstMetadata](int x, int y) { return firstMetadata.at(x, y); };
+        const PassImage secondMetadata = renderNativeAtmospherePass("classifyAtmosphereVolume", secondMetadataInputs);
+        ASSERT_EQ(secondMetadata.pixels.size(), firstMetadata.pixels.size());
+
+        NativePassInputs thirdMetadataInputs = secondInputs;
+        thirdMetadataInputs.frameNumber = 6;
+        thirdMetadataInputs.passInput = [](int, int) { return osg::Vec4f(0.f, 0.f, 0.f, 1.f); };
+        thirdMetadataInputs.atmosphereMetadataHistory
+            = [&secondMetadata](int x, int y) { return secondMetadata.at(x, y); };
+        const PassImage thirdMetadata = renderNativeAtmospherePass("classifyAtmosphereVolume", thirdMetadataInputs);
+        ASSERT_EQ(thirdMetadata.pixels.size(), secondMetadata.pixels.size());
+
+        std::size_t disappearingCloudSamples = 0;
+        for (std::size_t index = 0; index < firstRaw.pixels.size(); ++index)
+        {
+            const bool firstContributes = 1.f - firstRaw.pixels[index].w() > 0.0001f;
+            const bool secondContributes = 1.f - secondRaw.pixels[index].w() > 0.0001f;
+            if (!firstContributes || secondContributes || firstMetadata.pixels[index].w() <= 1.5f)
+                continue;
+            ++disappearingCloudSamples;
+            EXPECT_GT(firstMetadata.pixels[index].w(), 1.5f);
+            EXPECT_GT(secondMetadata.pixels[index].w(), 1.5f);
+            EXPECT_NEAR(firstMetadata.pixels[index].x(), secondMetadata.pixels[index].x(), 0.002f);
+            EXPECT_LT(thirdMetadata.pixels[index].w(), 0.5f);
+        }
+        EXPECT_GT(disappearingCloudSamples, 0u);
+    }
+
     TEST(AtmosphereShaderTest, movingGroundCameraRetainsOpenSkyCloudHistoryBeyondTheFarPlane)
     {
         const float encodedCloudDistance = encodeAtmosphereDistance(60000.f);

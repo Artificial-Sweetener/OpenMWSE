@@ -193,6 +193,23 @@ shared {
         return vec2(representativeDistance, densitySum);
     }
 
+    /// Report whether the advected previous-frame sample contained the same cloud support.
+    bool previousFrameContainsCloud(vec3 rayOrigin, vec3 rayDirection, float representativeDistance)
+    {
+        if (!atmosphereTemporalSamplingEnabled())
+            return false;
+        vec3 previousCloudPosition = rayOrigin + rayDirection * representativeDistance;
+        previousCloudPosition.xy += omw.atmosphereCloudAdvectionDeltaWorldUnits;
+        vec4 previousViewPosition = omw.prevViewMatrix * vec4(previousCloudPosition, 1.0);
+        vec4 previousClipPosition = omw.prevProjectionMatrix * previousViewPosition;
+        vec2 previousUv = previousClipPosition.xy / max(previousClipPosition.w, 0.0001) * 0.5 + 0.5;
+        if (previousClipPosition.w <= 0.0 || previousUv.x <= 0.001 || previousUv.x >= 0.999
+            || previousUv.y <= 0.001 || previousUv.y >= 0.999)
+            return false;
+        vec4 previousMetadata = omw_GetAtmosphereMetadataHistory(previousUv);
+        return previousMetadata.a > 1.5 && previousMetadata.g > 0.0001;
+    }
+
     /// Accumulate bounded nearby point-light radiance for supported mist quality levels.
     vec3 atmospherePointLighting(vec3 worldPosition)
     {
@@ -383,7 +400,7 @@ fragment classifyAtmosphereVolume(target=AtmosphereVolumeMetadataHistory, rt1=At
     {
         vec4 volume = omw_Texture2D(AtmosphereVolumeRaw, omw_TexCoord);
         float opacity = clamp(1.0 - volume.a, 0.0, 1.0);
-        if (!omw.atmosphereEnabled || opacity <= 0.0001)
+        if (!omw.atmosphereEnabled)
         {
             omw_FragColor = vec4(
                 encodeAtmosphereDistance(omw.far), 0.0, encodeAtmosphereDistance(omw.far), 0.0);
@@ -398,7 +415,8 @@ fragment classifyAtmosphereVolume(target=AtmosphereVolumeMetadataHistory, rt1=At
         float representativeDistance = cloudMaximumDistance;
         float mediumType = 0.0;
 
-        if (omw.atmosphereMistParameters.x > 0.001)
+        bool currentVolumeContributes = opacity > 0.0001;
+        if (currentVolumeContributes && omw.atmosphereMistParameters.x > 0.001)
         {
             float thickness = max(omw.atmosphereMistParameters.z, 1.0);
             float baseHeight = omw.waterHeight + omw.atmosphereMistParameters.y;
@@ -431,13 +449,18 @@ fragment classifyAtmosphereVolume(target=AtmosphereVolumeMetadataHistory, rt1=At
                 vec2 cloudDistanceAndDensity
                     = representativeCloudDistanceAndDensity(omw.eyePos.xyz, rayDirection, cloudInterval);
                 float cloudDistance = cloudDistanceAndDensity.x;
-                if (cloudDistance < representativeDistance)
+                bool cloudSupported = currentVolumeContributes
+                    || previousFrameContainsCloud(omw.eyePos.xyz, rayDirection, cloudDistance);
+                if (cloudSupported && (mediumType < 0.5 || cloudDistance < representativeDistance))
                 {
                     representativeDistance = cloudDistance;
                     mediumType = 2.0;
                 }
             }
         }
+
+        if (mediumType < 0.5)
+            representativeDistance = omw.far;
 
         omw_FragColor = vec4(encodeAtmosphereDistance(representativeDistance), opacity,
             encodeAtmosphereDistance(sceneDistance), mediumType);
@@ -522,7 +545,9 @@ fragment resolveAtmosphereVolumeHistory(
         }
 
         vec4 previousMetadata = omw_GetAtmosphereMetadataHistory(previousUv);
-        if (abs(previousMetadata.a - currentMetadata.a) > 0.25)
+        bool newlySampledCloud = currentMetadata.a > 1.5 && previousMetadata.a < 0.5
+            && previousMetadata.g <= 0.0001;
+        if (abs(previousMetadata.a - currentMetadata.a) > 0.25 && !newlySampledCloud)
         {
             omw_FragColor = currentVolume;
             return;
