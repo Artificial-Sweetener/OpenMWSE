@@ -21,6 +21,7 @@
 #include <osg/Stats>
 #include <osgViewer/Viewer>
 
+#include <components/sceneutil/diagnosticcamerawork.hpp>
 #include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/diagnosticshadowwork.hpp>
 #include <components/sdlutil/diagnosticpresentationtiming.hpp>
@@ -74,6 +75,13 @@ namespace OMW
             CameraMetric{ "completed-maps", Terrain::diagnosticCompositeMapCompletedStatistic },
             CameraMetric{ "queued-maps-after", Terrain::diagnosticCompositeMapQueuedAfterStatistic },
             CameraMetric{ "drawable-cpu-milliseconds", Terrain::diagnosticCompositeMapDrawableCpuStatistic },
+            CameraMetric{ "camera-setup-time", SceneUtil::diagnosticCpuPassSetupTimeStatistic },
+            CameraMetric{ "camera-setup-thread-cycles", SceneUtil::diagnosticCpuPassSetupThreadCycleStatistic },
+            CameraMetric{ "camera-draw-time", SceneUtil::diagnosticCpuPassDrawTimeStatistic },
+            CameraMetric{ "camera-draw-thread-cycles", SceneUtil::diagnosticCpuPassDrawThreadCycleStatistic },
+            CameraMetric{ "camera-completion-time", SceneUtil::diagnosticCpuPassCompletionTimeStatistic },
+            CameraMetric{
+                "camera-completion-thread-cycles", SceneUtil::diagnosticCpuPassCompletionThreadCycleStatistic },
         };
 
         /// Identifies one stable gap between adjacent draw-attribution boundaries.
@@ -518,7 +526,7 @@ namespace OMW
         forEachUserStatsValue(
             [&](const UserStats& value) { metrics.push_back({ value.mTaken, Metric::Owner::Viewer }); });
 
-        output << std::setprecision(17) << "provider: performance@10\n"
+        output << std::setprecision(17) << "provider: performance@11\n"
                << "threading-model: " << threadingModelName(viewer.getThreadingModel()) << '\n'
                << "first-sampled-frame: " << firstFrame << '\n'
                << "last-sampled-frame: " << lastFrame << '\n'
@@ -591,6 +599,16 @@ namespace OMW
         }
         reportDistribution(output, { "unclassified-cameras", Metric::Owner::PrimaryCamera },
             collectUnclassifiedCameraPasses(SceneUtil::diagnosticCpuPassTimeStatistic, firstFrame, lastFrame));
+
+        output << "render-thread-cycles:\n";
+        for (const SceneUtil::DiagnosticGpuPass& pass : SceneUtil::diagnosticGpuPasses())
+        {
+            reportDistribution(output, { std::string(pass.mName), Metric::Owner::PrimaryCamera },
+                collectCameraPass(
+                    pass.mCameraName, SceneUtil::diagnosticCpuPassThreadCycleStatistic, firstFrame, lastFrame));
+        }
+        reportDistribution(output, { "unclassified-cameras", Metric::Owner::PrimaryCamera },
+            collectUnclassifiedCameraPasses(SceneUtil::diagnosticCpuPassThreadCycleStatistic, firstFrame, lastFrame));
 
         output << "shadow-map-details:\n";
         std::map<unsigned, std::vector<osg::ref_ptr<osg::Camera>>> shadowMaps;

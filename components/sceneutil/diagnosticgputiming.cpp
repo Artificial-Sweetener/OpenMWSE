@@ -1,5 +1,7 @@
 #include "diagnosticgputiming.hpp"
 
+#include "diagnosticcamerawork.hpp"
+
 #include <osg/Camera>
 #include <osg/FrameStamp>
 #include <osg/GLExtensions>
@@ -72,6 +74,7 @@ namespace SceneUtil
         public:
             explicit GpuTimestampState(osg::Camera& camera)
                 : mCamera(&camera)
+                , mCameraWork(camera)
             {
             }
 
@@ -112,6 +115,7 @@ namespace SceneUtil
                 camera->getStats()->setAttribute(pair.mFrame, std::string(diagnosticCpuPassBeginOverheadStatistic),
                     std::chrono::duration<double>(std::chrono::steady_clock::now() - callbackStart).count());
                 queries.mActive = pair;
+                mCameraWork.begin(renderInfo);
             }
 
             /// Issue the ending timestamp and queue the interval for non-blocking readback.
@@ -140,6 +144,7 @@ namespace SceneUtil
                     camera->getStats()->setAttribute(active.mFrame, std::string(diagnosticCpuPassEndStatistic),
                         osg::Timer::instance()->delta_s(state->getStartTick(), osg::Timer::instance()->tick()));
                 }
+                mCameraWork.end(renderInfo);
                 const auto trailingOverheadStart = std::chrono::steady_clock::now();
                 if (gpuTimingActive)
                     extensions->glQueryCounter(active.mEnd, GL_TIMESTAMP);
@@ -159,9 +164,16 @@ namespace SceneUtil
                 }
             }
 
+            /// Mark completion of camera setup immediately before its draw body.
+            void beforeDraw(osg::RenderInfo& renderInfo) { mCameraWork.beforeDraw(renderInfo); }
+
+            /// Mark completion of the camera draw body before post-render work.
+            void afterDraw(osg::RenderInfo& renderInfo) { mCameraWork.afterDraw(renderInfo); }
+
             /// Release timestamp queries belonging to the supplied graphics context.
             void release(osg::State* state)
             {
+                mCameraWork.release(state);
                 std::lock_guard lock(mMutex);
                 if (state == nullptr)
                 {
@@ -281,6 +293,7 @@ namespace SceneUtil
 
             osg::observer_ptr<osg::Camera> mCamera;
             std::mutex mMutex;
+            DiagnosticCameraWork mCameraWork;
             std::map<unsigned, ContextQueries> mContexts;
         };
 
@@ -468,11 +481,45 @@ namespace SceneUtil
             osg::ref_ptr<GpuTimestampState> mState;
         };
 
+        /// Marks the boundary between camera setup and its draw body.
+        class BeforeDrawTimestampCallback final : public osg::Camera::DrawCallback
+        {
+        public:
+            explicit BeforeDrawTimestampCallback(GpuTimestampState& state)
+                : mState(&state)
+            {
+            }
+
+            /// Record the camera setup boundary.
+            void operator()(osg::RenderInfo& renderInfo) const override { mState->beforeDraw(renderInfo); }
+
+        private:
+            osg::ref_ptr<GpuTimestampState> mState;
+        };
+
+        /// Marks the boundary between the camera draw body and completion work.
+        class AfterDrawTimestampCallback final : public osg::Camera::DrawCallback
+        {
+        public:
+            explicit AfterDrawTimestampCallback(GpuTimestampState& state)
+                : mState(&state)
+            {
+            }
+
+            /// Record the camera draw-body boundary.
+            void operator()(osg::RenderInfo& renderInfo) const override { mState->afterDraw(renderInfo); }
+
+        private:
+            osg::ref_ptr<GpuTimestampState> mState;
+        };
+
         /// Attach explicit CPU and GPU timestamp callbacks to one render camera.
         void attachGpuTimestampCallbacks(osg::Camera& camera)
         {
             osg::ref_ptr<GpuTimestampState> state = new GpuTimestampState(camera);
             camera.addInitialDrawCallback(new BeginGpuTimestampCallback(*state));
+            camera.addPreDrawCallback(new BeforeDrawTimestampCallback(*state));
+            camera.addPostDrawCallback(new AfterDrawTimestampCallback(*state));
             camera.addFinalDrawCallback(new EndGpuTimestampCallback(*state));
         }
 

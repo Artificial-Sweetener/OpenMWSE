@@ -123,7 +123,7 @@ The versioned providers expose these evidence domains:
   normal and diagnostic-isolation stages.
 * ``gameplay@2`` records the cell, camera position and angles, first-person and underwater state, weather, game and simulation
   clocks, and state. The replay controller checks these stable fields before advancing the simulation.
-* ``performance@10`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
+* ``performance@11`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
   scopes for scripts, Lua, mechanics, physics, world, and UI, resource caches and work queues, navigation and paging activity,
   scene statistics, delayed per-camera GPU/render timing, and camera-owned GPU passes for the main scene, shadow maps, water
   reflection, sky render target, post-processing, precipitation occlusion, ripples, and terrain-composite generation. It divides
@@ -133,8 +133,10 @@ The versioned providers expose these evidence domains:
   named passes. The GPU timeline reports elapsed GPU-clock spans across instrumented cameras, their union, and named intervals
   between adjacent camera boundaries. These intervals may include time awaiting CPU submission and therefore do not by themselves
   measure GPU utilization. Unclassified cameras report both GPU and CPU time, and the report identifies the viewer threading
-  model used for the capture. The report measures callback work outside its own camera intervals so delayed GPU-query maintenance can be
-  separated from engine draw work. GPU queries are polled only after an eight-frame readback delay, and collection retains two
+  model used for the capture. On Windows, camera passes also report render-thread hardware cycles so active execution can be
+  distinguished from elapsed time spent blocked or descheduled. The report measures callback work outside its own camera
+  intervals so delayed GPU-query maintenance can be separated from engine draw work. GPU queries are polled only after an
+  eight-frame readback delay, and collection retains two
   additional rendered frames before reporting the final sample.
   Each shadow map reports its own CPU time, GPU time, post-sort render leaves, and state graphs so aggregate shadow
   cost can be traced to a specific map and its submitted work. Terrain-composite detail reports the scheduler budget, queue

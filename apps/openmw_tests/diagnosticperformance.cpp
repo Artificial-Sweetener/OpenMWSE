@@ -3,6 +3,7 @@
 
 #include <apps/openmw/mwrender/renderworkcounter.hpp>
 
+#include <components/sceneutil/diagnosticcamerawork.hpp>
 #include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/diagnosticshadowwork.hpp>
 #include <components/sdlutil/diagnosticpresentationtiming.hpp>
@@ -52,6 +53,8 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     viewer.getCamera()->getStats()->setAttribute(
         frame, std::string(SceneUtil::diagnosticGpuPassEndTimestampStatistic), 100.030);
     viewer.getCamera()->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassTimeStatistic), 0.008);
+    viewer.getCamera()->getStats()->setAttribute(
+        frame, std::string(SceneUtil::diagnosticCpuPassThreadCycleStatistic), 1000.0);
     viewer.getCamera()->getStats()->setAttribute(
         frame, std::string(SceneUtil::diagnosticCpuPassBeginStatistic), 10.000);
     viewer.getCamera()->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticCpuPassEndStatistic), 10.008);
@@ -137,7 +140,7 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     OMW::reportDiagnosticPerformance(frame, frame, viewer, output);
     const std::string report = output.str();
 
-    EXPECT_NE(report.find("provider: performance@10"), std::string::npos);
+    EXPECT_NE(report.find("provider: performance@11"), std::string::npos);
     EXPECT_NE(report.find("threading-model: automatic-selection"), std::string::npos);
     EXPECT_NE(report.find("presentation:\n  swap-buffers:\n    available: true\n    count: 1"), std::string::npos)
         << report;
@@ -177,6 +180,10 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
         report.find("  unclassified-cameras:\n    available: true\n    count: 1\n    median: 0.003"), std::string::npos)
         << report;
     EXPECT_NE(report.find("cpu-passes:\n  main-scene:\n    available: true\n    count: 1"), std::string::npos);
+    EXPECT_NE(report.find("render-thread-cycles:\n  main-scene:\n    available: true\n    count: 1\n"
+                          "    median: 1000"),
+        std::string::npos)
+        << report;
     EXPECT_NE(report.find("  terrain-composite:\n    available: true\n    count: 1"), std::string::npos) << report;
     EXPECT_NE(report.find("shadow-map-details:\n  - index: 1\n    physical-camera-count: 2\n"
                           "    gpu-time:\n      available: true\n      count: 1\n      median: 0.006"),
