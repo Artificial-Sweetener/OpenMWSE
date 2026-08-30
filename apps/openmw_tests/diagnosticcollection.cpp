@@ -6,6 +6,8 @@
 #include <osg/Stats>
 #include <osgViewer/Viewer>
 
+#include <components/sdlutil/diagnosticpresentationtiming.hpp>
+
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -19,11 +21,18 @@ TEST(DiagnosticCollectionTest, EnablesOnlyOneBoundedFutureIntervalAndRestoresPri
 
     OMW::DiagnosticCollection collection(viewer);
     EXPECT_FALSE(collection.active());
+    EXPECT_FALSE(SDLUtil::diagnosticPresentationTimingCollectionEnabled());
     EXPECT_FALSE(viewer.getViewerStats()->collectStats("scene"));
     EXPECT_FALSE(viewer.getCamera()->getStats()->collectStats("rendering"));
 
     EXPECT_TRUE(collection.start(17, 4, 100));
     EXPECT_TRUE(collection.active());
+    EXPECT_TRUE(SDLUtil::diagnosticPresentationTimingCollectionEnabled());
+    SDLUtil::recordDiagnosticSwapBufferTime(100, 0.004);
+    double swapDuration = 0.0;
+    EXPECT_TRUE(viewer.getViewerStats()->getAttribute(
+        100, std::string(SDLUtil::diagnosticSwapBufferTimeStatistic), swapDuration));
+    EXPECT_DOUBLE_EQ(swapDuration, 0.004);
     EXPECT_TRUE(viewer.getViewerStats()->collectStats("scene"));
     EXPECT_TRUE(viewer.getCamera()->getStats()->collectStats("rendering"));
     EXPECT_FALSE(collection.start(18, 1, 100));
@@ -37,6 +46,7 @@ TEST(DiagnosticCollectionTest, EnablesOnlyOneBoundedFutureIntervalAndRestoresPri
     EXPECT_EQ(completed->mFirstFrame, 100);
     EXPECT_EQ(completed->mLastFrame, 103);
     EXPECT_FALSE(collection.active());
+    EXPECT_FALSE(SDLUtil::diagnosticPresentationTimingCollectionEnabled());
     EXPECT_FALSE(viewer.getViewerStats()->collectStats("scene"));
     EXPECT_FALSE(viewer.getCamera()->getStats()->collectStats("rendering"));
     EXPECT_TRUE(viewer.getViewerStats()->collectStats("frame_rate"));

@@ -7,6 +7,7 @@
 #include <osg/Texture2D>
 
 #include <algorithm>
+#include <chrono>
 
 namespace Terrain
 {
@@ -25,6 +26,17 @@ namespace Terrain
 
     void CompositeMapRenderer::drawImplementation(osg::RenderInfo& renderInfo) const
     {
+        DiagnosticCompositeMapWork diagnosticWork;
+        const bool collectDiagnosticWork = diagnosticCompositeMapWorkCollectionEnabled(renderInfo);
+        const auto diagnosticStart = std::chrono::steady_clock::now();
+        const auto recordDiagnosticWork = [&]() {
+            if (!collectDiagnosticWork)
+                return;
+            diagnosticWork.mDrawableCpuMilliseconds
+                = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - diagnosticStart).count();
+            recordDiagnosticCompositeMapWork(renderInfo, diagnosticWork);
+        };
+
         double dt = mTimer.time_s();
         dt = std::min(dt, 0.2);
         mTimer.setStartTick();
@@ -32,7 +44,6 @@ namespace Terrain
         double conservativeTimeRatio(0.75);
         double availableTime = std::max((targetFrameTime - dt) * conservativeTimeRatio, mMinimumTimeAvailable);
 
-        DiagnosticCompositeMapWork diagnosticWork;
         diagnosticWork.mBudgetMilliseconds = availableTime * 1000.0;
 
         std::unique_lock<std::mutex> lock(mMutex);
@@ -42,7 +53,7 @@ namespace Terrain
         if (mImmediateCompileSet.empty() && mCompileSet.empty())
         {
             lock.unlock();
-            recordDiagnosticCompositeMapWork(renderInfo, diagnosticWork);
+            recordDiagnosticWork();
             return;
         }
 
@@ -83,7 +94,7 @@ namespace Terrain
         }
         diagnosticWork.mQueuedAfter = mCompileSet.size();
         lock.unlock();
-        recordDiagnosticCompositeMapWork(renderInfo, diagnosticWork);
+        recordDiagnosticWork();
         mTimer.setStartTick();
     }
 

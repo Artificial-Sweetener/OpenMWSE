@@ -12,6 +12,7 @@
 #include <osgViewer/Viewer>
 
 #include <components/sceneutil/diagnosticgputiming.hpp>
+#include <components/sdlutil/diagnosticpresentationtiming.hpp>
 
 namespace OMW
 {
@@ -107,11 +108,13 @@ namespace OMW
         }
         if (osg::Node* scene = mViewer.getSceneData())
             SceneUtil::enableDiagnosticGpuPassStatistics(*scene);
+        SDLUtil::setDiagnosticPresentationTimingStatistics(viewerStats);
         SceneUtil::setDiagnosticGpuPassStatisticsCollection(true);
     }
 
     void DiagnosticCollection::endCollection()
     {
+        SDLUtil::setDiagnosticPresentationTimingStatistics(nullptr);
         SceneUtil::setDiagnosticGpuPassStatisticsCollection(false);
         for (auto category = mEnabledCategories.rbegin(); category != mEnabledCategories.rend(); ++category)
         {

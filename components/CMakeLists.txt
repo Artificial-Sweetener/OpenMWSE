@@ -369,6 +369,7 @@ add_component_dir (fontloader
     )
 
 add_component_dir (sdlutil
+    diagnosticpresentationtiming
     events
     gl4esinit
     imagetosurface

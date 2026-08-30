@@ -5,6 +5,7 @@
 
 #include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/diagnosticshadowwork.hpp>
+#include <components/sdlutil/diagnosticpresentationtiming.hpp>
 #include <components/terrain/diagnosticcompositemapwork.hpp>
 
 #include <gtest/gtest.h>
@@ -42,6 +43,8 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     constexpr unsigned frame = 42;
     osgViewer::Viewer viewer;
     viewer.setViewerStats(new osg::Stats("viewer"));
+    viewer.getViewerStats()->setAttribute(
+        frame, std::string(SDLUtil::diagnosticSwapBufferTimeStatistic), 0.005);
     viewer.getCamera()->setName(std::string(SceneUtil::sceneCameraName));
     SceneUtil::enableDiagnosticGpuPassStatistics(*viewer.getCamera());
     viewer.getCamera()->getStats()->setAttribute(frame, std::string(SceneUtil::diagnosticGpuPassTimeStatistic), 0.010);
@@ -120,12 +123,17 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
         frame, std::string(Terrain::diagnosticCompositeMapCompletedStatistic), 1.0);
     terrainComposite->getStats()->setAttribute(
         frame, std::string(Terrain::diagnosticCompositeMapQueuedAfterStatistic), 11.0);
+    terrainComposite->getStats()->setAttribute(
+        frame, std::string(Terrain::diagnosticCompositeMapDrawableCpuStatistic), 0.15);
 
     std::ostringstream output;
     OMW::reportDiagnosticPerformance(frame, frame, viewer, output);
     const std::string report = output.str();
 
-    EXPECT_NE(report.find("provider: performance@8"), std::string::npos);
+    EXPECT_NE(report.find("provider: performance@9"), std::string::npos);
+    EXPECT_NE(report.find("presentation:\n  swap-buffers:\n    available: true\n    count: 1"),
+        std::string::npos)
+        << report;
     EXPECT_NE(report.find("draw-breakdown:\n  camera-covered:\n    available: true\n    count: 1\n"
                           "    median: 0.010999"),
         std::string::npos)
@@ -183,6 +191,9 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
         std::string::npos)
         << report;
     EXPECT_NE(report.find("  queued-maps-after:\n    available: true\n    count: 1\n    median: 11"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("  drawable-cpu-milliseconds:\n    available: true\n    count: 1"),
         std::string::npos)
         << report;
     EXPECT_NE(report.find("unclassified-camera-details:\n  - index: 1\n    name: \"AuxiliarySceneCamera\"\n"

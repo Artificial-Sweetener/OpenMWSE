@@ -1,6 +1,13 @@
 #include "sdlgraphicswindow.hpp"
 
+#include "diagnosticpresentationtiming.hpp"
+
 #include <SDL_video.h>
+
+#include <osg/FrameStamp>
+#include <osg/State>
+
+#include <chrono>
 
 #ifdef OPENMW_GL4ES_MANUAL_INIT
 #include "gl4esinit.h"
@@ -230,7 +237,20 @@ namespace SDLUtil
         if (!mRealized)
             return;
 
+        if (!diagnosticPresentationTimingCollectionEnabled())
+        {
+            SDL_GL_SwapWindow(mWindow);
+            return;
+        }
+
+        const auto start = std::chrono::steady_clock::now();
         SDL_GL_SwapWindow(mWindow);
+        const auto end = std::chrono::steady_clock::now();
+        if (osg::State* state = getState(); state != nullptr && state->getFrameStamp() != nullptr)
+        {
+            recordDiagnosticSwapBufferTime(state->getFrameStamp()->getFrameNumber(),
+                std::chrono::duration<double>(end - start).count());
+        }
     }
 
     void GraphicsWindowSDL2::setSyncToVBlank(bool on)

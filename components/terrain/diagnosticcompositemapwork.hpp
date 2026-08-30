@@ -32,6 +32,9 @@ namespace Terrain
     /// Names the queued non-immediate map count remaining after compilation.
     inline constexpr std::string_view diagnosticCompositeMapQueuedAfterStatistic
         = "OpenMW diagnostic terrain composite queued maps after";
+    /// Names the CPU wall-clock time spent inside the composite drawable body.
+    inline constexpr std::string_view diagnosticCompositeMapDrawableCpuStatistic
+        = "OpenMW diagnostic terrain composite drawable CPU milliseconds";
 
     /// Describes the bounded composite-map work attempted during one draw traversal.
     struct DiagnosticCompositeMapWork
@@ -43,7 +46,11 @@ namespace Terrain
         std::size_t mSubmittedDrawables = 0;
         std::size_t mCompleted = 0;
         std::size_t mQueuedAfter = 0;
+        double mDrawableCpuMilliseconds = 0.0;
     };
+
+    /// Return whether bounded composite-map work collection is active for this traversal.
+    bool diagnosticCompositeMapWorkCollectionEnabled(osg::RenderInfo& renderInfo);
 
     /// Record one frame of composite-map scheduling work when bounded diagnostics are active.
     void recordDiagnosticCompositeMapWork(osg::RenderInfo& renderInfo, const DiagnosticCompositeMapWork& work);

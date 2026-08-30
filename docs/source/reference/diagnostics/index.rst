@@ -101,7 +101,7 @@ The versioned providers expose these evidence domains:
   normal and diagnostic-isolation stages.
 * ``gameplay@2`` records the cell, camera position and angles, first-person and underwater state, weather, game and simulation
   clocks, and state. The replay controller checks these stable fields before advancing the simulation.
-* ``performance@8`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
+* ``performance@9`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
   scopes for scripts, Lua, mechanics, physics, world, and UI, resource caches and work queues, navigation and paging activity,
   scene statistics, delayed per-camera GPU/render timing, and camera-owned GPU passes for the main scene, shadow maps, water
   reflection, sky render target, post-processing, precipitation occlusion, ripples, and terrain-composite generation. It divides
@@ -113,8 +113,9 @@ The versioned providers expose these evidence domains:
   additional rendered frames before reporting the final sample.
   Each shadow map reports its own CPU time, GPU time, post-sort render leaves, and state graphs so aggregate shadow
   cost can be traced to a specific map and its submitted work. Terrain-composite detail reports the scheduler budget, queue
-  depth before and after the pass, immediate and processed map counts, submitted drawables, and completed maps so an over-budget
-  map can be distinguished from queue pressure or GPU cost. Main-camera render-bin intervals further
+  depth before and after the pass, immediate and processed map counts, submitted drawables, completed maps, and drawable CPU
+  duration so an over-budget map can be distinguished from queue pressure, drawable work, or GPU cost. Presentation detail
+  reports time blocked in buffer swap. Main-camera render-bin intervals further
   identify the scene root and its nested early-sky, attachment-resolve, transparency, occlusion-query, first-person, sun-glare,
   and distortion intervals. Groundcover submission and primitive near/far work are attributed separately to each named camera
   pass. It also reports a bounded stable counter schema for static rendering, attachment resolves,

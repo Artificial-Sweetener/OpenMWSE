@@ -23,6 +23,7 @@
 
 #include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/diagnosticshadowwork.hpp>
+#include <components/sdlutil/diagnosticpresentationtiming.hpp>
 #include <components/terrain/diagnosticcompositemapwork.hpp>
 
 namespace OMW
@@ -72,6 +73,7 @@ namespace OMW
             CameraMetric{ "submitted-drawables", Terrain::diagnosticCompositeMapSubmittedDrawablesStatistic },
             CameraMetric{ "completed-maps", Terrain::diagnosticCompositeMapCompletedStatistic },
             CameraMetric{ "queued-maps-after", Terrain::diagnosticCompositeMapQueuedAfterStatistic },
+            CameraMetric{ "drawable-cpu-milliseconds", Terrain::diagnosticCompositeMapDrawableCpuStatistic },
         };
 
         /// Identifies one stable gap between adjacent draw-attribution boundaries.
@@ -429,13 +431,18 @@ namespace OMW
         forEachUserStatsValue(
             [&](const UserStats& value) { metrics.push_back({ value.mTaken, Metric::Owner::Viewer }); });
 
-        output << std::setprecision(17) << "provider: performance@8\n"
+        output << std::setprecision(17) << "provider: performance@9\n"
                << "first-sampled-frame: " << firstFrame << '\n'
                << "last-sampled-frame: " << lastFrame << '\n'
                << "requested-samples: " << lastFrame - firstFrame + 1 << '\n'
                << "distributions:\n";
         for (const Metric& metric : metrics)
             reportDistribution(output, metric, collectMetric(metric, firstFrame, lastFrame, viewer));
+
+        output << "presentation:\n";
+        const Metric swapBuffersSource{ std::string(SDLUtil::diagnosticSwapBufferTimeStatistic), Metric::Owner::Viewer };
+        reportDistribution(output, { "swap-buffers", Metric::Owner::Viewer },
+            collectMetric(swapBuffersSource, firstFrame, lastFrame, viewer));
 
         const DrawAttribution drawAttribution = collectDrawAttribution(firstFrame, lastFrame, viewer);
         output << "draw-breakdown:\n";

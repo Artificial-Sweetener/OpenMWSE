@@ -12,12 +12,31 @@
 
 namespace Terrain
 {
+    namespace
+    {
+        /// Resolve the camera that owns active bounded composite-map statistics.
+        osg::Camera* diagnosticCamera(osg::RenderInfo& renderInfo)
+        {
+            osg::Camera* camera = renderInfo.getCurrentCamera();
+            if (camera == nullptr || camera->getStats() == nullptr
+                || !SceneUtil::diagnosticGpuPassStatisticsCollectionEnabled(*camera))
+            {
+                return nullptr;
+            }
+            return camera;
+        }
+    }
+
+    bool diagnosticCompositeMapWorkCollectionEnabled(osg::RenderInfo& renderInfo)
+    {
+        return diagnosticCamera(renderInfo) != nullptr;
+    }
+
     void recordDiagnosticCompositeMapWork(osg::RenderInfo& renderInfo, const DiagnosticCompositeMapWork& work)
     {
-        osg::Camera* camera = renderInfo.getCurrentCamera();
+        osg::Camera* camera = diagnosticCamera(renderInfo);
         osg::State* state = renderInfo.getState();
-        if (camera == nullptr || state == nullptr || state->getFrameStamp() == nullptr || camera->getStats() == nullptr
-            || !SceneUtil::diagnosticGpuPassStatisticsCollectionEnabled(*camera))
+        if (camera == nullptr || state == nullptr || state->getFrameStamp() == nullptr)
         {
             return;
         }
@@ -32,5 +51,7 @@ namespace Terrain
             frame, std::string(diagnosticCompositeMapSubmittedDrawablesStatistic), work.mSubmittedDrawables);
         stats.setAttribute(frame, std::string(diagnosticCompositeMapCompletedStatistic), work.mCompleted);
         stats.setAttribute(frame, std::string(diagnosticCompositeMapQueuedAfterStatistic), work.mQueuedAfter);
+        stats.setAttribute(
+            frame, std::string(diagnosticCompositeMapDrawableCpuStatistic), work.mDrawableCpuMilliseconds);
     }
 }
