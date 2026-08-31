@@ -53,6 +53,12 @@ namespace SceneUtil
         /// Temporarily bypass or restore configured shadow rendering for a diagnostic comparison frame.
         void setDiagnosticShadowRenderingEnabled(bool enabled) const;
 
+        /// Temporarily replace the outdoor caster mask for a bounded diagnostic comparison.
+        void setDiagnosticOutdoorShadowCastingMask(unsigned int mask) const;
+
+        /// Restore the configured outdoor caster mask after a diagnostic comparison.
+        void restoreDiagnosticOutdoorShadowCastingMask() const;
+
     protected:
         static ShadowManager* sInstance;
 

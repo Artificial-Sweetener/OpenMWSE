@@ -349,7 +349,7 @@ add_component_dir (translation
 
 add_component_dir (terrain
     storage world buffercache defs terraingrid material terraindrawable texturemanager chunkmanager compositemaprenderer
-    diagnosticcompositemapwork quadtreeworld quadtreenode viewdata cellborder view heightcull
+    diagnosticcompositemapwork diagnosticviewselection quadtreeworld quadtreenode viewdata cellborder view heightcull
     )
 
 add_component_dir (loadinglistener

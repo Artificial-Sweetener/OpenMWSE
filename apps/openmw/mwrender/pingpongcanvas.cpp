@@ -11,16 +11,19 @@
 
 #include "atmospherediagnostics.hpp"
 #include "postprocessor.hpp"
+#include "renderframediagnostics.hpp"
 
 namespace MWRender
 {
     PingPongCanvas::PingPongCanvas(Shader::ShaderManager& shaderManager,
         const std::shared_ptr<LuminanceCalculator>& luminanceCalculator,
-        std::shared_ptr<AtmosphereDiagnostics> atmosphereDiagnostics)
+        std::shared_ptr<AtmosphereDiagnostics> atmosphereDiagnostics,
+        std::shared_ptr<RenderFrameDiagnostics> renderFrameDiagnostics)
         : mFallbackStateSet(new osg::StateSet)
         , mMultiviewResolveStateSet(new osg::StateSet)
         , mLuminanceCalculator(luminanceCalculator)
         , mAtmosphereDiagnostics(std::move(atmosphereDiagnostics))
+        , mRenderFrameDiagnostics(std::move(renderFrameDiagnostics))
     {
         setUseDisplayList(false);
         setUseVertexBufferObjects(true);
@@ -449,6 +452,12 @@ namespace MWRender
                 mPreviousCanvas ? mPreviousCanvas->findRenderTarget("AtmosphereVolumeMetadataHistory") : nullptr,
                 destinationHandle, static_cast<int>(resolveViewport->width()),
                 static_cast<int>(resolveViewport->height()));
+        }
+
+        if (mRenderFrameDiagnostics && mRenderFrameDiagnostics->captureRequested())
+        {
+            mRenderFrameDiagnostics->captureFrame(renderInfo, destinationHandle,
+                static_cast<int>(resolveViewport->width()), static_cast<int>(resolveViewport->height()));
         }
 
         cacheEmptyUniformStacks(uniformMap, emptyUniformStacks);

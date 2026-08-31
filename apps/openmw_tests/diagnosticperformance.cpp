@@ -8,6 +8,7 @@
 #include <components/sceneutil/diagnosticshadowwork.hpp>
 #include <components/sdlutil/diagnosticpresentationtiming.hpp>
 #include <components/terrain/diagnosticcompositemapwork.hpp>
+#include <components/terrain/diagnosticviewselection.hpp>
 
 #include <gtest/gtest.h>
 
@@ -37,6 +38,19 @@ TEST(DiagnosticPerformanceTest, RejectsMissingAndNonFiniteSamples)
     EXPECT_THROW(OMW::summarizeDiagnosticSamples({}), std::invalid_argument);
     constexpr std::array samples{ 1.0, std::numeric_limits<double>::infinity() };
     EXPECT_THROW(OMW::summarizeDiagnosticSamples(samples), std::invalid_argument);
+}
+
+TEST(DiagnosticPerformanceTest, TerrainSelectionWorkFollowsDiagnosticCollectionLifetime)
+{
+    osg::ref_ptr<osg::Camera> camera = new osg::Camera;
+    SceneUtil::enableDiagnosticGpuPassStatistics(*camera);
+    EXPECT_FALSE(Terrain::diagnosticViewSelectionCollectionEnabled(*camera));
+
+    SceneUtil::setDiagnosticGpuPassStatisticsCollection(true);
+    EXPECT_TRUE(Terrain::diagnosticViewSelectionCollectionEnabled(*camera));
+    SceneUtil::setDiagnosticGpuPassStatisticsCollection(false);
+
+    EXPECT_FALSE(Terrain::diagnosticViewSelectionCollectionEnabled(*camera));
 }
 
 TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCameras)
@@ -89,10 +103,18 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
         frame, std::string(SceneUtil::diagnosticShadowRenderLeafCountStatistic), 200.0);
     firstShadow->getStats()->setAttribute(
         frame, std::string(SceneUtil::diagnosticShadowStateGraphCountStatistic), 40.0);
+    SceneUtil::setDiagnosticGpuPassStatisticsCollection(true);
     SceneUtil::setDiagnosticShadowLightState(
         *firstShadow, osg::Vec3d(0.0, 0.8, 0.6), osg::Vec4f(0.5f, 0.4f, 0.3f, 1.f));
-    SceneUtil::setDiagnosticGpuPassStatisticsCollection(true);
+    SceneUtil::setDiagnosticShadowCasterCullState(*firstShadow, -4000.0, -500.0);
     SceneUtil::setDiagnosticShadowWorkFrame(*firstShadow, frame);
+    Terrain::recordDiagnosticViewSelection(*firstShadow, frame,
+        { .mSelectedNodes = 192,
+            .mActiveGridNodes = 81,
+            .mPendingRenderingNodes = 2,
+            .mWorldRevision = 49,
+            .mSelectionUpdated = true,
+            .mSelectionChanged = false });
     SceneUtil::setDiagnosticGpuPassStatisticsCollection(false);
 
     osg::ref_ptr<osg::Camera> secondShadow = new osg::Camera;
@@ -217,6 +239,38 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
         << report;
     EXPECT_NE(report.find("    light-luminance:\n      available: true\n      count: 1\n"
                           "      median: 0.414"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("    caster-cull-minimum:\n      available: true\n      count: 1\n"
+                          "      median: -4000"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("    receiver-depth-span:\n      available: true\n      count: 1\n"
+                          "      median: 3500"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("    terrain-selected-nodes:\n      available: true\n      count: 1\n"
+                          "      median: 192"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("    terrain-active-grid-nodes:\n      available: true\n      count: 1\n"
+                          "      median: 81"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("    terrain-pending-rendering-nodes:\n      available: true\n      count: 1\n"
+                          "      median: 2"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("    terrain-world-revision:\n      available: true\n      count: 1\n"
+                          "      median: 49"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("    terrain-selection-updated:\n      available: true\n      count: 1\n"
+                          "      median: 1"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(report.find("    terrain-selection-changed:\n      available: true\n      count: 1\n"
+                          "      median: 0"),
         std::string::npos)
         << report;
     EXPECT_NE(report.find("  - index: 2\n    physical-camera-count: 1\n"

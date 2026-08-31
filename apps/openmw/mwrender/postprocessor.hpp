@@ -2,6 +2,7 @@
 #define OPENMW_MWRENDER_POSTPROCESSOR_H
 
 #include <array>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -53,6 +54,7 @@ namespace MWRender
     class PingPongCull;
     class PingPongCanvas;
     class AtmosphereDiagnostics;
+    class RenderFrameDiagnostics;
     class TransparentDepthBinCallback;
     class DistortionCallback;
 
@@ -224,6 +226,13 @@ namespace MWRender
         /// Report whether the production multi-frame diagnostic capture still owns transient render state.
         bool atmosphereDiagnosticCaptureInProgress() const;
 
+        /// Request exact final-composite captures for the next bounded sequence of production frames.
+        void requestRenderFrameDiagnosticCapture(
+            const std::filesystem::path& outputPath, std::uint32_t frameCount);
+
+        /// Report whether an exact final-composite sequence is being captured or serialized.
+        bool renderFrameDiagnosticCaptureInProgress() const;
+
         /// Invalidate both frame canvases so controlled replay cannot consume bootstrap atmosphere history.
         void invalidateAtmosphereHistory();
 
@@ -290,6 +299,7 @@ namespace MWRender
 
         osg::ref_ptr<Fx::StateUpdater> mStateUpdater;
         std::shared_ptr<AtmosphereDiagnostics> mAtmosphereDiagnostics;
+        std::shared_ptr<RenderFrameDiagnostics> mRenderFrameDiagnostics;
         osg::ref_ptr<PingPongCull> mPingPongCull;
         std::array<osg::ref_ptr<PingPongCanvas>, 2> mCanvases;
         osg::ref_ptr<TransparentDepthBinCallback> mTransparentDepthPostPass;

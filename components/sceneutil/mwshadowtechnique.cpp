@@ -625,6 +625,7 @@ MWShadowTechnique::ShadowData::ShadowData(MWShadowTechnique::ViewDependentData* 
         _camera->attach(osg::Camera::DEPTH_BUFFER, _texture.get());
         //_camera->attach(osg::Camera::COLOR_BUFFER, _texture.get());
     }
+    enableDiagnosticShadowMapCapture(*_camera, *_texture);
 }
 
 void MWShadowTechnique::ShadowData::releaseGLObjects(osg::State* state) const
@@ -2719,13 +2720,14 @@ bool MWShadowTechnique::cropShadowCameraToMainFrustum(Frustum& frustum, osg::Cam
         xMax = osg::minimum(1.0, convexHull.max(0));
         yMin = osg::maximum(-1.0, convexHull.min(1));
         yMax = osg::minimum(1.0, convexHull.max(1));
-        zMin = osg::maximum(-1.0, convexHull.min(2));
-        // Preserve the caster-facing half of the light volume in the projection so valid casters are clipped normally
-        // instead of relying on depth clamping, which disables efficient depth rejection on some drivers.
-        zMax = 1.0;
+        // Retain the light-facing depth range for casters and crop only behind the receiver volume.
+        zMin = -1.0;
+        zMax = osg::minimum(1.0, convexHull.max(2));
     }
     else
         return false;
+
+    setDiagnosticShadowProjectionState(*camera, viewNear, viewFar, { xMin, xMax, yMin, yMax, zMin, zMax });
 
     if (xMin != -1.0 || yMin != -1.0 || zMin != -1.0 ||
         xMax != 1.0 || yMax != 1.0 || zMax != 1.0)
@@ -2749,6 +2751,8 @@ bool MWShadowTechnique::cropShadowCameraToMainFrustum(Frustum& frustum, osg::Cam
         yMin = convexHull.min(1);
         yMax = convexHull.max(1);
         zMin = convexHull.min(2);
+        const double zMaxInViewSpace = convexHull.max(2);
+        setDiagnosticShadowCasterCullState(*camera, zMin, zMaxInViewSpace);
 
         planeList.emplace_back(0.0, -1.0, 0.0, yMax);
         planeList.emplace_back(0.0, 1.0, 0.0, -yMin);

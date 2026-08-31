@@ -1,11 +1,18 @@
 #version 120
 
+/// Preserve light-facing casters while leaving geometry behind the receiver volume to normal clipping.
+vec4 clampShadowCasterLightFacingDepth(vec4 clipPosition)
+{
+    clipPosition.z = max(clipPosition.z, -clipPosition.w);
+    return clipPosition;
+}
+
 #if @opaqueShadowCaster
 
 void main(void)
 {
     // Opaque casters need only clip-space position and user clip-plane distance.
-    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
+    gl_Position = clampShadowCasterLightFacingDepth(gl_ModelViewProjectionMatrix * gl_Vertex);
     gl_ClipVertex = gl_ModelViewMatrix * gl_Vertex;
 }
 
@@ -29,7 +36,7 @@ void main(void)
 {
     Material material = getMaterial();
 
-    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
+    gl_Position = clampShadowCasterLightFacingDepth(gl_ModelViewProjectionMatrix * gl_Vertex);
 
     vec4 viewPos = (gl_ModelViewMatrix * gl_Vertex);
     gl_ClipVertex = viewPos;

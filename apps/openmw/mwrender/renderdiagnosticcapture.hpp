@@ -34,16 +34,22 @@ namespace MWRender
         /// Read a two-dimensional color texture into scene-linear RGBA floats when available.
         std::optional<RenderDiagnosticImage> captureColorTexture(osg::Texture* texture, std::string name);
 
-        /// Read a packed depth-stencil texture into normalized depth floats when available.
-        std::optional<RenderDiagnosticImage> captureDepthTexture(osg::Texture* texture, std::string name);
+        /// Read a depth texture into normalized floats, optionally reducing its longest edge before readback.
+        std::optional<RenderDiagnosticImage> captureDepthTexture(
+            osg::Texture* texture, std::string name, unsigned maximumDimension = 0);
 
-        /// Read the named color attachment from a framebuffer into RGBA floats.
-        RenderDiagnosticImage captureFramebuffer(unsigned int framebuffer, int width, int height, std::string name);
+        /// Read the named color attachment from a framebuffer into RGBA floats, optionally reducing its longest edge.
+        RenderDiagnosticImage captureFramebuffer(unsigned int framebuffer, int width, int height, std::string name,
+            unsigned maximumDimension = 0);
 
     private:
+        /// Restore the framebuffer bindings and read target that were active before capture began.
+        void restoreFramebufferState();
+
         osg::State& mState;
         osg::GLExtensions& mExtensions;
         GLint mPreviousReadFramebuffer = 0;
+        GLint mPreviousDrawFramebuffer = 0;
         GLint mPreviousReadBuffer = GL_BACK;
     };
 }

@@ -8,6 +8,7 @@
 #include <components/diagnostics/capsule.hpp>
 #include <components/diagnostics/session.hpp>
 #include <components/files/hash.hpp>
+#include <components/sceneutil/shadow.hpp>
 #include <components/version/version.hpp>
 #include <components/vfs/manager.hpp>
 
@@ -18,6 +19,7 @@
 #include "mwrender/camera.hpp"
 #include "mwrender/postprocessor.hpp"
 #include "mwrender/renderingmanager.hpp"
+#include "mwrender/vismask.hpp"
 
 #include "mwstate/statemanagerimp.hpp"
 
@@ -147,6 +149,12 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
 
     if (const std::optional<CompletedDiagnosticCollection> completed = mDiagnosticCollection->update(frameNumber))
     {
+        if (mDiagnosticShadowOverrideRequest == completed->mRequestId)
+        {
+            SceneUtil::ShadowManager::instance().setDiagnosticShadowRenderingEnabled(true);
+            SceneUtil::ShadowManager::instance().restoreDiagnosticOutdoorShadowCastingMask();
+            mDiagnosticShadowOverrideRequest.reset();
+        }
         std::ostringstream output;
         output << "request-frame: " << completed->mFirstFrame << '\n'
                << "fixed-step: " << (mDiagnosticChild ? "true" : "false") << '\n'
@@ -230,6 +238,10 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << (mWorld->getPostProcessor()->atmosphereDiagnosticCaptureInProgress() ? "in-progress"
                                                                                                    : "idle")
                            << '\n'
+                           << "render-frame-capture: "
+                           << (mWorld->getPostProcessor()->renderFrameDiagnosticCaptureInProgress() ? "in-progress"
+                                                                                                     : "idle")
+                           << '\n'
                            << "performance-capture: " << (mDiagnosticCollection->active() ? "collecting" : "idle")
                            << '\n'
                            << "providers: [core@2, graphics@1, gameplay@2, performance@13]\n";
@@ -281,7 +293,18 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
 
                 case Diagnostics::CommandType::RunGameplayRouteSegment:
                 {
-                    if (!mDiagnosticChild || !mDiagnosticGameplayRoute || command.mPayload.size() != sizeof(std::uint32_t))
+                    const unsigned routeOptions = command.mPayload.size() == sizeof(std::uint32_t) + 1
+                        ? std::to_integer<unsigned char>(command.mPayload.back())
+                        : 0;
+                    const bool captureRenderedFrames = (routeOptions & 0x1u) != 0;
+                    const bool bypassShadows = (routeOptions & 0x2u) != 0;
+                    const bool terrainCastersOnly = (routeOptions & 0x4u) != 0;
+                    const bool objectCastersOnly = (routeOptions & 0x8u) != 0;
+                    if (!mDiagnosticChild || !mDiagnosticGameplayRoute
+                        || (command.mPayload.size() != sizeof(std::uint32_t)
+                            && command.mPayload.size() != sizeof(std::uint32_t) + 1)
+                        || (bypassShadows && (terrainCastersOnly || objectCastersOnly))
+                        || (terrainCastersOnly && objectCastersOnly))
                     {
                         response.mError = Diagnostics::ErrorCode::InvalidFrame;
                         break;
@@ -295,6 +318,25 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                     {
                         response.mError = Diagnostics::ErrorCode::InvalidState;
                         break;
+                    }
+                    if (captureRenderedFrames)
+                    {
+                        const std::filesystem::path outputPath
+                            = mDiagnosticArtifactRoot / ("route-frames-" + std::to_string(command.mRequestId) + ".omwdiag");
+                        mWorld->getPostProcessor()->requestRenderFrameDiagnosticCapture(outputPath, count);
+                    }
+                    if (bypassShadows)
+                    {
+                        SceneUtil::ShadowManager::instance().setDiagnosticShadowRenderingEnabled(false);
+                        mDiagnosticShadowOverrideRequest = command.mRequestId;
+                    }
+                    else if (terrainCastersOnly || objectCastersOnly)
+                    {
+                        const unsigned int mask = MWRender::Mask_Scene
+                            | (terrainCastersOnly ? MWRender::Mask_Terrain
+                                                  : MWRender::Mask_Object | MWRender::Mask_Static);
+                        SceneUtil::ShadowManager::instance().setDiagnosticOutdoorShadowCastingMask(mask);
+                        mDiagnosticShadowOverrideRequest = command.mRequestId;
                     }
                     mDiagnosticStepScheduler.schedule(count);
                     deferredResponse = true;

@@ -197,6 +197,7 @@ namespace OMW
         std::filesystem::path mDiagnosticArtifactRoot;
         std::string mDiagnosticEndpoint;
         Diagnostics::FixedStepScheduler mDiagnosticStepScheduler;
+        std::optional<std::uint64_t> mDiagnosticShadowOverrideRequest;
         bool mDiagnosticChild = false;
         bool mDiagnosticHeaded = false;
 

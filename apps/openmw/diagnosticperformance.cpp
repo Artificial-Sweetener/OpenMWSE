@@ -26,6 +26,7 @@
 #include <components/sceneutil/diagnosticshadowwork.hpp>
 #include <components/sdlutil/diagnosticpresentationtiming.hpp>
 #include <components/terrain/diagnosticcompositemapwork.hpp>
+#include <components/terrain/diagnosticviewselection.hpp>
 
 namespace OMW
 {
@@ -66,6 +67,14 @@ namespace OMW
             CameraMetric{ "state-graphs", SceneUtil::diagnosticShadowStateGraphCountStatistic },
             CameraMetric{ "light-vertical-magnitude", SceneUtil::diagnosticShadowLightVerticalMagnitudeStatistic },
             CameraMetric{ "light-luminance", SceneUtil::diagnosticShadowLightLuminanceStatistic },
+            CameraMetric{ "caster-cull-minimum", SceneUtil::diagnosticShadowCasterCullMinimumStatistic },
+            CameraMetric{ "receiver-depth-span", SceneUtil::diagnosticShadowReceiverDepthSpanStatistic },
+            CameraMetric{ "terrain-selected-nodes", Terrain::diagnosticSelectedNodeCountStatistic },
+            CameraMetric{ "terrain-active-grid-nodes", Terrain::diagnosticActiveGridNodeCountStatistic },
+            CameraMetric{ "terrain-pending-rendering-nodes", Terrain::diagnosticPendingRenderingNodeCountStatistic },
+            CameraMetric{ "terrain-world-revision", Terrain::diagnosticViewWorldRevisionStatistic },
+            CameraMetric{ "terrain-selection-updated", Terrain::diagnosticViewSelectionUpdatedStatistic },
+            CameraMetric{ "terrain-selection-changed", Terrain::diagnosticViewSelectionChangedStatistic },
         };
 
         constexpr std::array terrainCompositeMetrics{
@@ -718,6 +727,7 @@ namespace OMW
         }
 
         output << "raw-statistics:\n";
+        const std::vector<osg::ref_ptr<osg::Camera>> diagnosticCameras = SceneUtil::diagnosticGpuPassCameras();
         for (unsigned frame = firstFrame; frame <= lastFrame; ++frame)
         {
             viewer.getViewerStats()->report(output, frame);
@@ -725,6 +735,11 @@ namespace OMW
             viewer.getCameras(cameras);
             for (osg::Camera* camera : cameras)
                 camera->getStats()->report(output, frame);
+            for (const osg::ref_ptr<osg::Camera>& camera : diagnosticCameras)
+            {
+                if (std::ranges::find(cameras, camera.get()) == cameras.end())
+                    camera->getStats()->report(output, frame);
+            }
         }
     }
 }

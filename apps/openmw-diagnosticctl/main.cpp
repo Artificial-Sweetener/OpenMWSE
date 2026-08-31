@@ -519,6 +519,8 @@ namespace
                   "  openmw-diagnosticctl <run|replay> --openmw openmw.exe --config openmw.cfg\n"
                   "      --artifacts directory [--save save.omwsave | --capsule capture.omwdiag]\n"
                   "      [--frames count] [--performance-samples count] [--fixed-dt seconds]\n"
+                  "      [--capture-route-frames] [--bypass-route-shadows]\n"
+                  "      [--route-shadow-casters terrain|objects]\n"
                   "      [--headed]\n"
                   "      [--setting \"Section:name=value\"]...\n"
                   "  openmw-diagnosticctl inspect-capsule --capsule capture.omwdiag [--entry name]\n";
@@ -539,6 +541,23 @@ namespace
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         throw std::runtime_error("production graphics capture did not complete within its timeout");
+    }
+
+    /// Wait until an exact final-composite sequence has finished serializing.
+    void waitForRenderFrameCapture(const std::string& endpoint, std::uint64_t& requestId)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+        while (std::chrono::steady_clock::now() < deadline)
+        {
+            const Diagnostics::Response status
+                = Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::InspectSession, {} });
+            if (status.mError != Diagnostics::ErrorCode::None)
+                throw std::runtime_error("failed polling exact render-frame capture");
+            if (payloadText(status.mPayload).find("render-frame-capture: idle") != std::string::npos)
+                return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        throw std::runtime_error("exact render-frame capture did not complete within its timeout");
     }
 
     /// Wait for an exact cumulative fixed-frame count without advancing simulation after completion.
@@ -659,6 +678,13 @@ namespace
         const std::filesystem::path sourceConfigOption = findOption(arguments, "--config").value_or(std::string());
         const std::filesystem::path artifactsOption = findOption(arguments, "--artifacts").value_or(std::string());
         const bool headed = hasFlag(arguments, "--headed");
+        const bool captureRouteFrames = hasFlag(arguments, "--capture-route-frames");
+        const bool bypassRouteShadows = hasFlag(arguments, "--bypass-route-shadows");
+        const std::optional<std::string> routeShadowCasters = findOption(arguments, "--route-shadow-casters");
+        if (routeShadowCasters && *routeShadowCasters != "terrain" && *routeShadowCasters != "objects")
+            throw std::invalid_argument("--route-shadow-casters requires terrain or objects");
+        if (bypassRouteShadows && routeShadowCasters)
+            throw std::invalid_argument("--bypass-route-shadows conflicts with --route-shadow-casters");
         if (sourceConfigOption.empty() || artifactsOption.empty())
             throw std::invalid_argument("run requires --openmw, --config, and --artifacts");
 
@@ -773,8 +799,17 @@ namespace
                 const std::uint32_t segmentFrames = static_cast<std::uint32_t>(
                     std::min<std::size_t>(routePlan.mSegmentFrameCount, routePlan.mFrameCount - completedFrames));
                 Diagnostics::Command runSegment{ requestId++, Diagnostics::CommandType::RunGameplayRouteSegment, {} };
+                const std::uint64_t segmentRequestId = runSegment.mRequestId;
                 for (std::size_t byte = 0; byte < sizeof(segmentFrames); ++byte)
                     runSegment.mPayload.push_back(static_cast<std::byte>((segmentFrames >> (byte * 8)) & 0xffu));
+                if (captureRouteFrames || bypassRouteShadows || routeShadowCasters)
+                {
+                    const unsigned routeOptions
+                        = (captureRouteFrames ? 0x1u : 0u) | (bypassRouteShadows ? 0x2u : 0u)
+                        | (routeShadowCasters == "terrain" ? 0x4u : 0u)
+                        | (routeShadowCasters == "objects" ? 0x8u : 0u);
+                    runSegment.mPayload.push_back(static_cast<std::byte>(routeOptions));
+                }
                 const Diagnostics::Response performance
                     = Diagnostics::transact(endpoint, runSegment, std::chrono::minutes(3));
                 if (performance.mError != Diagnostics::ErrorCode::None)
@@ -789,6 +824,15 @@ namespace
                     throw std::runtime_error("failed writing gameplay-route performance evidence");
                 completedFrames += segmentFrames;
                 ++segmentIndex;
+                if (captureRouteFrames)
+                {
+                    waitForRenderFrameCapture(endpoint, requestId);
+                    const std::filesystem::path frameBundle
+                        = artifacts / ("route-frames-" + std::to_string(segmentRequestId) + ".omwdiag");
+                    if (!std::filesystem::is_regular_file(frameBundle))
+                        throw std::runtime_error("exact render-frame capture did not produce its bundle");
+                    std::cout << "route-frame-capture: " << frameBundle << '\n';
+                }
                 requireSuccessfulResponse(
                     Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::CaptureGraphics, {} }));
                 waitForGraphicsCapture(endpoint, requestId);

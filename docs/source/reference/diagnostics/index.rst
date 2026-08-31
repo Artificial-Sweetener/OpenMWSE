@@ -62,6 +62,13 @@ frame in bounded segments, writes ``performance-segment-*.txt``, captures full g
 then closes and cleans the isolated child. Use the same capsule, build configuration, driver state, and replay command for every
 baseline and candidate repetition.
 
+Add ``--capture-route-frames`` when diagnosing temporal rendering defects. The controller stores the exact final composite for
+every executed route frame together with frame-matched shadow-map depth and projection metadata in bounded, versioned
+``route-frames-*.omwdiag`` bundles inside the artifact directory. The capture uses the isolated graphics context and leaves the
+normal game profile untouched.
+Use ``--bypass-route-shadows`` with the same replay to produce a frame-aligned conventional-shadow comparison; shadow rendering
+is restored before boundary graphics evidence is captured.
+
 For temporal investigation, ``--frames`` limits replay to an exact route prefix and ``--performance-samples`` selects the
 checkpoint interval up to 600 frames. Repeating isolated replays with increasing frame limits captures unperturbed graphics at
 specific points along the same recorded motion without allowing an earlier graphics readback to influence a later checkpoint.

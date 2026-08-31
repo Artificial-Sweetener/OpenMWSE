@@ -22,14 +22,16 @@ namespace Shader
 namespace MWRender
 {
     class AtmosphereDiagnostics;
+    class RenderFrameDiagnostics;
 
     class PingPongCanvas : public osg::Geometry
     {
     public:
-        /// Create a frame canvas that can service shared one-shot atmosphere capture requests.
+        /// Create a frame canvas that services shared production-render diagnostic requests.
         PingPongCanvas(Shader::ShaderManager& shaderManager,
             const std::shared_ptr<LuminanceCalculator>& luminanceCalculator,
-            std::shared_ptr<AtmosphereDiagnostics> atmosphereDiagnostics);
+            std::shared_ptr<AtmosphereDiagnostics> atmosphereDiagnostics,
+            std::shared_ptr<RenderFrameDiagnostics> renderFrameDiagnostics);
 
         void drawGeometry(osg::RenderInfo& renderInfo) const;
 
@@ -104,6 +106,7 @@ namespace MWRender
         mutable std::array<osg::ref_ptr<osg::FrameBufferObject>, 3> mFbos;
         mutable std::shared_ptr<LuminanceCalculator> mLuminanceCalculator;
         std::shared_ptr<AtmosphereDiagnostics> mAtmosphereDiagnostics;
+        std::shared_ptr<RenderFrameDiagnostics> mRenderFrameDiagnostics;
         mutable osg::buffered_object<osg::State::UniformMap> mEmptyUniformStacks;
     };
 }

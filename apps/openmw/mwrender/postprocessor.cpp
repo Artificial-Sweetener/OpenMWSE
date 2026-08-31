@@ -39,12 +39,13 @@
 
 #include "atmosphere.hpp"
 #include "atmospherediagnostics.hpp"
+#include "renderframediagnostics.hpp"
 #include "distortion.hpp"
 #include "opaqueblit.hpp"
 #include "pingpongcull.hpp"
 #include "renderbin.hpp"
-#include "renderworkcounter.hpp"
 #include "renderingmanager.hpp"
+#include "renderworkcounter.hpp"
 #include "sky.hpp"
 #include "transparentpass.hpp"
 #include "vismask.hpp"
@@ -153,6 +154,18 @@ namespace MWRender
         return mAtmosphereDiagnostics->captureInProgress();
     }
 
+    void PostProcessor::requestRenderFrameDiagnosticCapture(
+        const std::filesystem::path& outputPath, std::uint32_t frameCount)
+    {
+        mRenderFrameDiagnostics->requestCapture(outputPath, frameCount);
+        Log(Debug::Info) << "Exact production-frame diagnostic sequence requested at " << outputPath;
+    }
+
+    bool PostProcessor::renderFrameDiagnosticCaptureInProgress() const
+    {
+        return mRenderFrameDiagnostics->captureInProgress();
+    }
+
     void PostProcessor::invalidateAtmosphereHistory()
     {
         for (const osg::ref_ptr<PingPongCanvas>& canvas : mCanvases)
@@ -241,8 +254,10 @@ namespace MWRender
         std::shared_ptr<LuminanceCalculator> luminanceCalculator = std::make_shared<LuminanceCalculator>(shaderManager);
 
         mAtmosphereDiagnostics = std::make_shared<AtmosphereDiagnostics>();
+        mRenderFrameDiagnostics = std::make_shared<RenderFrameDiagnostics>();
         for (auto& canvas : mCanvases)
-            canvas = new PingPongCanvas(shaderManager, luminanceCalculator, mAtmosphereDiagnostics);
+            canvas = new PingPongCanvas(
+                shaderManager, luminanceCalculator, mAtmosphereDiagnostics, mRenderFrameDiagnostics);
         mCanvases[0]->setPreviousCanvas(mCanvases[1]);
         mCanvases[1]->setPreviousCanvas(mCanvases[0]);
 

@@ -16,6 +16,7 @@
 
 #include "chunkmanager.hpp"
 #include "compositemaprenderer.hpp"
+#include "diagnosticviewselection.hpp"
 #include "heightcull.hpp"
 #include "quadtreenode.hpp"
 #include "storage.hpp"
@@ -487,6 +488,28 @@ namespace Terrain
             DefaultLodCallback lodCallback(
                 mLodFactor, mMinSize, mViewDistance, mActiveGrid, ESM::getCellSize(mWorldspace));
             mRootNode->traverseNodes(vd, viewPoint, &lodCallback);
+        }
+
+        if (isCullVisitor && viewer != nullptr && nv.getFrameStamp() != nullptr
+            && diagnosticViewSelectionCollectionEnabled(*static_cast<osg::Camera*>(viewer)))
+        {
+            DiagnosticViewSelection selection;
+            selection.mSelectedNodes = vd->getNumEntries();
+            selection.mWorldRevision = vd->getWorldUpdateRevision();
+            selection.mSelectionUpdated = needsUpdate;
+            selection.mSelectionChanged = vd->hasChanged();
+            for (unsigned int i = 0; i < vd->getNumEntries(); ++i)
+            {
+                const ViewDataEntry& entry = vd->getEntry(i);
+                const osg::Vec2f& center = entry.mNode->getCenter();
+                if (center.x() > mActiveGrid.x() && center.y() > mActiveGrid.y() && center.x() < mActiveGrid.z()
+                    && center.y() < mActiveGrid.w())
+                    ++selection.mActiveGridNodes;
+                if (!entry.mRenderingNode)
+                    ++selection.mPendingRenderingNodes;
+            }
+            recordDiagnosticViewSelection(
+                *static_cast<osg::Camera*>(viewer), nv.getFrameStamp()->getFrameNumber(), selection);
         }
 
         const float cellWorldSize = static_cast<float>(ESM::getCellSize(mWorldspace));

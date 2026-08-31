@@ -1,6 +1,7 @@
 #include <components/sceneutil/offscreencontext.hpp>
 #include <components/shader/shadermanager.hpp>
 
+#include <osg/GLExtensions>
 #include <osg/GraphicsContext>
 #include <osg/Program>
 
@@ -56,6 +57,60 @@ TEST(ShadowCastingShaderTest, OpaqueAndAlphaTestedProgramsLinkInARealContext)
         linkedProgram->getInfoLog(informationLog);
         EXPECT_TRUE(linkedProgram->isLinked()) << informationLog;
     }
+
+    context->releaseContext();
+    context->close();
+}
+
+TEST(ShadowCastingShaderTest, LightFacingDepthClampsAndReceiverAwayDepthClips)
+{
+    osg::ref_ptr<osg::GraphicsContext> context = SceneUtil::createOffscreenContext({ .mWidth = 32, .mHeight = 32 });
+    ASSERT_TRUE(context);
+    ASSERT_TRUE(context->realize());
+    ASSERT_TRUE(context->makeCurrent());
+
+    osg::State& state = *context->getState();
+    Shader::ShaderManager manager;
+    manager.setShaderPath(std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/shaders");
+    Shader::ShaderManager::DefineMap globalDefines = makeGlobalDefines();
+    manager.setGlobalDefines(globalDefines);
+
+    const osg::ref_ptr<osg::Program> program = compileShadowCaster(manager, state, true);
+    ASSERT_TRUE(program);
+    const osg::Program::PerContextProgram* linkedProgram = program->getPCP(state);
+    ASSERT_NE(linkedProgram, nullptr);
+    ASSERT_TRUE(linkedProgram->isLinked());
+
+    osg::GLExtensions* extensions = state.get<osg::GLExtensions>();
+    ASSERT_NE(extensions, nullptr);
+    extensions->glUseProgram(linkedProgram->getHandle());
+    glViewport(0, 0, 32, 32);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_ALWAYS);
+    glDepthMask(GL_TRUE);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+
+    const auto renderDepth = [](float casterDepth) {
+        glClearDepth(0.5);
+        glClear(GL_DEPTH_BUFFER_BIT);
+        glBegin(GL_TRIANGLES);
+        glVertex3f(-0.75f, -0.75f, casterDepth);
+        glVertex3f(0.75f, -0.75f, casterDepth);
+        glVertex3f(0.0f, 0.75f, casterDepth);
+        glEnd();
+        glFinish();
+
+        float centerDepth = 1.0f;
+        glReadPixels(16, 16, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, &centerDepth);
+        return centerDepth;
+    };
+
+    EXPECT_FLOAT_EQ(renderDepth(-2.0f), 0.0f);
+    EXPECT_FLOAT_EQ(renderDepth(2.0f), 0.5f);
+    extensions->glUseProgram(0);
 
     context->releaseContext();
     context->close();

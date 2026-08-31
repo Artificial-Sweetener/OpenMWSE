@@ -239,4 +239,14 @@ namespace SceneUtil
         else if (mEnableShadows)
             mShadowTechnique->disableShadows(true);
     }
+
+    void ShadowManager::setDiagnosticOutdoorShadowCastingMask(unsigned int mask) const
+    {
+        mShadowSettings->setCastsShadowTraversalMask(mask);
+    }
+
+    void ShadowManager::restoreDiagnosticOutdoorShadowCastingMask() const
+    {
+        mShadowSettings->setCastsShadowTraversalMask(mOutdoorShadowCastingMask);
+    }
 }

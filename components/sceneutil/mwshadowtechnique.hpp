@@ -260,7 +260,7 @@ namespace SceneUtil {
 
         virtual bool computeShadowCameraSettings(Frustum& frustum, LightData& positionedLight, osg::Matrixd& projectionMatrix, osg::Matrixd& viewMatrix);
 
-        /// Crop receiver dimensions while retaining the caster-facing depth range for normal depth clipping.
+        /// Crop receiver dimensions while retaining the caster-facing depth range for shader depth clamping.
         virtual bool cropShadowCameraToMainFrustum(Frustum& frustum, osg::Camera* camera, double viewNear, double viewFar, std::vector<osg::Plane>& planeList);
 
         virtual bool adjustPerspectiveShadowMapCameraSettings(osgUtil::RenderStage* renderStage, Frustum& frustum, LightData& positionedLight, osg::Camera* camera, double viewNear, double viewFar);
