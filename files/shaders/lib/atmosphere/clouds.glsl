@@ -124,7 +124,8 @@ float openmwseCloudSunAccess(vec3 samplePosition, vec3 sunDirection)
 /// Integrate premultiplied cloud radiance and transmittance along a bounded world-space ray.
 vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float maximumDistance, int quality,
     vec3 solarRadiance, vec3 skyIrradiance, vec3 groundIrradiance, vec3 atmosphericTarget,
-    OpenMWSEAerialPerspectiveParameters atmosphere, float rayDither, bool stableSampling, bool useAtmosphericTarget)
+    OpenMWSEAerialPerspectiveParameters atmosphere, float rayDither, bool quadratureSampling,
+    bool useAtmosphericTarget)
 {
     vec4 parameters = openmwseCloudParameters();
     if (parameters.x <= 0.001 || worldDirection.z <= -0.01)
@@ -170,11 +171,11 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
         if (segmentLength <= 0.0)
             break;
         float nextDistanceAlongRay = distanceAlongRay + segmentLength;
-        float sampleOffset = stableSampling ? 0.5 : fract(rayDither + float(sampleIndex) * 0.61803398875);
+        float sampleOffset = quadratureSampling ? 0.5 : fract(rayDither + float(sampleIndex) * 0.61803398875);
         float sampleDistance = distanceAlongRay + segmentLength * sampleOffset;
         vec3 samplePosition = rayOrigin + worldDirection * sampleDistance;
         float density;
-        if (stableSampling)
+        if (quadratureSampling)
         {
             const float firstQuadratureOffset = 0.2113248654;
             const float secondQuadratureOffset = 0.7886751346;
@@ -230,13 +231,13 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
     return vec4(scatteredLight, transmittance);
 }
 
-/// Integrate clouds with temporal samples or deterministic quadrature for frames without usable history.
+/// Integrate clouds with one deterministic or temporal sample per segment, or deterministic quadrature when requested.
 vec4 openmwseIntegrateClouds(vec3 rayOrigin, vec3 worldDirection, float maximumDistance, int quality,
     vec3 solarRadiance, vec3 skyIrradiance, vec3 groundIrradiance,
-    OpenMWSEAerialPerspectiveParameters atmosphere, float rayDither, bool stableSampling)
+    OpenMWSEAerialPerspectiveParameters atmosphere, float rayDither, bool quadratureSampling)
 {
     return openmwseIntegrateCloudsInternal(rayOrigin, worldDirection, maximumDistance, quality, solarRadiance,
-        skyIrradiance, groundIrradiance, vec3(0.0), atmosphere, rayDither, stableSampling, false);
+        skyIrradiance, groundIrradiance, vec3(0.0), atmosphere, rayDither, quadratureSampling, false);
 }
 
 /// Integrate deterministic reflected clouds without frame-dependent sampling noise.

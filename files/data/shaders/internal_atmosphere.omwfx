@@ -119,10 +119,20 @@ shared {
 
     const float maximumAtmosphereHistoryAdvectionWorldUnits = 2400.0;
 
+    /// Report whether camera translation makes a single-depth volume-history reprojection unreliable.
+    bool atmosphereCameraTranslated()
+    {
+        if (!omw_AtmosphereHistoryValid)
+            return false;
+        vec3 currentEyeInPreviousView = (omw.prevViewMatrix * vec4(omw.eyePos.xyz, 1.0)).xyz;
+        return length(currentEyeInPreviousView) > 1.0;
+    }
+
     /// Report whether global state permits frame-varying samples to accumulate in temporal history.
     bool atmosphereTemporalSamplingEnabled()
     {
         return omw_AtmosphereHistoryValid
+            && !atmosphereCameraTranslated()
             && omw.atmosphereHistoryLightingWeight >= 0.5
             && length(omw.atmosphereCloudAdvectionDeltaWorldUnits)
                 <= maximumAtmosphereHistoryAdvectionWorldUnits;
@@ -193,8 +203,9 @@ shared {
         return vec2(representativeDistance, densitySum);
     }
 
-    /// Report whether the advected previous-frame sample contained the same cloud support.
-    bool previousFrameContainsCloud(vec3 rayOrigin, vec3 rayDirection, float representativeDistance)
+    /// Retain stationary dither support only when it reprojects to the same physical cloud sample.
+    bool previousFrameContainsStationaryCloud(
+        vec3 rayOrigin, vec3 rayDirection, float representativeDistance, vec2 currentUv)
     {
         if (!atmosphereTemporalSamplingEnabled())
             return false;
@@ -206,8 +217,19 @@ shared {
         if (previousClipPosition.w <= 0.0 || previousUv.x <= 0.001 || previousUv.x >= 0.999
             || previousUv.y <= 0.001 || previousUv.y >= 0.999)
             return false;
+
+        vec2 volumeTexel = omw.rcpResolution * volumePixelScale();
+        vec2 reprojectionInTexels = (previousUv - currentUv) / max(volumeTexel, vec2(0.000001));
+        if (length(reprojectionInTexels) > 0.25)
+            return false;
+
         vec4 previousMetadata = omw_GetAtmosphereMetadataHistory(previousUv);
-        return previousMetadata.a > 1.5 && previousMetadata.g > 0.0001;
+        float previousRepresentativeDistance = decodeAtmosphereDistance(previousMetadata.r);
+        float expectedPreviousRepresentativeDistance = length(previousViewPosition.xyz);
+        float representativeDepthTolerance = max(180.0, expectedPreviousRepresentativeDistance * 0.035);
+        return previousMetadata.a > 1.5 && previousMetadata.g > 0.0001
+            && abs(previousRepresentativeDistance - expectedPreviousRepresentativeDistance)
+                <= representativeDepthTolerance;
     }
 
     /// Accumulate bounded nearby point-light radiance for supported mist quality levels.
@@ -307,13 +329,15 @@ fragment integrateAtmosphereVolume(target=AtmosphereVolumeRaw) {
         float cloudMaximumDistance = openSky ? openmwseCloudMaximumDistance : sceneDistance;
         OpenMWSEAerialPerspectiveParameters atmosphere = aerialPerspectiveParameters();
         bool temporalSamplingEnabled = atmosphereTemporalSamplingEnabled();
-        float cloudDither = temporalSamplingEnabled
-            ? openmwseRayMarchDither(gl_FragCoord.xy, float(omw.frameNumber))
-            : openmwseRayMarchDither(gl_FragCoord.xy);
+        bool cameraTranslated = atmosphereCameraTranslated();
+        float cloudDither = cameraTranslated ? 0.5
+            : temporalSamplingEnabled ? openmwseRayMarchDither(gl_FragCoord.xy, float(omw.frameNumber))
+                                      : openmwseRayMarchDither(gl_FragCoord.xy);
+        bool quadratureSampling = !temporalSamplingEnabled && !cameraTranslated;
         vec4 clouds = cloudsEnabled
             ? openmwseIntegrateClouds(omw.eyePos.xyz, rayDirection, cloudMaximumDistance, omw.atmosphereQuality,
                 omw.atmosphereSolarRadiance, omw.atmosphereSkyIrradiance, omw.atmosphereGroundIrradiance,
-                atmosphere, cloudDither, !temporalSamplingEnabled)
+                atmosphere, cloudDither, quadratureSampling)
             : vec4(0.0, 0.0, 0.0, 1.0);
 
         vec4 mist = vec4(0.0, 0.0, 0.0, 1.0);
@@ -350,7 +374,7 @@ fragment integrateAtmosphereVolume(target=AtmosphereVolumeRaw) {
                     float distanceAlongRay = segmentStart + jitter * stepLength;
                     vec3 samplePosition = omw.eyePos.xyz + rayDirection * distanceAlongRay;
                     float density;
-                    if (temporalSamplingEnabled)
+                    if (temporalSamplingEnabled || cameraTranslated)
                         density = mistDensityAt(samplePosition);
                     else
                     {
@@ -450,7 +474,8 @@ fragment classifyAtmosphereVolume(target=AtmosphereVolumeMetadataHistory, rt1=At
                     = representativeCloudDistanceAndDensity(omw.eyePos.xyz, rayDirection, cloudInterval);
                 float cloudDistance = cloudDistanceAndDensity.x;
                 bool cloudSupported = currentVolumeContributes
-                    || previousFrameContainsCloud(omw.eyePos.xyz, rayDirection, cloudDistance);
+                    || previousFrameContainsStationaryCloud(
+                        omw.eyePos.xyz, rayDirection, cloudDistance, omw_TexCoord);
                 if (cloudSupported && (mediumType < 0.5 || cloudDistance < representativeDistance))
                 {
                     representativeDistance = cloudDistance;
@@ -476,6 +501,12 @@ fragment resolveAtmosphereVolumeHistory(
         vec4 currentVolume = omw_Texture2D(AtmosphereVolumeRaw, omw_TexCoord);
         vec4 currentMetadata = omw_Texture2D(AtmosphereVolumeMetadataHistory, omw_TexCoord);
         if (!omw_AtmosphereHistoryValid || !omw.atmosphereEnabled)
+        {
+            omw_FragColor = currentVolume;
+            return;
+        }
+
+        if (atmosphereCameraTranslated())
         {
             omw_FragColor = currentVolume;
             return;
@@ -545,9 +576,7 @@ fragment resolveAtmosphereVolumeHistory(
         }
 
         vec4 previousMetadata = omw_GetAtmosphereMetadataHistory(previousUv);
-        bool newlySampledCloud = currentMetadata.a > 1.5 && previousMetadata.a < 0.5
-            && previousMetadata.g <= 0.0001;
-        if (abs(previousMetadata.a - currentMetadata.a) > 0.25 && !newlySampledCloud)
+        if (abs(previousMetadata.a - currentMetadata.a) > 0.25)
         {
             omw_FragColor = currentVolume;
             return;
