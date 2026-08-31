@@ -24,7 +24,6 @@ namespace MWRender
         = "Diagnostic Groundcover Conservative Instances Tested";
     inline constexpr std::string_view groundcoverConservativeInstanceRenderCounter
         = "Diagnostic Groundcover Conservative Instances Rendered";
-
     /// Initialize diagnostic rendering work counters for a frame when scene statistics are requested.
     void resetDiagnosticRenderWorkCounters(osg::Stats& stats, unsigned frameNumber);
 
