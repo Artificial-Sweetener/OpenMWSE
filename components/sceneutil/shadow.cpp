@@ -78,6 +78,8 @@ namespace SceneUtil
             mShadowTechnique->disableFrontFaceCulling();
 
         mShadowSettings->setMultipleShadowMapHint(osgShadow::ShadowSettings::CASCADED);
+        // Keep directional shadow geometry stable in world space while the viewing camera rotates.
+        mShadowSettings->setShadowMapProjectionHint(osgShadow::ShadowSettings::ORTHOGRAPHIC_SHADOW_MAP);
 
         if (mEnableShadows && settings.mEnableDebugHud)
             mShadowTechnique->enableDebugHUD();

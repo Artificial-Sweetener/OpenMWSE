@@ -35,6 +35,7 @@ namespace SceneUtil
             const Settings::ShadowsCategory& settings, Shader::ShaderManager& shaderManager);
         ~ShadowManager();
 
+        /// Apply runtime shadow policy and reserve the configured shadow-map texture units.
         void setupShadowSettings(const Settings::ShadowsCategory& settings, Shader::ShaderManager& shaderManager);
         void setOutdoorShadowCastingMask(unsigned int mask);
         void setIndoorShadowCastingMask(unsigned int mask);

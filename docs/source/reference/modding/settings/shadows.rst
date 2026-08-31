@@ -192,5 +192,5 @@ Shadows Settings
    :range: > 0
    :default: 0.25
 
-   Minimum near/far ratio for Light Space Perspective Shadow Map.
-   Controls distribution of shadow detail near and far from the camera.
+   Retained for configuration compatibility.
+   Stable orthographic shadow cascades do not apply this value.
