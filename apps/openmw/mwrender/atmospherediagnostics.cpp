@@ -2,6 +2,7 @@
 
 #include "renderdiagnosticbundle.hpp"
 #include "renderdiagnosticcapture.hpp"
+#include "shadowmapdiagnostics.hpp"
 
 #include <chrono>
 #include <string>
@@ -32,10 +33,13 @@ namespace MWRender
     bool AtmosphereDiagnostics::captureRequested() const
     {
         std::lock_guard lock(mRequestMutex);
+        if (mSettleFramesRemaining != 0)
+            return false;
         switch (mCaptureStage)
         {
             case CaptureStage::NormalPending:
             case CaptureStage::ShadowBypassPending:
+            case CaptureStage::CloudSurfaceShadowBypassPending:
             case CaptureStage::CoverageBypassPending:
             case CaptureStage::FogBypassPending:
             case CaptureStage::FogVisibilityPending:
@@ -57,45 +61,66 @@ namespace MWRender
     AtmosphereDiagnostics::ComparisonAction AtmosphereDiagnostics::advanceComparison()
     {
         std::lock_guard lock(mRequestMutex);
+        if (mSettleFramesRemaining != 0)
+        {
+            --mSettleFramesRemaining;
+            return ComparisonAction::None;
+        }
+
+        constexpr unsigned int comparisonSettleFrameCount = 3;
         if (mCaptureStage == CaptureStage::AwaitingShadowBypass)
         {
             mCaptureStage = CaptureStage::ShadowBypassPending;
+            mSettleFramesRemaining = comparisonSettleFrameCount;
             return ComparisonAction::BypassShadows;
+        }
+        if (mCaptureStage == CaptureStage::AwaitingCloudSurfaceShadowBypass)
+        {
+            mCaptureStage = CaptureStage::CloudSurfaceShadowBypassPending;
+            mSettleFramesRemaining = comparisonSettleFrameCount;
+            return ComparisonAction::BypassCloudSurfaceShadows;
         }
         if (mCaptureStage == CaptureStage::AwaitingCoverageBypass)
         {
             mCaptureStage = CaptureStage::CoverageBypassPending;
+            mSettleFramesRemaining = comparisonSettleFrameCount;
             return ComparisonAction::BypassCoveragePreservation;
         }
         if (mCaptureStage == CaptureStage::AwaitingFogBypass)
         {
             mCaptureStage = CaptureStage::FogBypassPending;
+            mSettleFramesRemaining = comparisonSettleFrameCount;
             return ComparisonAction::BypassCompatibilityFog;
         }
         if (mCaptureStage == CaptureStage::AwaitingFogVisibility)
         {
             mCaptureStage = CaptureStage::FogVisibilityPending;
+            mSettleFramesRemaining = comparisonSettleFrameCount;
             return ComparisonAction::ShowFogVisibility;
         }
         if (mCaptureStage == CaptureStage::AwaitingFogInScattering)
         {
             mCaptureStage = CaptureStage::FogInScatteringPending;
+            mSettleFramesRemaining = comparisonSettleFrameCount;
             return ComparisonAction::ShowFogInScattering;
         }
         if (mCaptureStage == CaptureStage::AwaitingPreFogRadiance)
         {
             mCaptureStage = CaptureStage::PreFogRadiancePending;
+            mSettleFramesRemaining = comparisonSettleFrameCount;
             return ComparisonAction::ShowPreFogRadiance;
         }
         if (mCaptureStage == CaptureStage::AwaitingSampledSurfaceColor)
         {
             mCaptureStage = CaptureStage::SampledSurfaceColorPending;
+            mSettleFramesRemaining = comparisonSettleFrameCount;
             return ComparisonAction::ShowSampledSurfaceColor;
         }
         if (mCaptureStage == CaptureStage::AwaitingNormalRestore)
         {
             mCaptureStage = CaptureStage::Idle;
             mRequestedOutputDirectory.reset();
+            mSettleFramesRemaining = 0;
             return ComparisonAction::RestoreNormalRendering;
         }
         return ComparisonAction::None;
@@ -114,12 +139,13 @@ namespace MWRender
             captureStage = mCaptureStage;
             const bool pendingCapture = captureStage == CaptureStage::NormalPending
                 || captureStage == CaptureStage::ShadowBypassPending
+                || captureStage == CaptureStage::CloudSurfaceShadowBypassPending
                 || captureStage == CaptureStage::CoverageBypassPending || captureStage == CaptureStage::FogBypassPending
                 || captureStage == CaptureStage::FogVisibilityPending
                 || captureStage == CaptureStage::FogInScatteringPending
                 || captureStage == CaptureStage::PreFogRadiancePending
                 || captureStage == CaptureStage::SampledSurfaceColorPending;
-            if (!mRequestedOutputDirectory || !pendingCapture)
+            if (!mRequestedOutputDirectory || !pendingCapture || mSettleFramesRemaining != 0)
                 return;
             outputDirectory = *mRequestedOutputDirectory;
         }
@@ -131,6 +157,8 @@ namespace MWRender
                     return "normal";
                 case CaptureStage::ShadowBypassPending:
                     return "shadows-bypassed";
+                case CaptureStage::CloudSurfaceShadowBypassPending:
+                    return "cloud-surface-shadows-bypassed";
                 case CaptureStage::CoverageBypassPending:
                     return "coverage-preservation-bypassed";
                 case CaptureStage::FogBypassPending:
@@ -152,6 +180,7 @@ namespace MWRender
         {
             RenderDiagnosticCapture capture(renderInfo);
             std::vector<RenderDiagnosticImage> images;
+            ShadowMapDiagnosticCapture shadowMaps;
             const auto appendColor = [&](osg::Texture* texture, std::string name) {
                 if (auto image = capture.captureColorTexture(texture, std::move(name)))
                     images.emplace_back(std::move(*image));
@@ -171,6 +200,13 @@ namespace MWRender
             appendColor(shafts, "atmosphere-shafts");
             appendColor(previousResolvedVolume, "previous-atmosphere-volume-resolved");
             appendColor(previousVolumeMetadata, "previous-atmosphere-volume-metadata");
+            if (captureStage == CaptureStage::NormalPending)
+            {
+                constexpr unsigned shadowMapDiagnosticMaximumDimension = 1024;
+                shadowMaps = captureShadowMapDiagnostics(capture, renderInfo, shadowMapDiagnosticMaximumDimension);
+                images.insert(images.end(), std::make_move_iterator(shadowMaps.mImages.begin()),
+                    std::make_move_iterator(shadowMaps.mImages.end()));
+            }
             images.emplace_back(
                 capture.captureFramebuffer(finalFramebuffer, finalWidth, finalHeight, "final-composite"));
 
@@ -183,6 +219,12 @@ namespace MWRender
                 / ("atmosphere-" + std::string(captureKind) + "-frame-" + std::to_string(frameNumber) + "-"
                     + std::to_string(timestamp) + ".omwdiag");
             writeRenderDiagnosticBundle(bundlePath, frameNumber, images);
+            if (!shadowMaps.mMetadata.empty())
+            {
+                std::filesystem::path metadataPath = bundlePath;
+                metadataPath.replace_extension(".shadow.yaml");
+                writeShadowMapDiagnosticMetadata(metadataPath, shadowMaps.mMetadata);
+            }
             Log(Debug::Info) << "Captured production atmosphere diagnostics to " << bundlePath;
         }
         catch (const std::exception& exception)
@@ -197,6 +239,8 @@ namespace MWRender
                 if (captureStage == CaptureStage::NormalPending)
                     mCaptureStage = CaptureStage::AwaitingShadowBypass;
                 else if (captureStage == CaptureStage::ShadowBypassPending)
+                    mCaptureStage = CaptureStage::AwaitingCloudSurfaceShadowBypass;
+                else if (captureStage == CaptureStage::CloudSurfaceShadowBypassPending)
                     mCaptureStage = CaptureStage::AwaitingCoverageBypass;
                 else if (captureStage == CaptureStage::CoverageBypassPending)
                     mCaptureStage = CaptureStage::AwaitingFogBypass;

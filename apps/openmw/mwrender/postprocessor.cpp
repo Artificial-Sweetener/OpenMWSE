@@ -7,12 +7,12 @@
 #include <chrono>
 #include <thread>
 
+#include <osg/Stats>
 #include <osg/Texture1D>
 #include <osg/Texture2D>
 #include <osg/Texture2DArray>
 #include <osg/Texture2DMultisample>
 #include <osg/Texture3D>
-#include <osg/Stats>
 
 #include <components/files/conversion.hpp>
 #include <components/misc/pathhelpers.hpp>
@@ -21,8 +21,8 @@
 #include <components/resource/scenemanager.hpp>
 #include <components/sceneutil/color.hpp>
 #include <components/sceneutil/deformationstats.hpp>
-#include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/depth.hpp>
+#include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/nodecallback.hpp>
 #include <components/sceneutil/shadow.hpp>
 #include <components/settings/values.hpp>
@@ -179,6 +179,11 @@ namespace MWRender
             case AtmosphereDiagnostics::ComparisonAction::BypassShadows:
                 SceneUtil::ShadowManager::instance().setDiagnosticShadowRenderingEnabled(false);
                 Log(Debug::Info) << "Bypassing shadows for the second production diagnostic frame";
+                break;
+            case AtmosphereDiagnostics::ComparisonAction::BypassCloudSurfaceShadows:
+                SceneUtil::ShadowManager::instance().setDiagnosticShadowRenderingEnabled(true);
+                mRendering.setAtmosphereDiagnosticMode(7);
+                Log(Debug::Info) << "Bypassing cloud surface shadows for the production diagnostic frame";
                 break;
             case AtmosphereDiagnostics::ComparisonAction::BypassCoveragePreservation:
                 SceneUtil::ShadowManager::instance().setDiagnosticShadowRenderingEnabled(true);

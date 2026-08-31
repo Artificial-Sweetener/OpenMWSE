@@ -26,6 +26,7 @@ namespace MWRender
         {
             None,
             BypassShadows,
+            BypassCloudSurfaceShadows,
             BypassCoveragePreservation,
             BypassCompatibilityFog,
             ShowFogVisibility,
@@ -62,6 +63,8 @@ namespace MWRender
             NormalPending,
             AwaitingShadowBypass,
             ShadowBypassPending,
+            AwaitingCloudSurfaceShadowBypass,
+            CloudSurfaceShadowBypassPending,
             AwaitingCoverageBypass,
             CoverageBypassPending,
             AwaitingFogBypass,
@@ -80,6 +83,7 @@ namespace MWRender
         mutable std::mutex mRequestMutex;
         std::optional<std::filesystem::path> mRequestedOutputDirectory;
         CaptureStage mCaptureStage = CaptureStage::Idle;
+        unsigned int mSettleFramesRemaining = 0;
     };
 }
 

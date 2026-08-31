@@ -2,6 +2,7 @@
 #define OPENMWSE_ATMOSPHERE_CLOUD_SHADOW_GLSL
 
 #include "lib/atmosphere/uniforms.glsl"
+#include "lib/atmosphere/diagnostics.glsl"
 
 uniform float waterHeight;
 
@@ -52,6 +53,9 @@ vec2 openmwseCloudShadowAdvectionOffsetWorldUnits()
 /// Evaluate Beer transmittance through the shared world-anchored cloud column toward the sun.
 float openmwseCloudSunTransmittance(vec3 worldPosition)
 {
+    if (openmwseAtmosphereDiagnosticMode == openmwseAtmosphereDiagnosticCloudSurfaceShadowsBypassed)
+        return 1.0;
+
     vec3 sunDirection = normalize(atmosphere.sunDirection);
     if (!atmosphere.enabled || atmosphere.cloudParameters.x <= 0.001 || sunDirection.z <= 0.01)
         return 1.0;
