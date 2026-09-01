@@ -1,9 +1,11 @@
 #include <components/debug/debugging.hpp>
+#include <components/diagnostics/atmospherescenario.hpp>
 #include <components/diagnostics/capsule.hpp>
 #include <components/diagnostics/gameplayroute.hpp>
 #include <components/diagnostics/localtransport.hpp>
 #include <components/diagnostics/session.hpp>
 #include <components/files/hash.hpp>
+#include <components/misc/strings/algorithm.hpp>
 
 #include "gameplayrouteexecution.hpp"
 #include "isolatedsettings.hpp"
@@ -20,6 +22,7 @@
 #include <future>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <optional>
 #include <random>
@@ -358,6 +361,44 @@ namespace
         return result;
     }
 
+    /// Describe bounded, path-level evidence when source-profile integrity verification fails.
+    std::string describeProfileDifference(const ProfileFingerprint& before, const ProfileFingerprint& after)
+    {
+        constexpr std::size_t maximumReportedPaths = 8;
+        std::vector<std::string> differences;
+        auto beforeIt = before.begin();
+        auto afterIt = after.begin();
+        while ((beforeIt != before.end() || afterIt != after.end()) && differences.size() < maximumReportedPaths)
+        {
+            if (afterIt == after.end() || (beforeIt != before.end() && beforeIt->first < afterIt->first))
+            {
+                differences.push_back("removed " + beforeIt->first.string());
+                ++beforeIt;
+            }
+            else if (beforeIt == before.end() || afterIt->first < beforeIt->first)
+            {
+                differences.push_back("added " + afterIt->first.string());
+                ++afterIt;
+            }
+            else
+            {
+                if (!(beforeIt->second == afterIt->second))
+                    differences.push_back("modified " + beforeIt->first.string());
+                ++beforeIt;
+                ++afterIt;
+            }
+        }
+
+        std::string result;
+        for (const std::string& difference : differences)
+        {
+            if (!result.empty())
+                result += ", ";
+            result += difference;
+        }
+        return result.empty() ? "unidentified fingerprint difference" : result;
+    }
+
     /// Copy the selected profile's authored configuration into a writable isolated workspace.
     void copyProfileConfiguration(const std::filesystem::path& source, const std::filesystem::path& destination)
     {
@@ -437,6 +478,123 @@ namespace
         return count == 1;
     }
 
+    /// Parse one finite floating-point option and reject trailing non-numeric text.
+    double parseFiniteOption(std::string_view name, const std::string& text)
+    {
+        std::size_t consumed = 0;
+        const double value = std::stod(text, &consumed);
+        if (consumed != text.size() || !std::isfinite(value))
+            throw std::invalid_argument(std::string(name) + " requires a finite number");
+        return value;
+    }
+
+    /// Parse one unsigned frame-count option without allowing narrowing or trailing text.
+    std::uint32_t parseFrameCountOption(std::string_view name, const std::string& text, std::uint32_t maximum)
+    {
+        std::size_t consumed = 0;
+        const unsigned long long value = std::stoull(text, &consumed);
+        if (consumed != text.size() || value > maximum)
+            throw std::invalid_argument(std::string(name) + " must be within [0, " + std::to_string(maximum) + "]");
+        return static_cast<std::uint32_t>(value);
+    }
+
+    /// Parse comma-separated semantic environment weights without assigning built-in biome identities.
+    std::map<std::string, float, std::less<>> parseEnvironmentTraits(const std::string& text)
+    {
+        std::map<std::string, float, std::less<>> traits;
+        std::size_t start = 0;
+        while (start < text.size())
+        {
+            const std::size_t end = text.find(',', start);
+            const std::string_view assignment(
+                text.data() + start, (end == std::string::npos ? text.size() : end) - start);
+            const std::size_t separator = assignment.find('=');
+            if (separator == std::string_view::npos || separator == 0 || separator + 1 >= assignment.size()
+                || assignment.find('=', separator + 1) != std::string_view::npos)
+                throw std::invalid_argument("--environment-traits requires comma-separated name=weight pairs");
+            const std::string trait(assignment.substr(0, separator));
+            const float weight = static_cast<float>(
+                parseFiniteOption("--environment-traits", std::string(assignment.substr(separator + 1))));
+            if (weight < 0.f || weight > 1.f || !traits.emplace(trait, weight).second)
+                throw std::invalid_argument("--environment-traits requires unique weights within [0, 1]");
+            if (end == std::string::npos)
+                break;
+            start = end + 1;
+        }
+        if (traits.empty())
+            throw std::invalid_argument("--environment-traits requires at least one name=weight pair");
+        return traits;
+    }
+
+    /// Build one exact atmosphere scenario from mutually exclusive steady and transitioning weather options.
+    std::optional<Diagnostics::AtmosphereScenario> parseAtmosphereScenarioOptions(std::span<char*> arguments)
+    {
+        const std::optional<std::string> weather = findOption(arguments, "--weather");
+        const std::optional<std::string> weatherFrom = findOption(arguments, "--weather-from");
+        const std::optional<std::string> weatherTo = findOption(arguments, "--weather-to");
+        const std::optional<std::string> transition = findOption(arguments, "--weather-transition");
+        const std::optional<std::string> gameHour = findOption(arguments, "--game-hour");
+        const std::optional<std::string> cloudSeed = findOption(arguments, "--cloud-seed");
+        const std::optional<std::string> recentPrecipitation = findOption(arguments, "--recent-precipitation");
+        const std::optional<std::string> environmentTraits = findOption(arguments, "--environment-traits");
+        const std::optional<std::string> environmentTerrainHeight
+            = findOption(arguments, "--environment-terrain-height");
+        const bool disableMainClouds = hasFlag(arguments, "--disable-main-clouds");
+        const bool disableLowClouds = hasFlag(arguments, "--disable-low-clouds");
+        const bool disableMist = hasFlag(arguments, "--disable-mist");
+        const bool disableFog = hasFlag(arguments, "--disable-fog");
+        const bool disableDistanceFog = hasFlag(arguments, "--disable-distance-fog");
+        const bool disablePrecipitation = hasFlag(arguments, "--disable-precipitation");
+        const bool disableLightning = hasFlag(arguments, "--disable-lightning");
+        const bool anyTransitionOption = weatherFrom || weatherTo || transition;
+        if (weather && anyTransitionOption)
+            throw std::invalid_argument("--weather conflicts with transitioning weather options");
+        if (anyTransitionOption && (!weatherFrom || !weatherTo || !transition))
+            throw std::invalid_argument(
+                "transitioning weather requires --weather-from, --weather-to, and --weather-transition");
+
+        Diagnostics::AtmosphereScenario scenario;
+        if (weather)
+            scenario.mWeather = Diagnostics::DiagnosticWeatherState{ *weather, std::nullopt, 0.f };
+        else if (anyTransitionOption)
+        {
+            scenario.mWeather = Diagnostics::DiagnosticWeatherState{ *weatherFrom, *weatherTo,
+                static_cast<float>(parseFiniteOption("--weather-transition", *transition)) };
+        }
+        if (gameHour)
+            scenario.mGameHour = parseFiniteOption("--game-hour", *gameHour);
+        if (disableMainClouds || disableLowClouds || disableMist || disableFog)
+            scenario.mMedia = Diagnostics::DiagnosticAtmosphereMedia{ !disableMainClouds, !disableLowClouds,
+                !disableMist, !disableFog };
+        if (disableDistanceFog)
+            scenario.mDistanceFog = false;
+        if (cloudSeed)
+            scenario.mCloudSeed
+                = parseFrameCountOption("--cloud-seed", *cloudSeed, std::numeric_limits<std::uint32_t>::max());
+        if (recentPrecipitation)
+            scenario.mRecentPrecipitation
+                = static_cast<float>(parseFiniteOption("--recent-precipitation", *recentPrecipitation));
+        if (disablePrecipitation || disableLightning)
+            scenario.mWeatherEffects
+                = Diagnostics::DiagnosticWeatherEffects{ !disablePrecipitation, !disableLightning };
+        if (environmentTraits || environmentTerrainHeight)
+        {
+            Diagnostics::DiagnosticEnvironmentState environment;
+            if (environmentTraits)
+                environment.mTraits = parseEnvironmentTraits(*environmentTraits);
+            if (environmentTerrainHeight)
+                environment.mTerrainHeightWorldUnits
+                    = static_cast<float>(parseFiniteOption("--environment-terrain-height", *environmentTerrainHeight));
+            scenario.mEnvironment = std::move(environment);
+        }
+        if (scenario.empty())
+            return std::nullopt;
+
+        // Canonical serialization performs the same strict range validation used by the child.
+        static_cast<void>(Diagnostics::serializeAtmosphereScenario(scenario));
+        return scenario;
+    }
+
     /// Generate a unique protected endpoint within the transport's reserved namespace.
     std::string uniqueEndpoint()
     {
@@ -480,8 +638,7 @@ namespace
     {
         const YAML::Node status = YAML::Load(payloadText(response.mPayload));
         if (status["mode"].as<std::string>("") != "isolated-child"
-            || status["graphics-context"].as<std::string>("")
-                != (headed ? "interactive-window" : "offscreen-pbuffer")
+            || status["graphics-context"].as<std::string>("") != (headed ? "interactive-window" : "offscreen-pbuffer")
             || status["native-window"].as<std::string>("") != (headed ? "present" : "absent")
             || status["input-source"].as<std::string>("") != "device-free")
             throw std::runtime_error("diagnostic child did not attest to the requested isolated runtime");
@@ -519,7 +676,15 @@ namespace
                   "  openmw-diagnosticctl <run|replay> --openmw openmw.exe --config openmw.cfg\n"
                   "      --artifacts directory [--save save.omwsave | --capsule capture.omwdiag]\n"
                   "      [--frames count] [--performance-samples count] [--fixed-dt seconds]\n"
-                  "      [--capture-route-frames] [--bypass-route-shadows]\n"
+                  "      [--weather name | --weather-from name --weather-to name --weather-transition progress]\n"
+                  "      [--game-hour hour] [--cloud-seed integer] [--recent-precipitation weight]\n"
+                  "      [--atmosphere-warmup-frames count]\n"
+                  "      [--environment-traits name=weight,...] [--environment-terrain-height world-units]\n"
+                  "      [--camera-pitch radians] [--camera-yaw radians] [--camera-roll radians]\n"
+                  "      [--disable-main-clouds] [--disable-low-clouds] [--disable-mist] [--disable-fog]\n"
+                  "      [--disable-distance-fog] [--disable-precipitation] [--disable-lightning]\n"
+                  "      [--capture-route-frames] [--skip-graphics-capture | --normal-only-graphics-capture]\n"
+                  "      [--bypass-route-shadows]\n"
                   "      [--route-shadow-casters terrain|objects]\n"
                   "      [--headed]\n"
                   "      [--setting \"Section:name=value\"]...\n"
@@ -588,7 +753,9 @@ namespace
     {
         const YAML::Node expected = YAML::Load(payloadText(expectedBytes));
         const YAML::Node actual = YAML::Load(payloadText(actualBytes));
-        if (actual["provider"].as<std::string>("") != "gameplay@2")
+        const std::string provider = actual["provider"].as<std::string>("");
+        if (provider != "gameplay@4" && provider != "gameplay@5" && provider != "gameplay@6"
+            && provider != "gameplay@7")
             throw std::runtime_error("replay state was reported by an incompatible gameplay provider");
         for (const char* key : { "cell", "weather" })
         {
@@ -679,7 +846,20 @@ namespace
         const std::filesystem::path artifactsOption = findOption(arguments, "--artifacts").value_or(std::string());
         const bool headed = hasFlag(arguments, "--headed");
         const bool captureRouteFrames = hasFlag(arguments, "--capture-route-frames");
+        const bool captureGraphics = !hasFlag(arguments, "--skip-graphics-capture");
+        const bool normalOnlyGraphicsCapture = hasFlag(arguments, "--normal-only-graphics-capture");
+        if (!captureGraphics && normalOnlyGraphicsCapture)
+            throw std::invalid_argument("--skip-graphics-capture conflicts with --normal-only-graphics-capture");
+        const std::vector<std::byte> graphicsCapturePayload
+            = normalOnlyGraphicsCapture ? textPayload("normal-only") : std::vector<std::byte>{};
         const bool bypassRouteShadows = hasFlag(arguments, "--bypass-route-shadows");
+        const std::optional<std::string> cameraPitch = findOption(arguments, "--camera-pitch");
+        const std::optional<std::string> cameraYaw = findOption(arguments, "--camera-yaw");
+        const std::optional<std::string> cameraRoll = findOption(arguments, "--camera-roll");
+        const bool cameraOverride = cameraPitch || cameraYaw || cameraRoll;
+        std::optional<Diagnostics::AtmosphereScenario> atmosphereScenario = parseAtmosphereScenarioOptions(arguments);
+        const std::uint32_t atmosphereWarmupFrames = parseFrameCountOption(
+            "--atmosphere-warmup-frames", findOption(arguments, "--atmosphere-warmup-frames").value_or("0"), 600);
         const std::optional<std::string> routeShadowCasters = findOption(arguments, "--route-shadow-casters");
         if (routeShadowCasters && *routeShadowCasters != "terrain" && *routeShadowCasters != "objects")
             throw std::invalid_argument("--route-shadow-casters requires terrain or objects");
@@ -724,6 +904,8 @@ namespace
             const Diagnostics::CapsuleEntry* snapshot = capsule.find("state/world.omwsave");
             const Diagnostics::CapsuleEntry* worldState = capsule.find("state/world.yaml");
             const Diagnostics::CapsuleEntry* route = capsule.find("state/gameplay-route.yaml");
+            const Diagnostics::CapsuleEntry* capturedAtmosphereScenario
+                = capsule.find("configuration/atmosphere-scenario.yaml");
             if (manifest == nullptr || manifest->mType != Diagnostics::CapsuleEntryType::Manifest || snapshot == nullptr
                 || snapshot->mType != Diagnostics::CapsuleEntryType::WorldSnapshot || worldState == nullptr)
                 throw std::runtime_error("diagnostic capsule does not contain its replay state");
@@ -734,6 +916,13 @@ namespace
                 if (route->mType != Diagnostics::CapsuleEntryType::GameplayTrace)
                     throw std::runtime_error("diagnostic capsule gameplay route has an invalid type");
                 gameplayRoute = route->mData;
+            }
+            if (!atmosphereScenario && capturedAtmosphereScenario != nullptr)
+            {
+                if (capturedAtmosphereScenario->mType != Diagnostics::CapsuleEntryType::Configuration)
+                    throw std::runtime_error("diagnostic capsule atmosphere scenario has an invalid type");
+                atmosphereScenario
+                    = Diagnostics::deserializeAtmosphereScenario(payloadText(capturedAtmosphereScenario->mData));
             }
             isolatedSave = workspace.path() / "replay.omwsave";
             std::ofstream stream(*isolatedSave, std::ios::binary | std::ios::trunc);
@@ -752,8 +941,7 @@ namespace
 
         ChildProcess child(executable, childArguments);
         Diagnostics::Command hello{ 1, Diagnostics::CommandType::Hello, std::move(replayManifest) };
-        const Diagnostics::Response ready
-            = transactWhenReady(endpoint, hello, std::chrono::minutes(3), &child, headed);
+        const Diagnostics::Response ready = transactWhenReady(endpoint, hello, std::chrono::minutes(3), &child, headed);
         if (printResponse(ready) != 0)
             return 2;
         validateIsolatedSession(ready, headed);
@@ -784,6 +972,103 @@ namespace
         validateReplayState(expectedWorldState, observed.mPayload);
         std::cout << "initial-state-parity: true\n";
 
+        if (cameraOverride)
+        {
+            const YAML::Node restoredState = YAML::Load(payloadText(expectedWorldState));
+            const YAML::Node restoredAngles = restoredState["camera-angles"];
+            if (!restoredAngles.IsSequence() || restoredAngles.size() != 3)
+                throw std::runtime_error("replay state contains invalid camera angles");
+            const double pitch
+                = cameraPitch ? parseFiniteOption("--camera-pitch", *cameraPitch) : restoredAngles[0].as<double>();
+            const double yaw
+                = cameraYaw ? parseFiniteOption("--camera-yaw", *cameraYaw) : restoredAngles[1].as<double>();
+            const double roll
+                = cameraRoll ? parseFiniteOption("--camera-roll", *cameraRoll) : restoredAngles[2].as<double>();
+            if (pitch < -1.5707963267948966 || pitch > 1.5707963267948966)
+                throw std::invalid_argument("--camera-pitch must be within [-pi/2, pi/2]");
+
+            YAML::Emitter cameraState;
+            cameraState << YAML::BeginMap << YAML::Key << "camera-angles" << YAML::Value << YAML::Flow << YAML::BeginSeq
+                        << pitch << yaw << roll << YAML::EndSeq << YAML::EndMap;
+            if (!cameraState.good())
+                throw std::runtime_error("failed serializing diagnostic camera state");
+            const Diagnostics::Response applied = Diagnostics::transact(
+                endpoint, { requestId++, Diagnostics::CommandType::SetCamera, textPayload(cameraState.c_str()) });
+            requireSuccessfulResponse(applied);
+            const YAML::Node actual = YAML::Load(payloadText(applied.mPayload));
+            const YAML::Node actualAngles = actual["camera-angles"];
+            if (!actualAngles.IsSequence() || actualAngles.size() != 3
+                || std::abs(actualAngles[0].as<double>() - pitch) > 0.0001
+                || std::abs(actualAngles[1].as<double>() - yaw) > 0.0001
+                || std::abs(actualAngles[2].as<double>() - roll) > 0.0001)
+                throw std::runtime_error("diagnostic child did not apply the requested camera angles");
+            std::cout << "camera-override-parity: true\n";
+        }
+
+        if (atmosphereScenario)
+        {
+            const std::string serialized = Diagnostics::serializeAtmosphereScenario(*atmosphereScenario);
+            const Diagnostics::Response applied = Diagnostics::transact(
+                endpoint, { requestId++, Diagnostics::CommandType::SetAtmosphereScenario, textPayload(serialized) });
+            requireSuccessfulResponse(applied);
+            const YAML::Node actual = YAML::Load(payloadText(applied.mPayload));
+            if (atmosphereScenario->mWeather)
+            {
+                const Diagnostics::DiagnosticWeatherState& expected = *atmosphereScenario->mWeather;
+                if (!Misc::StringUtils::ciEqual(actual["weather"].as<std::string>(), expected.mCurrent)
+                    || !Misc::StringUtils::ciEqual(
+                        actual["next-weather"].as<std::string>(), expected.mNext.value_or(std::string()))
+                    || std::abs(actual["weather-transition"].as<float>() - expected.mTransition) > 0.0001f)
+                    throw std::runtime_error("diagnostic child did not apply the requested weather state");
+            }
+            if (atmosphereScenario->mGameHour
+                && std::abs(actual["game-hour"].as<double>() - *atmosphereScenario->mGameHour) > 0.0001)
+                throw std::runtime_error("diagnostic child did not apply the requested game hour");
+            if (atmosphereScenario->mCloudSeed
+                && actual["cloud-seed"].as<std::uint32_t>() != *atmosphereScenario->mCloudSeed)
+                throw std::runtime_error("diagnostic child did not apply the requested cloud seed");
+            if (atmosphereScenario->mRecentPrecipitation
+                && std::abs(actual["recent-precipitation"].as<float>() - *atmosphereScenario->mRecentPrecipitation)
+                    > 1e-6f)
+                throw std::runtime_error("diagnostic child did not apply the requested recent precipitation");
+            if (atmosphereScenario->mWeatherEffects
+                && (actual["precipitation"].as<bool>() != atmosphereScenario->mWeatherEffects->mPrecipitation
+                    || actual["lightning"].as<bool>() != atmosphereScenario->mWeatherEffects->mLightning))
+                throw std::runtime_error("diagnostic child did not apply the requested weather effects");
+            if (atmosphereScenario->mEnvironment)
+            {
+                const YAML::Node actualTraits = actual["environment-traits"];
+                if (!actualTraits.IsMap() || actualTraits.size() != atmosphereScenario->mEnvironment->mTraits.size())
+                    throw std::runtime_error("diagnostic child did not apply the requested environment traits");
+                for (const auto& [trait, weight] : atmosphereScenario->mEnvironment->mTraits)
+                {
+                    if (!actualTraits[trait] || std::abs(actualTraits[trait].as<float>() - weight) > 0.0001f)
+                        throw std::runtime_error("diagnostic child did not apply the requested environment traits");
+                }
+                if (atmosphereScenario->mEnvironment->mTerrainHeightWorldUnits
+                    && std::abs(actual["environment-terrain-height"].as<float>()
+                           - *atmosphereScenario->mEnvironment->mTerrainHeightWorldUnits)
+                        > 0.0001f)
+                    throw std::runtime_error("diagnostic child did not apply the requested environment terrain height");
+            }
+            std::cout << "atmosphere-scenario-parity: true\n";
+        }
+        if (atmosphereScenario || cameraOverride)
+            requireSuccessfulResponse(Diagnostics::transact(
+                endpoint, { requestId++, Diagnostics::CommandType::CaptureCapsule, textPayload("scenario.omwdiag") }));
+
+        std::uint64_t completedFixedFrames = 0;
+        if (atmosphereWarmupFrames > 0)
+        {
+            Diagnostics::Command warmup{ requestId++, Diagnostics::CommandType::StepFrames, {} };
+            for (std::size_t byte = 0; byte < sizeof(atmosphereWarmupFrames); ++byte)
+                warmup.mPayload.push_back(static_cast<std::byte>((atmosphereWarmupFrames >> (byte * 8)) & 0xffu));
+            requireSuccessfulResponse(Diagnostics::transact(endpoint, warmup));
+            completedFixedFrames += atmosphereWarmupFrames;
+            waitForScheduledFrames(endpoint, requestId, completedFixedFrames);
+            std::cout << "atmosphere-warmup-frames: " << atmosphereWarmupFrames << '\n';
+        }
+
         if (!gameplayRoute.empty())
         {
             const std::vector<Diagnostics::GameplayRouteFrame> routeFrames
@@ -804,10 +1089,8 @@ namespace
                     runSegment.mPayload.push_back(static_cast<std::byte>((segmentFrames >> (byte * 8)) & 0xffu));
                 if (captureRouteFrames || bypassRouteShadows || routeShadowCasters)
                 {
-                    const unsigned routeOptions
-                        = (captureRouteFrames ? 0x1u : 0u) | (bypassRouteShadows ? 0x2u : 0u)
-                        | (routeShadowCasters == "terrain" ? 0x4u : 0u)
-                        | (routeShadowCasters == "objects" ? 0x8u : 0u);
+                    const unsigned routeOptions = (captureRouteFrames ? 0x1u : 0u) | (bypassRouteShadows ? 0x2u : 0u)
+                        | (routeShadowCasters == "terrain" ? 0x4u : 0u) | (routeShadowCasters == "objects" ? 0x8u : 0u);
                     runSegment.mPayload.push_back(static_cast<std::byte>(routeOptions));
                 }
                 const Diagnostics::Response performance
@@ -833,9 +1116,12 @@ namespace
                         throw std::runtime_error("exact render-frame capture did not produce its bundle");
                     std::cout << "route-frame-capture: " << frameBundle << '\n';
                 }
-                requireSuccessfulResponse(
-                    Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::CaptureGraphics, {} }));
-                waitForGraphicsCapture(endpoint, requestId);
+                if (captureGraphics)
+                {
+                    requireSuccessfulResponse(Diagnostics::transact(
+                        endpoint, { requestId++, Diagnostics::CommandType::CaptureGraphics, graphicsCapturePayload }));
+                    waitForGraphicsCapture(endpoint, requestId);
+                }
             }
             std::cout << "executed-route-frames: " << completedFrames << '\n';
         }
@@ -851,7 +1137,8 @@ namespace
             for (std::size_t byte = 0; byte < sizeof(frames); ++byte)
                 step.mPayload.push_back(static_cast<std::byte>((frames >> (byte * 8)) & 0xffu));
             requireSuccessfulResponse(Diagnostics::transact(endpoint, step));
-            waitForScheduledFrames(endpoint, requestId, frames);
+            completedFixedFrames += frames;
+            waitForScheduledFrames(endpoint, requestId, completedFixedFrames);
             std::cout << "executed-fixed-frames: " << frames << '\n';
 
             Diagnostics::Command performanceCommand{ requestId++, Diagnostics::CommandType::TracePerformance, {} };
@@ -868,18 +1155,31 @@ namespace
             if (!performanceFile)
                 throw std::runtime_error("failed writing performance evidence");
 
-            requireSuccessfulResponse(Diagnostics::transact(
-                endpoint, { requestId++, Diagnostics::CommandType::CaptureGraphics, {} }));
-            waitForGraphicsCapture(endpoint, requestId);
+            if (captureGraphics)
+            {
+                requireSuccessfulResponse(Diagnostics::transact(
+                    endpoint, { requestId++, Diagnostics::CommandType::CaptureGraphics, graphicsCapturePayload }));
+                waitForGraphicsCapture(endpoint, requestId);
+            }
         }
+        const Diagnostics::Response finalGameplay
+            = Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::TraceGameplay, {} });
+        requireSuccessfulResponse(finalGameplay);
+        std::ofstream gameplayFile(artifacts / "gameplay.yaml", std::ios::binary | std::ios::trunc);
+        gameplayFile.write(reinterpret_cast<const char*>(finalGameplay.mPayload.data()),
+            static_cast<std::streamsize>(finalGameplay.mPayload.size()));
+        if (!gameplayFile)
+            throw std::runtime_error("failed writing final gameplay evidence");
         if (!headed)
             child.requireNonDisruptiveWindowState();
         requireSuccessfulResponse(
             Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::ShutdownChild, {} }));
 
         const int exitCode = child.wait(std::chrono::seconds(30));
-        if (fingerprintProfile(sourceDirectory) != before)
-            throw std::runtime_error("source profile changed during isolated diagnostic run");
+        const ProfileFingerprint after = fingerprintProfile(sourceDirectory);
+        if (after != before)
+            throw std::runtime_error(
+                "source profile changed during isolated diagnostic run: " + describeProfileDifference(before, after));
         if (exitCode != 0)
             throw std::runtime_error("diagnostic child exited with status " + std::to_string(exitCode));
         workspace.cleanup();

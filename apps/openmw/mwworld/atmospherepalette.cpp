@@ -4,6 +4,7 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -14,6 +15,7 @@
 
 #include <components/vfs/manager.hpp>
 
+#include "atmosphereenvironment.hpp"
 #include "weather.hpp"
 
 namespace MWWorld
@@ -107,6 +109,42 @@ namespace MWWorld
             osg::Vec3f mOutScattering;
         };
 
+        /// Modulate weather-owned volumes with smoothly blended local environment evidence.
+        struct VolumeModifiers
+        {
+            float mCloudDensityMultiplier = 1.f;
+            float mCloudAltitudeOffsetWorldUnits = 0.f;
+            float mCloudThicknessMultiplier = 1.f;
+            float mLowCloudOccurrenceMultiplier = 1.f;
+            float mLowCloudDensityMultiplier = 1.f;
+            float mLowCloudAltitudeOffsetWorldUnits = 0.f;
+            float mLowCloudThicknessMultiplier = 1.f;
+            float mMistDensityMultiplier = 1.f;
+            float mMistAltitudeOffsetWorldUnits = 0.f;
+            float mMistThicknessMultiplier = 1.f;
+        };
+
+        VolumeModifiers blend(const VolumeModifiers& from, const VolumeModifiers& to, float factor)
+        {
+            return { std::lerp(from.mCloudDensityMultiplier, to.mCloudDensityMultiplier, factor),
+                std::lerp(from.mCloudAltitudeOffsetWorldUnits, to.mCloudAltitudeOffsetWorldUnits, factor),
+                std::lerp(from.mCloudThicknessMultiplier, to.mCloudThicknessMultiplier, factor),
+                std::lerp(from.mLowCloudOccurrenceMultiplier, to.mLowCloudOccurrenceMultiplier, factor),
+                std::lerp(from.mLowCloudDensityMultiplier, to.mLowCloudDensityMultiplier, factor),
+                std::lerp(from.mLowCloudAltitudeOffsetWorldUnits, to.mLowCloudAltitudeOffsetWorldUnits, factor),
+                std::lerp(from.mLowCloudThicknessMultiplier, to.mLowCloudThicknessMultiplier, factor),
+                std::lerp(from.mMistDensityMultiplier, to.mMistDensityMultiplier, factor),
+                std::lerp(from.mMistAltitudeOffsetWorldUnits, to.mMistAltitudeOffsetWorldUnits, factor),
+                std::lerp(from.mMistThicknessMultiplier, to.mMistThicknessMultiplier, factor) };
+        }
+
+        /// Bind one semantic environment trait to its palette and medium modifiers.
+        struct EnvironmentProfile
+        {
+            std::string mPalette;
+            VolumeModifiers mVolumes;
+        };
+
         /// Store validated per-weather cloud, mist, and shaft controls in world units.
         struct VolumeProfile
         {
@@ -114,10 +152,28 @@ namespace MWWorld
             float mCloudDensity;
             float mCloudBaseAltitudeWorldUnits;
             float mCloudThicknessWorldUnits;
+            float mCloudType;
+            float mCloudFeatureScale;
+            float mCloudVerticalDevelopment;
+            float mCloudAnvilStrength;
+            float mCloudTerrainFollowing;
+            float mCloudTerrainClearanceWorldUnits;
+            float mLowCloudCoverage;
+            float mLowCloudDensity;
+            float mLowCloudBaseAltitudeWorldUnits;
+            float mLowCloudThicknessWorldUnits;
+            float mLowCloudType;
+            float mLowCloudFeatureScale;
+            float mLowCloudVerticalDevelopment;
+            float mLowCloudEnvironmentInfluence;
             float mMistDensity;
             float mMistBaseAltitudeWorldUnits;
             float mMistThicknessWorldUnits;
             float mShaftIntensity;
+            float mFogDensity;
+            float mFogBaseAltitudeWorldUnits;
+            float mFogThicknessWorldUnits;
+            float mFogAnisotropy;
         };
 
         /// Parse and validate one weather volume profile with field-qualified errors.
@@ -129,10 +185,28 @@ namespace MWWorld
                 readBoundedFloat(source, "cloudDensity", path, 0.f, 4.f),
                 readBoundedFloat(source, "cloudAltitude", path, -10000.f, 200000.f),
                 readBoundedFloat(source, "cloudThickness", path, 1.f, 200000.f),
+                readBoundedFloat(source, "cloudType", path, 0.f, 1.f),
+                readBoundedFloat(source, "cloudFeatureScale", path, 0.25f, 4.f),
+                readBoundedFloat(source, "cloudVerticalDevelopment", path, 0.f, 1.f),
+                readBoundedFloat(source, "cloudAnvilStrength", path, 0.f, 1.f),
+                readBoundedFloat(source, "cloudTerrainFollowing", path, 0.f, 1.f),
+                readBoundedFloat(source, "cloudTerrainClearance", path, -20000.f, 100000.f),
+                readBoundedFloat(source, "lowCloudCoverage", path, 0.f, 1.f),
+                readBoundedFloat(source, "lowCloudDensity", path, 0.f, 4.f),
+                readBoundedFloat(source, "lowCloudAltitude", path, -10000.f, 50000.f),
+                readBoundedFloat(source, "lowCloudThickness", path, 1.f, 100000.f),
+                readBoundedFloat(source, "lowCloudType", path, 0.f, 1.f),
+                readBoundedFloat(source, "lowCloudFeatureScale", path, 0.25f, 4.f),
+                readBoundedFloat(source, "lowCloudVerticalDevelopment", path, 0.f, 1.f),
+                readBoundedFloat(source, "lowCloudEnvironmentInfluence", path, 0.f, 1.f),
                 readBoundedFloat(source, "mistDensity", path, 0.f, 4.f),
                 readBoundedFloat(source, "mistAltitude", path, -10000.f, 50000.f),
                 readBoundedFloat(source, "mistThickness", path, 1.f, 100000.f),
-                readBoundedFloat(source, "shaftIntensity", path, 0.f, 4.f) };
+                readBoundedFloat(source, "shaftIntensity", path, 0.f, 4.f),
+                readBoundedFloat(source, "fogDensity", path, 0.f, 4.f),
+                readBoundedFloat(source, "fogAltitude", path, -10000.f, 50000.f),
+                readBoundedFloat(source, "fogThickness", path, 1.f, 100000.f),
+                readBoundedFloat(source, "fogAnisotropy", path, 0.f, 0.95f) };
         }
 
         /// Interpolate weather volume controls during a weather transition.
@@ -142,10 +216,28 @@ namespace MWWorld
                 std::lerp(from.mCloudDensity, to.mCloudDensity, factor),
                 std::lerp(from.mCloudBaseAltitudeWorldUnits, to.mCloudBaseAltitudeWorldUnits, factor),
                 std::lerp(from.mCloudThicknessWorldUnits, to.mCloudThicknessWorldUnits, factor),
+                std::lerp(from.mCloudType, to.mCloudType, factor),
+                std::lerp(from.mCloudFeatureScale, to.mCloudFeatureScale, factor),
+                std::lerp(from.mCloudVerticalDevelopment, to.mCloudVerticalDevelopment, factor),
+                std::lerp(from.mCloudAnvilStrength, to.mCloudAnvilStrength, factor),
+                std::lerp(from.mCloudTerrainFollowing, to.mCloudTerrainFollowing, factor),
+                std::lerp(from.mCloudTerrainClearanceWorldUnits, to.mCloudTerrainClearanceWorldUnits, factor),
+                std::lerp(from.mLowCloudCoverage, to.mLowCloudCoverage, factor),
+                std::lerp(from.mLowCloudDensity, to.mLowCloudDensity, factor),
+                std::lerp(from.mLowCloudBaseAltitudeWorldUnits, to.mLowCloudBaseAltitudeWorldUnits, factor),
+                std::lerp(from.mLowCloudThicknessWorldUnits, to.mLowCloudThicknessWorldUnits, factor),
+                std::lerp(from.mLowCloudType, to.mLowCloudType, factor),
+                std::lerp(from.mLowCloudFeatureScale, to.mLowCloudFeatureScale, factor),
+                std::lerp(from.mLowCloudVerticalDevelopment, to.mLowCloudVerticalDevelopment, factor),
+                std::lerp(from.mLowCloudEnvironmentInfluence, to.mLowCloudEnvironmentInfluence, factor),
                 std::lerp(from.mMistDensity, to.mMistDensity, factor),
                 std::lerp(from.mMistBaseAltitudeWorldUnits, to.mMistBaseAltitudeWorldUnits, factor),
                 std::lerp(from.mMistThicknessWorldUnits, to.mMistThicknessWorldUnits, factor),
-                std::lerp(from.mShaftIntensity, to.mShaftIntensity, factor) };
+                std::lerp(from.mShaftIntensity, to.mShaftIntensity, factor),
+                std::lerp(from.mFogDensity, to.mFogDensity, factor),
+                std::lerp(from.mFogBaseAltitudeWorldUnits, to.mFogBaseAltitudeWorldUnits, factor),
+                std::lerp(from.mFogThicknessWorldUnits, to.mFogThicknessWorldUnits, factor),
+                std::lerp(from.mFogAnisotropy, to.mFogAnisotropy, factor) };
         }
 
         /// Resolve a canonical weather name to its volume-profile index.
@@ -192,9 +284,9 @@ namespace MWWorld
         {
             const YAML::Node root = YAML::Load(paletteStream);
             const YAML::Node presets = root["presets"];
-            const YAML::Node regions = root["regions"];
-            if (!presets.IsMap() || !regions.IsMap())
-                throw std::runtime_error("OpenMWSE atmosphere data must define presets and regions");
+            const YAML::Node environments = root["environments"];
+            if (!presets.IsMap() || !environments.IsMap())
+                throw std::runtime_error("OpenMWSE atmosphere data must define presets and environments");
 
             const YAML::Node volumes = YAML::Load(volumeStream);
             if (!volumes.IsMap())
@@ -233,36 +325,105 @@ namespace MWWorld
             if (defaultPreset == mPresets.end())
                 throw std::runtime_error("OpenMWSE atmosphere data is missing the default preset");
 
-            for (const auto& entry : regions)
+            for (const auto& entry : environments)
             {
-                const std::string preset = entry.second.as<std::string>();
+                const std::string trait = lowerCase(entry.first.as<std::string>());
+                const YAML::Node source = entry.second;
+                if (!source.IsMap())
+                    throw std::runtime_error("OpenMWSE atmosphere environment profile must be a map: " + trait);
+                const std::string preset = source["palette"].as<std::string>();
                 if (!mPresets.contains(preset))
-                    throw std::runtime_error("OpenMWSE atmosphere region references an unknown preset: " + preset);
-                mRegions.emplace(lowerCase(entry.first.as<std::string>()), preset);
+                    throw std::runtime_error("OpenMWSE atmosphere environment references an unknown preset: " + preset);
+                const std::string path = "environments." + trait;
+                EnvironmentProfile profile;
+                profile.mPalette = preset;
+                profile.mVolumes = { readBoundedFloat(source, "cloudDensityMultiplier", path, 0.f, 4.f),
+                    readBoundedFloat(source, "cloudAltitudeOffset", path, -100000.f, 100000.f),
+                    readBoundedFloat(source, "cloudThicknessMultiplier", path, 0.1f, 4.f),
+                    readBoundedFloat(source, "lowCloudOccurrenceMultiplier", path, 0.f, 4.f),
+                    readBoundedFloat(source, "lowCloudDensityMultiplier", path, 0.f, 4.f),
+                    readBoundedFloat(source, "lowCloudAltitudeOffset", path, -20000.f, 20000.f),
+                    readBoundedFloat(source, "lowCloudThicknessMultiplier", path, 0.1f, 4.f),
+                    readBoundedFloat(source, "mistDensityMultiplier", path, 0.f, 4.f),
+                    readBoundedFloat(source, "mistAltitudeOffset", path, -20000.f, 20000.f),
+                    readBoundedFloat(source, "mistThicknessMultiplier", path, 0.1f, 4.f) };
+                mEnvironments.emplace(trait, std::move(profile));
             }
 
-            mApplied = mFrom = mTarget = defaultPreset->second;
-            mTargetName = "default";
+            mApplied = mTarget = defaultPreset->second;
         }
 
-        void setRegion(std::string_view regionId)
+        void setEnvironment(const AtmosphereEnvironmentState& environment)
         {
-            const auto region = mRegions.find(lowerCase(regionId));
-            const std::string nextName = region == mRegions.end() ? "default" : region->second;
-            if (nextName == mTargetName)
-                return;
+            mTargetTerrainHeightWorldUnits = environment.mTerrainHeightWorldUnits;
+            mTargetTerrainSampleCenterWorldUnits = environment.mTerrainSampleCenterWorldUnits;
+            mTargetTerrainGradient = environment.mTerrainGradient;
+            mTargetValleyDepthWorldUnits = environment.mValleyDepthWorldUnits;
+            float totalEnvironmentWeight = 0.f;
+            for (const auto& [trait, profile] : mEnvironments)
+                totalEnvironmentWeight += environment.get(trait);
+            const float normalization = totalEnvironmentWeight > 1.f ? 1.f / totalEnvironmentWeight : 1.f;
+            float accumulatedWeight = std::max(0.f, 1.f - totalEnvironmentWeight * normalization);
+            mTarget = mPresets.at("default");
+            mTargetVolumes = {};
 
-            mFrom = mApplied;
-            mTarget = mPresets.at(nextName);
-            mTargetName = nextName;
-            mTransition = 0.f;
+            for (const auto& [trait, profile] : mEnvironments)
+            {
+                const float weight = environment.get(trait) * normalization;
+                if (weight <= 0.f)
+                    continue;
+                if (accumulatedWeight <= 0.f)
+                {
+                    mTarget = mPresets.at(profile.mPalette);
+                    mTargetVolumes = profile.mVolumes;
+                    accumulatedWeight = weight;
+                    continue;
+                }
+                const float blendFactor = weight / (accumulatedWeight + weight);
+                mTarget = blend(mTarget, mPresets.at(profile.mPalette), blendFactor);
+                mTargetVolumes = blend(mTargetVolumes, profile.mVolumes, blendFactor);
+                accumulatedWeight += weight;
+            }
+        }
+
+        /// Apply the selected environment without a regional transition for deterministic diagnostics.
+        void setDiagnosticEnvironment(const AtmosphereEnvironmentState& environment)
+        {
+            mDiagnosticEnvironmentActive = true;
+            setEnvironment(environment);
+            mApplied = mTarget;
+            mAppliedVolumes = mTargetVolumes;
+            mAppliedTerrainHeightWorldUnits = mTargetTerrainHeightWorldUnits;
+            mAppliedTerrainSampleCenterWorldUnits = mTargetTerrainSampleCenterWorldUnits;
+            mAppliedTerrainGradient = mTargetTerrainGradient;
+            mAppliedValleyDepthWorldUnits = mTargetValleyDepthWorldUnits;
         }
 
         void update(float elapsedSeconds, bool paused, std::span<Weather> weather)
         {
-            if (!paused && mTransition < 1.f)
-                mTransition = std::min(1.f, mTransition + std::max(0.f, elapsedSeconds) / sRegionTransitionSeconds);
-            mApplied = blend(mFrom, mTarget, mTransition);
+            if (mDiagnosticEnvironmentActive)
+            {
+                mApplied = mTarget;
+                mAppliedVolumes = mTargetVolumes;
+                mAppliedTerrainHeightWorldUnits = mTargetTerrainHeightWorldUnits;
+                mAppliedTerrainSampleCenterWorldUnits = mTargetTerrainSampleCenterWorldUnits;
+                mAppliedTerrainGradient = mTargetTerrainGradient;
+                mAppliedValleyDepthWorldUnits = mTargetValleyDepthWorldUnits;
+            }
+            else if (!paused)
+            {
+                const float blendFactor
+                    = std::clamp(std::max(0.f, elapsedSeconds) / sRegionTransitionSeconds, 0.f, 1.f);
+                mApplied = blend(mApplied, mTarget, blendFactor);
+                mAppliedVolumes = blend(mAppliedVolumes, mTargetVolumes, blendFactor);
+                mAppliedTerrainHeightWorldUnits
+                    = std::lerp(mAppliedTerrainHeightWorldUnits, mTargetTerrainHeightWorldUnits, blendFactor);
+                mAppliedTerrainSampleCenterWorldUnits = mTargetTerrainSampleCenterWorldUnits;
+                mAppliedTerrainGradient
+                    = mAppliedTerrainGradient + (mTargetTerrainGradient - mAppliedTerrainGradient) * blendFactor;
+                mAppliedValleyDepthWorldUnits
+                    = std::lerp(mAppliedValleyDepthWorldUnits, mTargetValleyDepthWorldUnits, blendFactor);
+            }
 
             if (weather.size() < mApplied.mWeather.size())
                 throw std::runtime_error("OpenMWSE atmosphere requires the ten Morrowind weather definitions");
@@ -279,18 +440,26 @@ namespace MWWorld
         }
 
         std::unordered_map<std::string, Palette> mPresets;
-        std::unordered_map<std::string, std::string> mRegions;
+        std::map<std::string, EnvironmentProfile, std::less<>> mEnvironments;
         std::array<VolumeProfile, sWeatherNames.size()> mVolumes;
         Palette mApplied;
-        Palette mFrom;
         Palette mTarget;
-        std::string mTargetName;
-        float mTransition = 1.f;
+        VolumeModifiers mAppliedVolumes;
+        VolumeModifiers mTargetVolumes;
+        float mAppliedTerrainHeightWorldUnits = 0.f;
+        float mTargetTerrainHeightWorldUnits = 0.f;
+        osg::Vec2f mAppliedTerrainSampleCenterWorldUnits;
+        osg::Vec2f mTargetTerrainSampleCenterWorldUnits;
+        osg::Vec2f mAppliedTerrainGradient;
+        osg::Vec2f mTargetTerrainGradient;
+        float mAppliedValleyDepthWorldUnits = 0.f;
+        float mTargetValleyDepthWorldUnits = 0.f;
+        bool mDiagnosticEnvironmentActive = false;
     };
 
     AtmospherePalette::AtmospherePalette(const VFS::Manager& vfs)
         : AtmospherePalette(*vfs.get(VFS::Path::NormalizedView("openmwse/atmosphere.json")),
-            *vfs.get(VFS::Path::NormalizedView("openmwse/atmosphere-volumes.json")))
+              *vfs.get(VFS::Path::NormalizedView("openmwse/atmosphere-volumes.json")))
     {
     }
 
@@ -301,9 +470,14 @@ namespace MWWorld
 
     AtmospherePalette::~AtmospherePalette() = default;
 
-    void AtmospherePalette::setRegion(std::string_view regionId)
+    void AtmospherePalette::setEnvironment(const AtmosphereEnvironmentState& environment)
     {
-        mImpl->setRegion(regionId);
+        mImpl->setEnvironment(environment);
+    }
+
+    void AtmospherePalette::setDiagnosticEnvironment(const AtmosphereEnvironmentState& environment)
+    {
+        mImpl->setDiagnosticEnvironment(environment);
     }
 
     void AtmospherePalette::update(float elapsedSeconds, bool paused, std::span<Weather> weather)
@@ -328,9 +502,30 @@ namespace MWWorld
         result.mOutScattering = mImpl->mApplied.mOutScattering;
         result.mWeatherWeight = weatherWeight * weatherWeight;
         result.mEnabled = true;
-        result.mVolumes = { volume.mCloudCoverage, volume.mCloudDensity, volume.mCloudBaseAltitudeWorldUnits,
-            volume.mCloudThicknessWorldUnits, volume.mMistDensity, volume.mMistBaseAltitudeWorldUnits,
-            volume.mMistThicknessWorldUnits, volume.mShaftIntensity };
+        const VolumeModifiers& environment = mImpl->mAppliedVolumes;
+        result.mVolumes = { volume.mCloudCoverage, volume.mCloudDensity * environment.mCloudDensityMultiplier,
+            volume.mCloudBaseAltitudeWorldUnits + environment.mCloudAltitudeOffsetWorldUnits,
+            volume.mCloudThicknessWorldUnits * environment.mCloudThicknessMultiplier, volume.mCloudType,
+            volume.mCloudFeatureScale, volume.mCloudVerticalDevelopment, volume.mCloudAnvilStrength,
+            volume.mCloudTerrainFollowing, volume.mCloudTerrainClearanceWorldUnits,
+            std::clamp(volume.mLowCloudCoverage
+                    * std::lerp(1.f, environment.mLowCloudOccurrenceMultiplier, volume.mLowCloudEnvironmentInfluence),
+                0.f, 1.f),
+            volume.mLowCloudDensity
+                * std::lerp(1.f, environment.mLowCloudDensityMultiplier, volume.mLowCloudEnvironmentInfluence),
+            volume.mLowCloudBaseAltitudeWorldUnits
+                + environment.mLowCloudAltitudeOffsetWorldUnits * volume.mLowCloudEnvironmentInfluence,
+            volume.mLowCloudThicknessWorldUnits
+                * std::lerp(1.f, environment.mLowCloudThicknessMultiplier, volume.mLowCloudEnvironmentInfluence),
+            volume.mLowCloudType, volume.mLowCloudFeatureScale, volume.mLowCloudVerticalDevelopment,
+            volume.mLowCloudEnvironmentInfluence, mImpl->mAppliedTerrainHeightWorldUnits,
+            mImpl->mAppliedTerrainSampleCenterWorldUnits, mImpl->mAppliedTerrainGradient,
+            mImpl->mAppliedValleyDepthWorldUnits, volume.mMistDensity * environment.mMistDensityMultiplier,
+            volume.mMistBaseAltitudeWorldUnits + environment.mMistAltitudeOffsetWorldUnits,
+            volume.mMistThicknessWorldUnits * environment.mMistThicknessMultiplier, volume.mShaftIntensity,
+            volume.mFogDensity * environment.mMistDensityMultiplier,
+            volume.mFogBaseAltitudeWorldUnits + environment.mMistAltitudeOffsetWorldUnits,
+            volume.mFogThicknessWorldUnits * environment.mMistThicknessMultiplier, volume.mFogAnisotropy };
         return result;
     }
 }

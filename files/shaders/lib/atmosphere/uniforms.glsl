@@ -11,8 +11,20 @@ struct Atmosphere
     vec3 sunDirection;
     // coverage, density, base altitude in world units, thickness in world units
     vec4 cloudParameters;
+    // morphology from stratus to storm, feature scale, vertical development, anvil strength
+    vec4 cloudShapeParameters;
+    // coverage, density, base altitude in world units, thickness in world units
+    vec4 lowCloudParameters;
+    // morphology, feature scale, vertical development, environment influence
+    vec4 lowCloudShapeParameters;
     // density, base altitude in world units, thickness in world units, shaft intensity
     vec4 mistParameters;
+    // density, base altitude in world units, thickness in world units, scattering anisotropy
+    vec4 fogVolumeParameters;
+    // terrain height, cloud terrain-following weight, terrain clearance, valley depth
+    vec4 mediumReferenceParameters;
+    // sparse terrain sample center xy and local height gradient xy
+    vec4 orographicParameters;
     // scene-linear HDR tint and visibility
     vec4 sunDiscColor;
     // direct solar radiance, diffuse sky irradiance, and diffuse ground irradiance
@@ -25,5 +37,8 @@ struct Atmosphere
 };
 
 uniform Atmosphere atmosphere;
+uniform sampler3D openmwseCloudNoiseTexture;
+uniform sampler3D openmwseCloudDetailNoiseTexture;
+uniform sampler2D openmwseCloudWeatherTexture;
 
 #endif

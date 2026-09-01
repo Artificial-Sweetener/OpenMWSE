@@ -2,6 +2,8 @@
 #define OPENMW_COMPONENTS_SCENEUTIL_STATEUPDATER_H
 
 #include <osg/Matrixf>
+#include <osg/Texture2D>
+#include <osg/Texture3D>
 #include <osg/Vec2f>
 #include <osg/Vec3f>
 #include <osg/Vec4f>
@@ -83,6 +85,11 @@ namespace SceneUtil
     class StateUpdater : public StateSetUpdater
     {
     public:
+        /// Bind the canonical atmosphere weather, base, and detail fields to scene shaders using reserved units.
+        StateUpdater(osg::Texture3D* atmosphereNoiseTexture = nullptr, int atmosphereNoiseTextureUnit = -1,
+            osg::Texture3D* atmosphereDetailNoiseTexture = nullptr, int atmosphereDetailNoiseTextureUnit = -1,
+            osg::Texture2D* atmosphereWeatherTexture = nullptr, int atmosphereWeatherTextureUnit = -1);
+
         void setDefaults(osg::StateSet* stateset) override;
 
         void apply(osg::StateSet* stateset, osg::NodeVisitor*) override;
@@ -98,9 +105,12 @@ namespace SceneUtil
         /// Publish canonical scene-linear atmosphere, volume, and lighting state to compatibility shaders.
         void setAtmosphere(bool enabled, const osg::Vec4f& skyColor, const osg::Vec3f& inScattering,
             const osg::Vec3f& outScattering, float weatherWeight, const osg::Vec3f& sunDirection,
-            const osg::Vec4f& cloudParameters, const osg::Vec4f& mistParameters, const osg::Vec4f& sunDiscColor,
-            const osg::Vec3f& solarRadiance, const osg::Vec3f& skyIrradiance, const osg::Vec3f& groundIrradiance,
-            const osg::Vec2f& cloudAdvectionOffsetWorldUnits, int quality);
+            const osg::Vec4f& cloudParameters, const osg::Vec4f& cloudShapeParameters,
+            const osg::Vec4f& lowCloudParameters, const osg::Vec4f& lowCloudShapeParameters,
+            const osg::Vec4f& mistParameters, const osg::Vec4f& fogVolumeParameters,
+            const osg::Vec4f& mediumReferenceParameters, const osg::Vec4f& orographicParameters,
+            const osg::Vec4f& sunDiscColor, const osg::Vec3f& solarRadiance, const osg::Vec3f& skyIrradiance,
+            const osg::Vec3f& groundIrradiance, const osg::Vec2f& cloudAdvectionOffsetWorldUnits, int quality);
 
         void setUnderwaterFogColor(const osg::Vec4f& col);
 
@@ -119,6 +129,12 @@ namespace SceneUtil
         void setAtmosphereDiagnosticMode(int mode);
 
     private:
+        osg::ref_ptr<osg::Texture3D> mAtmosphereNoiseTexture;
+        int mAtmosphereNoiseTextureUnit = -1;
+        osg::ref_ptr<osg::Texture3D> mAtmosphereDetailNoiseTexture;
+        int mAtmosphereDetailNoiseTextureUnit = -1;
+        osg::ref_ptr<osg::Texture2D> mAtmosphereWeatherTexture;
+        int mAtmosphereWeatherTextureUnit = -1;
         osg::Vec4f mAmbientColor;
         osg::Vec4f mFogColor;
         float mFogStart = 0.f;
@@ -130,7 +146,13 @@ namespace SceneUtil
         float mAtmosphereWeatherWeight = 0.f;
         osg::Vec3f mAtmosphereSunDirection{ 0.f, 0.f, 1.f };
         osg::Vec4f mAtmosphereCloudParameters;
+        osg::Vec4f mAtmosphereCloudShapeParameters;
+        osg::Vec4f mAtmosphereLowCloudParameters;
+        osg::Vec4f mAtmosphereLowCloudShapeParameters;
         osg::Vec4f mAtmosphereMistParameters;
+        osg::Vec4f mAtmosphereFogVolumeParameters;
+        osg::Vec4f mAtmosphereMediumReferenceParameters;
+        osg::Vec4f mAtmosphereOrographicParameters;
         osg::Vec4f mAtmosphereSunDiscColor;
         osg::Vec3f mAtmosphereSolarRadiance;
         osg::Vec3f mAtmosphereSkyIrradiance;

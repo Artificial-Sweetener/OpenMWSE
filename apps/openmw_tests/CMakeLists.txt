@@ -21,6 +21,7 @@ file(GLOB UNITTEST_SRC_FILES
     mwworld/testtimestamp.cpp
     mwworld/testptr.cpp
     mwworld/testweather.cpp
+    mwworld/testatmosphereenvironment.cpp
     mwworld/testatmospherepalette.cpp
 
     mwdialogue/testkeywordsearch.cpp

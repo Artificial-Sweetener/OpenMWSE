@@ -18,7 +18,7 @@
 
 namespace MWRender
 {
-    void AtmosphereDiagnostics::requestCapture(std::filesystem::path outputDirectory)
+    void AtmosphereDiagnostics::requestCapture(std::filesystem::path outputDirectory, bool captureComparisons)
     {
         std::lock_guard lock(mRequestMutex);
         if (mCaptureStage != CaptureStage::Idle)
@@ -28,6 +28,7 @@ namespace MWRender
         }
         mRequestedOutputDirectory = std::move(outputDirectory);
         mCaptureStage = CaptureStage::NormalPending;
+        mCaptureComparisons = captureComparisons;
     }
 
     bool AtmosphereDiagnostics::captureRequested() const
@@ -237,7 +238,15 @@ namespace MWRender
             if (mCaptureStage == captureStage)
             {
                 if (captureStage == CaptureStage::NormalPending)
-                    mCaptureStage = CaptureStage::AwaitingShadowBypass;
+                {
+                    if (mCaptureComparisons)
+                        mCaptureStage = CaptureStage::AwaitingShadowBypass;
+                    else
+                    {
+                        mCaptureStage = CaptureStage::Idle;
+                        mRequestedOutputDirectory.reset();
+                    }
+                }
                 else if (captureStage == CaptureStage::ShadowBypassPending)
                     mCaptureStage = CaptureStage::AwaitingCloudSurfaceShadowBypass;
                 else if (captureStage == CaptureStage::CloudSurfaceShadowBypassPending)

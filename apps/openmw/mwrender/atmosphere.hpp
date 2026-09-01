@@ -28,10 +28,32 @@ namespace MWRender
         float mCloudDensity = 0.f;
         float mCloudBaseAltitudeWorldUnits = 55000.f;
         float mCloudThicknessWorldUnits = 18000.f;
+        float mCloudType = 0.5f;
+        float mCloudFeatureScale = 1.f;
+        float mCloudVerticalDevelopment = 0.5f;
+        float mCloudAnvilStrength = 0.f;
+        float mCloudTerrainFollowing = 0.f;
+        float mCloudTerrainClearanceWorldUnits = 0.f;
+        float mLowCloudCoverage = 0.f;
+        float mLowCloudDensity = 0.f;
+        float mLowCloudBaseAltitudeWorldUnits = 4000.f;
+        float mLowCloudThicknessWorldUnits = 8000.f;
+        float mLowCloudType = 0.15f;
+        float mLowCloudFeatureScale = 1.f;
+        float mLowCloudVerticalDevelopment = 0.2f;
+        float mLowCloudEnvironmentInfluence = 1.f;
+        float mTerrainReferenceHeightWorldUnits = 0.f;
+        osg::Vec2f mTerrainSampleCenterWorldUnits;
+        osg::Vec2f mTerrainGradient;
+        float mValleyDepthWorldUnits = 0.f;
         float mMistDensity = 0.f;
         float mMistBaseAltitudeWorldUnits = 800.f;
         float mMistThicknessWorldUnits = 4500.f;
         float mShaftIntensity = 0.f;
+        float mFogDensity = 0.f;
+        float mFogBaseAltitudeWorldUnits = 0.f;
+        float mFogThicknessWorldUnits = 6000.f;
+        float mFogAnisotropy = 0.45f;
     };
 
     /// Carries the shared scene-linear light sources consumed by every atmospheric and surface-lighting path.
@@ -40,6 +62,17 @@ namespace MWRender
         osg::Vec3f mSolarRadiance{ 1.f, 1.f, 1.f };
         osg::Vec3f mSkyIrradiance{ 1.f, 1.f, 1.f };
         osg::Vec3f mGroundIrradiance{ 1.f, 1.f, 1.f };
+    };
+
+    /// Reserves canonical optical inputs for a later weatherborne medium that must inherit atmosphere lighting.
+    struct AtmosphereSuspendedMediumState
+    {
+        osg::Vec3f mExtinctionPerWorldUnit{ 0.f, 0.f, 0.f };
+        osg::Vec3f mSingleScatteringAlbedo{ 1.f, 1.f, 1.f };
+        float mAnisotropy = 0.f;
+        float mBaseAltitudeWorldUnits = 0.f;
+        float mThicknessWorldUnits = 1.f;
+        float mTerrainFollowing = 0.f;
     };
 
     /// Captures the frame-varying radiance inputs that determine atmosphere-history compatibility.
@@ -201,6 +234,7 @@ namespace MWRender
         float mWeatherWeight = 0.f;
         bool mEnabled = false;
         AtmosphereVolumeState mVolumes;
+        AtmosphereSuspendedMediumState mSuspendedMedium;
         AtmosphereLightingState mLighting;
         osg::Vec4f mSunDiscColor{ 1.f, 1.f, 1.f, 0.f };
     };

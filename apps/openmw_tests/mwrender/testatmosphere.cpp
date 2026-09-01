@@ -20,8 +20,10 @@
 #include <osg/Program>
 #include <osg/StateSet>
 #include <osg/Texture2D>
+#include <osg/Texture3D>
 #include <osg/Uniform>
 #include <osg/Viewport>
+#include <osgDB/ReadFile>
 #include <osgUtil/IntersectionVisitor>
 #include <osgUtil/LineSegmentIntersector>
 #include <osgViewer/Viewer>
@@ -49,6 +51,56 @@ namespace MWRender
     namespace
     {
         constexpr int captureSize = 128;
+
+        /// Load the repository-owned cloud noise volume used by production compatibility shaders.
+        osg::ref_ptr<osg::Texture3D> loadAtmosphereNoiseTexture()
+        {
+            const std::filesystem::path path = std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files" / "data"
+                / "textures" / "openmwse" / "atmosphere_cloud_noise.dds";
+            osg::ref_ptr<osg::Image> image = osgDB::readRefImageFile(path.string());
+            if (!image)
+                throw std::runtime_error("Unable to load production atmosphere cloud noise texture");
+            osg::ref_ptr<osg::Texture3D> texture = new osg::Texture3D(image);
+            texture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
+            texture->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
+            texture->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
+            texture->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
+            texture->setWrap(osg::Texture::WRAP_R, osg::Texture::REPEAT);
+            return texture;
+        }
+
+        /// Load the repository-owned detail erosion volume used by production compatibility shaders.
+        osg::ref_ptr<osg::Texture3D> loadAtmosphereDetailNoiseTexture()
+        {
+            const std::filesystem::path path = std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files" / "data"
+                / "textures" / "openmwse" / "atmosphere_cloud_detail.dds";
+            osg::ref_ptr<osg::Image> image = osgDB::readRefImageFile(path.string());
+            if (!image)
+                throw std::runtime_error("Unable to load production atmosphere cloud detail texture");
+            osg::ref_ptr<osg::Texture3D> texture = new osg::Texture3D(image);
+            texture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
+            texture->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
+            texture->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
+            texture->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
+            texture->setWrap(osg::Texture::WRAP_R, osg::Texture::REPEAT);
+            return texture;
+        }
+
+        /// Load the repository-owned broad weather field used by production compatibility shaders.
+        osg::ref_ptr<osg::Texture2D> loadAtmosphereWeatherTexture()
+        {
+            const std::filesystem::path path = std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files" / "data"
+                / "textures" / "openmwse" / "atmosphere_cloud_weather.dds";
+            osg::ref_ptr<osg::Image> image = osgDB::readRefImageFile(path.string());
+            if (!image)
+                throw std::runtime_error("Unable to load production atmosphere cloud weather texture");
+            osg::ref_ptr<osg::Texture2D> texture = new osg::Texture2D(image);
+            texture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
+            texture->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
+            texture->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
+            texture->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
+            return texture;
+        }
 
         /// Pair a deterministic sky sample with its world-space direction.
         struct AtmosphereSample
@@ -80,6 +132,13 @@ namespace MWRender
         {
             return { std::lerp(from.mRed, to.mRed, factor), std::lerp(from.mGreen, to.mGreen, factor),
                 std::lerp(from.mBlue, to.mBlue, factor) };
+        }
+
+        /// Evaluate the GLSL smoothstep transfer function for the independent CPU reference.
+        float smoothstep(float lower, float upper, float value)
+        {
+            const float normalized = std::clamp((value - lower) / (upper - lower), 0.f, 1.f);
+            return normalized * normalized * (3.f - 2.f * normalized);
         }
 
         /// Create a filtered stock-like star texture with dark translucent edge texels around a bright core.
@@ -116,8 +175,8 @@ namespace MWRender
             return texture;
         }
 
-        /// Evaluate the independently transcribed MGE-style scattering reference for one direction.
-        CapturedColor referenceMgeSky(const osg::Vec3f& requestedDirection)
+        /// Evaluate the independently transcribed directional atmosphere reference for one direction.
+        CapturedColor referenceAtmosphereSky(const osg::Vec3f& requestedDirection)
         {
             constexpr CapturedColor skyColor{ 0.232298f, 0.361908f, 0.519572f };
             constexpr CapturedColor fogColor{ 0.887052f, 0.638956f, 0.517662f };
@@ -165,13 +224,43 @@ namespace MWRender
                 scattered.mBlue * integrated.mBlue * depthBrightness * altitudeBrightness,
             };
             const CapturedColor weatherBlended = mix(directionalSky, result, 1.f);
-            return weatherBlended;
+
+            const float sunElevationDegrees = osg::RadiansToDegrees(std::asin(std::clamp(sunDirection.z(), -1.f, 1.f)));
+            const float airMassDenominator
+                = sunDirection.z() + 0.50572f * std::pow(std::max(sunElevationDegrees + 6.07995f, 0.05f), -1.6364f);
+            const float relativeAirMass = std::clamp(1.f / std::max(airMassDenominator, 0.035f), 1.f, 30.f);
+            const CapturedColor longPathTransmittance{
+                std::exp(-relativeAirMass * 0.018f),
+                std::exp(-relativeAirMass * 0.041f),
+                std::exp(-relativeAirMass * 0.095f),
+            };
+            const float twilight
+                = smoothstep(-0.3f, -0.015f, sunDirection.z()) * (1.f - smoothstep(0.06f, 0.34f, sunDirection.z()));
+            const float horizonBand = std::exp(-7.5f * std::abs(direction.z()));
+            const float solarAfterglow = std::pow(std::clamp(0.5f + 0.5f * sunCosine, 0.f, 1.f), 3.f);
+            const float antiSolarArch = std::pow(std::clamp(0.5f - 0.5f * sunCosine, 0.f, 1.f), 2.f);
+            const CapturedColor sunsetRadiance{
+                std::lerp(1.22f, 1.f, longPathTransmittance.mRed) * solarAfterglow,
+                std::lerp(0.24f, 0.62f, longPathTransmittance.mGreen) * solarAfterglow,
+                std::lerp(0.055f, 0.24f, longPathTransmittance.mBlue) * solarAfterglow,
+            };
+            const CapturedColor twilightArch{
+                0.22f * antiSolarArch,
+                0.12f * antiSolarArch,
+                0.34f * antiSolarArch,
+            };
+            const float twilightWeight = twilight * horizonBand;
+            return {
+                weatherBlended.mRed + (sunsetRadiance.mRed + twilightArch.mRed) * twilightWeight,
+                weatherBlended.mGreen + (sunsetRadiance.mGreen + twilightArch.mGreen) * twilightWeight,
+                weatherBlended.mBlue + (sunsetRadiance.mBlue + twilightArch.mBlue) * twilightWeight,
+            };
         }
 
         /// Compare a captured sky sample with the independent directional reference.
-        void expectMgeReference(const CapturedColor& actual, const osg::Vec3f& direction)
+        void expectAtmosphereReference(const CapturedColor& actual, const osg::Vec3f& direction)
         {
-            const CapturedColor expected = referenceMgeSky(direction);
+            const CapturedColor expected = referenceAtmosphereSky(direction);
             constexpr float tolerance = 0.035f;
             EXPECT_NEAR(actual.mRed, expected.mRed, tolerance);
             EXPECT_NEAR(actual.mGreen, expected.mGreen, tolerance);
@@ -347,7 +436,8 @@ namespace MWRender
                 perViewState->setProjectionMatrix(static_cast<osg::Matrixf>(camera->getProjectionMatrix()));
                 mRoot->addCullCallback(perViewState);
 
-                mAtmosphereState = new SceneUtil::StateUpdater;
+                mAtmosphereState = new SceneUtil::StateUpdater(loadAtmosphereNoiseTexture(), 14,
+                    loadAtmosphereDetailNoiseTexture(), 15, loadAtmosphereWeatherTexture(), 16);
                 mAtmosphereState->setFogColor({ 0.887052f, 0.638956f, 0.517662f, 1.f });
                 mAtmosphereState->setFogStart(1000.f);
                 mAtmosphereState->setFogEnd(20000.f);
@@ -408,6 +498,16 @@ namespace MWRender
                 applyAtmosphereState();
             }
 
+            /// Set the canonical scene-linear illumination consumed by sky, cloud, and aerial scattering.
+            void setAtmosphereLighting(
+                const osg::Vec3f& solarRadiance, const osg::Vec3f& skyIrradiance, const osg::Vec3f& groundIrradiance)
+            {
+                mSolarRadiance = solarRadiance;
+                mSkyIrradiance = skyIrradiance;
+                mGroundIrradiance = groundIrradiance;
+                applyAtmosphereState();
+            }
+
             /// Set weather volume controls and quality without changing canonical scattering colors.
             void setAtmosphereVolumes(const osg::Vec4f& cloudParameters, const osg::Vec4f& mistParameters,
                 const osg::Vec4f& sunDiscColor, int quality = 2)
@@ -417,6 +517,13 @@ namespace MWRender
                 mSunDiscColor = sunDiscColor;
                 mQuality = quality;
                 applyAtmosphereState();
+            }
+
+            /// Set the path-atmosphere range used to verify cloud visibility and distance convergence independently.
+            void setFogRange(float start, float end)
+            {
+                mAtmosphereState->setFogStart(start);
+                mAtmosphereState->setFogEnd(end);
             }
 
             /// Capture the main-view sky for a world-space viewing direction.
@@ -503,8 +610,8 @@ namespace MWRender
             void applyAtmosphereState()
             {
                 mAtmosphereState->setAtmosphere(true, { 0.232298f, 0.361908f, 0.519572f, 1.f }, { 0.25f, 0.38f, 0.48f },
-                    { 0.07f, 0.36f, 0.76f }, 1.f, mSunDirection, mCloudParameters, mMistParameters, mSunDiscColor,
-                    { 1.f, 0.85f, 0.65f }, { 0.3f, 0.4f, 0.55f }, { 0.45f, 0.5f, 0.6f },
+                    { 0.07f, 0.36f, 0.76f }, 1.f, mSunDirection, mCloudParameters, { 0.62f, 0.9f, 0.72f, 0.08f }, {},
+                    {}, mMistParameters, {}, {}, {}, mSunDiscColor, mSolarRadiance, mSkyIrradiance, mGroundIrradiance,
                     mCloudAdvectionOffsetWorldUnits, mQuality);
             }
 
@@ -521,6 +628,9 @@ namespace MWRender
             osg::Vec4f mCloudParameters;
             osg::Vec4f mMistParameters;
             osg::Vec4f mSunDiscColor{ 1.f, 0.85f, 0.65f, 0.f };
+            osg::Vec3f mSolarRadiance{ 1.f, 0.85f, 0.65f };
+            osg::Vec3f mSkyIrradiance{ 0.3f, 0.4f, 0.55f };
+            osg::Vec3f mGroundIrradiance{ 0.45f, 0.5f, 0.6f };
             osg::Vec2f mCloudAdvectionOffsetWorldUnits;
             int mWidth;
             int mHeight;
@@ -764,7 +874,9 @@ namespace MWRender
             state->setTextureAttributeAndModes(skyTextureUnit, skyTexture, osg::StateAttribute::ON);
             state->addUniform(new osg::Uniform("sky", skyTextureUnit));
 
-            osg::ref_ptr<SceneUtil::StateUpdater> atmosphereState = new SceneUtil::StateUpdater;
+            osg::ref_ptr<SceneUtil::StateUpdater> atmosphereState
+                = new SceneUtil::StateUpdater(loadAtmosphereNoiseTexture(), 14, loadAtmosphereDetailNoiseTexture(), 15,
+                    loadAtmosphereWeatherTexture(), 16);
             atmosphereState->setAmbientColor({ 0.22f, 0.2f, 0.19f, 1.f });
             atmosphereState->setFogColor(fog.mColor);
             atmosphereState->setFogStart(fog.mStart);
@@ -773,8 +885,8 @@ namespace MWRender
             atmosphereState->setUnderwaterFogStart(fog.mStart);
             atmosphereState->setUnderwaterFogEnd(fog.mEnd);
             atmosphereState->setAtmosphere(true, fog.mColor, { 0.25f, 0.38f, 0.48f }, { 0.07f, 0.36f, 0.76f }, 0.f,
-                { 0.95f, 0.f, 0.31f }, {}, {}, {}, { 0.8f, 0.68f, 0.6f }, { 0.34f, 0.29f, 0.27f },
-                { 0.34f, 0.29f, 0.27f }, {}, 2);
+                { 0.95f, 0.f, 0.31f }, {}, {}, {}, {}, {}, {}, {}, {}, {}, { 0.8f, 0.68f, 0.6f },
+                { 0.34f, 0.29f, 0.27f }, { 0.34f, 0.29f, 0.27f }, {}, 2);
             atmosphereState->setDefaults(state);
 
             viewer.setSceneData(root);
@@ -978,6 +1090,15 @@ namespace MWRender
                 (resumed.mOffsetWorldUnits - paused.mOffsetWorldUnits).y(), resumed.mFrameDeltaWorldUnits.y(), 0.002f);
         }
 
+        TEST(MWRenderAtmosphereTest, reservedSuspendedMediumIsOpticallyNeutralByDefault)
+        {
+            const AtmosphereState atmosphere;
+            EXPECT_EQ(atmosphere.mSuspendedMedium.mExtinctionPerWorldUnit, osg::Vec3f());
+            EXPECT_EQ(atmosphere.mSuspendedMedium.mSingleScatteringAlbedo, osg::Vec3f(1.f, 1.f, 1.f));
+            EXPECT_FLOAT_EQ(atmosphere.mSuspendedMedium.mAnisotropy, 0.f);
+            EXPECT_FLOAT_EQ(atmosphere.mSuspendedMedium.mTerrainFollowing, 0.f);
+        }
+
         TEST(MWRenderAtmosphereTest, cloudAdvectionRejectsInvalidOrStoppedProductionClocks)
         {
             CloudAdvectionController controller;
@@ -1023,25 +1144,37 @@ namespace MWRender
             EXPECT_FLOAT_EQ(controller.update(stable, true), 0.f);
         }
 
-        TEST(MWRenderAtmosphereTest, sceneUniformStatePublishesCanonicalCloudAdvection)
+        TEST(MWRenderAtmosphereTest, sceneUniformStatePublishesCanonicalVolumeReferences)
         {
             osg::ref_ptr<SceneUtil::StateUpdater> updater = new SceneUtil::StateUpdater;
             updater->setAtmosphere(true, { 0.4f, 0.5f, 0.7f, 1.f }, { 0.25f, 0.38f, 0.48f }, { 0.07f, 0.36f, 0.76f },
-                1.f, { 0.8f, 0.f, 0.6f }, { 0.58f, 0.9f, 48000.f, 22000.f }, {}, { 1.f, 0.8f, 0.6f, 1.f },
+                1.f, { 0.8f, 0.f, 0.6f }, { 0.58f, 0.9f, 48000.f, 22000.f }, { 0.62f, 0.9f, 0.72f, 0.08f }, {}, {}, {},
+                {}, { 12500.f, 0.75f, 1500.f, 0.f }, { 4000.f, 5000.f, 0.2f, -0.1f }, { 1.f, 0.8f, 0.6f, 1.f },
                 { 1.f, 0.8f, 0.6f }, { 0.3f, 0.4f, 0.55f }, { 0.45f, 0.5f, 0.6f }, { 1234.f, 567.f }, 2);
             osg::ref_ptr<osg::StateSet> state = new osg::StateSet;
             updater->setDefaults(state);
 
             osg::Vec2f publishedOffset;
+            osg::Vec4f publishedMediumReference;
+            osg::Vec4f publishedOrography;
             ASSERT_TRUE(state->getUniform("atmosphere.cloudAdvectionOffsetWorldUnits")->get(publishedOffset));
+            ASSERT_TRUE(state->getUniform("atmosphere.mediumReferenceParameters")->get(publishedMediumReference));
+            ASSERT_TRUE(state->getUniform("atmosphere.orographicParameters")->get(publishedOrography));
             EXPECT_EQ(publishedOffset, osg::Vec2f(1234.f, 567.f));
+            EXPECT_EQ(publishedMediumReference, osg::Vec4f(12500.f, 0.75f, 1500.f, 0.f));
+            EXPECT_EQ(publishedOrography, osg::Vec4f(4000.f, 5000.f, 0.2f, -0.1f));
 
             updater->setAtmosphere(true, { 0.4f, 0.5f, 0.7f, 1.f }, { 0.25f, 0.38f, 0.48f }, { 0.07f, 0.36f, 0.76f },
-                1.f, { 0.8f, 0.f, 0.6f }, { 0.58f, 0.9f, 48000.f, 22000.f }, {}, { 1.f, 0.8f, 0.6f, 1.f },
+                1.f, { 0.8f, 0.f, 0.6f }, { 0.58f, 0.9f, 48000.f, 22000.f }, { 0.62f, 0.9f, 0.72f, 0.08f }, {}, {}, {},
+                {}, { 12600.f, 0.74f, 1600.f, 0.f }, { 4100.f, 5100.f, 0.18f, -0.08f }, { 1.f, 0.8f, 0.6f, 1.f },
                 { 1.f, 0.8f, 0.6f }, { 0.3f, 0.4f, 0.55f }, { 0.45f, 0.5f, 0.6f }, { 1240.f, 570.f }, 2);
             updater->apply(state, nullptr);
             ASSERT_TRUE(state->getUniform("atmosphere.cloudAdvectionOffsetWorldUnits")->get(publishedOffset));
+            ASSERT_TRUE(state->getUniform("atmosphere.mediumReferenceParameters")->get(publishedMediumReference));
+            ASSERT_TRUE(state->getUniform("atmosphere.orographicParameters")->get(publishedOrography));
             EXPECT_EQ(publishedOffset, osg::Vec2f(1240.f, 570.f));
+            EXPECT_EQ(publishedMediumReference, osg::Vec4f(12600.f, 0.74f, 1600.f, 0.f));
+            EXPECT_EQ(publishedOrography, osg::Vec4f(4100.f, 5100.f, 0.18f, -0.08f));
         }
 
         TEST(MWRenderAtmosphereTest, reshapesStockHorizonBandIntoClosedSkyBackground)
@@ -1070,8 +1203,8 @@ namespace MWRender
 
             const CapturedColor solar = harness.render({ 1.f, 0.f, 0.08f });
             const CapturedColor antiSolar = harness.render({ -1.f, 0.f, 0.08f });
-            expectMgeReference(solar, { 1.f, 0.f, 0.08f });
-            expectMgeReference(antiSolar, { -1.f, 0.f, 0.08f });
+            expectAtmosphereReference(solar, { 1.f, 0.f, 0.08f });
+            expectAtmosphereReference(antiSolar, { -1.f, 0.f, 0.08f });
             EXPECT_GT(solar.mRed, antiSolar.mRed + 0.1f);
             EXPECT_GT(solar.mRed / solar.mBlue, antiSolar.mRed / antiSolar.mBlue + 0.1f);
         }
@@ -1239,29 +1372,43 @@ namespace MWRender
                 GTEST_SKIP() << "No offscreen compatibility OpenGL context is available";
 
             const osg::Vec3f viewDirection(1.f, 0.f, 0.35f);
-            const CapturedImage clear = harness.renderReflectedImage({}, viewDirection);
+            const CapturedImage foggedClear = harness.renderReflectedImage({}, viewDirection);
             harness.setAtmosphereVolumes({ 0.95f, 1.05f, 1200.f, 5000.f }, {}, { 1.f, 0.82f, 0.62f, 0.f });
-            const CapturedImage firstCloudFrame = harness.renderReflectedImage({}, viewDirection);
-            const CapturedImage secondCloudFrame = harness.renderReflectedImage({}, viewDirection);
+            const CapturedImage foggedClouds = harness.renderReflectedImage({}, viewDirection);
+            const CapturedImage repeatedFoggedClouds = harness.renderReflectedImage({}, viewDirection);
 
-            double change = 0.0;
+            harness.setFogRange(1000000.f, 2000000.f);
+            harness.setAtmosphereVolumes({}, {}, { 1.f, 0.82f, 0.62f, 0.f });
+            const CapturedImage clearPathClouds = harness.renderReflectedImage({}, viewDirection);
+            harness.setAtmosphereVolumes({ 0.95f, 1.05f, 1200.f, 5000.f }, {}, { 1.f, 0.82f, 0.62f, 0.f });
+            const CapturedImage visibleClouds = harness.renderReflectedImage({}, viewDirection);
+
+            double foggedChange = 0.0;
+            double visibleChange = 0.0;
             double repeatDifference = 0.0;
-            for (std::size_t index = 0; index < clear.mPixels.size(); ++index)
+            for (std::size_t index = 0; index < foggedClear.mPixels.size(); ++index)
             {
-                const CapturedColor& base = clear.mPixels[index];
-                const CapturedColor& first = firstCloudFrame.mPixels[index];
-                const CapturedColor& second = secondCloudFrame.mPixels[index];
-                change += std::abs(first.mRed - base.mRed) + std::abs(first.mGreen - base.mGreen)
-                    + std::abs(first.mBlue - base.mBlue);
-                repeatDifference += std::abs(first.mRed - second.mRed) + std::abs(first.mGreen - second.mGreen)
-                    + std::abs(first.mBlue - second.mBlue);
-                EXPECT_TRUE(std::isfinite(first.mRed));
-                EXPECT_TRUE(std::isfinite(first.mGreen));
-                EXPECT_TRUE(std::isfinite(first.mBlue));
+                const CapturedColor& foggedBase = foggedClear.mPixels[index];
+                const CapturedColor& fogged = foggedClouds.mPixels[index];
+                const CapturedColor& repeated = repeatedFoggedClouds.mPixels[index];
+                const CapturedColor& clearBase = clearPathClouds.mPixels[index];
+                const CapturedColor& visible = visibleClouds.mPixels[index];
+                foggedChange += std::abs(fogged.mRed - foggedBase.mRed) + std::abs(fogged.mGreen - foggedBase.mGreen)
+                    + std::abs(fogged.mBlue - foggedBase.mBlue);
+                visibleChange += std::abs(visible.mRed - clearBase.mRed) + std::abs(visible.mGreen - clearBase.mGreen)
+                    + std::abs(visible.mBlue - clearBase.mBlue);
+                repeatDifference += std::abs(fogged.mRed - repeated.mRed) + std::abs(fogged.mGreen - repeated.mGreen)
+                    + std::abs(fogged.mBlue - repeated.mBlue);
+                EXPECT_TRUE(std::isfinite(visible.mRed));
+                EXPECT_TRUE(std::isfinite(visible.mGreen));
+                EXPECT_TRUE(std::isfinite(visible.mBlue));
             }
 
-            const double channelCount = static_cast<double>(clear.mPixels.size() * 3);
-            EXPECT_GT(change / channelCount, 0.008);
+            const double channelCount = static_cast<double>(foggedClear.mPixels.size() * 3);
+            EXPECT_GT(visibleChange / channelCount, 0.006);
+            EXPECT_GT(foggedChange / channelCount, 0.001);
+            EXPECT_LT(foggedChange, visibleChange)
+                << "Reflected clouds must converge toward the same path atmosphere as distant landscape";
             EXPECT_LT(repeatDifference / channelCount, 1e-6);
         }
 
@@ -1364,6 +1511,7 @@ namespace MWRender
             if (!harness.isValid())
                 GTEST_SKIP() << "No offscreen compatibility OpenGL context is available";
 
+            harness.setFogRange(1000000.f, 2000000.f);
             const osg::Vec3f nearHorizonDirection(1.f, 0.f, 0.08f);
             harness.setAtmosphereVolumes({}, {}, { 1.f, 0.82f, 0.62f, 0.f });
             const CapturedImage clear = harness.renderReflectedImage({}, nearHorizonDirection);
@@ -1418,6 +1566,45 @@ namespace MWRender
             EXPECT_NEAR(clippedDisc.mBlue, noDisc.mBlue, 0.002f);
         }
 
+        TEST(MWRenderAtmosphereTest, refractedSunDiscRemainsVisibleWithItsGeometricCenterBelowTheHorizon)
+        {
+            AtmosphereRenderHarness harness(createHarnessDome(), 192, 192, 12.0);
+            if (!harness.isValid())
+                GTEST_SKIP() << "No offscreen compatibility OpenGL context is available";
+
+            const osg::Vec3f geometricSunDirection(1.f, 0.f, -0.006f);
+            const osg::Vec3f apparentHorizonDirection(1.f, 0.f, 0.004f);
+            harness.setSunDirection(geometricSunDirection, { 1.f, 0.82f, 0.62f, 0.f });
+            const CapturedColor noDisc = harness.render(apparentHorizonDirection);
+            harness.setSunDirection(geometricSunDirection, { 1.f, 0.82f, 0.62f, 1.f });
+            const CapturedColor refractedDisc = harness.render(apparentHorizonDirection);
+
+            EXPECT_GT(refractedDisc.mRed - noDisc.mRed, 0.35f);
+            EXPECT_GT(refractedDisc.mGreen - noDisc.mGreen, 0.15f);
+        }
+
+        TEST(MWRenderAtmosphereTest, postSunsetScatteringUsesCanonicalIlluminationAndFadesIntoNight)
+        {
+            AtmosphereRenderHarness harness(createHarnessDome());
+            if (!harness.isValid())
+                GTEST_SKIP() << "No offscreen compatibility OpenGL context is available";
+
+            const osg::Vec3f solarHorizonDirection(1.f, 0.f, 0.03f);
+            harness.setSunDirection({ 1.f, 0.f, -0.07f });
+            harness.setAtmosphereLighting({ 1.f, 0.82f, 0.62f }, { 0.3f, 0.4f, 0.55f }, { 0.45f, 0.5f, 0.6f });
+            const CapturedColor illuminatedTwilight = harness.render(solarHorizonDirection);
+            harness.setAtmosphereLighting({}, {}, {});
+            const CapturedColor unilluminatedTwilight = harness.render(solarHorizonDirection);
+            harness.setAtmosphereLighting({ 1.f, 0.82f, 0.62f }, { 0.3f, 0.4f, 0.55f }, { 0.45f, 0.5f, 0.6f });
+            harness.setSunDirection({ 1.f, 0.f, -0.36f });
+            const CapturedColor astronomicalNight = harness.render(solarHorizonDirection);
+
+            EXPECT_GT(illuminatedTwilight.mRed, unilluminatedTwilight.mRed + 0.01f);
+            EXPECT_GT(illuminatedTwilight.mRed, illuminatedTwilight.mBlue);
+            EXPECT_GT(illuminatedTwilight.mRed, astronomicalNight.mRed + 0.08f);
+            EXPECT_GT(illuminatedTwilight.mBlue, astronomicalNight.mBlue + 0.02f);
+        }
+
         TEST(MWRenderAtmosphereTest, analyticSunUsesHdrTintAndDisappearsBehindTheCamera)
         {
             AtmosphereRenderHarness harness(createHarnessDome());
@@ -1453,6 +1640,7 @@ namespace MWRender
             if (!harness.isValid())
                 GTEST_SKIP() << "No offscreen compatibility OpenGL context is available";
 
+            harness.setFogRange(1000000.f, 2000000.f);
             const osg::Vec3f eyePosition(3400.f, -1700.f, 850.f);
             osg::Vec3f skyDirection(0.82f, 0.31f, 0.48f);
             skyDirection.normalize();
@@ -1462,13 +1650,17 @@ namespace MWRender
 
             double cloudChange = 0.0;
             double spatialVariation = 0.0;
+            std::size_t cloudAffectedPixels = 0;
             const CapturedColor& center = cloudy.at(cloudy.mWidth / 2, cloudy.mHeight / 2);
             for (std::size_t index = 0; index < clear.mPixels.size(); ++index)
             {
                 const CapturedColor& base = clear.mPixels[index];
                 const CapturedColor& reflectedSky = cloudy.mPixels[index];
-                cloudChange += std::abs(reflectedSky.mRed - base.mRed) + std::abs(reflectedSky.mGreen - base.mGreen)
-                    + std::abs(reflectedSky.mBlue - base.mBlue);
+                const double pixelCloudChange = std::abs(reflectedSky.mRed - base.mRed)
+                    + std::abs(reflectedSky.mGreen - base.mGreen) + std::abs(reflectedSky.mBlue - base.mBlue);
+                cloudChange += pixelCloudChange;
+                if (pixelCloudChange > 0.015)
+                    ++cloudAffectedPixels;
                 spatialVariation += std::abs(reflectedSky.mRed - center.mRed)
                     + std::abs(reflectedSky.mGreen - center.mGreen) + std::abs(reflectedSky.mBlue - center.mBlue);
                 EXPECT_TRUE(std::isfinite(reflectedSky.mRed));
@@ -1477,8 +1669,10 @@ namespace MWRender
             }
             const double channelCount = static_cast<double>(clear.mPixels.size() * 3);
             EXPECT_GT(center.mRed + center.mGreen + center.mBlue, 0.1f);
-            EXPECT_GT(cloudChange / channelCount, 0.015)
+            EXPECT_GT(cloudChange / channelCount, 0.008)
                 << "The reflection render must contain the procedural clouds, not only the clear-sky color";
+            EXPECT_GT(cloudAffectedPixels, clear.mPixels.size() * 9 / 100)
+                << "Organized reflected clouds must affect a material portion of the water-visible sky";
             EXPECT_GT(spatialVariation / channelCount, 0.01)
                 << "The reflection render must preserve spatial sky detail instead of collapsing to a flat tint";
         }
@@ -1514,7 +1708,7 @@ namespace MWRender
             {
                 EXPECT_TRUE(intersectsDome(*dome, samples[index].mDirection));
                 colors[index] = harness.render(samples[index].mDirection);
-                expectMgeReference(colors[index], samples[index].mDirection);
+                expectAtmosphereReference(colors[index], samples[index].mDirection);
             }
 
             EXPECT_GT(colors[0].mRed, colors[1].mRed + 0.1f)

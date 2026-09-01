@@ -69,6 +69,7 @@ file(GLOB UNITTEST_SRC_FILES
     files/hash.cpp
 
     diagnostics/protocol.cpp
+    diagnostics/atmospherescenario.cpp
     diagnostics/commandqueue.cpp
     diagnostics/capsule.cpp
     diagnostics/gameplayroute.cpp

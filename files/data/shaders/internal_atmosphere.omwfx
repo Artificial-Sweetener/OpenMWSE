@@ -1,3 +1,29 @@
+sampler_3d openmwseCloudNoiseTexture {
+    source = "textures/openmwse/atmosphere_cloud_noise.dds";
+    min_filter = linear;
+    mag_filter = linear;
+    wrap_s = repeat;
+    wrap_t = repeat;
+    wrap_r = repeat;
+}
+
+sampler_3d openmwseCloudDetailNoiseTexture {
+    source = "textures/openmwse/atmosphere_cloud_detail.dds";
+    min_filter = linear;
+    mag_filter = linear;
+    wrap_s = repeat;
+    wrap_t = repeat;
+    wrap_r = repeat;
+}
+
+sampler_2d openmwseCloudWeatherTexture {
+    source = "textures/openmwse/atmosphere_cloud_weather.dds";
+    min_filter = linear;
+    mag_filter = linear;
+    wrap_s = repeat;
+    wrap_t = repeat;
+}
+
 shared {
     // World reconstruction and linear depth helpers abstract the active depth convention. Distances are world units;
     // lighting and pass outputs remain scene-linear HDR until the normal post-processing tonemap.
@@ -5,6 +31,36 @@ shared {
     vec4 openmwseCloudParameters()
     {
         return omw.atmosphereCloudParameters;
+    }
+
+    /// Expose canonical weather-specific cloud morphology to the shared cloud implementation.
+    vec4 openmwseCloudShapeParameters()
+    {
+        return omw.atmosphereCloudShapeParameters;
+    }
+
+    /// Expose the independently placeable low-cloud layer to the shared implementation.
+    vec4 openmwseLowCloudParameters()
+    {
+        return omw.atmosphereLowCloudParameters;
+    }
+
+    /// Expose weather and environment morphology for the low-cloud layer.
+    vec4 openmwseLowCloudShapeParameters()
+    {
+        return omw.atmosphereLowCloudShapeParameters;
+    }
+
+    /// Expose local terrain height and terrain-following controls to shared cloud height calculations.
+    vec4 openmwseCloudMediumReferenceParameters()
+    {
+        return omw.atmosphereMediumReferenceParameters;
+    }
+
+    /// Expose the sparse terrain sample center and gradient used by orographic formation.
+    vec4 openmwseCloudOrographicParameters()
+    {
+        return omw.atmosphereOrographicParameters;
     }
 
     /// Expose the exterior water datum to shared cloud height calculations.
@@ -17,6 +73,24 @@ shared {
     vec2 openmwseCloudAdvectionOffsetWorldUnits()
     {
         return omw.atmosphereCloudAdvectionOffsetWorldUnits;
+    }
+
+    /// Sample the canonical tileable multi-channel cloud shape volume.
+    vec4 openmwseCloudNoiseSample(vec3 coordinates)
+    {
+        return omw_Texture3D(openmwseCloudNoiseTexture, fract(coordinates));
+    }
+
+    /// Sample the independent high-frequency cloud erosion volume.
+    vec4 openmwseCloudDetailNoiseSample(vec3 coordinates)
+    {
+        return omw_Texture3D(openmwseCloudDetailNoiseTexture, fract(coordinates));
+    }
+
+    /// Sample the canonical broad cloud-organization and morphology field.
+    vec4 openmwseCloudWeatherSample(vec2 coordinates)
+    {
+        return omw_Texture2D(openmwseCloudWeatherTexture, fract(coordinates));
     }
 
     #include "lib/util/dither.glsl"
@@ -73,11 +147,17 @@ shared {
         return vec2(max(0.0, min(first, second)), min(omw.far, max(first, second)));
     }
 
+    /// Return the local ground or water datum used by terrain-coupled mist and fog.
+    float atmosphereLocalGroundHeight(vec2 worldPosition)
+    {
+        return max(omw.waterHeight, openmwseCloudTerrainHeight(worldPosition));
+    }
+
     /// Evaluate height-fog density in the same integrated world-space advection field as clouds and shadows.
     float mistDensityAt(vec3 worldPosition)
     {
         float densityScale = max(omw.atmosphereMistParameters.x, 0.0);
-        float baseHeight = omw.waterHeight + omw.atmosphereMistParameters.y;
+        float baseHeight = atmosphereLocalGroundHeight(worldPosition.xy) + omw.atmosphereMistParameters.y;
         float thickness = max(omw.atmosphereMistParameters.z, 1.0);
         float height = (worldPosition.z - (baseHeight - thickness * 0.2)) / (thickness * 1.2);
         float heightShape = 1.0 - smoothstep(0.15, 1.0, height);
@@ -86,13 +166,33 @@ shared {
             = advectedWorldPosition * 0.00011 + worldPosition.z * vec2(0.000025, -0.000018);
         float detail = atmosphereNoise(noisePosition) * 0.68
             + atmosphereNoise(noisePosition * 2.13 + vec2(9.7, -13.1)) * 0.32;
-        return densityScale * heightShape * smoothstep(0.18, 0.82, detail);
+        float valleyPooling = smoothstep(300.0, 4200.0, omw.atmosphereMediumReferenceParameters.w)
+            * openmwseCloudTerrainInfluence(worldPosition.xy);
+        return densityScale * heightShape * smoothstep(0.18, 0.82, detail)
+            * mix(1.0, 1.58, valleyPooling);
+    }
+
+    /// Evaluate sustained volumetric fog as a smoother ground-coupled medium than localized mist.
+    float fogDensityAt(vec3 worldPosition)
+    {
+        float densityScale = max(omw.atmosphereFogVolumeParameters.x, 0.0);
+        float baseHeight = atmosphereLocalGroundHeight(worldPosition.xy) + omw.atmosphereFogVolumeParameters.y;
+        float thickness = max(omw.atmosphereFogVolumeParameters.z, 1.0);
+        float relativeHeight = max((worldPosition.z - baseHeight) / thickness, 0.0);
+        float heightShape = exp(-relativeHeight * 2.6)
+            * (1.0 - smoothstep(0.78, 1.15, relativeHeight));
+        vec2 advectedWorldPosition
+            = worldPosition.xy + omw.atmosphereCloudAdvectionOffsetWorldUnits * 0.32;
+        float broadVariation = atmosphereNoise(advectedWorldPosition * 0.000035 + vec2(7.1, -23.4));
+        float valleyPooling = smoothstep(600.0, 5200.0, omw.atmosphereMediumReferenceParameters.w)
+            * openmwseCloudTerrainInfluence(worldPosition.xy);
+        return densityScale * heightShape * mix(0.78, 1.08, broadVariation)
+            * mix(1.0, 1.16, valleyPooling);
     }
 
     /// Evaluate the mist's normalized forward-scattering phase function.
-    float miePhase(float cosineAngle)
+    float miePhase(float cosineAngle, float anisotropy)
     {
-        const float anisotropy = 0.62;
         float denominator = 1.0 + anisotropy * anisotropy - 2.0 * anisotropy * cosineAngle;
         return (1.0 - anisotropy * anisotropy) / max(12.5663706 * pow(denominator, 1.5), 0.001);
     }
@@ -183,24 +283,38 @@ shared {
         return exp2(encodedDistance * 20.0) - 1.0;
     }
 
-    /// Estimate the contribution-bearing cloud distance from the temporally stable broad-density field.
-    vec2 representativeCloudDistanceAndDensity(vec3 rayOrigin, vec3 rayDirection, vec2 cloudInterval)
+    /// Estimate contribution distance from conservative weather-column and family-profile support.
+    vec2 representativeCloudDistanceAndSupport(
+        vec3 rayOrigin, vec3 rayDirection, vec2 cloudInterval, OpenMWSECloudLayer cloudLayer)
     {
-        const int sampleCount = 4;
+        const int sampleCount = 6;
         float weightedDistance = 0.0;
-        float densitySum = 0.0;
+        float supportSum = 0.0;
         for (int sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex)
         {
             float intervalPosition = (float(sampleIndex) + 0.5) / float(sampleCount);
             float sampleDistance = mix(cloudInterval.x, cloudInterval.y, intervalPosition);
-            float density = max(openmwseCloudBroadDensity(rayOrigin + rayDirection * sampleDistance), 0.0);
-            weightedDistance += sampleDistance * density;
-            densitySum += density;
+            vec3 samplePosition = rayOrigin + rayDirection * sampleDistance;
+            vec3 advectedPosition = openmwseCloudLayerPosition(samplePosition, cloudLayer);
+            OpenMWSECloudColumnProperties columnProperties = openmwseCloudColumnProperties(
+                openmwseCloudColumnPosition(samplePosition, advectedPosition, cloudLayer),
+                cloudLayer.parameters, cloudLayer.shape);
+            vec2 localLayer
+                = openmwseCloudLocalLayerFromProperties(samplePosition, columnProperties, cloudLayer);
+            float relativeHeight
+                = clamp((samplePosition.z - localLayer.x) / max(localLayer.y, 1.0), 0.0, 1.0);
+            float heightSupport = openmwseCloudHeightProfile(
+                relativeHeight, columnProperties.family, columnProperties.development);
+            float columnSupport = openmwseCloudLocalCoverage(
+                columnProperties.organizationPotential, cloudLayer.parameters.x);
+            float support = heightSupport * columnSupport;
+            weightedDistance += sampleDistance * support;
+            supportSum += support;
         }
         float fallbackDistance = mix(cloudInterval.x, cloudInterval.y, 0.5);
         float representativeDistance
-            = densitySum > 0.0001 ? weightedDistance / densitySum : fallbackDistance;
-        return vec2(representativeDistance, densitySum);
+            = supportSum > 0.0001 ? weightedDistance / supportSum : fallbackDistance;
+        return vec2(representativeDistance, supportSum);
     }
 
     /// Retain stationary dither support only when it reprojects to the same physical cloud sample.
@@ -314,9 +428,11 @@ fragment integrateAtmosphereVolume(target=AtmosphereVolumeRaw) {
 
     void main()
     {
-        bool cloudsEnabled = omw.atmosphereCloudParameters.x > 0.001;
+        bool cloudsEnabled
+            = omw.atmosphereCloudParameters.x > 0.001 || omw.atmosphereLowCloudParameters.x > 0.001;
         bool mistEnabled = omw.atmosphereMistParameters.x > 0.001;
-        if (!omw.atmosphereEnabled || (!cloudsEnabled && !mistEnabled))
+        bool fogEnabled = omw.atmosphereFogVolumeParameters.x > 0.001;
+        if (!omw.atmosphereEnabled || (!cloudsEnabled && !mistEnabled && !fogEnabled))
         {
             omw_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
             return;
@@ -341,12 +457,23 @@ fragment integrateAtmosphereVolume(target=AtmosphereVolumeRaw) {
             : vec4(0.0, 0.0, 0.0, 1.0);
 
         vec4 mist = vec4(0.0, 0.0, 0.0, 1.0);
-        if (mistEnabled)
+        if (mistEnabled || fogEnabled)
         {
-            float thickness = max(omw.atmosphereMistParameters.z, 1.0);
-            float baseHeight = omw.waterHeight + omw.atmosphereMistParameters.y;
-            vec2 interval = layerIntersection(
-                omw.eyePos.xyz, rayDirection, baseHeight - thickness * 0.2, baseHeight + thickness);
+            float mistThickness = max(omw.atmosphereMistParameters.z, 1.0);
+            float mistBaseHeight = atmosphereLocalGroundHeight(omw.eyePos.xy) + omw.atmosphereMistParameters.y;
+            float fogThickness = max(omw.atmosphereFogVolumeParameters.z, 1.0);
+            float fogBaseHeight = atmosphereLocalGroundHeight(omw.eyePos.xy) + omw.atmosphereFogVolumeParameters.y;
+            float terrainExcursion = length(omw.atmosphereOrographicParameters.zw) * 20480.0;
+            float lowerHeight = mistEnabled ? mistBaseHeight - mistThickness * 0.2 : fogBaseHeight;
+            float upperHeight = mistEnabled ? mistBaseHeight + mistThickness : fogBaseHeight + fogThickness;
+            if (fogEnabled)
+            {
+                lowerHeight = min(lowerHeight, fogBaseHeight);
+                upperHeight = max(upperHeight, fogBaseHeight + fogThickness);
+            }
+            lowerHeight -= terrainExcursion;
+            upperHeight += terrainExcursion;
+            vec2 interval = layerIntersection(omw.eyePos.xyz, rayDirection, lowerHeight, upperHeight);
             interval.y = min(interval.y, sceneDistance);
             if (interval.y > interval.x)
             {
@@ -360,7 +487,11 @@ fragment integrateAtmosphereVolume(target=AtmosphereVolumeRaw) {
                 vec3 scatteredLight = vec3(0.0);
                 float representativeDistanceSum = 0.0;
                 vec3 sunDirection = normalize(omw.sunPos.xyz);
-                float phase = 0.3 + 0.7 * miePhase(dot(rayDirection, sunDirection));
+                float mistWeight = max(omw.atmosphereMistParameters.x, 0.0);
+                float fogWeight = max(omw.atmosphereFogVolumeParameters.x, 0.0);
+                float anisotropy = mix(omw.atmosphereFogVolumeParameters.w, 0.62,
+                    mistWeight / max(mistWeight + fogWeight, 0.0001));
+                float phase = 0.3 + 0.7 * miePhase(dot(rayDirection, sunDirection), anisotropy);
                 vec3 ambientLight
                     = openmwseAtmosphereEnvironmentIrradiance(omw.atmosphereSkyIrradiance, atmosphere);
                 vec3 directLight
@@ -373,25 +504,35 @@ fragment integrateAtmosphereVolume(target=AtmosphereVolumeRaw) {
                     float segmentStart = interval.x + float(sampleIndex) * stepLength;
                     float distanceAlongRay = segmentStart + jitter * stepLength;
                     vec3 samplePosition = omw.eyePos.xyz + rayDirection * distanceAlongRay;
-                    float density;
+                    float mistDensity;
+                    float fogDensity;
                     if (temporalSamplingEnabled || cameraTranslated)
-                        density = mistDensityAt(samplePosition);
+                    {
+                        mistDensity = mistEnabled ? mistDensityAt(samplePosition) : 0.0;
+                        fogDensity = fogEnabled ? fogDensityAt(samplePosition) : 0.0;
+                    }
                     else
                     {
                         const float firstQuadratureOffset = 0.2113248654;
                         const float secondQuadratureOffset = 0.7886751346;
-                        density = 0.5 * (mistDensityAt(omw.eyePos.xyz
-                            + rayDirection * (segmentStart + firstQuadratureOffset * stepLength))
-                            + mistDensityAt(omw.eyePos.xyz
-                                + rayDirection * (segmentStart + secondQuadratureOffset * stepLength)));
+                        vec3 firstPosition = omw.eyePos.xyz
+                            + rayDirection * (segmentStart + firstQuadratureOffset * stepLength);
+                        vec3 secondPosition = omw.eyePos.xyz
+                            + rayDirection * (segmentStart + secondQuadratureOffset * stepLength);
+                        mistDensity = mistEnabled
+                            ? 0.5 * (mistDensityAt(firstPosition) + mistDensityAt(secondPosition)) : 0.0;
+                        fogDensity = fogEnabled
+                            ? 0.5 * (fogDensityAt(firstPosition) + fogDensityAt(secondPosition)) : 0.0;
                     }
+                    float density = mistDensity + fogDensity;
                     if (density > 0.0001)
                     {
-                        float extinction = density * stepLength * 0.00042;
+                        float extinction = (mistDensity * 0.00042 + fogDensity * 0.00032) * stepLength;
                         float sampleOpacity = 1.0 - exp(-extinction);
                         vec3 localLight = atmospherePointLighting(samplePosition);
                         float contribution = transmittance * sampleOpacity;
-                        float relativeHeight = clamp((samplePosition.z - baseHeight) / thickness, 0.0, 1.0);
+                        float relativeHeight
+                            = clamp((samplePosition.z - lowerHeight) / max(upperHeight - lowerHeight, 1.0), 0.0, 1.0);
                         vec3 diffuseEnvironment = mix(
                             omw.atmosphereGroundIrradiance, ambientLight, smoothstep(0.0, 1.0, relativeHeight));
                         scatteredLight += contribution * (diffuseEnvironment * 0.72 + directLight + localLight);
@@ -440,12 +581,26 @@ fragment classifyAtmosphereVolume(target=AtmosphereVolumeMetadataHistory, rt1=At
         float mediumType = 0.0;
 
         bool currentVolumeContributes = opacity > 0.0001;
-        if (currentVolumeContributes && omw.atmosphereMistParameters.x > 0.001)
+        if (currentVolumeContributes
+            && (omw.atmosphereMistParameters.x > 0.001 || omw.atmosphereFogVolumeParameters.x > 0.001))
         {
-            float thickness = max(omw.atmosphereMistParameters.z, 1.0);
-            float baseHeight = omw.waterHeight + omw.atmosphereMistParameters.y;
-            vec2 mistInterval = layerIntersection(
-                omw.eyePos.xyz, rayDirection, baseHeight - thickness * 0.2, baseHeight + thickness);
+            bool mistEnabled = omw.atmosphereMistParameters.x > 0.001;
+            bool fogEnabled = omw.atmosphereFogVolumeParameters.x > 0.001;
+            float mistThickness = max(omw.atmosphereMistParameters.z, 1.0);
+            float mistBaseHeight = atmosphereLocalGroundHeight(omw.eyePos.xy) + omw.atmosphereMistParameters.y;
+            float fogThickness = max(omw.atmosphereFogVolumeParameters.z, 1.0);
+            float fogBaseHeight = atmosphereLocalGroundHeight(omw.eyePos.xy) + omw.atmosphereFogVolumeParameters.y;
+            float terrainExcursion = length(omw.atmosphereOrographicParameters.zw) * 20480.0;
+            float lowerHeight = mistEnabled ? mistBaseHeight - mistThickness * 0.2 : fogBaseHeight;
+            float upperHeight = mistEnabled ? mistBaseHeight + mistThickness : fogBaseHeight + fogThickness;
+            if (fogEnabled)
+            {
+                lowerHeight = min(lowerHeight, fogBaseHeight);
+                upperHeight = max(upperHeight, fogBaseHeight + fogThickness);
+            }
+            lowerHeight -= terrainExcursion;
+            upperHeight += terrainExcursion;
+            vec2 mistInterval = layerIntersection(omw.eyePos.xyz, rayDirection, lowerHeight, upperHeight);
             mistInterval.y = min(mistInterval.y, sceneDistance);
             if (mistInterval.y > mistInterval.x)
             {
@@ -458,29 +613,69 @@ fragment classifyAtmosphereVolume(target=AtmosphereVolumeMetadataHistory, rt1=At
             }
         }
 
-        if (omw.atmosphereCloudParameters.x > 0.001)
+        OpenMWSECloudLayer mainCloudLayer = openmwseMainCloudLayer();
+        OpenMWSECloudLayer lowCloudLayer = openmwseLowCloudLayer();
+        bool mainCloudEnabled = openmwseCloudLayerEnabled(mainCloudLayer);
+        bool lowCloudEnabled = openmwseCloudLayerEnabled(lowCloudLayer);
+        bool cloudIsOnlyParticipatingMedium
+            = omw.atmosphereMistParameters.x <= 0.001 && omw.atmosphereFogVolumeParameters.x <= 0.001;
+        if (mainCloudEnabled || lowCloudEnabled)
         {
-            float nominalBaseHeight = omw.waterHeight + omw.atmosphereCloudParameters.z;
-            float nominalThickness = max(omw.atmosphereCloudParameters.w, 1.0);
-            float minimumCloudHeight = nominalBaseHeight - nominalThickness * openmwseCloudBaseVariation;
-            float maximumCloudHeight
-                = nominalBaseHeight + nominalThickness * (openmwseCloudBaseVariation + openmwseCloudMaximumThicknessScale);
-            vec2 cloudInterval
-                = openmwseCloudLayerIntersection(omw.eyePos.xyz, rayDirection, minimumCloudHeight, maximumCloudHeight);
-            cloudInterval.y = min(cloudInterval.y, cloudMaximumDistance);
-            if (cloudInterval.y > cloudInterval.x)
+            vec2 mainCloudInterval = vec2(1.0, 0.0);
+            vec2 lowCloudInterval = vec2(1.0, 0.0);
+            if (mainCloudEnabled)
             {
-                vec2 cloudDistanceAndDensity
-                    = representativeCloudDistanceAndDensity(omw.eyePos.xyz, rayDirection, cloudInterval);
-                float cloudDistance = cloudDistanceAndDensity.x;
-                bool cloudSupported = currentVolumeContributes
+                vec2 mainHeightBounds = openmwseCloudLayerHeightBounds(mainCloudLayer);
+                mainCloudInterval = openmwseCloudLayerIntersection(omw.eyePos.xyz, rayDirection,
+                    mainHeightBounds.x, mainHeightBounds.y);
+                mainCloudInterval.y = min(mainCloudInterval.y, cloudMaximumDistance);
+            }
+            if (lowCloudEnabled)
+            {
+                vec2 lowHeightBounds = openmwseCloudLayerHeightBounds(lowCloudLayer);
+                lowCloudInterval = openmwseCloudLayerIntersection(omw.eyePos.xyz, rayDirection,
+                    lowHeightBounds.x, lowHeightBounds.y);
+                lowCloudInterval.y = min(lowCloudInterval.y, cloudMaximumDistance);
+            }
+
+            float nearestSupportedCloudDistance = cloudMaximumDistance;
+            bool cloudSupported = false;
+            if (mainCloudInterval.y > mainCloudInterval.x)
+            {
+                vec2 mainDistanceAndSupport = representativeCloudDistanceAndSupport(
+                    omw.eyePos.xyz, rayDirection, mainCloudInterval, mainCloudLayer);
+                bool mainCloudOwnsCurrentVolume
+                    = cloudIsOnlyParticipatingMedium && !lowCloudEnabled && currentVolumeContributes;
+                bool mainCloudSupported = mainCloudOwnsCurrentVolume
+                    || (currentVolumeContributes && mainDistanceAndSupport.y > 0.0001)
                     || previousFrameContainsStationaryCloud(
-                        omw.eyePos.xyz, rayDirection, cloudDistance, omw_TexCoord);
-                if (cloudSupported && (mediumType < 0.5 || cloudDistance < representativeDistance))
+                        omw.eyePos.xyz, rayDirection, mainDistanceAndSupport.x, omw_TexCoord);
+                if (mainCloudSupported)
                 {
-                    representativeDistance = cloudDistance;
-                    mediumType = 2.0;
+                    nearestSupportedCloudDistance = mainDistanceAndSupport.x;
+                    cloudSupported = true;
                 }
+            }
+            if (lowCloudInterval.y > lowCloudInterval.x)
+            {
+                vec2 lowDistanceAndSupport = representativeCloudDistanceAndSupport(
+                    omw.eyePos.xyz, rayDirection, lowCloudInterval, lowCloudLayer);
+                bool lowCloudOwnsCurrentVolume
+                    = cloudIsOnlyParticipatingMedium && !mainCloudEnabled && currentVolumeContributes;
+                bool lowCloudSupported = lowCloudOwnsCurrentVolume
+                    || (currentVolumeContributes && lowDistanceAndSupport.y > 0.0001)
+                    || previousFrameContainsStationaryCloud(
+                        omw.eyePos.xyz, rayDirection, lowDistanceAndSupport.x, omw_TexCoord);
+                if (lowCloudSupported)
+                {
+                    nearestSupportedCloudDistance = min(nearestSupportedCloudDistance, lowDistanceAndSupport.x);
+                    cloudSupported = true;
+                }
+            }
+            if (cloudSupported && (mediumType < 0.5 || nearestSupportedCloudDistance < representativeDistance))
+            {
+                representativeDistance = nearestSupportedCloudDistance;
+                mediumType = 2.0;
             }
         }
 
@@ -591,34 +786,15 @@ fragment resolveAtmosphereVolumeHistory(
             return;
         }
 
-        vec2 volumeTexel = omw.rcpResolution * volumePixelScale();
-        vec4 neighborhoodMinimum = currentVolume;
-        vec4 neighborhoodMaximum = currentVolume;
-        float currentSceneTerminationDistance = decodeAtmosphereDistance(currentMetadata.b);
-        float neighborhoodTerminationTolerance = max(120.0, currentSceneTerminationDistance * 0.02);
-        for (int offsetIndex = 0; offsetIndex < 4; ++offsetIndex)
-        {
-            float index = float(offsetIndex);
-            vec2 offset = vec2(mod(index, 2.0), floor(index * 0.5)) * 2.0 - 1.0;
-            vec2 neighborUv = omw_TexCoord + offset * volumeTexel;
-            vec4 neighborMetadata = omw_Texture2D(AtmosphereVolumeMetadataHistory, neighborUv);
-            float neighborSceneTerminationDistance = decodeAtmosphereDistance(neighborMetadata.b);
-            bool matchingMedium = abs(neighborMetadata.a - currentMetadata.a) <= 0.25;
-            bool matchingTermination = abs(neighborSceneTerminationDistance - currentSceneTerminationDistance)
-                <= neighborhoodTerminationTolerance;
-            if (!matchingMedium || !matchingTermination)
-                continue;
-            vec4 neighbor = omw_Texture2D(AtmosphereVolumeRaw, neighborUv);
-            neighborhoodMinimum = min(neighborhoodMinimum, neighbor);
-            neighborhoodMaximum = max(neighborhoodMaximum, neighbor);
-        }
-
-        vec4 history = clamp(omw_GetAtmosphereHistory(previousUv), neighborhoodMinimum, neighborhoodMaximum);
+        vec4 history = omw_GetAtmosphereHistory(previousUv);
         float confidence = max(currentMetadata.g, previousMetadata.g);
         float confidenceWeight = mix(0.94, 1.0, smoothstep(0.0, 0.15, confidence));
+        float qualityWeight = float(omw.atmosphereQuality) / 3.0;
+        float volumeHistoryWeight = mix(0.82, 0.92, qualityWeight);
+        float stableCloudHistory = step(1.5, currentMetadata.a) * step(1.5, previousMetadata.a);
+        volumeHistoryWeight = mix(volumeHistoryWeight, mix(0.94, 0.985, qualityWeight), stableCloudHistory);
         float historyWeight
-            = mix(0.82, 0.92, float(omw.atmosphereQuality) / 3.0) * confidenceWeight
-            * omw.atmosphereHistoryLightingWeight;
+            = volumeHistoryWeight * confidenceWeight * omw.atmosphereHistoryLightingWeight;
         omw_FragColor = mix(currentVolume, history, historyWeight);
     }
 }

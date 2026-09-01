@@ -1,11 +1,13 @@
 #include "renderingmanager.hpp"
 
 #include <cstdlib>
+#include <limits>
 
 #include <osg/ClipControl>
 #include <osg/ComputeBoundsVisitor>
 #include <osg/Group>
 #include <osg/Matrix>
+#include <osg/Texture3D>
 #include <osg/UserDataContainer>
 
 #include <osgUtil/LineSegmentIntersector>
@@ -319,7 +321,36 @@ namespace MWRender
         mGroundcover = chunkMgr.mGroundcover.get();
         mObjectPaging = chunkMgr.mObjectPaging.get();
 
-        mStateUpdater = new SceneUtil::StateUpdater();
+        osg::ref_ptr<osg::Texture3D> atmosphereNoiseTexture
+            = new osg::Texture3D(mResourceSystem->getImageManager()->getImage(
+                VFS::Path::Normalized("textures/openmwse/atmosphere_cloud_noise.dds"), true));
+        atmosphereNoiseTexture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
+        atmosphereNoiseTexture->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
+        atmosphereNoiseTexture->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
+        atmosphereNoiseTexture->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
+        atmosphereNoiseTexture->setWrap(osg::Texture::WRAP_R, osg::Texture::REPEAT);
+
+        osg::ref_ptr<osg::Texture3D> atmosphereDetailNoiseTexture
+            = new osg::Texture3D(mResourceSystem->getImageManager()->getImage(
+                VFS::Path::Normalized("textures/openmwse/atmosphere_cloud_detail.dds"), true));
+        atmosphereDetailNoiseTexture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
+        atmosphereDetailNoiseTexture->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
+        atmosphereDetailNoiseTexture->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
+        atmosphereDetailNoiseTexture->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
+        atmosphereDetailNoiseTexture->setWrap(osg::Texture::WRAP_R, osg::Texture::REPEAT);
+        osg::ref_ptr<osg::Texture2D> atmosphereWeatherTexture
+            = new osg::Texture2D(mResourceSystem->getImageManager()->getImage(
+                VFS::Path::Normalized("textures/openmwse/atmosphere_cloud_weather.dds"), true));
+        atmosphereWeatherTexture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
+        atmosphereWeatherTexture->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
+        atmosphereWeatherTexture->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
+        atmosphereWeatherTexture->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
+        const int atmosphereNoiseTextureUnit
+            = mResourceSystem->getSceneManager()->getShaderManager().reserveGlobalTextureUnits(
+                Shader::ShaderManager::Slot::AtmosphereNoise, 3);
+        mStateUpdater = new SceneUtil::StateUpdater(atmosphereNoiseTexture, atmosphereNoiseTextureUnit,
+            atmosphereDetailNoiseTexture, atmosphereNoiseTextureUnit + 1, atmosphereWeatherTexture,
+            atmosphereNoiseTextureUnit + 2);
         sceneRoot->addUpdateCallback(mStateUpdater);
 
         mSharedUniformStateUpdater = new SceneUtil::SharedUniformStateUpdater(Settings::fog().mSkyBlendingStart);
@@ -763,6 +794,11 @@ namespace MWRender
         float fogStart = mFog->getFogStart(false);
         float fogEnd = mFog->getFogEnd(false);
         osg::Vec4f fogColor = mFog->getFogColor(false);
+        if (!mAtmosphereDiagnosticDistanceFogEnabled)
+        {
+            fogStart = std::max(mViewDistance * 100.f, 1000000.f);
+            fogEnd = fogStart * 2.f;
+        }
 
         float fogUnderwaterStart = mFog->getFogStart(true);
         float fogUnderwaterEnd = mFog->getFogEnd(true);
@@ -778,12 +814,30 @@ namespace MWRender
         mStateUpdater->setUnderwaterFogColor(fogUnderwaterColor);
 
         const AtmosphereState& atmosphere = mSky->getAtmosphereState();
+        AtmosphereVolumeState diagnosticVolumes = atmosphere.mVolumes;
+        if (!mAtmosphereDiagnosticMedia.mMainClouds)
+        {
+            diagnosticVolumes.mCloudCoverage = 0.f;
+            diagnosticVolumes.mCloudDensity = 0.f;
+        }
+        if (!mAtmosphereDiagnosticMedia.mLowClouds)
+        {
+            diagnosticVolumes.mLowCloudCoverage = 0.f;
+            diagnosticVolumes.mLowCloudDensity = 0.f;
+        }
+        if (!mAtmosphereDiagnosticMedia.mMist)
+            diagnosticVolumes.mMistDensity = 0.f;
+        if (!mAtmosphereDiagnosticMedia.mFog)
+            diagnosticVolumes.mFogDensity = 0.f;
         const CloudAdvectionState& cloudAdvection = mCloudAdvection.getState();
+        const osg::Vec2f cloudFieldOffset = cloudAdvection.mOffsetWorldUnits + mAtmosphereDiagnosticCloudFieldOffset;
         const bool atmosphereEnabled
             = Settings::shaders().mAtmosphericEffects && mSky->isEnabled() && atmosphere.mEnabled;
         const osg::Vec4f skyColor = mSky->getSkyColor();
         const osg::Vec3f scatteringSunDirection
             = getScatteringSunDirection(mSky->getSunDirection(), mSunVisibility > 0.f);
+        mAtmosphereDiagnosticState = { fogStart, fogEnd, mNearClip, mViewDistance, atmosphereEnabled, diagnosticVolumes,
+            scatteringSunDirection, atmosphere.mLighting, atmosphere.mSunDiscColor };
         const float atmosphereHistoryLightingWeight = mAtmosphereHistoryLighting.update(
             { atmosphere.mLighting.mSolarRadiance, atmosphere.mLighting.mSkyIrradiance,
                 atmosphere.mLighting.mGroundIrradiance, atmosphere.mInScattering, atmosphere.mOutScattering,
@@ -792,13 +846,25 @@ namespace MWRender
             atmosphereEnabled);
         mStateUpdater->setAtmosphere(atmosphereEnabled, mSky->getSkyColor(), atmosphere.mInScattering,
             atmosphere.mOutScattering, atmosphere.mWeatherWeight, scatteringSunDirection,
-            { atmosphere.mVolumes.mCloudCoverage, atmosphere.mVolumes.mCloudDensity,
-                atmosphere.mVolumes.mCloudBaseAltitudeWorldUnits, atmosphere.mVolumes.mCloudThicknessWorldUnits },
-            { atmosphere.mVolumes.mMistDensity, atmosphere.mVolumes.mMistBaseAltitudeWorldUnits,
+            { diagnosticVolumes.mCloudCoverage, diagnosticVolumes.mCloudDensity,
+                diagnosticVolumes.mCloudBaseAltitudeWorldUnits, diagnosticVolumes.mCloudThicknessWorldUnits },
+            { atmosphere.mVolumes.mCloudType, atmosphere.mVolumes.mCloudFeatureScale,
+                atmosphere.mVolumes.mCloudVerticalDevelopment, atmosphere.mVolumes.mCloudAnvilStrength },
+            { diagnosticVolumes.mLowCloudCoverage, diagnosticVolumes.mLowCloudDensity,
+                atmosphere.mVolumes.mLowCloudBaseAltitudeWorldUnits, atmosphere.mVolumes.mLowCloudThicknessWorldUnits },
+            { atmosphere.mVolumes.mLowCloudType, atmosphere.mVolumes.mLowCloudFeatureScale,
+                atmosphere.mVolumes.mLowCloudVerticalDevelopment, atmosphere.mVolumes.mLowCloudEnvironmentInfluence },
+            { diagnosticVolumes.mMistDensity, diagnosticVolumes.mMistBaseAltitudeWorldUnits,
                 atmosphere.mVolumes.mMistThicknessWorldUnits, atmosphere.mVolumes.mShaftIntensity },
+            { diagnosticVolumes.mFogDensity, diagnosticVolumes.mFogBaseAltitudeWorldUnits,
+                atmosphere.mVolumes.mFogThicknessWorldUnits, atmosphere.mVolumes.mFogAnisotropy },
+            { atmosphere.mVolumes.mTerrainReferenceHeightWorldUnits, atmosphere.mVolumes.mCloudTerrainFollowing,
+                atmosphere.mVolumes.mCloudTerrainClearanceWorldUnits, atmosphere.mVolumes.mValleyDepthWorldUnits },
+            { atmosphere.mVolumes.mTerrainSampleCenterWorldUnits.x(),
+                atmosphere.mVolumes.mTerrainSampleCenterWorldUnits.y(), atmosphere.mVolumes.mTerrainGradient.x(),
+                atmosphere.mVolumes.mTerrainGradient.y() },
             atmosphere.mSunDiscColor, atmosphere.mLighting.mSolarRadiance, atmosphere.mLighting.mSkyIrradiance,
-            atmosphere.mLighting.mGroundIrradiance, cloudAdvection.mOffsetWorldUnits,
-            Settings::shaders().mAtmosphericQuality.get());
+            atmosphere.mLighting.mGroundIrradiance, cloudFieldOffset, Settings::shaders().mAtmosphericQuality.get());
 
         mViewer->getCamera()->setClearColor(isUnderwater ? fogUnderwaterColor : fogColor);
 
@@ -816,14 +882,26 @@ namespace MWRender
         stateUpdater->setWindSpeed(world->getWindSpeed());
         stateUpdater->setSkyColor(mSky->getSkyColor());
         stateUpdater->setAtmosphere(atmosphere.mInScattering, atmosphere.mOutScattering,
-            { atmosphere.mVolumes.mCloudCoverage, atmosphere.mVolumes.mCloudDensity,
-                atmosphere.mVolumes.mCloudBaseAltitudeWorldUnits, atmosphere.mVolumes.mCloudThicknessWorldUnits },
-            { atmosphere.mVolumes.mMistDensity, atmosphere.mVolumes.mMistBaseAltitudeWorldUnits,
+            { diagnosticVolumes.mCloudCoverage, diagnosticVolumes.mCloudDensity,
+                diagnosticVolumes.mCloudBaseAltitudeWorldUnits, diagnosticVolumes.mCloudThicknessWorldUnits },
+            { atmosphere.mVolumes.mCloudType, atmosphere.mVolumes.mCloudFeatureScale,
+                atmosphere.mVolumes.mCloudVerticalDevelopment, atmosphere.mVolumes.mCloudAnvilStrength },
+            { diagnosticVolumes.mLowCloudCoverage, diagnosticVolumes.mLowCloudDensity,
+                atmosphere.mVolumes.mLowCloudBaseAltitudeWorldUnits, atmosphere.mVolumes.mLowCloudThicknessWorldUnits },
+            { atmosphere.mVolumes.mLowCloudType, atmosphere.mVolumes.mLowCloudFeatureScale,
+                atmosphere.mVolumes.mLowCloudVerticalDevelopment, atmosphere.mVolumes.mLowCloudEnvironmentInfluence },
+            { diagnosticVolumes.mMistDensity, diagnosticVolumes.mMistBaseAltitudeWorldUnits,
                 atmosphere.mVolumes.mMistThicknessWorldUnits, atmosphere.mVolumes.mShaftIntensity },
+            { diagnosticVolumes.mFogDensity, diagnosticVolumes.mFogBaseAltitudeWorldUnits,
+                atmosphere.mVolumes.mFogThicknessWorldUnits, atmosphere.mVolumes.mFogAnisotropy },
+            { atmosphere.mVolumes.mTerrainReferenceHeightWorldUnits, atmosphere.mVolumes.mCloudTerrainFollowing,
+                atmosphere.mVolumes.mCloudTerrainClearanceWorldUnits, atmosphere.mVolumes.mValleyDepthWorldUnits },
+            { atmosphere.mVolumes.mTerrainSampleCenterWorldUnits.x(),
+                atmosphere.mVolumes.mTerrainSampleCenterWorldUnits.y(), atmosphere.mVolumes.mTerrainGradient.x(),
+                atmosphere.mVolumes.mTerrainGradient.y() },
             atmosphere.mSunDiscColor, atmosphere.mLighting.mSolarRadiance, atmosphere.mLighting.mSkyIrradiance,
-            atmosphere.mLighting.mGroundIrradiance, cloudAdvection.mOffsetWorldUnits,
-            cloudAdvection.mFrameDeltaWorldUnits, atmosphereHistoryLightingWeight, atmosphere.mWeatherWeight,
-            Settings::shaders().mAtmosphericQuality.get(),
+            atmosphere.mLighting.mGroundIrradiance, cloudFieldOffset, cloudAdvection.mFrameDeltaWorldUnits,
+            atmosphereHistoryLightingWeight, atmosphere.mWeatherWeight, Settings::shaders().mAtmosphericQuality.get(),
             getAtmosphereVolumeResolutionScale(Settings::shaders().mAtmosphericQuality.get()), atmosphereEnabled);
         mPostProcessor->setUnderwaterFlag(isUnderwater);
     }
@@ -831,6 +909,40 @@ namespace MWRender
     void RenderingManager::setAtmosphereDiagnosticMode(int mode)
     {
         mStateUpdater->setAtmosphereDiagnosticMode(mode);
+    }
+
+    void RenderingManager::setAtmosphereDiagnosticMedia(const AtmosphereDiagnosticMedia& media)
+    {
+        mAtmosphereDiagnosticMedia = media;
+        invalidateAtmosphereHistory();
+    }
+
+    void RenderingManager::setAtmosphereDiagnosticDistanceFogEnabled(bool enabled)
+    {
+        mAtmosphereDiagnosticDistanceFogEnabled = enabled;
+        invalidateAtmosphereHistory();
+    }
+
+    void RenderingManager::setAtmosphereDiagnosticCloudSeed(std::uint32_t seed)
+    {
+        if (seed == 0)
+            mAtmosphereDiagnosticCloudFieldOffset.set(0.f, 0.f);
+        else
+        {
+            const auto scramble = [](std::uint32_t value) {
+                value ^= value >> 16;
+                value *= 0x7feb352du;
+                value ^= value >> 15;
+                value *= 0x846ca68bu;
+                return value ^ (value >> 16);
+            };
+            constexpr float fieldSpanWorldUnits = 600000.f;
+            constexpr float inverseUintMaximum = 1.f / static_cast<float>(std::numeric_limits<std::uint32_t>::max());
+            mAtmosphereDiagnosticCloudFieldOffset.set(
+                static_cast<float>(scramble(seed)) * inverseUintMaximum * fieldSpanWorldUnits,
+                static_cast<float>(scramble(seed ^ 0x9e3779b9u)) * inverseUintMaximum * fieldSpanWorldUnits);
+        }
+        invalidateAtmosphereHistory();
     }
 
     void RenderingManager::updatePlayerPtr(const MWWorld::Ptr& ptr)

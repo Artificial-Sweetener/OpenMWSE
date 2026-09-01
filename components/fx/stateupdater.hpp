@@ -112,15 +112,25 @@ namespace Fx
 
         /// Publish canonical scene-linear atmosphere, volume, and lighting state to native passes.
         void setAtmosphere(const osg::Vec3f& inScattering, const osg::Vec3f& outScattering,
-            const osg::Vec4f& cloudParameters, const osg::Vec4f& mistParameters, const osg::Vec4f& sunDiscColor,
-            const osg::Vec3f& solarRadiance, const osg::Vec3f& skyIrradiance, const osg::Vec3f& groundIrradiance,
-            const osg::Vec2f& cloudAdvectionOffsetWorldUnits, const osg::Vec2f& cloudAdvectionDeltaWorldUnits,
-            float historyLightingWeight, float weatherWeight, int quality, float volumeResolutionScale, bool enabled)
+            const osg::Vec4f& cloudParameters, const osg::Vec4f& cloudShapeParameters,
+            const osg::Vec4f& lowCloudParameters, const osg::Vec4f& lowCloudShapeParameters,
+            const osg::Vec4f& mistParameters, const osg::Vec4f& fogVolumeParameters,
+            const osg::Vec4f& mediumReferenceParameters, const osg::Vec4f& orographicParameters,
+            const osg::Vec4f& sunDiscColor, const osg::Vec3f& solarRadiance, const osg::Vec3f& skyIrradiance,
+            const osg::Vec3f& groundIrradiance, const osg::Vec2f& cloudAdvectionOffsetWorldUnits,
+            const osg::Vec2f& cloudAdvectionDeltaWorldUnits, float historyLightingWeight, float weatherWeight,
+            int quality, float volumeResolutionScale, bool enabled)
         {
             mData.get<AtmosphereInScattering>() = inScattering;
             mData.get<AtmosphereOutScattering>() = outScattering;
             mData.get<AtmosphereCloudParameters>() = cloudParameters;
+            mData.get<AtmosphereCloudShapeParameters>() = cloudShapeParameters;
+            mData.get<AtmosphereLowCloudParameters>() = lowCloudParameters;
+            mData.get<AtmosphereLowCloudShapeParameters>() = lowCloudShapeParameters;
             mData.get<AtmosphereMistParameters>() = mistParameters;
+            mData.get<AtmosphereFogVolumeParameters>() = fogVolumeParameters;
+            mData.get<AtmosphereMediumReferenceParameters>() = mediumReferenceParameters;
+            mData.get<AtmosphereOrographicParameters>() = orographicParameters;
             mData.get<AtmosphereSunDiscColor>() = sunDiscColor;
             mData.get<AtmosphereSolarRadiance>() = solarRadiance;
             mData.get<AtmosphereSkyIrradiance>() = skyIrradiance;
@@ -335,10 +345,46 @@ namespace Fx
             static constexpr std::string_view sName = "atmosphereCloudParameters";
         };
 
+        /// Bind weather-controlled cloud morphology, scale, vertical development, and anvil strength.
+        struct AtmosphereCloudShapeParameters : Std140::Vec4
+        {
+            static constexpr std::string_view sName = "atmosphereCloudShapeParameters";
+        };
+
+        /// Bind low-cloud coverage, density, base height, and thickness.
+        struct AtmosphereLowCloudParameters : Std140::Vec4
+        {
+            static constexpr std::string_view sName = "atmosphereLowCloudParameters";
+        };
+
+        /// Bind low-cloud morphology, scale, vertical development, and environment influence.
+        struct AtmosphereLowCloudShapeParameters : Std140::Vec4
+        {
+            static constexpr std::string_view sName = "atmosphereLowCloudShapeParameters";
+        };
+
         /// Bind weather-controlled mist density, base height, thickness, and shaft intensity.
         struct AtmosphereMistParameters : Std140::Vec4
         {
             static constexpr std::string_view sName = "atmosphereMistParameters";
+        };
+
+        /// Bind weather-controlled volumetric fog density, base height, thickness, and anisotropy.
+        struct AtmosphereFogVolumeParameters : Std140::Vec4
+        {
+            static constexpr std::string_view sName = "atmosphereFogVolumeParameters";
+        };
+
+        /// Bind local terrain height and terrain-following cloud-layer controls.
+        struct AtmosphereMediumReferenceParameters : Std140::Vec4
+        {
+            static constexpr std::string_view sName = "atmosphereMediumReferenceParameters";
+        };
+
+        /// Bind terrain sample center and local gradient for sparse orographic formation.
+        struct AtmosphereOrographicParameters : Std140::Vec4
+        {
+            static constexpr std::string_view sName = "atmosphereOrographicParameters";
         };
 
         /// Bind scene-linear analytic sun color and visibility.
@@ -412,7 +458,9 @@ namespace Fx
             Resolution, RcpResolution, FogNear, FogFar, Near, Far, Fov, GameHour, SunVis, WaterHeight, IsWaterEnabled,
             SimulationTime, DeltaSimulationTime, FrameNumber, WindSpeed, WeatherTransition, WeatherID, NextWeatherID,
             IsUnderwater, IsInterior, AtmosphereInScattering, AtmosphereOutScattering, AtmosphereCloudParameters,
-            AtmosphereMistParameters, AtmosphereSunDiscColor, AtmosphereSolarRadiance, AtmosphereSkyIrradiance,
+            AtmosphereCloudShapeParameters, AtmosphereLowCloudParameters, AtmosphereLowCloudShapeParameters,
+            AtmosphereMistParameters, AtmosphereFogVolumeParameters, AtmosphereMediumReferenceParameters,
+            AtmosphereOrographicParameters, AtmosphereSunDiscColor, AtmosphereSolarRadiance, AtmosphereSkyIrradiance,
             AtmosphereGroundIrradiance, AtmosphereCloudAdvectionOffset, AtmosphereCloudAdvectionDelta,
             AtmosphereHistoryLightingWeight, AtmosphereWeatherWeight, AtmosphereQuality,
             AtmosphereVolumeResolutionScale, AtmosphereEnabled>;

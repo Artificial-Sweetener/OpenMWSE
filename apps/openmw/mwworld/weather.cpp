@@ -22,12 +22,14 @@
 #include "../mwrender/renderingmanager.hpp"
 #include "../mwrender/sky.hpp"
 
+#include "atmosphereenvironment.hpp"
 #include "atmospherepalette.hpp"
 #include "cellstore.hpp"
 #include "esmstore.hpp"
 #include "player.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace MWWorld
@@ -60,6 +62,17 @@ namespace MWWorld
                 stormDirection.normalize();
             }
             return stormDirection;
+        }
+
+        /// Return moisture-producing precipitation weight without treating ash or blight media as water.
+        float precipitationMoistureWeight(const Weather& weather)
+        {
+            if (!weather.mRainEffect.empty())
+                return 1.f;
+            if (weather.mParticleEffect.empty() || weather.mParticleEffect == Settings::models().mWeatherashcloud.get()
+                || weather.mParticleEffect == Settings::models().mWeatherblightcloud.get())
+                return 0.f;
+            return 0.55f;
         }
     }
 
@@ -256,6 +269,11 @@ namespace MWWorld
         }
 
         return mFlashBrightness;
+    }
+
+    void Weather::resetThunder()
+    {
+        mFlashBrightness = 0.f;
     }
 
     inline void Weather::flashDecrement(const float elapsedSeconds)
@@ -627,7 +645,10 @@ namespace MWWorld
               Fallback::Map::getFloat("Water_UnderwaterDayFog"), Fallback::Map::getFloat("Water_UnderwaterSunsetFog"),
               Fallback::Map::getFloat("Water_UnderwaterNightFog"))
         , mWeatherSettings()
+        , mAtmosphereEnvironment(
+              std::make_unique<AtmosphereEnvironmentClassifier>(*rendering.getResourceSystem()->getVFS(), store))
         , mAtmospherePalette(std::make_unique<AtmospherePalette>(*rendering.getResourceSystem()->getVFS()))
+        , mCurrentEnvironment()
         , mMasser("Masser")
         , mSecunda("Secunda")
         , mWindSpeed(0.f)
@@ -717,6 +738,63 @@ namespace MWWorld
         return nullptr;
     }
 
+    void WeatherManager::setDiagnosticWeatherState(
+        const ESM::RefId& current, const std::optional<ESM::RefId>& next, float transition)
+    {
+        const auto findWeatherIndex = [&](const ESM::RefId& id) {
+            const auto found = std::find_if(mWeatherSettings.begin(), mWeatherSettings.end(),
+                [&](const Weather& weather) { return weather.mId == id; });
+            if (found == mWeatherSettings.end())
+                throw std::invalid_argument("unknown diagnostic weather " + id.serializeText());
+            return static_cast<int>(std::distance(mWeatherSettings.begin(), found));
+        };
+
+        if (!std::isfinite(transition) || transition < 0.f || transition > 1.f)
+            throw std::invalid_argument("diagnostic weather transition must be within [0, 1]");
+        if (!next && transition != 0.f)
+            throw std::invalid_argument("steady diagnostic weather cannot have transition progress");
+
+        mCurrentWeather = findWeatherIndex(current);
+        mNextWeather = next ? findWeatherIndex(*next) : invalidWeatherID;
+        mTransitionFactor = next ? 1.f - transition : 0.f;
+        mQueuedWeather = invalidWeatherID;
+        mFastForward = false;
+        mTimePassed = 0.f;
+        mWeatherUpdateTime = mHoursBetweenWeatherChanges;
+        mDiagnosticWeatherLocked = true;
+    }
+
+    void WeatherManager::setDiagnosticWeatherEffects(bool precipitationEnabled, bool lightningEnabled)
+    {
+        mDiagnosticPrecipitationEnabled = precipitationEnabled;
+        mDiagnosticLightningEnabled = lightningEnabled;
+        if (!lightningEnabled)
+        {
+            for (Weather& weather : mWeatherSettings)
+                weather.resetThunder();
+        }
+    }
+
+    void WeatherManager::setDiagnosticRecentPrecipitation(float weight)
+    {
+        mCondensateFormation.setRecentPrecipitation(weight);
+        mLastAtmosphereFormationTimeHours.reset();
+    }
+
+    void WeatherManager::setDiagnosticEnvironmentState(AtmosphereEnvironmentState environment)
+    {
+        for (const auto& [trait, weight] : environment.mTraits)
+        {
+            if (trait.empty() || !std::isfinite(weight) || weight < 0.f || weight > 1.f)
+                throw std::invalid_argument("diagnostic environment traits require weights within [0, 1]");
+        }
+        if (!std::isfinite(environment.mTerrainHeightWorldUnits))
+            throw std::invalid_argument("diagnostic environment terrain height must be finite");
+        mDiagnosticEnvironment = std::move(environment);
+        mCurrentEnvironment = *mDiagnosticEnvironment;
+        mAtmospherePalette->setDiagnosticEnvironment(mCurrentEnvironment);
+    }
+
     void WeatherManager::changeWeather(const ESM::RefId& regionID, const ESM::RefId& weatherID)
     {
         auto wIt = std::find_if(mWeatherSettings.begin(), mWeatherSettings.end(),
@@ -790,7 +868,6 @@ namespace MWWorld
             if (it != mRegions.end() && playerRegion != mCurrentRegion)
             {
                 mCurrentRegion = playerRegion;
-                mAtmospherePalette->setRegion(mCurrentRegion.getRefIdString());
                 forceWeather(it->second.getWeather());
             }
         }
@@ -816,13 +893,11 @@ namespace MWWorld
     {
         MWWorld::ConstPtr player = MWMechanics::getPlayer();
 
-        if (!paused || mFastForward)
+        if (!mDiagnosticWeatherLocked && (!paused || mFastForward))
         {
             // Add new transitions when either the player's current external region changes.
             const bool timeChanged = updateWeatherTime();
             const bool regionChanged = updateWeatherRegion(player.getCell()->getCell()->getRegion());
-            if (regionChanged)
-                mAtmospherePalette->setRegion(mCurrentRegion.getRefIdString());
             if (timeChanged || regionChanged)
             {
                 auto it = mRegions.find(mCurrentRegion);
@@ -835,6 +910,59 @@ namespace MWWorld
             updateWeatherTransitions(duration);
         }
 
+        if (isExterior)
+        {
+            if (mDiagnosticEnvironment)
+            {
+                mCurrentEnvironment = *mDiagnosticEnvironment;
+                mAtmospherePalette->setDiagnosticEnvironment(mCurrentEnvironment);
+            }
+            else
+            {
+                const Cell& cell = *player.getCell()->getCell();
+                const osg::Vec3f playerPosition = player.getRefData().getPosition().asVec3();
+                constexpr float orographicSampleRadius = 8192.f;
+                constexpr float orographicResampleDistance = 2048.f;
+                const osg::Vec2f playerHorizontalPosition(playerPosition.x(), playerPosition.y());
+                const bool changedWorldspace = mCachedOrographyWorldspace != cell.getWorldSpace();
+                const bool movedBeyondSample
+                    = (playerHorizontalPosition - mCachedOrography.mTerrainSampleCenterWorldUnits).length2()
+                    >= orographicResampleDistance * orographicResampleDistance;
+                if (!mOrographyCacheValid || changedWorldspace || movedBeyondSample)
+                {
+                    const auto terrainHeightAtOffset = [&](float x, float y) {
+                        return mRendering.getTerrainHeightAt(
+                            playerPosition + osg::Vec3f(x, y, 0.f), cell.getWorldSpace());
+                    };
+                    mCachedOrography = makeAtmosphereOrographicState(playerHorizontalPosition,
+                        terrainHeightAtOffset(0.f, 0.f), terrainHeightAtOffset(orographicSampleRadius, 0.f),
+                        terrainHeightAtOffset(-orographicSampleRadius, 0.f),
+                        terrainHeightAtOffset(0.f, orographicSampleRadius),
+                        terrainHeightAtOffset(0.f, -orographicSampleRadius), orographicSampleRadius);
+                    mCachedOrographyWorldspace = cell.getWorldSpace();
+                    mOrographyCacheValid = true;
+                }
+                std::array<AtmosphereEnvironmentWeatherSample, 10> weatherProbabilities{};
+                const auto regionalWeather = mRegions.find(cell.getRegion());
+                if (regionalWeather != mRegions.end())
+                {
+                    const std::span<const uint8_t> chances = regionalWeather->second.getChances();
+                    const std::size_t count
+                        = std::min({ weatherProbabilities.size(), chances.size(), mWeatherSettings.size() });
+                    for (std::size_t index = 0; index < count; ++index)
+                    {
+                        weatherProbabilities[index]
+                            = { mWeatherSettings[index].mName, static_cast<float>(chances[index]) * 0.01f };
+                    }
+                }
+                mCurrentEnvironment = mAtmosphereEnvironment->classify(
+                    playerPosition, *player.getCell(), mCachedOrography.mTerrainHeightWorldUnits, weatherProbabilities);
+                mCurrentEnvironment.mTerrainSampleCenterWorldUnits = mCachedOrography.mTerrainSampleCenterWorldUnits;
+                mCurrentEnvironment.mTerrainGradient = mCachedOrography.mTerrainGradient;
+                mCurrentEnvironment.mValleyDepthWorldUnits = mCachedOrography.mValleyDepthWorldUnits;
+                mAtmospherePalette->setEnvironment(mCurrentEnvironment);
+            }
+        }
         mAtmospherePalette->update(duration, paused, mWeatherSettings);
 
         bool isDay = time.getHour() >= mSunriseTime && time.getHour() <= mTimeSettings.mNightStart;
@@ -856,6 +984,27 @@ namespace MWWorld
         }
 
         calculateWeatherResult(time.getHour(), duration, paused);
+
+        const float transition = inTransition() ? 1.f - mTransitionFactor : 0.f;
+        const float currentPrecipitation = precipitationMoistureWeight(mWeatherSettings[mCurrentWeather]);
+        const float nextPrecipitation
+            = inTransition() ? precipitationMoistureWeight(mWeatherSettings[mNextWeather]) : currentPrecipitation;
+        const double currentFormationTimeHours
+            = static_cast<double>(time.getDay()) * 24.0 + static_cast<double>(time.getHour());
+        float elapsedGameHours = 0.f;
+        if (mLastAtmosphereFormationTimeHours)
+        {
+            const double elapsed = currentFormationTimeHours - *mLastAtmosphereFormationTimeHours;
+            if (elapsed >= 0.0 && std::isfinite(elapsed))
+                elapsedGameHours = static_cast<float>(elapsed);
+            else
+                mCondensateFormation.reset();
+        }
+        mLastAtmosphereFormationTimeHours = currentFormationTimeHours;
+        const float mistFormationMultiplier = mCondensateFormation.update(elapsedGameHours, paused,
+            std::lerp(currentPrecipitation, nextPrecipitation, transition), time.getHour(), mSunriseTime,
+            mCurrentEnvironment);
+        mResult.mAtmosphere.mVolumes.mMistDensity *= mistFormationMultiplier;
 
         if (!paused)
         {
@@ -1116,6 +1265,7 @@ namespace MWWorld
     {
         stopSounds();
 
+        mDiagnosticWeatherLocked = false;
         mCurrentRegion = ESM::RefId();
         mTimePassed = 0.0f;
         mWeatherUpdateTime = 0.0f;
@@ -1272,22 +1422,33 @@ namespace MWWorld
         if (!inTransition())
         {
             calculateResult(mCurrentWeather, gameHour);
-            flash = mWeatherSettings[mCurrentWeather].calculateThunder(1.0f, elapsedSeconds, isPaused);
+            if (mDiagnosticLightningEnabled)
+                flash = mWeatherSettings[mCurrentWeather].calculateThunder(1.0f, elapsedSeconds, isPaused);
         }
         else
         {
             calculateTransitionResult(1 - mTransitionFactor, gameHour);
-            float currentFlash
-                = mWeatherSettings[mCurrentWeather].calculateThunder(mTransitionFactor, elapsedSeconds, isPaused);
-            float nextFlash
-                = mWeatherSettings[mNextWeather].calculateThunder(1 - mTransitionFactor, elapsedSeconds, isPaused);
-            flash = currentFlash + nextFlash;
+            if (mDiagnosticLightningEnabled)
+            {
+                float currentFlash
+                    = mWeatherSettings[mCurrentWeather].calculateThunder(mTransitionFactor, elapsedSeconds, isPaused);
+                float nextFlash
+                    = mWeatherSettings[mNextWeather].calculateThunder(1 - mTransitionFactor, elapsedSeconds, isPaused);
+                flash = currentFlash + nextFlash;
+            }
         }
         osg::Vec4f flashColor(flash, flash, flash, 0.0f);
 
         mResult.mFogColor += flashColor;
         mResult.mAmbientColor += flashColor;
         mResult.mSunColor += flashColor;
+
+        if (!mDiagnosticPrecipitationEnabled)
+        {
+            mResult.mPrecipitationAlpha = 0.f;
+            mResult.mRainEffect.clear();
+            mResult.mParticleEffect.clear();
+        }
 
         const std::string_view nextWeather
             = inTransition() ? std::string_view(mWeatherSettings[mNextWeather].mName) : std::string_view();

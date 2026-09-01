@@ -75,6 +75,7 @@ namespace MWPhysics
 
 namespace MWWorld
 {
+    struct AtmosphereEnvironmentState;
     class DateTimeManager;
     class WeatherManager;
     class Player;
@@ -315,10 +316,28 @@ namespace MWWorld
 
         void changeWeather(const ESM::RefId& region, const ESM::RefId& id) override;
 
+        /// Apply an exact weather state used only by the isolated diagnostic child.
+        void setDiagnosticWeatherState(
+            const ESM::RefId& current, const std::optional<ESM::RefId>& next, float transition);
+
+        /// Select weather-side visual effects used only by the isolated diagnostic child.
+        void setDiagnosticWeatherEffects(bool precipitationEnabled, bool lightningEnabled);
+
+        /// Seed transient post-precipitation condensate history in an isolated diagnostic child.
+        void setDiagnosticRecentPrecipitation(float weight);
+
+        /// Apply exact environment evidence used only by the isolated diagnostic child.
+        void setDiagnosticEnvironmentState(AtmosphereEnvironmentState environment);
+
+        /// Apply an exact game hour used only by the isolated diagnostic child.
+        void setDiagnosticGameHour(double hour);
+
         const std::vector<MWWorld::Weather>& getAllWeather() const override;
 
         int getCurrentWeatherScriptId() const override;
         const MWWorld::Weather& getCurrentWeather() const override;
+        /// Return the environment evidence currently driving atmosphere rendering.
+        const AtmosphereEnvironmentState& getAtmosphereEnvironmentState() const;
         const MWWorld::Weather* getWeather(size_t index) const override;
         const MWWorld::Weather* getWeather(const ESM::RefId& id) const override;
         int getNextWeatherScriptId() const override;

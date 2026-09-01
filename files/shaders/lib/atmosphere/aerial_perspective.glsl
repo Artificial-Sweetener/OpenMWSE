@@ -9,12 +9,133 @@ struct OpenMWSEAerialPerspectiveParameters
     vec3 skyColor;
     vec3 fogColor;
     vec3 sunDirection;
+    vec3 solarRadiance;
+    vec3 skyIrradiance;
+    vec3 groundIrradiance;
     float weatherWeight;
     float fogStart;
     float fogEnd;
     float exponentialFog;
     float referenceHeight;
 };
+
+/// Approximate near-horizon astronomical refraction using NOAA's piecewise solar correction.
+float openmwseAtmosphericRefraction(float geometricElevation)
+{
+    float elevationDegrees = degrees(geometricElevation);
+    float correctionDegrees = 0.0;
+    if (elevationDegrees > 5.0 && elevationDegrees < 85.0)
+    {
+        float tangent = tan(geometricElevation);
+        correctionDegrees
+            = (58.1 / tangent - 0.07 / (tangent * tangent * tangent)
+                + 0.000086 / pow(tangent, 5.0)) / 3600.0;
+    }
+    else if (elevationDegrees > -0.575 && elevationDegrees <= 5.0)
+    {
+        correctionDegrees = (1735.0 - 518.2 * elevationDegrees + 103.4 * elevationDegrees * elevationDegrees
+            - 12.79 * pow(elevationDegrees, 3.0) + 0.711 * pow(elevationDegrees, 4.0)) / 3600.0;
+    }
+    else if (elevationDegrees <= -0.575 && elevationDegrees > -6.0)
+        correctionDegrees = (-20.774 / tan(geometricElevation)) / 3600.0;
+    return radians(clamp(correctionDegrees, 0.0, 0.85));
+}
+
+/// Return the refracted apparent solar direction while retaining the physical azimuth.
+vec3 openmwseApparentSunDirection(vec3 geometricDirection)
+{
+    geometricDirection = normalize(geometricDirection);
+    float geometricElevation = asin(clamp(geometricDirection.z, -1.0, 1.0));
+    float apparentElevation = geometricElevation + openmwseAtmosphericRefraction(geometricElevation);
+    vec2 azimuth = geometricDirection.xy;
+    float azimuthLength = length(azimuth);
+    azimuth = azimuthLength > 0.0001 ? azimuth / azimuthLength : vec2(1.0, 0.0);
+    return normalize(vec3(azimuth * cos(apparentElevation), sin(apparentElevation)));
+}
+
+/// Invert astronomical refraction so a screen ray can be tested against the geometric solar disc.
+vec3 openmwseGeometricDirectionFromApparent(vec3 apparentDirection)
+{
+    apparentDirection = normalize(apparentDirection);
+    float apparentElevation = asin(clamp(apparentDirection.z, -1.0, 1.0));
+    float geometricElevation = apparentElevation;
+    for (int iteration = 0; iteration < 2; ++iteration)
+        geometricElevation = apparentElevation - openmwseAtmosphericRefraction(geometricElevation);
+    vec2 azimuth = apparentDirection.xy;
+    float azimuthLength = length(azimuth);
+    azimuth = azimuthLength > 0.0001 ? azimuth / azimuthLength : vec2(1.0, 0.0);
+    return normalize(vec3(azimuth * cos(geometricElevation), sin(geometricElevation)));
+}
+
+/// Approximate the slant optical path through the lower atmosphere, including twilight rays above the observer.
+float openmwseSolarRelativeAirMass(float solarElevation)
+{
+    float elevationDegrees = degrees(solarElevation);
+    float kastenYoungDenominator = sin(solarElevation)
+        + 0.50572 * pow(max(elevationDegrees + 6.07995, 0.05), -1.6364);
+    float daylightAirMass = clamp(1.0 / max(kastenYoungDenominator, 0.035), 1.0, 30.0);
+    float twilightAirMass = mix(12.0, 30.0, smoothstep(-18.0, -0.5, elevationDegrees));
+    return mix(twilightAirMass, daylightAirMass, smoothstep(-0.75, 0.0, elevationDegrees));
+}
+
+/// Evaluate the normalized molecular scattering phase function.
+float openmwseRayleighPhase(float cosineAngle)
+{
+    return 0.0596831 * (1.0 + cosineAngle * cosineAngle);
+}
+
+/// Evaluate a normalized aerosol phase lobe with bounded forward anisotropy.
+float openmwseAtmosphereMiePhase(float cosineAngle)
+{
+    const float anisotropy = 0.76;
+    float anisotropySquared = anisotropy * anisotropy;
+    float denominator = max(1.0 + anisotropySquared - 2.0 * anisotropy * cosineAngle, 0.0025);
+    return 0.0795775 * (1.0 - anisotropySquared) / pow(denominator, 1.5);
+}
+
+/// Evaluate low-sun single and bounded multiple scattering from canonical atmosphere illumination.
+vec3 openmwseLowSunScattering(vec3 worldDirection, float sunCosine, float solarElevation,
+    float opticalDistance, OpenMWSEAerialPerspectiveParameters parameters)
+{
+    const vec3 rayleighExtinction = vec3(0.0085, 0.0210, 0.0520);
+    const vec3 aerosolExtinction = vec3(0.0105, 0.0120, 0.0150);
+    const vec3 ozoneExtinction = vec3(0.0025, 0.0115, 0.0035);
+    vec3 totalExtinction = rayleighExtinction + aerosolExtinction + ozoneExtinction;
+    float relativeAirMass = openmwseSolarRelativeAirMass(solarElevation);
+    vec3 solarTransmittance = exp(-relativeAirMass * totalExtinction);
+
+    float civilTwilight = smoothstep(radians(-6.5), radians(0.5), solarElevation);
+    float nauticalTwilight = smoothstep(radians(-12.0), radians(-4.0), solarElevation)
+        * (1.0 - smoothstep(radians(-0.5), radians(2.0), solarElevation));
+    float astronomicalTwilight = smoothstep(radians(-18.0), radians(-10.0), solarElevation)
+        * (1.0 - smoothstep(radians(-5.0), radians(-2.0), solarElevation));
+    float illuminatedAtmosphere = max(civilTwilight, max(0.55 * nauticalTwilight, 0.2 * astronomicalTwilight));
+
+    float horizonDensity = exp(-6.5 * abs(worldDirection.z));
+    float viewDepth = 1.0 + 2.4 * horizonDensity;
+    float molecularPhase = openmwseRayleighPhase(sunCosine);
+    float aerosolPhase = openmwseAtmosphereMiePhase(sunCosine);
+    vec3 singleScattering = parameters.solarRadiance * solarTransmittance
+        * (18.0 * rayleighExtinction * molecularPhase + 4.0 * aerosolExtinction * aerosolPhase)
+        * viewDepth * illuminatedAtmosphere;
+
+    vec3 removedSolarRadiance = parameters.solarRadiance * (vec3(1.0) - solarTransmittance);
+    vec3 multipleScattering = mix(parameters.skyIrradiance, removedSolarRadiance, 0.38)
+        * (0.055 + 0.13 * horizonDensity) * illuminatedAtmosphere;
+
+    float antiSolar = pow(clamp(0.5 - 0.5 * sunCosine, 0.0, 1.0), 2.0);
+    float postSunset = smoothstep(radians(-10.0), radians(-1.0), solarElevation)
+        * (1.0 - smoothstep(radians(-0.5), radians(1.5), solarElevation));
+    float venusAltitude = exp(-pow((worldDirection.z - 0.12) / 0.105, 2.0));
+    vec3 ozoneFilteredSolar = parameters.solarRadiance * exp(-relativeAirMass * ozoneExtinction * 2.2);
+    vec3 venusBelt = mix(parameters.skyIrradiance, ozoneFilteredSolar, 0.58)
+        * antiSolar * venusAltitude * postSunset * 0.18;
+
+    float groundHorizon = 1.0 - smoothstep(0.0, 0.42, max(worldDirection.z, 0.0));
+    vec3 groundBounce = parameters.groundIrradiance * groundHorizon * civilTwilight * 0.035;
+    float pathWeight = 0.18 + 0.82 * clamp(opticalDistance, 0.0, 1.0);
+    return (singleScattering + multipleScattering + venusBelt + groundBounce) * pathWeight;
+}
 
 /// Convert world distance into the fork's MGE-style exponential fog optical distance.
 float openmwseExponentialFogOpticalDistance(float distanceFromEye, float fogStart, float fogEnd)
@@ -73,8 +194,40 @@ vec3 openmwseAtmosphereScatteredLight(vec3 worldDirection, float opticalDistance
     vec3 scatteredColor = vec3(0.125 * forwardScatter)
         + mix(parameters.skyColor, vec3(0.371, 0.637, 1.108), 0.44) * diffuseScatter;
     scatteredColor *= integratedAttenuation * (1.17 * atmosphereDepth + 0.89) * altitudeBrightness;
+    if (sunHeight < 0.34)
+    {
+        float solarElevation = asin(clamp(sunHeight, -1.0, 1.0));
+        float relativeAirMass = openmwseSolarRelativeAirMass(solarElevation);
+        vec3 longPathTransmittance = exp(-relativeAirMass * vec3(0.018, 0.041, 0.095));
+        float twilight = smoothstep(-0.3, -0.015, sunHeight) * (1.0 - smoothstep(0.06, 0.34, sunHeight));
+        float horizonBand = exp(-7.5 * abs(worldDirection.z));
+        float solarAfterglow = pow(clamp(0.5 + 0.5 * sunCosine, 0.0, 1.0), 3.0);
+        float antiSolarArch = pow(clamp(0.5 - 0.5 * sunCosine, 0.0, 1.0), 2.0);
+        vec3 sunsetRadiance
+            = mix(vec3(1.22, 0.24, 0.055), vec3(1.0, 0.62, 0.24), longPathTransmittance) * solarAfterglow;
+        vec3 twilightArch = vec3(0.22, 0.12, 0.34) * antiSolarArch;
+        scatteredColor += (sunsetRadiance + twilightArch) * twilight * horizonBand
+            * (0.18 + 0.82 * clamp(opticalDistance, 0.0, 1.0));
+
+        float physicalLowSunWeight = 1.0 - smoothstep(0.02, 0.07, sunHeight);
+        if (physicalLowSunWeight > 0.0)
+            scatteredColor += openmwseLowSunScattering(
+                worldDirection, sunCosine, solarElevation, opticalDistance, parameters) * physicalLowSunWeight;
+    }
 
     return mix(baseColor * (1.0 - visibility), scatteredColor, parameters.weatherWeight);
+}
+
+/// Evaluate the canonical directional sky radiance that also owns the fog-colored horizon.
+vec3 openmwseAtmosphereSkyRadiance(
+    vec3 worldDirection, OpenMWSEAerialPerspectiveParameters parameters)
+{
+    worldDirection = normalize(worldDirection);
+    float skyAmount = 1.0 - pow(
+        clamp(1.0 - 2.22 * clamp(worldDirection.z - 0.075, 0.0, 1.0), 0.0, 1.0), 1.15);
+    vec3 directionalSky = mix(parameters.fogColor, parameters.skyColor, skyAmount);
+    return openmwseAtmosphereScatteredLight(
+        worldDirection, 1.0, 0.0, directionalSky, parameters);
 }
 
 /// Apply aerial perspective while retaining a caller-selected maximum haze opacity.
@@ -110,8 +263,11 @@ vec3 openmwseApplyAerialPerspectiveTowardTarget(vec3 localRadiance, vec3 atmosph
 vec3 openmwseIncidentSolarRadiance(vec3 weatherSolarRadiance, OpenMWSEAerialPerspectiveParameters parameters)
 {
     vec3 sunDirection = normalize(parameters.sunDirection);
-    float horizonVisibility = smoothstep(-0.04, 0.02, sunDirection.z);
-    return weatherSolarRadiance * horizonVisibility;
+    vec3 apparentSunDirection = openmwseApparentSunDirection(sunDirection);
+    float horizonVisibility = smoothstep(-0.012, 0.018, apparentSunDirection.z);
+    float relativeAirMass = openmwseSolarRelativeAirMass(asin(clamp(sunDirection.z, -1.0, 1.0)));
+    vec3 spectralTransmittance = exp(-(relativeAirMass - 1.0) * vec3(0.008, 0.021, 0.052));
+    return weatherSolarRadiance * spectralTransmittance * horizonVisibility;
 }
 
 /// Estimate upper-hemisphere irradiance from the same directional sky model rendered behind the clouds.

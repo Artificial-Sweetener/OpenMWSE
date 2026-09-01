@@ -5,6 +5,7 @@
 #include "diagnosticperformance.hpp"
 #include "diagnosticrenderconfiguration.hpp"
 
+#include <components/diagnostics/atmospherescenario.hpp>
 #include <components/diagnostics/capsule.hpp>
 #include <components/diagnostics/session.hpp>
 #include <components/files/hash.hpp>
@@ -14,6 +15,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <cmath>
 #include <iomanip>
 
 #include "mwrender/camera.hpp"
@@ -23,7 +25,9 @@
 
 #include "mwstate/statemanagerimp.hpp"
 
+#include "mwworld/atmosphereenvironment.hpp"
 #include "mwworld/datetimemanager.hpp"
+#include "mwworld/timestamp.hpp"
 #include "mwworld/weather.hpp"
 #include "mwworld/worldimp.hpp"
 
@@ -83,8 +87,8 @@ Diagnostics::Capsule OMW::Engine::createDiagnosticCapsule(unsigned frameNumber)
     MWWorld::DateTimeManager& time = *mWorld->getTimeManager();
     const MWRender::Camera* camera = mWorld->getCamera();
     const osg::Vec3d cameraPosition = camera->getPosition();
-    const bool cameraUnderwater = mWorld->isUnderwater(mWorld->getPlayerPtr().getCell(),
-        osg::Vec3f(cameraPosition.x(), cameraPosition.y(), cameraPosition.z()));
+    const bool cameraUnderwater = mWorld->isUnderwater(
+        mWorld->getPlayerPtr().getCell(), osg::Vec3f(cameraPosition.x(), cameraPosition.y(), cameraPosition.z()));
     const MWWorld::Weather& weather = mWorld->getCurrentWeather();
 
     Diagnostics::Capsule capsule;
@@ -92,7 +96,7 @@ Diagnostics::Capsule OMW::Engine::createDiagnosticCapsule(unsigned frameNumber)
     manifest << "capsule-version: " << Diagnostics::capsuleVersion << '\n'
              << "build: " << quoteDiagnosticYaml(Version::getOpenmwVersionDescription()) << '\n'
              << "frame: " << frameNumber << '\n'
-             << "providers: [core@2, graphics@1, gameplay@2, performance@13]\n"
+             << "providers: [core@2, graphics@1, gameplay@7, performance@13]\n"
              << "content:\n";
     for (const std::string& content : mContentFiles)
     {
@@ -108,22 +112,30 @@ Diagnostics::Capsule OMW::Engine::createDiagnosticCapsule(unsigned frameNumber)
     const std::string configuration = serializeDiagnosticRenderConfiguration(captureDiagnosticRenderConfiguration());
     capsule.add({ "configuration/effective.yaml", Diagnostics::CapsuleEntryType::Configuration,
         diagnosticBytes(configuration) });
+    if (mDiagnosticAtmosphereScenario)
+    {
+        capsule.add({ "configuration/atmosphere-scenario.yaml", Diagnostics::CapsuleEntryType::Configuration,
+            diagnosticBytes(Diagnostics::serializeAtmosphereScenario(*mDiagnosticAtmosphereScenario)) });
+    }
 
     std::ostringstream world;
     world << "cell: " << quoteDiagnosticYaml(mWorld->getCellName()) << '\n'
           << "frame: " << frameNumber << '\n'
-          << "camera: [" << cameraPosition.x() << ", " << cameraPosition.y() << ", " << cameraPosition.z()
-          << "]\n"
-          << "camera-angles: [" << camera->getPitch() << ", " << camera->getYaw() << ", " << camera->getRoll()
-          << "]\n"
+          << "camera: [" << cameraPosition.x() << ", " << cameraPosition.y() << ", " << cameraPosition.z() << "]\n"
+          << "camera-angles: [" << camera->getPitch() << ", " << camera->getYaw() << ", " << camera->getRoll() << "]\n"
           << "first-person: " << (mWorld->isFirstPerson() ? "true" : "false") << '\n'
           << "camera-underwater: " << (cameraUnderwater ? "true" : "false") << '\n'
           << "weather: " << quoteDiagnosticYaml(weather.mId.serializeText()) << '\n'
+          << "next-weather: "
+          << quoteDiagnosticYaml(
+                 mWorld->getNextWeather() ? mWorld->getNextWeather()->mId.serializeText() : std::string_view())
+          << '\n'
+          << "weather-transition: " << (mWorld->getNextWeather() ? 1.f - mWorld->getWeatherTransition() : 0.f) << '\n'
+          << "game-hour: " << time.getTimeStamp().getHour() << '\n'
           << "game-time-seconds: " << time.getGameTime() << '\n'
           << "simulation-time: " << time.getSimulationTime() << '\n'
           << "rendering-time: " << time.getRenderingSimulationTime() << '\n';
-    capsule.add(
-        { "state/world.yaml", Diagnostics::CapsuleEntryType::GameplayTrace, diagnosticBytes(world.str()) });
+    capsule.add({ "state/world.yaml", Diagnostics::CapsuleEntryType::GameplayTrace, diagnosticBytes(world.str()) });
 
     if (mStateManager->getState() == MWBase::StateManager::State_Running)
     {
@@ -226,8 +238,8 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << "graphics-context: "
                            << (mDiagnosticChild && !mDiagnosticHeaded ? "offscreen-pbuffer" : "interactive-window")
                            << '\n'
-                           << "native-window: "
-                           << (mDiagnosticChild && !mDiagnosticHeaded ? "absent" : "present") << '\n'
+                           << "native-window: " << (mDiagnosticChild && !mDiagnosticHeaded ? "absent" : "present")
+                           << '\n'
                            << "input-source: " << (mDiagnosticChild ? "device-free" : "host-devices") << '\n'
                            << "scheduled-frames-remaining: " << mDiagnosticStepScheduler.remainingFrames() << '\n'
                            << "completed-fixed-frames: " << mDiagnosticStepScheduler.completedFrames() << '\n'
@@ -240,11 +252,11 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << '\n'
                            << "render-frame-capture: "
                            << (mWorld->getPostProcessor()->renderFrameDiagnosticCaptureInProgress() ? "in-progress"
-                                                                                                     : "idle")
+                                                                                                    : "idle")
                            << '\n'
                            << "performance-capture: " << (mDiagnosticCollection->active() ? "collecting" : "idle")
                            << '\n'
-                           << "providers: [core@2, graphics@1, gameplay@2, performance@13]\n";
+                           << "providers: [core@2, graphics@1, gameplay@7, performance@13]\n";
                     response.mPayload = diagnosticBytes(output.str());
                     break;
 
@@ -321,8 +333,8 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                     }
                     if (captureRenderedFrames)
                     {
-                        const std::filesystem::path outputPath
-                            = mDiagnosticArtifactRoot / ("route-frames-" + std::to_string(command.mRequestId) + ".omwdiag");
+                        const std::filesystem::path outputPath = mDiagnosticArtifactRoot
+                            / ("route-frames-" + std::to_string(command.mRequestId) + ".omwdiag");
                         mWorld->getPostProcessor()->requestRenderFrameDiagnosticCapture(outputPath, count);
                     }
                     if (bypassShadows)
@@ -345,17 +357,26 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
 
                 case Diagnostics::CommandType::CaptureGraphics:
                 {
+                    const std::string captureMode = diagnosticText(command.mPayload);
+                    if (!captureMode.empty() && captureMode != "normal-only")
+                        throw std::invalid_argument("unsupported graphics capture mode");
                     const std::filesystem::path outputDirectory
                         = mDiagnosticArtifactRoot / ("graphics-" + std::to_string(frameNumber));
-                    mWorld->getPostProcessor()->requestAtmosphereDiagnosticCapture(outputDirectory);
+                    mWorld->getPostProcessor()->requestAtmosphereDiagnosticCapture(
+                        outputDirectory, captureMode != "normal-only");
                     output << "capture-root: " << quoteDiagnosticYaml(outputDirectory.filename().string()) << '\n'
+                           << "capture-mode: " << (captureMode.empty() ? "comparison" : captureMode) << '\n'
                            << "frame: " << frameNumber << '\n';
                     response.mPayload = diagnosticBytes(output.str());
                     break;
                 }
 
                 case Diagnostics::CommandType::TraceGameplay:
-                    output << "provider: gameplay@2\nframe: " << frameNumber << '\n'
+                {
+                    const MWRender::AtmosphereDiagnosticState& atmosphere
+                        = mWorld->getRenderingManager()->getAtmosphereDiagnosticState();
+                    const MWRender::AtmosphereVolumeState& volumes = atmosphere.mVolumes;
+                    output << "provider: gameplay@7\nframe: " << frameNumber << '\n'
                            << "state: " << static_cast<int>(mStateManager->getState()) << '\n'
                            << "cell: " << quoteDiagnosticYaml(mWorld->getCellName()) << '\n'
                            << "camera: [" << cameraPosition.x() << ", " << cameraPosition.y() << ", "
@@ -365,10 +386,63 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << "first-person: " << (mWorld->isFirstPerson() ? "true" : "false") << '\n'
                            << "camera-underwater: " << (cameraUnderwater ? "true" : "false") << '\n'
                            << "weather: " << quoteDiagnosticYaml(weather.mId.serializeText()) << '\n'
+                           << "next-weather: "
+                           << quoteDiagnosticYaml(mWorld->getNextWeather()
+                                      ? mWorld->getNextWeather()->mId.serializeText()
+                                      : std::string_view())
+                           << '\n'
+                           << "weather-transition: "
+                           << (mWorld->getNextWeather() ? 1.f - mWorld->getWeatherTransition() : 0.f) << '\n'
+                           << "game-hour: " << time.getTimeStamp().getHour() << '\n'
                            << "game-time-seconds: " << time.getGameTime() << '\n'
-                           << "simulation-time: " << time.getSimulationTime() << '\n';
+                           << "simulation-time: " << time.getSimulationTime() << '\n'
+                           << "atmosphere:\n"
+                           << "  enabled: " << (atmosphere.mEnabled ? "true" : "false") << '\n'
+                           << "  fog-range-world-units: [" << atmosphere.mFogStartWorldUnits << ", "
+                           << atmosphere.mFogEndWorldUnits << "]\n"
+                           << "  camera-range-world-units: [" << atmosphere.mNearClipWorldUnits << ", "
+                           << atmosphere.mViewDistanceWorldUnits << "]\n"
+                           << "  sun-direction: [" << atmosphere.mSunDirection.x() << ", "
+                           << atmosphere.mSunDirection.y() << ", " << atmosphere.mSunDirection.z() << "]\n"
+                           << "  solar-radiance: [" << atmosphere.mLighting.mSolarRadiance.x() << ", "
+                           << atmosphere.mLighting.mSolarRadiance.y() << ", " << atmosphere.mLighting.mSolarRadiance.z()
+                           << "]\n"
+                           << "  sky-irradiance: [" << atmosphere.mLighting.mSkyIrradiance.x() << ", "
+                           << atmosphere.mLighting.mSkyIrradiance.y() << ", " << atmosphere.mLighting.mSkyIrradiance.z()
+                           << "]\n"
+                           << "  ground-irradiance: [" << atmosphere.mLighting.mGroundIrradiance.x() << ", "
+                           << atmosphere.mLighting.mGroundIrradiance.y() << ", "
+                           << atmosphere.mLighting.mGroundIrradiance.z() << "]\n"
+                           << "  sun-disc-color: [" << atmosphere.mSunDiscColor.x() << ", "
+                           << atmosphere.mSunDiscColor.y() << ", " << atmosphere.mSunDiscColor.z() << ", "
+                           << atmosphere.mSunDiscColor.w() << "]\n"
+                           << "  main-cloud: [" << volumes.mCloudCoverage << ", " << volumes.mCloudDensity << ", "
+                           << volumes.mCloudBaseAltitudeWorldUnits << ", " << volumes.mCloudThicknessWorldUnits << ", "
+                           << volumes.mCloudType << ", " << volumes.mCloudFeatureScale << ", "
+                           << volumes.mCloudVerticalDevelopment << ", " << volumes.mCloudAnvilStrength << "]\n"
+                           << "  low-cloud: [" << volumes.mLowCloudCoverage << ", " << volumes.mLowCloudDensity << ", "
+                           << volumes.mLowCloudBaseAltitudeWorldUnits << ", " << volumes.mLowCloudThicknessWorldUnits
+                           << ", " << volumes.mLowCloudType << ", " << volumes.mLowCloudFeatureScale << ", "
+                           << volumes.mLowCloudVerticalDevelopment << ", " << volumes.mLowCloudEnvironmentInfluence
+                           << "]\n"
+                           << "  mist: [" << volumes.mMistDensity << ", " << volumes.mMistBaseAltitudeWorldUnits << ", "
+                           << volumes.mMistThicknessWorldUnits << "]\n"
+                           << "  fog: [" << volumes.mFogDensity << ", " << volumes.mFogBaseAltitudeWorldUnits << ", "
+                           << volumes.mFogThicknessWorldUnits << ", " << volumes.mFogAnisotropy << "]\n"
+                           << "  terrain: [" << volumes.mTerrainReferenceHeightWorldUnits << ", "
+                           << volumes.mCloudTerrainFollowing << ", " << volumes.mCloudTerrainClearanceWorldUnits
+                           << "]\n"
+                           << "  terrain-sample-center: [" << volumes.mTerrainSampleCenterWorldUnits.x() << ", "
+                           << volumes.mTerrainSampleCenterWorldUnits.y() << "]\n"
+                           << "  terrain-gradient: [" << volumes.mTerrainGradient.x() << ", "
+                           << volumes.mTerrainGradient.y() << "]\n"
+                           << "  valley-depth-world-units: " << volumes.mValleyDepthWorldUnits << '\n'
+                           << "environment-traits:\n";
+                    for (const auto& [trait, contribution] : mWorld->getAtmosphereEnvironmentState().mTraits)
+                        output << "  " << quoteDiagnosticYaml(trait) << ": " << contribution << '\n';
                     response.mPayload = diagnosticBytes(output.str());
                     break;
+                }
 
                 case Diagnostics::CommandType::TracePerformance:
                 {
@@ -451,7 +525,146 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                     break;
                 }
 
+                case Diagnostics::CommandType::SetAtmosphereScenario:
+                {
+                    if (!mDiagnosticChild)
+                    {
+                        response.mError = Diagnostics::ErrorCode::PermissionDenied;
+                        break;
+                    }
+                    Diagnostics::AtmosphereScenario scenario;
+                    try
+                    {
+                        scenario = Diagnostics::deserializeAtmosphereScenario(diagnosticText(command.mPayload));
+                        if (scenario.mGameHour)
+                            mWorld->setDiagnosticGameHour(*scenario.mGameHour);
+                        if (scenario.mWeather)
+                        {
+                            const std::optional<ESM::RefId> next = scenario.mWeather->mNext
+                                ? std::optional<ESM::RefId>(ESM::RefId::deserializeText(*scenario.mWeather->mNext))
+                                : std::nullopt;
+                            mWorld->setDiagnosticWeatherState(ESM::RefId::deserializeText(scenario.mWeather->mCurrent),
+                                next, scenario.mWeather->mTransition);
+                        }
+                        if (scenario.mEnvironment)
+                        {
+                            MWWorld::AtmosphereEnvironmentState environment = mWorld->getAtmosphereEnvironmentState();
+                            environment.mTraits = scenario.mEnvironment->mTraits;
+                            if (scenario.mEnvironment->mTerrainHeightWorldUnits)
+                                environment.mTerrainHeightWorldUnits = *scenario.mEnvironment->mTerrainHeightWorldUnits;
+                            mWorld->setDiagnosticEnvironmentState(std::move(environment));
+                        }
+                        if (scenario.mRecentPrecipitation)
+                            mWorld->setDiagnosticRecentPrecipitation(*scenario.mRecentPrecipitation);
+                        const Diagnostics::DiagnosticWeatherEffects weatherEffects
+                            = scenario.mWeatherEffects.value_or(Diagnostics::DiagnosticWeatherEffects{});
+                        mWorld->setDiagnosticWeatherEffects(weatherEffects.mPrecipitation, weatherEffects.mLightning);
+                        const Diagnostics::DiagnosticAtmosphereMedia media
+                            = scenario.mMedia.value_or(Diagnostics::DiagnosticAtmosphereMedia{});
+                        mWorld->getRenderingManager()->setAtmosphereDiagnosticMedia(
+                            { media.mMainClouds, media.mLowClouds, media.mMist, media.mFog });
+                        mWorld->getRenderingManager()->setAtmosphereDiagnosticDistanceFogEnabled(
+                            scenario.mDistanceFog.value_or(true));
+                        mWorld->getRenderingManager()->setAtmosphereDiagnosticCloudSeed(
+                            scenario.mCloudSeed.value_or(0));
+                    }
+                    catch (const std::exception& error)
+                    {
+                        response.mError = Diagnostics::ErrorCode::InvalidFrame;
+                        response.mPayload = diagnosticBytes(error.what());
+                        break;
+                    }
+                    mWorld->getRenderingManager()->invalidateAtmosphereHistory();
+                    mDiagnosticAtmosphereScenario = scenario;
+                    output
+                        << "scenario-version: " << Diagnostics::atmosphereScenarioVersion << '\n'
+                        << "weather: " << quoteDiagnosticYaml(mWorld->getCurrentWeather().mId.serializeText()) << '\n'
+                        << "next-weather: "
+                        << quoteDiagnosticYaml(mWorld->getNextWeather() ? mWorld->getNextWeather()->mId.serializeText()
+                                                                        : std::string_view())
+                        << '\n'
+                        << "weather-transition: "
+                        << (mWorld->getNextWeather() ? 1.f - mWorld->getWeatherTransition() : 0.f) << '\n'
+                        << "game-hour: " << time.getTimeStamp().getHour() << '\n'
+                        << "main-clouds: "
+                        << (mDiagnosticAtmosphereScenario->mMedia ? mDiagnosticAtmosphereScenario->mMedia->mMainClouds
+                                                                  : true)
+                        << '\n'
+                        << "low-clouds: "
+                        << (mDiagnosticAtmosphereScenario->mMedia ? mDiagnosticAtmosphereScenario->mMedia->mLowClouds
+                                                                  : true)
+                        << '\n'
+                        << "mist: "
+                        << (mDiagnosticAtmosphereScenario->mMedia ? mDiagnosticAtmosphereScenario->mMedia->mMist : true)
+                        << '\n'
+                        << "fog: "
+                        << (mDiagnosticAtmosphereScenario->mMedia ? mDiagnosticAtmosphereScenario->mMedia->mFog : true)
+                        << '\n'
+                        << "distance-fog: " << mDiagnosticAtmosphereScenario->mDistanceFog.value_or(true) << '\n'
+                        << "cloud-seed: " << mDiagnosticAtmosphereScenario->mCloudSeed.value_or(0) << '\n'
+                        << "recent-precipitation: " << mDiagnosticAtmosphereScenario->mRecentPrecipitation.value_or(0.f)
+                        << '\n'
+                        << "precipitation: "
+                        << (mDiagnosticAtmosphereScenario->mWeatherEffects
+                                       && mDiagnosticAtmosphereScenario->mWeatherEffects->mPrecipitation
+                                   ? "true"
+                                   : "false")
+                        << '\n'
+                        << "lightning: "
+                        << (mDiagnosticAtmosphereScenario->mWeatherEffects
+                                       && mDiagnosticAtmosphereScenario->mWeatherEffects->mLightning
+                                   ? "true"
+                                   : "false")
+                        << '\n'
+                        << "environment-traits:\n";
+                    for (const auto& [trait, weight] : mWorld->getAtmosphereEnvironmentState().mTraits)
+                        output << "  " << quoteDiagnosticYaml(trait) << ": " << weight << '\n';
+                    output << "environment-terrain-height: "
+                           << mWorld->getAtmosphereEnvironmentState().mTerrainHeightWorldUnits << '\n'
+                           << "environment-terrain-sample-center: ["
+                           << mWorld->getAtmosphereEnvironmentState().mTerrainSampleCenterWorldUnits.x() << ", "
+                           << mWorld->getAtmosphereEnvironmentState().mTerrainSampleCenterWorldUnits.y() << "]\n"
+                           << "environment-terrain-gradient: ["
+                           << mWorld->getAtmosphereEnvironmentState().mTerrainGradient.x() << ", "
+                           << mWorld->getAtmosphereEnvironmentState().mTerrainGradient.y() << "]\n"
+                           << "environment-valley-depth-world-units: "
+                           << mWorld->getAtmosphereEnvironmentState().mValleyDepthWorldUnits << '\n'
+                           << "atmosphere-history: reset\n";
+                    response.mPayload = diagnosticBytes(output.str());
+                    break;
+                }
+
                 case Diagnostics::CommandType::SetCamera:
+                {
+                    if (!mDiagnosticChild)
+                    {
+                        response.mError = Diagnostics::ErrorCode::PermissionDenied;
+                        break;
+                    }
+                    const YAML::Node state = YAML::Load(diagnosticText(command.mPayload));
+                    if (!state.IsMap() || state.size() != 1 || !state["camera-angles"])
+                        throw std::invalid_argument("diagnostic camera state requires only camera-angles");
+                    const YAML::Node angles = state["camera-angles"];
+                    if (!angles.IsSequence() || angles.size() != 3)
+                        throw std::invalid_argument("diagnostic camera state has invalid camera angles");
+                    const float pitch = angles[0].as<float>();
+                    const float yaw = angles[1].as<float>();
+                    const float roll = angles[2].as<float>();
+                    if (!std::isfinite(pitch) || !std::isfinite(yaw) || !std::isfinite(roll) || pitch < -1.5707964f
+                        || pitch > 1.5707964f)
+                        throw std::invalid_argument("diagnostic camera angles are outside their finite range");
+                    MWRender::Camera* camera = mWorld->getCamera();
+                    camera->setPitch(pitch, true);
+                    camera->setYaw(yaw, true);
+                    camera->setRoll(roll);
+                    mWorld->getRenderingManager()->invalidateAtmosphereHistory();
+                    output << "camera-angles: [" << camera->getPitch() << ", " << camera->getYaw() << ", "
+                           << camera->getRoll() << "]\n"
+                           << "atmosphere-history: reset\n";
+                    response.mPayload = diagnosticBytes(output.str());
+                    break;
+                }
+
                 case Diagnostics::CommandType::Cancel:
                     response.mError = Diagnostics::ErrorCode::UnsupportedCommand;
                     break;

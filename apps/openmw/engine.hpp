@@ -5,6 +5,7 @@
 
 #include <components/compiler/extensions.hpp>
 #include <components/debug/debuglog.hpp>
+#include <components/diagnostics/atmospherescenario.hpp>
 #include <components/diagnostics/fixedstepscheduler.hpp>
 #include <components/esm/refid.hpp>
 #include <components/files/collections.hpp>
@@ -198,6 +199,7 @@ namespace OMW
         std::string mDiagnosticEndpoint;
         Diagnostics::FixedStepScheduler mDiagnosticStepScheduler;
         std::optional<std::uint64_t> mDiagnosticShadowOverrideRequest;
+        std::optional<Diagnostics::AtmosphereScenario> mDiagnosticAtmosphereScenario;
         bool mDiagnosticChild = false;
         bool mDiagnosticHeaded = false;
 
@@ -270,8 +272,7 @@ namespace OMW
         void go();
 
         /// Enable the protected diagnostic bridge and optional isolated child behavior.
-        void configureDiagnostics(
-            std::string endpoint, std::filesystem::path artifactRoot, bool child, bool headed,
+        void configureDiagnostics(std::string endpoint, std::filesystem::path artifactRoot, bool child, bool headed,
             double fixedFrameDuration);
 
         /// Compile all scripts (excludign dialogue scripts) at startup?

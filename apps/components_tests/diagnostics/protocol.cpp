@@ -14,6 +14,29 @@ namespace
         EXPECT_EQ(Diagnostics::decodeCommand(Diagnostics::encodeCommand(command)), command);
     }
 
+    TEST(DiagnosticProtocol, SupportsVersionedAtmosphereScenarioCommand)
+    {
+        Diagnostics::Command command;
+        command.mRequestId = 9;
+        command.mType = Diagnostics::CommandType::SetAtmosphereScenario;
+        command.mPayload = { std::byte{ 'v' }, std::byte{ '2' } };
+
+        EXPECT_EQ(Diagnostics::decodeCommand(Diagnostics::encodeCommand(command)), command);
+        EXPECT_TRUE(Diagnostics::isSupportedCommand(
+            static_cast<std::uint16_t>(Diagnostics::CommandType::SetAtmosphereScenario)));
+    }
+
+    TEST(DiagnosticProtocol, SupportsIsolatedCameraCommand)
+    {
+        Diagnostics::Command command;
+        command.mRequestId = 10;
+        command.mType = Diagnostics::CommandType::SetCamera;
+        command.mPayload = { std::byte{ '[' }, std::byte{ ']' } };
+
+        EXPECT_EQ(Diagnostics::decodeCommand(Diagnostics::encodeCommand(command)), command);
+        EXPECT_TRUE(Diagnostics::isSupportedCommand(static_cast<std::uint16_t>(Diagnostics::CommandType::SetCamera)));
+    }
+
     TEST(DiagnosticProtocol, RejectsDeclaredLengthMismatch)
     {
         Diagnostics::Command command{ 1, Diagnostics::CommandType::Hello, { std::byte{ 1 } } };

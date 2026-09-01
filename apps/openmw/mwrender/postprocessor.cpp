@@ -39,11 +39,11 @@
 
 #include "atmosphere.hpp"
 #include "atmospherediagnostics.hpp"
-#include "renderframediagnostics.hpp"
 #include "distortion.hpp"
 #include "opaqueblit.hpp"
 #include "pingpongcull.hpp"
 #include "renderbin.hpp"
+#include "renderframediagnostics.hpp"
 #include "renderingmanager.hpp"
 #include "renderworkcounter.hpp"
 #include "sky.hpp"
@@ -143,10 +143,13 @@ namespace MWRender
         requestAtmosphereDiagnosticCapture(std::filesystem::path(outputDirectory));
     }
 
-    void PostProcessor::requestAtmosphereDiagnosticCapture(const std::filesystem::path& outputDirectory)
+    void PostProcessor::requestAtmosphereDiagnosticCapture(
+        const std::filesystem::path& outputDirectory, bool captureComparisons)
     {
-        mAtmosphereDiagnostics->requestCapture(outputDirectory);
-        Log(Debug::Info) << "Production atmosphere shader-stage comparison requested for the next screenshot frames";
+        mAtmosphereDiagnostics->requestCapture(outputDirectory, captureComparisons);
+        Log(Debug::Info) << (captureComparisons
+                ? "Production atmosphere shader-stage comparison requested for the next screenshot frames"
+                : "Production atmosphere normal-frame capture requested for the next screenshot frame");
     }
 
     bool PostProcessor::atmosphereDiagnosticCaptureInProgress() const

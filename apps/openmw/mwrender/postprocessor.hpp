@@ -220,15 +220,15 @@ namespace MWRender
         /// Request a one-shot production pass capture when OPENMW_ATMOSPHERE_DIAGNOSTICS_DIR is set.
         void requestAtmosphereDiagnosticCapture();
 
-        /// Request a one-shot production pass capture in an explicitly owned artifact directory.
-        void requestAtmosphereDiagnosticCapture(const std::filesystem::path& outputDirectory);
+        /// Request a production capture in an explicitly owned artifact directory.
+        void requestAtmosphereDiagnosticCapture(
+            const std::filesystem::path& outputDirectory, bool captureComparisons = true);
 
         /// Report whether the production multi-frame diagnostic capture still owns transient render state.
         bool atmosphereDiagnosticCaptureInProgress() const;
 
         /// Request exact final-composite captures for the next bounded sequence of production frames.
-        void requestRenderFrameDiagnosticCapture(
-            const std::filesystem::path& outputPath, std::uint32_t frameCount);
+        void requestRenderFrameDiagnosticCapture(const std::filesystem::path& outputPath, std::uint32_t frameCount);
 
         /// Report whether an exact final-composite sequence is being captured or serialized.
         bool renderFrameDiagnosticCaptureInProgress() const;

@@ -13,6 +13,7 @@
 
 #include <osgUtil/IncrementalCompileOperation>
 
+#include <cstdint>
 #include <deque>
 #include <map>
 #include <memory>
@@ -90,6 +91,29 @@ namespace Debug
 
 namespace MWRender
 {
+    /// Select the production atmosphere media retained by an isolated diagnostic scenario.
+    struct AtmosphereDiagnosticMedia
+    {
+        bool mMainClouds = true;
+        bool mLowClouds = true;
+        bool mMist = true;
+        bool mFog = true;
+    };
+
+    /// Captures the range, media, and canonical illumination sent to atmosphere shaders for the latest rendered frame.
+    struct AtmosphereDiagnosticState
+    {
+        float mFogStartWorldUnits = 0.f;
+        float mFogEndWorldUnits = 0.f;
+        float mNearClipWorldUnits = 0.f;
+        float mViewDistanceWorldUnits = 0.f;
+        bool mEnabled = false;
+        AtmosphereVolumeState mVolumes;
+        osg::Vec3f mSunDirection{ 0.f, 0.f, 1.f };
+        AtmosphereLightingState mLighting;
+        osg::Vec4f mSunDiscColor{ 1.f, 1.f, 1.f, 0.f };
+    };
+
     class IntersectionVisitorWithIgnoreList;
 
     class EffectManager;
@@ -214,6 +238,18 @@ namespace MWRender
 
         /// Select the inert or capture-only compatibility-shader diagnostic output.
         void setAtmosphereDiagnosticMode(int mode);
+
+        /// Apply an isolated diagnostic medium mask without mutating weather or content state.
+        void setAtmosphereDiagnosticMedia(const AtmosphereDiagnosticMedia& media);
+
+        /// Select distance-atmosphere fog for an isolated diagnostic without changing volumetric media.
+        void setAtmosphereDiagnosticDistanceFogEnabled(bool enabled);
+
+        /// Select a deterministic procedural cloud-field phase for an isolated diagnostic scenario.
+        void setAtmosphereDiagnosticCloudSeed(std::uint32_t seed);
+
+        /// Return the atmosphere values actually applied during the latest rendered frame.
+        const AtmosphereDiagnosticState& getAtmosphereDiagnosticState() const { return mAtmosphereDiagnosticState; }
 
         Animation* getAnimation(const MWWorld::Ptr& ptr);
         const Animation* getAnimation(const MWWorld::ConstPtr& ptr) const;
@@ -358,6 +394,10 @@ namespace MWRender
         osg::ref_ptr<SceneUtil::PerViewUniformStateUpdater> mPerViewUniformStateUpdater;
         CloudAdvectionController mCloudAdvection;
         AtmosphereHistoryLightingController mAtmosphereHistoryLighting;
+        AtmosphereDiagnosticMedia mAtmosphereDiagnosticMedia;
+        AtmosphereDiagnosticState mAtmosphereDiagnosticState;
+        bool mAtmosphereDiagnosticDistanceFogEnabled = true;
+        osg::Vec2f mAtmosphereDiagnosticCloudFieldOffset;
 
         osg::Vec4f mAmbientColor;
         float mNightEyeFactor;

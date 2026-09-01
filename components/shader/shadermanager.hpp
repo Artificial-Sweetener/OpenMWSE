@@ -83,6 +83,7 @@ namespace Shader
         {
             OpaqueDepthTexture,
             OpaqueColorTexture,
+            AtmosphereNoise,
             SkyTexture,
             ShadowMaps,
             SLOT_COUNT

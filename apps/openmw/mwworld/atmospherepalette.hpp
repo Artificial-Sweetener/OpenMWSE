@@ -15,6 +15,7 @@ namespace VFS
 
 namespace MWWorld
 {
+    struct AtmosphereEnvironmentState;
     class Weather;
 
     class AtmospherePalette
@@ -29,9 +30,11 @@ namespace MWWorld
         AtmospherePalette(const AtmospherePalette&) = delete;
         AtmospherePalette& operator=(const AtmospherePalette&) = delete;
 
-        /// Select the regional palette that weather colors will transition toward.
-        void setRegion(std::string_view regionId);
-        /// Advance the regional transition and publish its weather color cycles.
+        /// Select a continuous environment-derived palette and volume target.
+        void setEnvironment(const AtmosphereEnvironmentState& environment);
+        /// Select and immediately apply exact environment evidence for an isolated diagnostic.
+        void setDiagnosticEnvironment(const AtmosphereEnvironmentState& environment);
+        /// Smooth environment changes and publish the resulting weather color cycles.
         void update(float elapsedSeconds, bool paused, std::span<Weather> weather);
 
         /// Resolve blended scattering and weather-volume controls for the active weather transition.

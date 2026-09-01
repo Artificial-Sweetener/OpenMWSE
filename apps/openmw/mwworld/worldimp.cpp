@@ -1337,9 +1337,9 @@ namespace MWWorld
             spawnPoint.z() += 30; // move up a little to account for slopes, will snap down later
 
             if (!mPhysics
-                     ->castRay(spawnPoint, osg::Vec3f(pos.x(), pos.y(), pos.z() + 20),
-                         MWPhysics::CollisionType_World | MWPhysics::CollisionType_Door)
-                     .mHit)
+                    ->castRay(spawnPoint, osg::Vec3f(pos.x(), pos.y(), pos.z() + 20),
+                        MWPhysics::CollisionType_World | MWPhysics::CollisionType_Door)
+                    .mHit)
             {
                 // safe
                 break;
@@ -1791,6 +1791,11 @@ namespace MWWorld
         return mWeatherManager->getWeather();
     }
 
+    const AtmosphereEnvironmentState& World::getAtmosphereEnvironmentState() const
+    {
+        return mWeatherManager->getAtmosphereEnvironmentState();
+    }
+
     const MWWorld::Weather* World::getWeather(size_t index) const
     {
         return mWeatherManager->getWeather(index);
@@ -1833,6 +1838,34 @@ namespace MWWorld
     void World::changeWeather(const ESM::RefId& region, const ESM::RefId& id)
     {
         mWeatherManager->changeWeather(region, id);
+    }
+
+    void World::setDiagnosticWeatherState(
+        const ESM::RefId& current, const std::optional<ESM::RefId>& next, float transition)
+    {
+        mWeatherManager->setDiagnosticWeatherState(current, next, transition);
+    }
+
+    void World::setDiagnosticWeatherEffects(bool precipitationEnabled, bool lightningEnabled)
+    {
+        mWeatherManager->setDiagnosticWeatherEffects(precipitationEnabled, lightningEnabled);
+    }
+
+    void World::setDiagnosticRecentPrecipitation(float weight)
+    {
+        mWeatherManager->setDiagnosticRecentPrecipitation(weight);
+    }
+
+    void World::setDiagnosticEnvironmentState(AtmosphereEnvironmentState environment)
+    {
+        mWeatherManager->setDiagnosticEnvironmentState(std::move(environment));
+    }
+
+    void World::setDiagnosticGameHour(double hour)
+    {
+        if (!std::isfinite(hour) || hour < 0.0 || hour >= 24.0)
+            throw std::invalid_argument("diagnostic game hour must be within [0, 24)");
+        setGlobalFloat(Globals::sGameHour, static_cast<float>(hour));
     }
 
     void World::modRegion(const ESM::RefId& regionid, std::span<const uint8_t> chances)

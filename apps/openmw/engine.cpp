@@ -327,6 +327,8 @@ bool OMW::Engine::frame(unsigned frameNumber, float frametime)
             {
                 if (frametime > 0.f)
                     applyDiagnosticGameplayRoute();
+                if (mDiagnosticAtmosphereScenario && mDiagnosticAtmosphereScenario->mGameHour)
+                    mWorld->setDiagnosticGameHour(*mDiagnosticAtmosphereScenario->mGameHour);
                 mWorld->update(frametime, paused);
             }
         }
@@ -1249,8 +1251,7 @@ void OMW::Engine::recordDiagnosticGameplayRoute(float dt)
     };
     try
     {
-        if (const std::optional<std::filesystem::path> path
-            = mDiagnosticGameplayRoute->recordFrame(std::move(frame)))
+        if (const std::optional<std::filesystem::path> path = mDiagnosticGameplayRoute->recordFrame(std::move(frame)))
             mWindowManager->messageBox("Gameplay route reached its frame limit and was saved: " + path->string());
     }
     catch (const std::exception& error)
@@ -1266,8 +1267,7 @@ void OMW::Engine::applyDiagnosticGameplayRoute()
         return;
     const Diagnostics::GameplayRouteFrame& frame = mDiagnosticGameplayRoute->replayFrame();
     MWWorld::Ptr player = mWorld->getPlayerPtr();
-    MWWorld::CellStore& cell
-        = mWorld->getWorldModel().getCell(ESM::RefId::deserializeText(frame.mCell));
+    MWWorld::CellStore& cell = mWorld->getWorldModel().getCell(ESM::RefId::deserializeText(frame.mCell));
     const osg::Vec3f position(frame.mPosition[0], frame.mPosition[1], frame.mPosition[2]);
     const osg::Vec3f rotation(frame.mRotation[0], frame.mRotation[1], frame.mRotation[2]);
     if (player.getCell() == &cell)

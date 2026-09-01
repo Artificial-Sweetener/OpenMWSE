@@ -36,8 +36,8 @@ namespace MWRender
             RestoreNormalRendering,
         };
 
-        /// Schedule one production frame capture in the requested output directory.
-        void requestCapture(std::filesystem::path outputDirectory);
+        /// Schedule a production capture, optionally including every comparison route.
+        void requestCapture(std::filesystem::path outputDirectory, bool captureComparisons = true);
 
         /// Report whether a capture request is waiting for the render thread.
         bool captureRequested() const;
@@ -84,6 +84,7 @@ namespace MWRender
         std::optional<std::filesystem::path> mRequestedOutputDirectory;
         CaptureStage mCaptureStage = CaptureStage::Idle;
         unsigned int mSettleFramesRemaining = 0;
+        bool mCaptureComparisons = true;
     };
 }
 

@@ -26,6 +26,7 @@ set(BUILTIN_DATA_MW_FILES
 
     openmwse/atmosphere.json
     openmwse/atmosphere-volumes.json
+    openmwse/atmosphere-environments.json
 
     scripts/omw/cellhandlers.lua
     scripts/omw/esmfallbacks.lua

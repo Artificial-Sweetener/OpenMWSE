@@ -80,6 +80,45 @@ cull, draw, camera-owned GPU-pass, and frame-duration metrics with median, p95, 
 GPU passes cover the main scene, shadow maps, water reflection, sky render target, post-processing, precipitation occlusion,
 and ripple simulation. A sample count must not exceed the frame count or 600. Visual capture begins after the timed window so
 synchronous readback does not contaminate its distributions.
+
+Atmosphere captures can replace save-derived weather and game hour without changing the save or its region probabilities.
+``--weather <name>`` locks one steady weather. ``--weather-from <name> --weather-to <name>
+--weather-transition <progress>`` locks an exact transition, where progress is within ``[0, 1]`` from the first weather to the
+second. ``--game-hour <hour>`` locks civil game time within ``[0, 24)`` while simulation time and cloud advection continue.
+``--cloud-seed <integer>`` selects a deterministic world-space phase shared by visible clouds and their surface shadows;
+seed zero preserves the production field phase.
+``--recent-precipitation <weight>`` sets the condensate controller's bounded recent-rain memory within ``[0, 1]``. It is useful
+for paired dry and post-rain mist captures because it changes mist formation without inventing a different current weather,
+fog policy, or lighting path.
+``--environment-traits <name=weight,...>`` replaces classified environment evidence with exact semantic weights in ``[0, 1]``.
+``--environment-terrain-height <world-units>`` optionally replaces the local terrain datum. These isolated-child-only controls
+apply the production palette and medium profile immediately, allowing deterministic wetland, coastal, volcanic, and future
+environment scenarios without waiting for a regional transition or encoding region names in the renderer.
+``--camera-pitch <radians>``, ``--camera-yaw <radians>``, and ``--camera-roll <radians>`` replace individual camera
+angles after replay parity is established. Camera overrides are isolated-child-only, reset atmosphere history, and are
+recorded in the resulting scenario capsule without changing the source save.
+Every scenario change rejects temporal atmosphere history. ``--atmosphere-warmup-frames <count>`` then advances up to 600 exact
+fixed-step frames before the measured workload, allowing the same command surface to capture either cold history or a controlled
+settled history. The child reports requested-versus-observed scenario parity before advancing.
+
+The initial ``capture.omwdiag`` retains the unmodified save state. A run with atmosphere overrides also writes
+``scenario.omwdiag`` with ``configuration/atmosphere-scenario.yaml`` and the overridden world snapshot. Replaying that capsule
+automatically reapplies and locks its scenario; explicit command-line atmosphere options replace the capsule scenario for a
+controlled comparison.
+
+Use ``--disable-main-clouds``, ``--disable-low-clouds``, ``--disable-mist``, and ``--disable-fog`` to isolate participating
+media while retaining the selected production weather, lighting, shaders, assets, and scene. These masks are accepted only by
+the isolated diagnostic child, are recorded in the versioned atmosphere scenario, and do not mutate weather data or the normal
+profile.
+
+``--disable-distance-fog`` independently removes exponential or linear view-path aerial perspective for cloud-shape diagnosis.
+It does not disable volumetric fog, mist, or cloud media unless their corresponding controls are also supplied.
+
+Every isolated run writes its final ``gameplay.yaml`` evidence. Use ``--skip-graphics-capture`` for state or
+performance-only runs that do not need production attachments. Use ``--normal-only-graphics-capture`` for deterministic
+morphology sweeps that need the normal production frame but not every shader-route comparison. Full visual qualification uses
+the default comparison capture or exact route-frame bundles.
+
 Repeat ``--setting "Section:name=value"`` to apply a validated setting override only to the temporary profile used by that run
 or replay. The controller leaves the source profile unchanged, making the option suitable for controlled configuration and
 fallback comparisons.
@@ -135,8 +174,13 @@ The versioned providers expose these evidence domains:
   instance so replay evidence can attest to rendering-setting parity.
 * ``graphics@1`` captures scene color and depth, resolved atmospheric volumes and metadata, shafts, and the final composite over
   normal and diagnostic-isolation stages.
-* ``gameplay@2`` records the cell, camera position and angles, first-person and underwater state, weather, game and simulation
-  clocks, and state. The replay controller checks these stable fields before advancing the simulation.
+* ``gameplay@7`` records the cell, camera position and angles, first-person and underwater state, current and next weather,
+  weather-transition progress, game hour, game and simulation clocks, state, continuous terrain-derived environment traits,
+  sparse terrain sample center, local gradient, valley depth,
+  and the applied fog range and resolved cloud, low-cloud, mist, fog, and terrain-atmosphere parameters. It also records the
+  canonical sun direction, solar/sky/ground illumination, sun-disc state, and resolved atmospheric media. Readers also accept
+  ``gameplay@4``, ``gameplay@5``, and ``gameplay@6`` capsules.
+  The replay controller checks stable save fields before applying any explicit atmosphere scenario and advancing the simulation.
 * ``performance@13`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
   scopes for scripts, Lua, mechanics, physics, world, and UI, resource caches and work queues, navigation and paging activity,
   scene statistics, delayed per-camera GPU/render timing, and camera-owned GPU passes for the main scene, shadow maps, water
@@ -171,7 +215,8 @@ The versioned providers expose these evidence domains:
   expensive scene, timing-query, and work-counter collection is enabled only for a bounded performance capture and then restored.
 
 A ``.omwdiag`` capsule contains a manifest, effective settings, full loadable world snapshot, stable world state, provider
-versions, frame identity, and performance evidence. A route capsule also contains its versioned bounded gameplay route. The
+versions, frame identity, and performance evidence. A scenario capsule also contains its versioned deterministic atmosphere
+inputs, while a route capsule contains its versioned bounded gameplay route. The
 manifest records the ordered content list and hashes. It does not embed installed game or mod assets. Graphics bundles remain
 beside the capsule because they are evidence from the run rather than inputs required to reproduce it. The controller also
 preserves the isolated engine and crash logs beneath the artifact directory's ``logs`` folder before removing its temporary
@@ -185,7 +230,8 @@ unsupported, oversized, contains unsafe names, omits required state, or does not
 hashes. Artifact writes are bounded, validated, atomic, and refuse replacement. The controller reports structured protocol error
 names and preserves engine error context.
 
-Protocol, capsule, provider, and render-bundle versions are independent compatibility boundaries. A provider version describes
+Protocol version 2 adds the isolated-child atmosphere-scenario command. Protocol, capsule, provider, scenario, and render-bundle
+versions are independent compatibility boundaries. A provider version describes
 the names and semantics in one provider response. Graphics-provider bundle version 1 stores named, dimensioned float attachments;
 adding a newly named optional attachment remains compatible, while changing an existing attachment's meaning, layout, numeric
 representation, or coordinate convention requires a new bundle or provider version. Readers reject unsupported versions and

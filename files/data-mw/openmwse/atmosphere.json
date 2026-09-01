@@ -1,22 +1,12 @@
 {
-  "regions": {
-    "Thirsk Region": "Solstheim-Necro",
-    "Red Mountain Region": "BC-Necro",
-    "Brodir Grove Region": "Solstheim-Necro",
-    "Mournhold Region": "BC-Necro",
-    "West Gash Region": "WG-Necro",
-    "Bitter Coast Region": "BC-Necro",
-    "Felsaad Coast Region": "Solstheim-Necro",
-    "Azura's Coast Region": "AC-Necro",
-    "Moesring Mountains Region": "Solstheim-Necro",
-    "Sheogorad": "SG-Necro",
-    "Grazelands Region": "BC-Necro",
-    "Firemoth Region": "BC-Necro",
-    "Hirstaang Forest Region": "Solstheim-Necro",
-    "Ashlands Region": "AL-Necro",
-    "Molag Mar Region": "BC-Necro",
-    "Ascadian Isles Region": "AI-Necro",
-    "Isinfier Plains Region": "Solstheim-Necro"
+  "environments": {
+    "wetland": { "palette": "BC-Necro", "cloudDensityMultiplier": 1.04, "cloudAltitudeOffset": -3500.0, "cloudThicknessMultiplier": 1.05, "lowCloudOccurrenceMultiplier": 1.8, "lowCloudDensityMultiplier": 1.3, "lowCloudAltitudeOffset": -800.0, "lowCloudThicknessMultiplier": 1.2, "mistDensityMultiplier": 1.65, "mistAltitudeOffset": -250.0, "mistThicknessMultiplier": 1.25 },
+    "cultivated": { "palette": "AI-Necro", "cloudDensityMultiplier": 1.0, "cloudAltitudeOffset": 0.0, "cloudThicknessMultiplier": 1.0, "lowCloudOccurrenceMultiplier": 1.0, "lowCloudDensityMultiplier": 1.0, "lowCloudAltitudeOffset": 0.0, "lowCloudThicknessMultiplier": 1.0, "mistDensityMultiplier": 1.08, "mistAltitudeOffset": 0.0, "mistThicknessMultiplier": 1.08 },
+    "volcanic": { "palette": "AL-Necro", "cloudDensityMultiplier": 1.08, "cloudAltitudeOffset": -1500.0, "cloudThicknessMultiplier": 1.12, "lowCloudOccurrenceMultiplier": 0.65, "lowCloudDensityMultiplier": 0.9, "lowCloudAltitudeOffset": 500.0, "lowCloudThicknessMultiplier": 0.9, "mistDensityMultiplier": 0.72, "mistAltitudeOffset": 400.0, "mistThicknessMultiplier": 0.9 },
+    "highland": { "palette": "WG-Necro", "cloudDensityMultiplier": 1.03, "cloudAltitudeOffset": -2500.0, "cloudThicknessMultiplier": 1.08, "lowCloudOccurrenceMultiplier": 1.25, "lowCloudDensityMultiplier": 1.05, "lowCloudAltitudeOffset": -500.0, "lowCloudThicknessMultiplier": 1.1, "mistDensityMultiplier": 0.92, "mistAltitudeOffset": 300.0, "mistThicknessMultiplier": 1.0 },
+    "coastal": { "palette": "AC-Necro", "cloudDensityMultiplier": 1.0, "cloudAltitudeOffset": -1800.0, "cloudThicknessMultiplier": 1.02, "lowCloudOccurrenceMultiplier": 1.35, "lowCloudDensityMultiplier": 1.08, "lowCloudAltitudeOffset": -350.0, "lowCloudThicknessMultiplier": 1.1, "mistDensityMultiplier": 1.22, "mistAltitudeOffset": -100.0, "mistThicknessMultiplier": 1.12 },
+    "cold": { "palette": "Solstheim-Necro", "cloudDensityMultiplier": 1.08, "cloudAltitudeOffset": -4000.0, "cloudThicknessMultiplier": 1.12, "lowCloudOccurrenceMultiplier": 1.3, "lowCloudDensityMultiplier": 1.12, "lowCloudAltitudeOffset": -500.0, "lowCloudThicknessMultiplier": 1.15, "mistDensityMultiplier": 1.12, "mistAltitudeOffset": -100.0, "mistThicknessMultiplier": 1.16 },
+    "dry": { "palette": "SG-Necro", "cloudDensityMultiplier": 0.9, "cloudAltitudeOffset": 2500.0, "cloudThicknessMultiplier": 0.9, "lowCloudOccurrenceMultiplier": 0.4, "lowCloudDensityMultiplier": 0.75, "lowCloudAltitudeOffset": 800.0, "lowCloudThicknessMultiplier": 0.8, "mistDensityMultiplier": 0.72, "mistAltitudeOffset": 300.0, "mistThicknessMultiplier": 0.85 }
   },
   "presets": {
     "Solstheim-Necro": {

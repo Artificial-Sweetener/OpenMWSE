@@ -14,6 +14,18 @@
 
 namespace SceneUtil
 {
+    StateUpdater::StateUpdater(osg::Texture3D* atmosphereNoiseTexture, int atmosphereNoiseTextureUnit,
+        osg::Texture3D* atmosphereDetailNoiseTexture, int atmosphereDetailNoiseTextureUnit,
+        osg::Texture2D* atmosphereWeatherTexture, int atmosphereWeatherTextureUnit)
+        : mAtmosphereNoiseTexture(atmosphereNoiseTexture)
+        , mAtmosphereNoiseTextureUnit(atmosphereNoiseTextureUnit)
+        , mAtmosphereDetailNoiseTexture(atmosphereDetailNoiseTexture)
+        , mAtmosphereDetailNoiseTextureUnit(atmosphereDetailNoiseTextureUnit)
+        , mAtmosphereWeatherTexture(atmosphereWeatherTexture)
+        , mAtmosphereWeatherTextureUnit(atmosphereWeatherTextureUnit)
+    {
+    }
+
     PerViewUniformStateUpdater::PerViewUniformStateUpdater(
         Resource::SceneManager* sceneManager, int opaqueTextureUnit, int opaqueColorTextureUnit)
         : mSceneManager(sceneManager)
@@ -149,6 +161,28 @@ namespace SceneUtil
         SceneUtil::setUnderwaterFogEnd(*stateset, mUnderwaterFogEnd);
         SceneUtil::setFogDepth(*stateset, -1.f);
 
+        if (mAtmosphereNoiseTexture && mAtmosphereNoiseTextureUnit >= 0)
+        {
+            stateset->setTextureAttribute(
+                mAtmosphereNoiseTextureUnit, mAtmosphereNoiseTexture, osg::StateAttribute::ON);
+            stateset->addUniform(new osg::Uniform("openmwseCloudNoiseTexture", mAtmosphereNoiseTextureUnit));
+        }
+
+        if (mAtmosphereDetailNoiseTexture && mAtmosphereDetailNoiseTextureUnit >= 0)
+        {
+            stateset->setTextureAttribute(
+                mAtmosphereDetailNoiseTextureUnit, mAtmosphereDetailNoiseTexture, osg::StateAttribute::ON);
+            stateset->addUniform(
+                new osg::Uniform("openmwseCloudDetailNoiseTexture", mAtmosphereDetailNoiseTextureUnit));
+        }
+
+        if (mAtmosphereWeatherTexture && mAtmosphereWeatherTextureUnit >= 0)
+        {
+            stateset->setTextureAttribute(
+                mAtmosphereWeatherTextureUnit, mAtmosphereWeatherTexture, osg::StateAttribute::ON);
+            stateset->addUniform(new osg::Uniform("openmwseCloudWeatherTexture", mAtmosphereWeatherTextureUnit));
+        }
+
         stateset->addUniform(new osg::Uniform("atmosphere.enabled", mAtmosphereEnabled));
         stateset->addUniform(new osg::Uniform("atmosphere.skyColor", mAtmosphereSkyColor));
         stateset->addUniform(new osg::Uniform("atmosphere.inScattering", mAtmosphereInScattering));
@@ -156,7 +190,15 @@ namespace SceneUtil
         stateset->addUniform(new osg::Uniform("atmosphere.weatherWeight", mAtmosphereWeatherWeight));
         stateset->addUniform(new osg::Uniform("atmosphere.sunDirection", mAtmosphereSunDirection));
         stateset->addUniform(new osg::Uniform("atmosphere.cloudParameters", mAtmosphereCloudParameters));
+        stateset->addUniform(new osg::Uniform("atmosphere.cloudShapeParameters", mAtmosphereCloudShapeParameters));
+        stateset->addUniform(new osg::Uniform("atmosphere.lowCloudParameters", mAtmosphereLowCloudParameters));
+        stateset->addUniform(
+            new osg::Uniform("atmosphere.lowCloudShapeParameters", mAtmosphereLowCloudShapeParameters));
         stateset->addUniform(new osg::Uniform("atmosphere.mistParameters", mAtmosphereMistParameters));
+        stateset->addUniform(new osg::Uniform("atmosphere.fogVolumeParameters", mAtmosphereFogVolumeParameters));
+        stateset->addUniform(
+            new osg::Uniform("atmosphere.mediumReferenceParameters", mAtmosphereMediumReferenceParameters));
+        stateset->addUniform(new osg::Uniform("atmosphere.orographicParameters", mAtmosphereOrographicParameters));
         stateset->addUniform(new osg::Uniform("atmosphere.sunDiscColor", mAtmosphereSunDiscColor));
         stateset->addUniform(new osg::Uniform("atmosphere.solarRadiance", mAtmosphereSolarRadiance));
         stateset->addUniform(new osg::Uniform("atmosphere.skyIrradiance", mAtmosphereSkyIrradiance));
@@ -189,7 +231,13 @@ namespace SceneUtil
         stateset->getUniform("atmosphere.weatherWeight")->set(mAtmosphereWeatherWeight);
         stateset->getUniform("atmosphere.sunDirection")->set(mAtmosphereSunDirection);
         stateset->getUniform("atmosphere.cloudParameters")->set(mAtmosphereCloudParameters);
+        stateset->getUniform("atmosphere.cloudShapeParameters")->set(mAtmosphereCloudShapeParameters);
+        stateset->getUniform("atmosphere.lowCloudParameters")->set(mAtmosphereLowCloudParameters);
+        stateset->getUniform("atmosphere.lowCloudShapeParameters")->set(mAtmosphereLowCloudShapeParameters);
         stateset->getUniform("atmosphere.mistParameters")->set(mAtmosphereMistParameters);
+        stateset->getUniform("atmosphere.fogVolumeParameters")->set(mAtmosphereFogVolumeParameters);
+        stateset->getUniform("atmosphere.mediumReferenceParameters")->set(mAtmosphereMediumReferenceParameters);
+        stateset->getUniform("atmosphere.orographicParameters")->set(mAtmosphereOrographicParameters);
         stateset->getUniform("atmosphere.sunDiscColor")->set(mAtmosphereSunDiscColor);
         stateset->getUniform("atmosphere.solarRadiance")->set(mAtmosphereSolarRadiance);
         stateset->getUniform("atmosphere.skyIrradiance")->set(mAtmosphereSkyIrradiance);
@@ -225,8 +273,11 @@ namespace SceneUtil
 
     void StateUpdater::setAtmosphere(bool enabled, const osg::Vec4f& skyColor, const osg::Vec3f& inScattering,
         const osg::Vec3f& outScattering, float weatherWeight, const osg::Vec3f& sunDirection,
-        const osg::Vec4f& cloudParameters, const osg::Vec4f& mistParameters, const osg::Vec4f& sunDiscColor,
-        const osg::Vec3f& solarRadiance, const osg::Vec3f& skyIrradiance, const osg::Vec3f& groundIrradiance,
+        const osg::Vec4f& cloudParameters, const osg::Vec4f& cloudShapeParameters, const osg::Vec4f& lowCloudParameters,
+        const osg::Vec4f& lowCloudShapeParameters, const osg::Vec4f& mistParameters,
+        const osg::Vec4f& fogVolumeParameters, const osg::Vec4f& mediumReferenceParameters,
+        const osg::Vec4f& orographicParameters, const osg::Vec4f& sunDiscColor, const osg::Vec3f& solarRadiance,
+        const osg::Vec3f& skyIrradiance, const osg::Vec3f& groundIrradiance,
         const osg::Vec2f& cloudAdvectionOffsetWorldUnits, int quality)
     {
         mAtmosphereEnabled = enabled;
@@ -236,7 +287,13 @@ namespace SceneUtil
         mAtmosphereWeatherWeight = weatherWeight;
         mAtmosphereSunDirection = sunDirection;
         mAtmosphereCloudParameters = cloudParameters;
+        mAtmosphereCloudShapeParameters = cloudShapeParameters;
+        mAtmosphereLowCloudParameters = lowCloudParameters;
+        mAtmosphereLowCloudShapeParameters = lowCloudShapeParameters;
         mAtmosphereMistParameters = mistParameters;
+        mAtmosphereFogVolumeParameters = fogVolumeParameters;
+        mAtmosphereMediumReferenceParameters = mediumReferenceParameters;
+        mAtmosphereOrographicParameters = orographicParameters;
         mAtmosphereSunDiscColor = sunDiscColor;
         mAtmosphereSolarRadiance = solarRadiance;
         mAtmosphereSkyIrradiance = skyIrradiance;

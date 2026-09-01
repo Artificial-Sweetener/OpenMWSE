@@ -1,0 +1,129 @@
+{
+  "version": 1,
+  "textureRules": [
+    {
+      "contains": ["_bc_", "muck", "mud", "moss", "swamp", "marsh", "bog", "fen", "scum", "undergrowth"],
+      "traits": { "wetland": 1.0 }
+    },
+    {
+      "contains": ["_ai_", "tilled", "clover", "farmland", "cultivated"],
+      "traits": { "cultivated": 1.0 }
+    },
+    {
+      "contains": ["ashland", "_rm_", "_ma_", "lava", "sulphur", "volcanic", "basalt"],
+      "traits": { "volcanic": 1.0 }
+    },
+    {
+      "contains": ["_wg_", "rocky", "roundstone", "darkstone", "darkgravel", "highland"],
+      "traits": { "highland": 1.0 }
+    },
+    {
+      "contains": ["_ac_", "coastal", "beach", "shore", "sand"],
+      "traits": { "coastal": 1.0 }
+    },
+    {
+      "contains": ["snow", "ice", "glacier", "tundra", "solstheim"],
+      "traits": { "cold": 1.0 }
+    },
+    {
+      "contains": ["scrubplain", "dry", "dust", "desert"],
+      "traits": { "dry": 1.0 }
+    }
+  ],
+  "terrainEvidence": {
+    "waterProximity": {
+      "edge": 3500.0,
+      "full": 200.0,
+      "traits": { "coastal": 0.32, "wetland": 0.18 }
+    },
+    "elevation": {
+      "edge": 8000.0,
+      "full": 24000.0,
+      "traits": { "highland": 0.45 }
+    }
+  },
+  "diagnosticAssetRules": [
+    {
+      "contains": ["terrain_bc_scum", "pond_scum", "pondscum", "swampwater", "marshwater"],
+      "traits": { "wetland": 0.72 }
+    },
+    {
+      "contains": ["saltmarsh", "bog_pool", "fen_pool", "mangrove"],
+      "traits": { "wetland": 0.58, "coastal": 0.22 }
+    },
+    {
+      "contains": ["lava", "fumarole", "volcanic_vent", "sulphur_pool"],
+      "traits": { "volcanic": 0.65, "dry": 0.12 }
+    }
+  ],
+  "floraRules": [
+    {
+      "contains": ["tree_bc", "flora_bc", "mangrove", "cypress", "willow", "reeds", "cattail", "lily"],
+      "traits": { "wetland": 0.46 }
+    },
+    {
+      "contains": ["kelp", "seaweed", "saltgrass", "shoregrass"],
+      "traits": { "coastal": 0.42 }
+    },
+    {
+      "contains": ["tree_wg", "heather", "juniper"],
+      "traits": { "highland": 0.28 }
+    },
+    {
+      "contains": ["snowberry", "tree_bm", "flora_bm", "icegrass"],
+      "traits": { "cold": 0.48 }
+    },
+    {
+      "contains": ["scrub", "drygrass", "thorn", "cactus"],
+      "traits": { "dry": 0.34 }
+    }
+  ],
+  "weatherProbabilityRules": [
+    {
+      "contains": ["foggy"],
+      "traits": { "wetland": 0.32, "coastal": 0.12 }
+    },
+    {
+      "contains": ["rain", "thunderstorm"],
+      "traits": { "wetland": 0.24, "coastal": 0.1 }
+    },
+    {
+      "contains": ["ashstorm", "blight"],
+      "traits": { "volcanic": 0.3, "dry": 0.08 }
+    },
+    {
+      "contains": ["snow", "blizzard"],
+      "traits": { "cold": 0.38 }
+    }
+  ],
+  "regionFallbackRules": [
+    {
+      "contains": ["bitter coast"],
+      "traits": { "wetland": 0.24, "coastal": 0.08 }
+    },
+    {
+      "contains": ["ascadian isles"],
+      "traits": { "cultivated": 0.22 }
+    },
+    {
+      "contains": ["ashlands", "molag amur", "red mountain"],
+      "traits": { "volcanic": 0.24 }
+    },
+    {
+      "contains": ["west gash"],
+      "traits": { "highland": 0.2 }
+    },
+    {
+      "contains": ["azura's coast", "sheogorad"],
+      "traits": { "coastal": 0.2 }
+    },
+    {
+      "contains": ["grazelands"],
+      "traits": { "dry": 0.16 }
+    },
+    {
+      "contains": ["solstheim"],
+      "traits": { "cold": 0.24 }
+    }
+  ]
+}

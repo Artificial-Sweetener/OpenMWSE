@@ -12,6 +12,12 @@ vec4 openmwseCloudShadowParameters()
     return atmosphere.cloudParameters;
 }
 
+/// Expose surface-lighting cloud morphology to the shared cloud-field implementation.
+vec4 openmwseCloudShadowShapeParameters()
+{
+    return atmosphere.cloudShapeParameters;
+}
+
 /// Expose the exterior water datum to the shared cloud-field implementation.
 float openmwseCloudShadowWaterHeight()
 {
@@ -24,31 +30,75 @@ vec2 openmwseCloudShadowAdvectionOffsetWorldUnits()
     return atmosphere.cloudAdvectionOffsetWorldUnits;
 }
 
+/// Sample the canonical tileable multi-channel cloud volume for surface shadowing.
+vec4 openmwseCloudShadowNoiseSample(vec3 coordinates)
+{
+    return texture3D(openmwseCloudNoiseTexture, fract(coordinates));
+}
+
+/// Sample the canonical broad cloud-organization field for surface shadowing.
+vec4 openmwseCloudShadowWeatherSample(vec2 coordinates)
+{
+    return texture2D(openmwseCloudWeatherTexture, fract(coordinates));
+}
+
 #define openmwseCloudMaximumDistance openmwseCloudShadowMaximumDistance
 #define openmwseCloudBaseVariation openmwseCloudShadowBaseVariation
 #define openmwseCloudMinimumThicknessScale openmwseCloudShadowMinimumThicknessScale
 #define openmwseCloudMaximumThicknessScale openmwseCloudShadowMaximumThicknessScale
 #define openmwseCloudParameters openmwseCloudShadowParameters
+#define openmwseCloudShapeParameters openmwseCloudShadowShapeParameters
 #define openmwseCloudWaterHeight openmwseCloudShadowWaterHeight
 #define openmwseCloudAdvectionOffsetWorldUnits openmwseCloudShadowAdvectionOffsetWorldUnits
+#define openmwseCloudNoiseSample openmwseCloudShadowNoiseSample
+#define openmwseCloudWeatherSample openmwseCloudShadowWeatherSample
+#define openmwseCloudRemap openmwseCloudShadowRemap
+#define openmwseCloudBaseFromNoise openmwseCloudShadowBaseFromNoise
 #define openmwseCloudHash openmwseCloudShadowHash
 #define openmwseCloudValueNoise openmwseCloudShadowValueNoise
 #define openmwseCloudAdvectedPosition openmwseCloudShadowAdvectedPosition
+#define openmwseCloudWeatherCoordinates openmwseCloudShadowWeatherCoordinates
+#define openmwseCloudConvectiveWeatherCoordinates openmwseCloudShadowConvectiveWeatherCoordinates
+#define openmwseCloudColumnProperties openmwseCloudShadowColumnProperties
 #define openmwseCloudColumnNoise openmwseCloudShadowColumnNoise
+#define openmwseCloudLocalCoverage openmwseCloudShadowLocalCoverage
+#define openmwseCloudColumnOccupancy openmwseCloudShadowColumnOccupancy
 #define openmwseCloudColumnDensity openmwseCloudShadowColumnDensity
 #include "cloud_field.glsl"
 #undef openmwseCloudColumnDensity
+#undef openmwseCloudColumnOccupancy
+#undef openmwseCloudLocalCoverage
 #undef openmwseCloudColumnNoise
+#undef openmwseCloudColumnProperties
+#undef openmwseCloudConvectiveWeatherCoordinates
+#undef openmwseCloudWeatherCoordinates
 #undef openmwseCloudAdvectedPosition
 #undef openmwseCloudValueNoise
 #undef openmwseCloudHash
 #undef openmwseCloudAdvectionOffsetWorldUnits
+#undef openmwseCloudBaseFromNoise
+#undef openmwseCloudRemap
+#undef openmwseCloudNoiseSample
+#undef openmwseCloudWeatherSample
 #undef openmwseCloudWaterHeight
 #undef openmwseCloudParameters
+#undef openmwseCloudShapeParameters
 #undef openmwseCloudMaximumThicknessScale
 #undef openmwseCloudMinimumThicknessScale
 #undef openmwseCloudBaseVariation
 #undef openmwseCloudMaximumDistance
+
+/// Evaluate normalized low-cloud optical density from the shared weather field.
+float openmwseLowCloudShadowColumnDensity(vec2 worldPosition)
+{
+    vec4 parameters = atmosphere.lowCloudParameters;
+    vec4 shape = atmosphere.lowCloudShapeParameters;
+    vec3 advectedPosition = openmwseCloudShadowAdvectedPosition(vec3(worldPosition, 0.0));
+    advectedPosition.xy += vec2(137000.0, -91000.0);
+    OpenMWSECloudColumnProperties properties
+        = openmwseCloudShadowColumnProperties(advectedPosition.xy, parameters, shape);
+    return smoothstep(0.08, 0.82, properties.localCoverage) * max(parameters.y, 0.0);
+}
 
 /// Evaluate Beer transmittance through the shared world-anchored cloud column toward the sun.
 float openmwseCloudSunTransmittance(vec3 worldPosition)
@@ -57,15 +107,31 @@ float openmwseCloudSunTransmittance(vec3 worldPosition)
         return 1.0;
 
     vec3 sunDirection = normalize(atmosphere.sunDirection);
-    if (!atmosphere.enabled || atmosphere.cloudParameters.x <= 0.001 || sunDirection.z <= 0.01)
+    bool mainCloudEnabled = atmosphere.cloudParameters.x > 0.001 && atmosphere.cloudParameters.y > 0.001;
+    bool lowCloudEnabled = atmosphere.lowCloudParameters.x > 0.001 && atmosphere.lowCloudParameters.y > 0.001;
+    if (!atmosphere.enabled || (!mainCloudEnabled && !lowCloudEnabled) || sunDirection.z <= 0.01)
         return 1.0;
 
-    float layerCenterHeight = waterHeight + atmosphere.cloudParameters.z + atmosphere.cloudParameters.w * 0.5;
-    float distanceToLayer = max(layerCenterHeight - worldPosition.z, 0.0) / max(sunDirection.z, 0.08);
-    vec2 shadowPosition = worldPosition.xy + sunDirection.xy * distanceToLayer;
-    float columnDensity = openmwseCloudShadowColumnDensity(shadowPosition);
     float slantPathScale = 1.0 / max(sunDirection.z, 0.22);
-    float opticalDepth = columnDensity * max(atmosphere.cloudParameters.w, 1.0) * 0.000105 * slantPathScale;
+    float opticalDepth = 0.0;
+    if (mainCloudEnabled)
+    {
+        float layerCenterHeight
+            = waterHeight + atmosphere.cloudParameters.z + atmosphere.cloudParameters.w * 0.5;
+        float distanceToLayer = max(layerCenterHeight - worldPosition.z, 0.0) / max(sunDirection.z, 0.08);
+        vec2 shadowPosition = worldPosition.xy + sunDirection.xy * distanceToLayer;
+        float columnDensity = openmwseCloudShadowColumnDensity(shadowPosition);
+        opticalDepth += columnDensity * max(atmosphere.cloudParameters.w, 1.0) * 0.000105 * slantPathScale;
+    }
+    if (lowCloudEnabled)
+    {
+        float layerCenterHeight
+            = waterHeight + atmosphere.lowCloudParameters.z + atmosphere.lowCloudParameters.w * 0.5;
+        float distanceToLayer = max(layerCenterHeight - worldPosition.z, 0.0) / max(sunDirection.z, 0.08);
+        vec2 shadowPosition = worldPosition.xy + sunDirection.xy * distanceToLayer;
+        float columnDensity = openmwseLowCloudShadowColumnDensity(shadowPosition);
+        opticalDepth += columnDensity * max(atmosphere.lowCloudParameters.w, 1.0) * 0.000105 * slantPathScale;
+    }
     return exp(-opticalDepth);
 }
 
@@ -77,7 +143,9 @@ void openmwseApplyCloudLighting(vec3 worldPosition, inout vec3 diffuseLight, ino
     diffuseLight *= sunTransmittance;
     specularLight *= sunTransmittance;
 
-    float coverage = clamp(atmosphere.cloudParameters.x * atmosphere.cloudParameters.y, 0.0, 1.0);
+    float mainCoverage = clamp(atmosphere.cloudParameters.x * atmosphere.cloudParameters.y, 0.0, 1.0);
+    float lowCoverage = clamp(atmosphere.lowCloudParameters.x * atmosphere.lowCloudParameters.y, 0.0, 1.0);
+    float coverage = 1.0 - (1.0 - mainCoverage) * (1.0 - lowCoverage);
     float localSkyVisibility = mix(1.0, 0.82 + 0.18 * sqrt(sunTransmittance), coverage * 0.35);
     ambientLight *= localSkyVisibility;
 }

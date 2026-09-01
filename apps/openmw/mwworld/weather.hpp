@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -17,6 +18,8 @@
 #include "../mwbase/soundmanager.hpp"
 
 #include "../mwrender/skyutil.hpp"
+
+#include "atmosphereenvironment.hpp"
 
 namespace ESM
 {
@@ -233,6 +236,9 @@ namespace MWWorld
 
         float calculateThunder(const float transitionRatio, const float elapsedSeconds, const bool isPaused);
 
+        /// Clear accumulated lightning brightness for a deterministic diagnostic discontinuity.
+        void resetThunder();
+
     private:
         float mTransitionDelta;
 
@@ -326,6 +332,19 @@ namespace MWWorld
         std::span<const uint8_t> getRegionChances(const ESM::RefId& regionID) const;
         void playerTeleported(const ESM::RefId& playerRegion, bool isExterior);
 
+        /// Set an exact isolated diagnostic weather state without changing persistent regional probabilities.
+        void setDiagnosticWeatherState(
+            const ESM::RefId& current, const std::optional<ESM::RefId>& next, float transition);
+
+        /// Select weather-side visual effects for an isolated diagnostic scenario.
+        void setDiagnosticWeatherEffects(bool precipitationEnabled, bool lightningEnabled);
+
+        /// Seed transient post-precipitation condensate history and synchronize its clock to an isolated scenario.
+        void setDiagnosticRecentPrecipitation(float weight);
+
+        /// Replace classified environment evidence for the lifetime of an isolated diagnostic child.
+        void setDiagnosticEnvironmentState(AtmosphereEnvironmentState environment);
+
         /** Advance weather transitions and publish their canonical scene-linear atmosphere lighting state.
          *
          * @param duration Unscaled frame interval in seconds.
@@ -356,6 +375,9 @@ namespace MWWorld
         const Weather* getWeather(size_t index) const;
 
         const Weather* getWeather(const ESM::RefId& id) const;
+
+        /// Return the continuous terrain-derived environment evidence used by atmosphere rendering.
+        const AtmosphereEnvironmentState& getAtmosphereEnvironmentState() const { return mCurrentEnvironment; }
 
         int getWeatherID() const { return mCurrentWeather; }
 
@@ -405,7 +427,15 @@ namespace MWWorld
         TimeOfDayInterpolator<float> mUnderwaterFog;
 
         std::vector<Weather> mWeatherSettings;
+        std::unique_ptr<AtmosphereEnvironmentClassifier> mAtmosphereEnvironment;
         std::unique_ptr<AtmospherePalette> mAtmospherePalette;
+        AtmosphereEnvironmentState mCurrentEnvironment;
+        std::optional<AtmosphereEnvironmentState> mDiagnosticEnvironment;
+        AtmosphereEnvironmentState mCachedOrography;
+        ESM::RefId mCachedOrographyWorldspace;
+        bool mOrographyCacheValid = false;
+        AtmosphereCondensateFormationController mCondensateFormation;
+        std::optional<double> mLastAtmosphereFormationTimeHours;
         MoonModel mMasser;
         MoonModel mSecunda;
 
@@ -425,6 +455,9 @@ namespace MWWorld
         int mCurrentWeather;
         int mNextWeather;
         int mQueuedWeather;
+        bool mDiagnosticWeatherLocked = false;
+        bool mDiagnosticPrecipitationEnabled = true;
+        bool mDiagnosticLightningEnabled = true;
         std::map<ESM::RefId, RegionWeather> mRegions;
         MWRender::WeatherResult mResult;
 

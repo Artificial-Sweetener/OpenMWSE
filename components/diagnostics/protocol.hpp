@@ -11,7 +11,7 @@
 
 namespace Diagnostics
 {
-    inline constexpr std::uint16_t protocolVersion = 1;
+    inline constexpr std::uint16_t protocolVersion = 2;
     inline constexpr std::size_t maximumPayloadSize = 16 * 1024 * 1024;
 
     /// Identifies a validated bridge operation without exposing an unrestricted execution surface.
@@ -31,6 +31,7 @@ namespace Diagnostics
         ShutdownChild = 12,
         LoadGameplayRoute = 13,
         RunGameplayRouteSegment = 14,
+        SetAtmosphereScenario = 15,
     };
 
     /// Classifies protocol failures so clients can distinguish invalid requests from runtime failures.
