@@ -24,7 +24,7 @@ namespace MWRender
     /// Defines weather-controlled cloud, mist, and shaft properties in world units.
     struct AtmosphereVolumeState
     {
-        float mCloudCoverage = 0.f;
+        float mCloudDeckCoverage = 0.f;
         float mCloudDensity = 0.f;
         float mCloudBaseAltitudeWorldUnits = 55000.f;
         float mCloudThicknessWorldUnits = 18000.f;
@@ -32,6 +32,12 @@ namespace MWRender
         float mCloudFeatureScale = 1.f;
         float mCloudVerticalDevelopment = 0.5f;
         float mCloudAnvilStrength = 0.f;
+        float mCloudDeckContinuity = 0.5f;
+        float mCloudConvectiveFrequency = 0.f;
+        float mCloudConvectiveMaturity = 0.f;
+        float mCloudStormOrganization = 0.f;
+        float mCloudTowerTaper = 0.7f;
+        float mCloudBaseVariation = 0.5f;
         float mCloudTerrainFollowing = 0.f;
         float mCloudTerrainClearanceWorldUnits = 0.f;
         float mLowCloudCoverage = 0.f;
@@ -217,10 +223,10 @@ namespace MWRender
     }
 
     /// Restores the physical below-horizon sun trajectory hidden by Morrowind's rendered sun bounce.
-    inline osg::Vec3f getScatteringSunDirection(osg::Vec3f renderedSunDirection, bool isSunVisible)
+    inline osg::Vec3f getScatteringSunDirection(osg::Vec3f renderedSunDirection, bool isDay)
     {
         // Morrowind bounces the rendered sun above the horizon at night. MGE XE restores its physical trajectory here.
-        if (!isSunVisible)
+        if (!isDay)
             renderedSunDirection.z() = -std::abs(renderedSunDirection.z());
         renderedSunDirection.normalize();
         return renderedSunDirection;

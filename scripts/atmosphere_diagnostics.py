@@ -58,9 +58,14 @@ def write_pfm(path: Path, pixels: numpy.ndarray) -> None:
         stream.write(numpy.asarray(pixels, dtype="<f4").tobytes(order="C"))
 
 
-def inspect_bundle(bundle_path: Path, extract_directory: Path | None) -> dict:
-    """Validate a capture bundle, report numerical ranges, and optionally extract PFM attachments."""
+def inspect_bundle(
+    bundle_path: Path,
+    extract_directory: Path | None,
+    extract_labels: set[str] | None = None,
+) -> dict:
+    """Validate a capture bundle, report numerical ranges, and extract selected PFM attachments."""
     summary: dict = {"bundle": str(bundle_path), "images": []}
+    extracted_labels: set[str] = set()
     if extract_directory:
         extract_directory.mkdir(parents=True, exist_ok=True)
 
@@ -101,7 +106,7 @@ def inspect_bundle(bundle_path: Path, extract_directory: Path | None) -> dict:
             }
             summary["images"].append(image_summary)
 
-            if extract_directory:
+            if extract_directory and (not extract_labels or label in extract_labels):
                 stem = safe_file_stem(label)
                 if channels == 1:
                     write_pfm(extract_directory / f"{stem}.pfm", pixels[:, :, 0])
@@ -109,9 +114,13 @@ def inspect_bundle(bundle_path: Path, extract_directory: Path | None) -> dict:
                     write_pfm(extract_directory / f"{stem}-rgb.pfm", pixels[:, :, :3])
                     if channels >= 4:
                         write_pfm(extract_directory / f"{stem}-alpha.pfm", pixels[:, :, 3])
+                extracted_labels.add(label)
 
         if stream.read(1):
             raise ValueError("unexpected trailing data in atmosphere diagnostic bundle")
+    missing_labels = (extract_labels or set()) - extracted_labels
+    if missing_labels:
+        raise ValueError(f"capture bundle does not contain requested images: {sorted(missing_labels)}")
     return summary
 
 
@@ -120,13 +129,22 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("bundle", type=Path, help="Path to an .omwdiag capture bundle")
     parser.add_argument("--extract", type=Path, help="Directory for lossless PFM attachment extraction")
+    parser.add_argument(
+        "--image",
+        action="append",
+        dest="images",
+        help="Attachment label to extract; repeat to select multiple images",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     """Inspect the requested bundle and print a machine-readable numerical summary."""
     arguments = parse_arguments()
-    print(json.dumps(inspect_bundle(arguments.bundle, arguments.extract), indent=2))
+    if arguments.images and not arguments.extract:
+        raise ValueError("--image requires --extract")
+    extract_labels = set(arguments.images) if arguments.images else None
+    print(json.dumps(inspect_bundle(arguments.bundle, arguments.extract, extract_labels), indent=2))
 
 
 if __name__ == "__main__":

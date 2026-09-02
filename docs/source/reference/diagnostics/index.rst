@@ -174,12 +174,13 @@ The versioned providers expose these evidence domains:
   instance so replay evidence can attest to rendering-setting parity.
 * ``graphics@1`` captures scene color and depth, resolved atmospheric volumes and metadata, shafts, and the final composite over
   normal and diagnostic-isolation stages.
-* ``gameplay@7`` records the cell, camera position and angles, first-person and underwater state, current and next weather,
+* ``gameplay@8`` records the cell, camera position and angles, first-person and underwater state, current and next weather,
   weather-transition progress, game hour, game and simulation clocks, state, continuous terrain-derived environment traits,
   sparse terrain sample center, local gradient, valley depth,
   and the applied fog range and resolved cloud, low-cloud, mist, fog, and terrain-atmosphere parameters. It also records the
-  canonical sun direction, solar/sky/ground illumination, sun-disc state, and resolved atmospheric media. Readers also accept
-  ``gameplay@4``, ``gameplay@5``, and ``gameplay@6`` capsules.
+  canonical sun direction, solar/sky/ground illumination, sun-disc state, resolved atmospheric media, and the exact world-space
+  cloud-field offset used by procedural density and shadow evaluation. Readers also accept ``gameplay@4``, ``gameplay@5``,
+  ``gameplay@6``, and ``gameplay@7`` capsules.
   The replay controller checks stable save fields before applying any explicit atmosphere scenario and advancing the simulation.
 * ``performance@13`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
   scopes for scripts, Lua, mechanics, physics, world, and UI, resource caches and work queues, navigation and paging activity,

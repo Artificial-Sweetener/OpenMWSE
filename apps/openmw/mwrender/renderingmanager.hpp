@@ -112,6 +112,7 @@ namespace MWRender
         osg::Vec3f mSunDirection{ 0.f, 0.f, 1.f };
         AtmosphereLightingState mLighting;
         osg::Vec4f mSunDiscColor{ 1.f, 1.f, 1.f, 0.f };
+        osg::Vec2f mCloudFieldOffsetWorldUnits;
     };
 
     class IntersectionVisitorWithIgnoreList;

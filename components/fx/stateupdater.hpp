@@ -113,6 +113,7 @@ namespace Fx
         /// Publish canonical scene-linear atmosphere, volume, and lighting state to native passes.
         void setAtmosphere(const osg::Vec3f& inScattering, const osg::Vec3f& outScattering,
             const osg::Vec4f& cloudParameters, const osg::Vec4f& cloudShapeParameters,
+            const osg::Vec4f& cloudOrganizationParameters, const osg::Vec4f& cloudStructureParameters,
             const osg::Vec4f& lowCloudParameters, const osg::Vec4f& lowCloudShapeParameters,
             const osg::Vec4f& mistParameters, const osg::Vec4f& fogVolumeParameters,
             const osg::Vec4f& mediumReferenceParameters, const osg::Vec4f& orographicParameters,
@@ -125,6 +126,8 @@ namespace Fx
             mData.get<AtmosphereOutScattering>() = outScattering;
             mData.get<AtmosphereCloudParameters>() = cloudParameters;
             mData.get<AtmosphereCloudShapeParameters>() = cloudShapeParameters;
+            mData.get<AtmosphereCloudOrganizationParameters>() = cloudOrganizationParameters;
+            mData.get<AtmosphereCloudStructureParameters>() = cloudStructureParameters;
             mData.get<AtmosphereLowCloudParameters>() = lowCloudParameters;
             mData.get<AtmosphereLowCloudShapeParameters>() = lowCloudShapeParameters;
             mData.get<AtmosphereMistParameters>() = mistParameters;
@@ -351,6 +354,18 @@ namespace Fx
             static constexpr std::string_view sName = "atmosphereCloudShapeParameters";
         };
 
+        /// Bind independent deck continuity, convective frequency, maturity, and storm organization.
+        struct AtmosphereCloudOrganizationParameters : Std140::Vec4
+        {
+            static constexpr std::string_view sName = "atmosphereCloudOrganizationParameters";
+        };
+
+        /// Bind independent tower taper and cloud-base variation controls.
+        struct AtmosphereCloudStructureParameters : Std140::Vec4
+        {
+            static constexpr std::string_view sName = "atmosphereCloudStructureParameters";
+        };
+
         /// Bind low-cloud coverage, density, base height, and thickness.
         struct AtmosphereLowCloudParameters : Std140::Vec4
         {
@@ -458,12 +473,12 @@ namespace Fx
             Resolution, RcpResolution, FogNear, FogFar, Near, Far, Fov, GameHour, SunVis, WaterHeight, IsWaterEnabled,
             SimulationTime, DeltaSimulationTime, FrameNumber, WindSpeed, WeatherTransition, WeatherID, NextWeatherID,
             IsUnderwater, IsInterior, AtmosphereInScattering, AtmosphereOutScattering, AtmosphereCloudParameters,
-            AtmosphereCloudShapeParameters, AtmosphereLowCloudParameters, AtmosphereLowCloudShapeParameters,
-            AtmosphereMistParameters, AtmosphereFogVolumeParameters, AtmosphereMediumReferenceParameters,
-            AtmosphereOrographicParameters, AtmosphereSunDiscColor, AtmosphereSolarRadiance, AtmosphereSkyIrradiance,
-            AtmosphereGroundIrradiance, AtmosphereCloudAdvectionOffset, AtmosphereCloudAdvectionDelta,
-            AtmosphereHistoryLightingWeight, AtmosphereWeatherWeight, AtmosphereQuality,
-            AtmosphereVolumeResolutionScale, AtmosphereEnabled>;
+            AtmosphereCloudShapeParameters, AtmosphereCloudOrganizationParameters, AtmosphereCloudStructureParameters,
+            AtmosphereLowCloudParameters, AtmosphereLowCloudShapeParameters, AtmosphereMistParameters,
+            AtmosphereFogVolumeParameters, AtmosphereMediumReferenceParameters, AtmosphereOrographicParameters,
+            AtmosphereSunDiscColor, AtmosphereSolarRadiance, AtmosphereSkyIrradiance, AtmosphereGroundIrradiance,
+            AtmosphereCloudAdvectionOffset, AtmosphereCloudAdvectionDelta, AtmosphereHistoryLightingWeight,
+            AtmosphereWeatherWeight, AtmosphereQuality, AtmosphereVolumeResolutionScale, AtmosphereEnabled>;
 
         UniformData mData;
         bool mUseUBO;

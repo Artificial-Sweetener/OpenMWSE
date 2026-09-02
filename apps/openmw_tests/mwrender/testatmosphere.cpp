@@ -610,9 +610,10 @@ namespace MWRender
             void applyAtmosphereState()
             {
                 mAtmosphereState->setAtmosphere(true, { 0.232298f, 0.361908f, 0.519572f, 1.f }, { 0.25f, 0.38f, 0.48f },
-                    { 0.07f, 0.36f, 0.76f }, 1.f, mSunDirection, mCloudParameters, { 0.62f, 0.9f, 0.72f, 0.08f }, {},
-                    {}, mMistParameters, {}, {}, {}, mSunDiscColor, mSolarRadiance, mSkyIrradiance, mGroundIrradiance,
-                    mCloudAdvectionOffsetWorldUnits, mQuality);
+                    { 0.07f, 0.36f, 0.76f }, 1.f, mSunDirection, mCloudParameters, { 0.62f, 0.9f, 0.72f, 0.08f },
+                    { 0.65f, 0.3f, 0.6f, 0.1f }, { 0.7f, 0.5f, 0.f, 0.f }, {}, {}, mMistParameters, {}, {}, {},
+                    mSunDiscColor, mSolarRadiance, mSkyIrradiance, mGroundIrradiance, mCloudAdvectionOffsetWorldUnits,
+                    mQuality);
             }
 
             osgViewer::Viewer mViewer;
@@ -885,7 +886,7 @@ namespace MWRender
             atmosphereState->setUnderwaterFogStart(fog.mStart);
             atmosphereState->setUnderwaterFogEnd(fog.mEnd);
             atmosphereState->setAtmosphere(true, fog.mColor, { 0.25f, 0.38f, 0.48f }, { 0.07f, 0.36f, 0.76f }, 0.f,
-                { 0.95f, 0.f, 0.31f }, {}, {}, {}, {}, {}, {}, {}, {}, {}, { 0.8f, 0.68f, 0.6f },
+                { 0.95f, 0.f, 0.31f }, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { 0.8f, 0.68f, 0.6f },
                 { 0.34f, 0.29f, 0.27f }, { 0.34f, 0.29f, 0.27f }, {}, 2);
             atmosphereState->setDefaults(state);
 
@@ -1006,7 +1007,7 @@ namespace MWRender
             return visitor.mBounds;
         }
 
-        TEST(MWRenderAtmosphereTest, separatesRenderedAndPhysicalNightSunDirections)
+        TEST(MWRenderAtmosphereTest, derivesPhysicalSunDirectionFromDaylightRatherThanWeatherVisibility)
         {
             const osg::Vec3f renderedDirection = osg::Vec3f(0.8f, -0.15f, 0.58f);
 
@@ -1148,8 +1149,9 @@ namespace MWRender
         {
             osg::ref_ptr<SceneUtil::StateUpdater> updater = new SceneUtil::StateUpdater;
             updater->setAtmosphere(true, { 0.4f, 0.5f, 0.7f, 1.f }, { 0.25f, 0.38f, 0.48f }, { 0.07f, 0.36f, 0.76f },
-                1.f, { 0.8f, 0.f, 0.6f }, { 0.58f, 0.9f, 48000.f, 22000.f }, { 0.62f, 0.9f, 0.72f, 0.08f }, {}, {}, {},
-                {}, { 12500.f, 0.75f, 1500.f, 0.f }, { 4000.f, 5000.f, 0.2f, -0.1f }, { 1.f, 0.8f, 0.6f, 1.f },
+                1.f, { 0.8f, 0.f, 0.6f }, { 0.58f, 0.9f, 48000.f, 22000.f }, { 0.62f, 0.9f, 0.72f, 0.08f },
+                { 0.7f, 0.4f, 0.65f, 0.2f }, { 0.72f, 0.46f, 0.f, 0.f }, {}, {}, {}, {},
+                { 12500.f, 0.75f, 1500.f, 0.f }, { 4000.f, 5000.f, 0.2f, -0.1f }, { 1.f, 0.8f, 0.6f, 1.f },
                 { 1.f, 0.8f, 0.6f }, { 0.3f, 0.4f, 0.55f }, { 0.45f, 0.5f, 0.6f }, { 1234.f, 567.f }, 2);
             osg::ref_ptr<osg::StateSet> state = new osg::StateSet;
             updater->setDefaults(state);
@@ -1157,16 +1159,23 @@ namespace MWRender
             osg::Vec2f publishedOffset;
             osg::Vec4f publishedMediumReference;
             osg::Vec4f publishedOrography;
+            osg::Vec4f publishedOrganization;
+            osg::Vec4f publishedStructure;
             ASSERT_TRUE(state->getUniform("atmosphere.cloudAdvectionOffsetWorldUnits")->get(publishedOffset));
             ASSERT_TRUE(state->getUniform("atmosphere.mediumReferenceParameters")->get(publishedMediumReference));
             ASSERT_TRUE(state->getUniform("atmosphere.orographicParameters")->get(publishedOrography));
+            ASSERT_TRUE(state->getUniform("atmosphere.cloudOrganizationParameters")->get(publishedOrganization));
+            ASSERT_TRUE(state->getUniform("atmosphere.cloudStructureParameters")->get(publishedStructure));
             EXPECT_EQ(publishedOffset, osg::Vec2f(1234.f, 567.f));
             EXPECT_EQ(publishedMediumReference, osg::Vec4f(12500.f, 0.75f, 1500.f, 0.f));
             EXPECT_EQ(publishedOrography, osg::Vec4f(4000.f, 5000.f, 0.2f, -0.1f));
+            EXPECT_EQ(publishedOrganization, osg::Vec4f(0.7f, 0.4f, 0.65f, 0.2f));
+            EXPECT_EQ(publishedStructure, osg::Vec4f(0.72f, 0.46f, 0.f, 0.f));
 
             updater->setAtmosphere(true, { 0.4f, 0.5f, 0.7f, 1.f }, { 0.25f, 0.38f, 0.48f }, { 0.07f, 0.36f, 0.76f },
-                1.f, { 0.8f, 0.f, 0.6f }, { 0.58f, 0.9f, 48000.f, 22000.f }, { 0.62f, 0.9f, 0.72f, 0.08f }, {}, {}, {},
-                {}, { 12600.f, 0.74f, 1600.f, 0.f }, { 4100.f, 5100.f, 0.18f, -0.08f }, { 1.f, 0.8f, 0.6f, 1.f },
+                1.f, { 0.8f, 0.f, 0.6f }, { 0.58f, 0.9f, 48000.f, 22000.f }, { 0.62f, 0.9f, 0.72f, 0.08f },
+                { 0.7f, 0.4f, 0.65f, 0.2f }, { 0.72f, 0.46f, 0.f, 0.f }, {}, {}, {}, {},
+                { 12600.f, 0.74f, 1600.f, 0.f }, { 4100.f, 5100.f, 0.18f, -0.08f }, { 1.f, 0.8f, 0.6f, 1.f },
                 { 1.f, 0.8f, 0.6f }, { 0.3f, 0.4f, 0.55f }, { 0.45f, 0.5f, 0.6f }, { 1240.f, 570.f }, 2);
             updater->apply(state, nullptr);
             ASSERT_TRUE(state->getUniform("atmosphere.cloudAdvectionOffsetWorldUnits")->get(publishedOffset));

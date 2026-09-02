@@ -96,7 +96,7 @@ Diagnostics::Capsule OMW::Engine::createDiagnosticCapsule(unsigned frameNumber)
     manifest << "capsule-version: " << Diagnostics::capsuleVersion << '\n'
              << "build: " << quoteDiagnosticYaml(Version::getOpenmwVersionDescription()) << '\n'
              << "frame: " << frameNumber << '\n'
-             << "providers: [core@2, graphics@1, gameplay@7, performance@13]\n"
+             << "providers: [core@2, graphics@1, gameplay@8, performance@13]\n"
              << "content:\n";
     for (const std::string& content : mContentFiles)
     {
@@ -256,7 +256,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << '\n'
                            << "performance-capture: " << (mDiagnosticCollection->active() ? "collecting" : "idle")
                            << '\n'
-                           << "providers: [core@2, graphics@1, gameplay@7, performance@13]\n";
+                           << "providers: [core@2, graphics@1, gameplay@8, performance@13]\n";
                     response.mPayload = diagnosticBytes(output.str());
                     break;
 
@@ -376,7 +376,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                     const MWRender::AtmosphereDiagnosticState& atmosphere
                         = mWorld->getRenderingManager()->getAtmosphereDiagnosticState();
                     const MWRender::AtmosphereVolumeState& volumes = atmosphere.mVolumes;
-                    output << "provider: gameplay@7\nframe: " << frameNumber << '\n'
+                    output << "provider: gameplay@8\nframe: " << frameNumber << '\n'
                            << "state: " << static_cast<int>(mStateManager->getState()) << '\n'
                            << "cell: " << quoteDiagnosticYaml(mWorld->getCellName()) << '\n'
                            << "camera: [" << cameraPosition.x() << ", " << cameraPosition.y() << ", "
@@ -416,10 +416,17 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << "  sun-disc-color: [" << atmosphere.mSunDiscColor.x() << ", "
                            << atmosphere.mSunDiscColor.y() << ", " << atmosphere.mSunDiscColor.z() << ", "
                            << atmosphere.mSunDiscColor.w() << "]\n"
-                           << "  main-cloud: [" << volumes.mCloudCoverage << ", " << volumes.mCloudDensity << ", "
+                           << "  cloud-field-offset-world-units: [" << atmosphere.mCloudFieldOffsetWorldUnits.x()
+                           << ", " << atmosphere.mCloudFieldOffsetWorldUnits.y() << "]\n"
+                           << "  main-cloud: [" << volumes.mCloudDeckCoverage << ", " << volumes.mCloudDensity << ", "
                            << volumes.mCloudBaseAltitudeWorldUnits << ", " << volumes.mCloudThicknessWorldUnits << ", "
                            << volumes.mCloudType << ", " << volumes.mCloudFeatureScale << ", "
                            << volumes.mCloudVerticalDevelopment << ", " << volumes.mCloudAnvilStrength << "]\n"
+                           << "  cloud-organization: [" << volumes.mCloudDeckContinuity << ", "
+                           << volumes.mCloudConvectiveFrequency << ", " << volumes.mCloudConvectiveMaturity << ", "
+                           << volumes.mCloudStormOrganization << "]\n"
+                           << "  cloud-structure: [" << volumes.mCloudTowerTaper << ", " << volumes.mCloudBaseVariation
+                           << "]\n"
                            << "  low-cloud: [" << volumes.mLowCloudCoverage << ", " << volumes.mLowCloudDensity << ", "
                            << volumes.mLowCloudBaseAltitudeWorldUnits << ", " << volumes.mLowCloudThicknessWorldUnits
                            << ", " << volumes.mLowCloudType << ", " << volumes.mLowCloudFeatureScale << ", "
@@ -642,8 +649,23 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                         break;
                     }
                     const YAML::Node state = YAML::Load(diagnosticText(command.mPayload));
-                    if (!state.IsMap() || state.size() != 1 || !state["camera-angles"])
-                        throw std::invalid_argument("diagnostic camera state requires only camera-angles");
+                    if (!state.IsMap() || !state["camera-angles"] || state.size() > 2
+                        || (state.size() == 2 && !state["camera-position"]))
+                        throw std::invalid_argument(
+                            "diagnostic camera state requires camera-angles and optional camera-position");
+                    MWRender::Camera* camera = mWorld->getCamera();
+                    if (const YAML::Node position = state["camera-position"])
+                    {
+                        if (!position.IsSequence() || position.size() != 3)
+                            throw std::invalid_argument("diagnostic camera state has invalid camera coordinates");
+                        const osg::Vec3d requestedPosition(
+                            position[0].as<double>(), position[1].as<double>(), position[2].as<double>());
+                        if (!std::isfinite(requestedPosition.x()) || !std::isfinite(requestedPosition.y())
+                            || !std::isfinite(requestedPosition.z()))
+                            throw std::invalid_argument("diagnostic camera coordinates are outside their finite range");
+                        camera->setMode(MWRender::Camera::Mode::Static);
+                        camera->setStaticPosition(requestedPosition);
+                    }
                     const YAML::Node angles = state["camera-angles"];
                     if (!angles.IsSequence() || angles.size() != 3)
                         throw std::invalid_argument("diagnostic camera state has invalid camera angles");
@@ -653,12 +675,13 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                     if (!std::isfinite(pitch) || !std::isfinite(yaw) || !std::isfinite(roll) || pitch < -1.5707964f
                         || pitch > 1.5707964f)
                         throw std::invalid_argument("diagnostic camera angles are outside their finite range");
-                    MWRender::Camera* camera = mWorld->getCamera();
                     camera->setPitch(pitch, true);
                     camera->setYaw(yaw, true);
                     camera->setRoll(roll);
                     mWorld->getRenderingManager()->invalidateAtmosphereHistory();
-                    output << "camera-angles: [" << camera->getPitch() << ", " << camera->getYaw() << ", "
+                    output << "camera-position: [" << camera->getPosition().x() << ", " << camera->getPosition().y()
+                           << ", " << camera->getPosition().z() << "]\n"
+                           << "camera-angles: [" << camera->getPitch() << ", " << camera->getYaw() << ", "
                            << camera->getRoll() << "]\n"
                            << "atmosphere-history: reset\n";
                     response.mPayload = diagnosticBytes(output.str());

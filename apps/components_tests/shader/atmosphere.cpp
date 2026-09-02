@@ -95,6 +95,8 @@ namespace
         int shaftHeight = 0;
         osg::Vec4f cloudParameters;
         osg::Vec4f cloudShapeParameters{ 0.62f, 0.9f, 0.72f, 0.08f };
+        osg::Vec4f cloudOrganizationParameters{ 0.5f, 0.3f, 0.6f, 0.1f };
+        osg::Vec4f cloudStructureParameters{ 0.7f, 0.5f, 0.f, 0.f };
         osg::Vec4f lowCloudParameters;
         osg::Vec4f lowCloudShapeParameters{ 0.15f, 1.f, 0.2f, 1.f };
         osg::Vec4f mistParameters{ 1.f, 800.f, 4500.f, 1.f };
@@ -142,6 +144,9 @@ namespace
         int quality = 2;
         int frameNumber = 4;
         float volumeResolutionScale = 0.5f;
+        osg::Vec2f cloudDensitySliceExtent{ 500000.f, 500000.f };
+        int cloudDensitySliceAxis = 0;
+        bool renderCloudDensitySlice = false;
     };
 
     /// Return the representative shader permutation used by atmosphere rendering tests.
@@ -206,10 +211,15 @@ namespace
         result.sunDiscColor = phase == "Sunset"
             ? osg::Vec4f(readAtmosphereFixtureColor(weather["sundiscSunsetColor"]), 1.f)
             : osg::Vec4f(1.f, 1.f, 1.f, 1.f);
-        result.cloudParameters = { volume["cloudCoverage"].as<float>(), volume["cloudDensity"].as<float>(),
+        result.cloudParameters = { volume["cloudDeckCoverage"].as<float>(), volume["cloudDensity"].as<float>(),
             volume["cloudAltitude"].as<float>(), volume["cloudThickness"].as<float>() };
         result.cloudShapeParameters = { volume["cloudType"].as<float>(), volume["cloudFeatureScale"].as<float>(),
             volume["cloudVerticalDevelopment"].as<float>(), volume["cloudAnvilStrength"].as<float>() };
+        result.cloudOrganizationParameters
+            = { volume["cloudDeckContinuity"].as<float>(), volume["cloudConvectiveFrequency"].as<float>(),
+                  volume["cloudConvectiveMaturity"].as<float>(), volume["cloudStormOrganization"].as<float>() };
+        result.cloudStructureParameters
+            = { volume["cloudTowerTaper"].as<float>(), volume["cloudBaseVariation"].as<float>(), 0.f, 0.f };
         result.lowCloudParameters = { volume["lowCloudCoverage"].as<float>(), volume["lowCloudDensity"].as<float>(),
             volume["lowCloudAltitude"].as<float>(), volume["lowCloudThickness"].as<float>() };
         result.lowCloudShapeParameters = { volume["lowCloudType"].as<float>(),
@@ -357,6 +367,43 @@ namespace
         geode->addDrawable(triangle);
         osg::StateSet* state = geode->getOrCreateStateSet();
         (*passIt)->prepareStateSet(state, technique.getName());
+        if (inputs.renderCloudDensitySlice)
+        {
+            osg::Program* program = dynamic_cast<osg::Program*>(state->getAttribute(osg::StateAttribute::PROGRAM));
+            if (program == nullptr)
+                throw std::runtime_error("Native atmosphere density diagnostic has no shader program");
+            for (unsigned int shaderIndex = 0; shaderIndex < program->getNumShaders(); ++shaderIndex)
+            {
+                osg::Shader* shader = program->getShader(shaderIndex);
+                if (shader->getType() != osg::Shader::FRAGMENT)
+                    continue;
+                std::string source = shader->getShaderSource();
+                const std::size_t mainPosition = source.rfind("void main()");
+                if (mainPosition == std::string::npos)
+                    throw std::runtime_error("Native atmosphere density diagnostic could not replace fragment main");
+                source.replace(
+                    mainPosition, std::string_view("void main()").size(), "void openmwseProductionAtmosphereMain()");
+                source += R"glsl(
+uniform vec2 openmwseTestCloudDensitySliceExtent;
+uniform int openmwseTestCloudDensitySliceAxis;
+
+void main()
+{
+    vec2 sliceCoordinates = gl_FragCoord.xy / omw.resolution.xy - vec2(0.5);
+    vec3 sliceOffset = openmwseTestCloudDensitySliceAxis == 0
+        ? vec3(sliceCoordinates * openmwseTestCloudDensitySliceExtent, 0.0)
+        : vec3(sliceCoordinates.x * openmwseTestCloudDensitySliceExtent.x, 0.0,
+            sliceCoordinates.y * openmwseTestCloudDensitySliceExtent.y);
+    vec3 samplePosition = omw.eyePos.xyz + sliceOffset;
+    float density = openmwseCloudDensity(samplePosition, 0.0, 250.0, openmwseMainCloudLayer());
+    omw_FragColor = vec4(density, density, density, 1.0);
+}
+)glsl";
+                shader->setShaderSource(source);
+            }
+            state->addUniform(new osg::Uniform("openmwseTestCloudDensitySliceExtent", inputs.cloudDensitySliceExtent));
+            state->addUniform(new osg::Uniform("openmwseTestCloudDensitySliceAxis", inputs.cloudDensitySliceAxis));
+        }
         if (inputs.reverseZ)
         {
             osg::Program* program = dynamic_cast<osg::Program*>(state->getAttribute(osg::StateAttribute::PROGRAM));
@@ -495,12 +542,12 @@ namespace
         updater.setFrameNumber(inputs.frameNumber);
         updater.setWindSpeed(inputs.windSpeed);
         updater.setAtmosphere(inputs.inScattering, inputs.outScattering, inputs.cloudParameters,
-            inputs.cloudShapeParameters, inputs.lowCloudParameters, inputs.lowCloudShapeParameters,
-            inputs.mistParameters, inputs.fogVolumeParameters, inputs.mediumReferenceParameters,
-            inputs.orographicParameters, inputs.sunDiscColor, inputs.solarRadiance, inputs.skyIrradiance,
-            inputs.groundIrradiance, inputs.cloudAdvectionOffsetWorldUnits, inputs.cloudAdvectionDeltaWorldUnits,
-            inputs.historyLightingWeight, inputs.weatherWeight, inputs.quality, inputs.volumeResolutionScale,
-            inputs.atmosphereEnabled);
+            inputs.cloudShapeParameters, inputs.cloudOrganizationParameters, inputs.cloudStructureParameters,
+            inputs.lowCloudParameters, inputs.lowCloudShapeParameters, inputs.mistParameters,
+            inputs.fogVolumeParameters, inputs.mediumReferenceParameters, inputs.orographicParameters,
+            inputs.sunDiscColor, inputs.solarRadiance, inputs.skyIrradiance, inputs.groundIrradiance,
+            inputs.cloudAdvectionOffsetWorldUnits, inputs.cloudAdvectionDeltaWorldUnits, inputs.historyLightingWeight,
+            inputs.weatherWeight, inputs.quality, inputs.volumeResolutionScale, inputs.atmosphereEnabled);
         osg::ref_ptr<osg::Group> scene = new osg::Group;
         scene->addChild(geode);
         osg::StateSet* updaterState = inputs.bindUniformBufferOnAncestor ? scene->getOrCreateStateSet() : state;
@@ -1639,11 +1686,26 @@ namespace
         inputs.fogNear = 1000000.f;
         inputs.fogFar = 2000000.f;
 
-        inputs.cloudShapeParameters = { 0.08f, 1.35f, 0.14f, 0.f };
+        const osg::Vec4f stratusShape{ 0.08f, 1.35f, 0.14f, 0.f };
+        const osg::Vec4f stratusOrganization{ 0.94f, 0.02f, 0.08f, 0.f };
+        const osg::Vec4f stratusStructure{ 0.72f, 0.16f, 0.f, 0.f };
+        inputs.cloudShapeParameters = stratusShape;
+        inputs.cloudOrganizationParameters = stratusOrganization;
+        inputs.cloudStructureParameters = stratusStructure;
         const PassImage stratus = renderNativeAtmospherePass("integrateAtmosphereVolume", inputs);
-        inputs.cloudShapeParameters = { 0.64f, 0.9f, 0.74f, 0.f };
+        const osg::Vec4f cumulusShape{ 0.64f, 0.9f, 0.74f, 0.f };
+        const osg::Vec4f cumulusOrganization{ 0.46f, 0.5f, 0.72f, 0.12f };
+        const osg::Vec4f cumulusStructure{ 0.68f, 0.46f, 0.f, 0.f };
+        inputs.cloudShapeParameters = cumulusShape;
+        inputs.cloudOrganizationParameters = cumulusOrganization;
+        inputs.cloudStructureParameters = cumulusStructure;
         const PassImage cumulus = renderNativeAtmospherePass("integrateAtmosphereVolume", inputs);
-        inputs.cloudShapeParameters = { 1.f, 1.05f, 1.f, 0.9f };
+        const osg::Vec4f stormShape{ 1.f, 1.05f, 1.f, 0.9f };
+        const osg::Vec4f stormOrganization{ 0.9f, 0.72f, 1.f, 1.f };
+        const osg::Vec4f stormStructure{ 0.72f, 0.24f, 0.f, 0.f };
+        inputs.cloudShapeParameters = stormShape;
+        inputs.cloudOrganizationParameters = stormOrganization;
+        inputs.cloudStructureParameters = stormStructure;
         const PassImage storm = renderNativeAtmospherePass("integrateAtmosphereVolume", inputs);
         ASSERT_EQ(stratus.pixels.size(), cumulus.pixels.size());
         ASSERT_EQ(stratus.pixels.size(), storm.pixels.size());
@@ -1654,29 +1716,50 @@ namespace
                 difference += std::abs(first.pixels[index].w() - second.pixels[index].w());
             return difference / static_cast<double>(first.pixels.size());
         };
-        const auto meanOccupiedVerticalSpan = [](const PassImage& image) {
-            double occupiedSpan = 0.0;
-            std::size_t occupiedColumns = 0;
-            for (int x = 0; x < image.width; ++x)
-            {
-                int firstOccupiedRow = image.height;
-                int lastOccupiedRow = -1;
-                for (int y = 0; y < image.height; ++y)
-                {
-                    if (1.f - image.at(x, y).w() > 0.05f)
-                    {
-                        firstOccupiedRow = std::min(firstOccupiedRow, y);
-                        lastOccupiedRow = y;
-                    }
-                }
-                if (lastOccupiedRow >= firstOccupiedRow)
-                {
-                    occupiedSpan += lastOccupiedRow - firstOccupiedRow + 1;
-                    ++occupiedColumns;
-                }
-            }
-            return occupiedColumns > 0 ? occupiedSpan / static_cast<double>(occupiedColumns * image.height) : 0.0;
-        };
+        const auto topDownOpticalDepth
+            = [&](const osg::Vec4f& shape, const osg::Vec4f& organization, const osg::Vec4f& structure) {
+                  NativePassInputs depthInputs = inputs;
+                  depthInputs.cloudParameters.y() = 0.08f;
+                  depthInputs.cloudShapeParameters = shape;
+                  depthInputs.cloudOrganizationParameters = organization;
+                  depthInputs.cloudStructureParameters = structure;
+                  depthInputs.cloudAdvectionOffsetWorldUnits = {};
+                  depthInputs.eyePosition = { 0.f, 0.f, 500000.f };
+                  depthInputs.viewDirection = { 0.04f, 0.01f, -1.f };
+                  depthInputs.verticalFov = 70.f;
+                  depthInputs.farPlane = 800000.f;
+                  const PassImage image = renderNativeAtmospherePass("integrateAtmosphereVolume", depthInputs);
+                  std::vector<double> opticalDepths;
+                  opticalDepths.reserve(image.pixels.size());
+                  for (const osg::Vec4f& pixel : image.pixels)
+                      opticalDepths.push_back(-std::log(std::max(static_cast<double>(pixel.w()), 1e-6)));
+                  std::ranges::sort(opticalDepths);
+                  const double meanOpticalDepth = std::reduce(opticalDepths.begin(), opticalDepths.end())
+                      / static_cast<double>(opticalDepths.size());
+                  const double developedColumnOpticalDepth = opticalDepths[opticalDepths.size() * 49 / 50];
+                  return std::array{ meanOpticalDepth, developedColumnOpticalDepth };
+              };
+        const auto upperVolumeSupport
+            = [&](const osg::Vec4f& shape, const osg::Vec4f& organization, const osg::Vec4f& structure) {
+                  NativePassInputs upperInputs = inputs;
+                  upperInputs.cloudParameters.y() = 0.2f;
+                  upperInputs.cloudShapeParameters = shape;
+                  upperInputs.cloudOrganizationParameters = organization;
+                  upperInputs.cloudStructureParameters = structure;
+                  upperInputs.width = 192;
+                  upperInputs.height = 1;
+                  upperInputs.eyePosition = { -300000.f, 0.f, 45000.f };
+                  upperInputs.viewDirection = { 1.f, 0.f, 0.f };
+                  upperInputs.verticalFov = 15.f;
+                  upperInputs.farPlane = 600000.f;
+                  const PassImage image = renderNativeAtmospherePass("integrateAtmosphereVolume", upperInputs);
+                  std::vector<double> opticalDepths;
+                  opticalDepths.reserve(image.pixels.size());
+                  for (const osg::Vec4f& pixel : image.pixels)
+                      opticalDepths.push_back(-std::log(std::max(static_cast<double>(pixel.w()), 1e-6)));
+                  std::ranges::sort(opticalDepths);
+                  return opticalDepths[opticalDepths.size() * 19 / 20];
+              };
         const auto opacityPopulation = [](const PassImage& image) {
             std::array<std::size_t, 3> population{};
             for (const osg::Vec4f& pixel : image.pixels)
@@ -1699,14 +1782,217 @@ namespace
             << "Cumulus and developed storm profiles must not collapse to one density silhouette";
         EXPECT_GT(meanOpacityDifference(stratus, storm), 0.008)
             << "Stratus and storm fields must remain materially distinct after integration";
-        EXPECT_GT(meanOccupiedVerticalSpan(cumulus), meanOccupiedVerticalSpan(stratus) * 1.1)
-            << "Cumulus must reconstruct a deeper vertical profile than stratiform cover";
-        EXPECT_GT(meanOccupiedVerticalSpan(storm), meanOccupiedVerticalSpan(cumulus) * 1.05)
-            << "Developed storms must reconstruct a deeper vertical profile than cumulus";
+        const std::array<double, 2> stratusOpticalDepth
+            = topDownOpticalDepth(stratusShape, stratusOrganization, stratusStructure);
+        const std::array<double, 2> cumulusOpticalDepth
+            = topDownOpticalDepth(cumulusShape, cumulusOrganization, cumulusStructure);
+        const std::array<double, 2> stormOpticalDepth
+            = topDownOpticalDepth(stormShape, stormOrganization, stormStructure);
+        EXPECT_GT(cumulusOpticalDepth[0], stratusOpticalDepth[0] * 1.1)
+            << "Cumulus must integrate through a deeper physical volume than stratiform cover";
+        const double stratusUpperSupport = upperVolumeSupport(stratusShape, stratusOrganization, stratusStructure);
+        const double cumulusUpperSupport = upperVolumeSupport(cumulusShape, cumulusOrganization, cumulusStructure);
+        const double stormUpperSupport = upperVolumeSupport(stormShape, stormOrganization, stormStructure);
+        EXPECT_LT(stratusUpperSupport, 0.001) << "Stratiform cover must not occupy the developed upper-cloud volume";
+        EXPECT_GT(stormUpperSupport, cumulusUpperSupport * 1.1)
+            << "Developed storms must retain more upper-volume support than tapering cumulus"
+            << " stormMeanDepth=" << stormOpticalDepth[0] << " cumulusMeanDepth=" << cumulusOpticalDepth[0];
         EXPECT_LT(static_cast<double>(stormOpacity[1]) / static_cast<double>(stormOpacity[0]), 0.7)
             << "The weather support field must not integrate into a near-binary opaque storm mask";
         EXPECT_GT(static_cast<double>(stormOpacity[2]) / static_cast<double>(stormOpacity[0]), 0.08)
             << "The reconstructed storm boundary must retain a meaningful partial-density population";
+    }
+
+    /// Verify that convective support narrows with altitude instead of extruding one weather-map footprint vertically.
+    TEST(AtmosphereShaderTest, convectiveCloudSupportTapersInsteadOfExtrudingWeatherFootprints)
+    {
+        const auto densitySupport = [](float eyeHeight) {
+            NativePassInputs inputs;
+            inputs.width = 96;
+            inputs.height = 96;
+            inputs.eyePosition = { 65000.f, 355000.f, eyeHeight };
+            inputs.cloudDensitySliceExtent = { 500000.f, 500000.f };
+            inputs.renderCloudDensitySlice = true;
+            inputs.mistParameters = {};
+            inputs.cloudParameters = { 0.12f, 1.f, 32000.f, 90000.f };
+            inputs.cloudShapeParameters = { 0.68f, 1.2f, 1.f, 0.f };
+            inputs.cloudOrganizationParameters = { 0.15f, 0.55f, 1.f, 0.f };
+            inputs.cloudStructureParameters = { 0.82f, 0.22f, 0.f, 0.f };
+            const PassImage image = renderNativeAtmospherePass("integrateAtmosphereVolume", inputs);
+            std::vector<bool> support(image.pixels.size());
+            for (std::size_t index = 0; index < image.pixels.size(); ++index)
+                support[index] = image.pixels[index].x() > 0.01f;
+            return support;
+        };
+
+        const std::vector<bool> lowerSupport = densitySupport(52000.f);
+        const std::vector<bool> upperSupport = densitySupport(132000.f);
+        ASSERT_EQ(lowerSupport.size(), upperSupport.size());
+        std::size_t lowerCount = 0;
+        std::size_t upperCount = 0;
+        std::size_t unionCount = 0;
+        std::size_t intersectionCount = 0;
+        for (std::size_t index = 0; index < lowerSupport.size(); ++index)
+        {
+            lowerCount += lowerSupport[index] ? 1u : 0u;
+            upperCount += upperSupport[index] ? 1u : 0u;
+            unionCount += lowerSupport[index] || upperSupport[index] ? 1u : 0u;
+            intersectionCount += lowerSupport[index] && upperSupport[index] ? 1u : 0u;
+        }
+        ASSERT_GT(lowerCount, 0u);
+        ASSERT_GT(upperCount, 0u);
+        ASSERT_GT(unionCount, 0u);
+        EXPECT_GT(lowerCount, upperCount) << "Convective cloud bodies must taper before reaching their developed tops";
+        EXPECT_LT(static_cast<double>(intersectionCount) / static_cast<double>(unionCount), 0.82)
+            << "Upper convection must not repeat the lower weather-map footprint as a vertical stamp";
+    }
+
+    /// Verify that production Clear clouds form height-varying masses instead of extruded coverage columns.
+    TEST(AtmosphereShaderTest, productionClearCloudsDoNotExtrudeCoverageColumns)
+    {
+        const auto densitySupport = [](float eyeHeight) {
+            NativePassInputs inputs = makeProductionAtmosphereInputs("Clear", "Day");
+            inputs.width = 96;
+            inputs.height = 96;
+            inputs.eyePosition = { 43333.f, 236667.f, eyeHeight };
+            inputs.cloudDensitySliceExtent = { 333333.f, 333333.f };
+            inputs.renderCloudDensitySlice = true;
+            inputs.mistParameters = {};
+            inputs.lowCloudParameters = {};
+            const PassImage image = renderNativeAtmospherePass("integrateAtmosphereVolume", inputs);
+            std::vector<bool> support(image.pixels.size());
+            for (std::size_t index = 0; index < image.pixels.size(); ++index)
+                support[index] = image.pixels[index].x() > 0.01f;
+            return support;
+        };
+
+        const std::vector<bool> lowerSupport = densitySupport(65000.f);
+        const std::vector<bool> upperSupport = densitySupport(90000.f);
+        ASSERT_EQ(lowerSupport.size(), upperSupport.size());
+        std::size_t lowerCount = 0;
+        std::size_t upperCount = 0;
+        std::size_t unionCount = 0;
+        std::size_t intersectionCount = 0;
+        for (std::size_t index = 0; index < lowerSupport.size(); ++index)
+        {
+            lowerCount += lowerSupport[index] ? 1u : 0u;
+            upperCount += upperSupport[index] ? 1u : 0u;
+            unionCount += lowerSupport[index] || upperSupport[index] ? 1u : 0u;
+            intersectionCount += lowerSupport[index] && upperSupport[index] ? 1u : 0u;
+        }
+        ASSERT_GT(lowerCount, 0u);
+        ASSERT_GT(upperCount, 0u);
+        ASSERT_GT(unionCount, 0u);
+        EXPECT_LT(upperCount, lowerCount * 3 / 5)
+            << "Clear-weather crowns must occupy materially less area than their lower cloud mass"
+            << " lower=" << lowerCount << " upper=" << upperCount;
+        EXPECT_LT(static_cast<double>(intersectionCount) / static_cast<double>(unionCount), 0.55)
+            << "Clear-weather upper density must not repeat its lower coverage footprint"
+            << " lower=" << lowerCount << " upper=" << upperCount;
+    }
+
+    /// Verify that production Clear-cloud side profiles do not expose long vertical weather-column walls.
+    TEST(AtmosphereShaderTest, productionClearCloudProfilesAvoidVerticalSupportWalls)
+    {
+        NativePassInputs inputs = makeProductionAtmosphereInputs("Clear", "Day");
+        inputs.width = 192;
+        inputs.height = 96;
+        inputs.eyePosition = { 43333.f, 236667.f, 78000.f };
+        inputs.cloudDensitySliceExtent = { 333333.f, 110000.f };
+        inputs.cloudDensitySliceAxis = 1;
+        inputs.renderCloudDensitySlice = true;
+        inputs.mistParameters = {};
+        inputs.lowCloudParameters = {};
+        const PassImage density = renderNativeAtmospherePass("integrateAtmosphereVolume", inputs);
+        ASSERT_EQ(density.width, inputs.width);
+        ASSERT_EQ(density.height, inputs.height);
+
+        int longestVerticalBoundary = 0;
+        for (int x = 1; x < density.width; ++x)
+        {
+            int currentBoundaryLength = 0;
+            for (int y = 0; y < density.height; ++y)
+            {
+                const bool previousOccupied = density.at(x - 1, y).x() > 0.01f;
+                const bool currentOccupied = density.at(x, y).x() > 0.01f;
+                currentBoundaryLength = previousOccupied != currentOccupied ? currentBoundaryLength + 1 : 0;
+                longestVerticalBoundary = std::max(longestVerticalBoundary, currentBoundaryLength);
+            }
+        }
+        EXPECT_LT(longestVerticalBoundary, density.height / 4)
+            << "Clear-weather density must not expose tall vertical coverage-map boundaries";
+    }
+
+    /// Verify that organized storms retain a connected body and spread an outflow above the tapered crown.
+    TEST(AtmosphereShaderTest, organizedStormOutflowSpreadsBeyondConvectiveCrown)
+    {
+        const auto densitySupportCounts = [](float eyeHeight) {
+            NativePassInputs inputs;
+            inputs.width = 96;
+            inputs.height = 96;
+            inputs.eyePosition = { 65000.f, 355000.f, eyeHeight };
+            inputs.cloudDensitySliceExtent = { 500000.f, 500000.f };
+            inputs.renderCloudDensitySlice = true;
+            inputs.mistParameters = {};
+            inputs.cloudParameters = { 0.08f, 1.1f, 32000.f, 90000.f };
+            inputs.cloudShapeParameters = { 1.f, 1.2f, 1.f, 1.f };
+            inputs.cloudOrganizationParameters = { 0.1f, 0.65f, 1.f, 1.f };
+            inputs.cloudStructureParameters = { 0.82f, 0.22f, 0.f, 0.f };
+            const PassImage image = renderNativeAtmospherePass("integrateAtmosphereVolume", inputs);
+            std::array<std::size_t, 3> supportCounts{};
+            for (const osg::Vec4f& pixel : image.pixels)
+            {
+                supportCounts[0] += pixel.x() > 0.005f ? 1u : 0u;
+                supportCounts[1] += pixel.x() > 0.02f ? 1u : 0u;
+                supportCounts[2] += pixel.x() > 0.08f ? 1u : 0u;
+            }
+            return supportCounts;
+        };
+
+        const std::array<std::size_t, 3> bodySupport = densitySupportCounts(65000.f);
+        const std::array<std::size_t, 3> crownSupport = densitySupportCounts(136000.f);
+        const std::array<std::size_t, 3> outflowSupport = densitySupportCounts(146000.f);
+        ASSERT_GT(crownSupport[1], 0u);
+        EXPECT_GT(bodySupport[1], crownSupport[1])
+            << "An organized storm must rise from a broader connected body than its crown"
+            << " body=" << bodySupport[0] << ',' << bodySupport[1] << ',' << bodySupport[2]
+            << " crown=" << crownSupport[0] << ',' << crownSupport[1] << ',' << crownSupport[2];
+        EXPECT_GT(outflowSupport[1], crownSupport[1])
+            << "The mature outflow must spread laterally beyond the tapered convective crown"
+            << " crown=" << crownSupport[0] << ',' << crownSupport[1] << ',' << crownSupport[2]
+            << " outflow=" << outflowSupport[0] << ',' << outflowSupport[1] << ',' << outflowSupport[2];
+    }
+
+    TEST(AtmosphereShaderTest, coverageHeavyWeatherRetainsZenithAndMultiAzimuthCloudSupport)
+    {
+        const auto occupiedFraction = [](const PassImage& image) {
+            return static_cast<double>(std::count_if(image.pixels.begin(), image.pixels.end(),
+                       [](const osg::Vec4f& pixel) { return 1.f - pixel.w() > 0.03f; }))
+                / static_cast<double>(image.pixels.size());
+        };
+        const std::array<osg::Vec3f, 5> directions{ osg::Vec3f(0.01f, 0.f, 1.f), osg::Vec3f(1.f, 0.f, 0.24f),
+            osg::Vec3f(-1.f, 0.f, 0.24f), osg::Vec3f(0.f, 1.f, 0.24f), osg::Vec3f(0.f, -1.f, 0.24f) };
+
+        for (std::string_view weather : { "Overcast", "Rain", "Thunderstorm" })
+        {
+            NativePassInputs inputs = makeProductionAtmosphereInputs(weather, "Day");
+            inputs.width = 64;
+            inputs.height = 48;
+            inputs.mistParameters = {};
+            inputs.lowCloudParameters = {};
+            inputs.eyePosition = { 0.f, 0.f, 1200.f };
+            inputs.farPlane = 500000.f;
+            inputs.fogNear = 1000000.f;
+            inputs.fogFar = 2000000.f;
+            for (std::size_t directionIndex = 0; directionIndex < directions.size(); ++directionIndex)
+            {
+                inputs.viewDirection = directions[directionIndex];
+                const PassImage clouds = renderNativeAtmospherePass("integrateAtmosphereVolume", inputs);
+                ASSERT_FALSE(clouds.pixels.empty());
+                const double minimumSupport = directionIndex == 0 ? 0.52 : 0.28;
+                EXPECT_GT(occupiedFraction(clouds), minimumSupport) << weather << " direction=" << directionIndex;
+            }
+        }
     }
 
     TEST(AtmosphereShaderTest, cloudRadianceParticipatesInDistanceFogWithoutLosingDensity)
@@ -1769,6 +2055,8 @@ namespace
         inputs.height = 96;
         inputs.cloudParameters = { 0.82f, 1.8f, 16000.f, 42000.f };
         inputs.cloudShapeParameters = { 1.f, 1.05f, 1.f, 0.9f };
+        inputs.cloudOrganizationParameters = { 0.92f, 0.72f, 1.f, 1.f };
+        inputs.cloudStructureParameters = { 0.72f, 0.24f, 0.f, 0.f };
         inputs.mistParameters = {};
         inputs.solarRadiance = {};
         inputs.skyIrradiance = { 0.08f, 0.1f, 0.14f };

@@ -8,6 +8,8 @@ struct OpenMWSECloudLayer
 {
     vec4 parameters;
     vec4 shape;
+    vec4 organization;
+    vec4 structure;
     vec2 fieldOffsetWorldUnits;
     float terrainCoupling;
 };
@@ -15,14 +17,16 @@ struct OpenMWSECloudLayer
 /// Return the main weather-cloud stratum.
 OpenMWSECloudLayer openmwseMainCloudLayer()
 {
-    return OpenMWSECloudLayer(openmwseCloudParameters(), openmwseCloudShapeParameters(), vec2(0.0), 0.0);
+    return OpenMWSECloudLayer(openmwseCloudParameters(), openmwseCloudShapeParameters(),
+        openmwseCloudOrganizationParameters(), openmwseCloudStructureParameters(), vec2(0.0), 0.0);
 }
 
 /// Return the low environmental-cloud stratum with an independent deterministic field phase.
 OpenMWSECloudLayer openmwseLowCloudLayer()
 {
     return OpenMWSECloudLayer(
-        openmwseLowCloudParameters(), openmwseLowCloudShapeParameters(), vec2(137000.0, -91000.0), 1.0);
+        openmwseLowCloudParameters(), openmwseLowCloudShapeParameters(), vec4(0.72, 0.08, 0.16, 0.0),
+        vec4(0.72, 0.42, 0.0, 0.0), vec2(137000.0, -91000.0), 1.0);
 }
 
 /// Return whether one cloud stratum can contribute visible density.
@@ -109,7 +113,7 @@ float openmwseCloudHeightProfile(float relativeHeight, float cloudFamily, float 
     float cumulus = smoothstep(0.01, 0.07, relativeHeight)
         * (1.0 - smoothstep(mix(0.5, 0.66, development), mix(0.76, 0.9, development), relativeHeight));
     float storm = smoothstep(0.01, 0.055, relativeHeight)
-        * (1.0 - smoothstep(mix(0.7, 0.84, development), mix(0.92, 0.99, development), relativeHeight));
+        * (1.0 - smoothstep(mix(0.62, 0.68, development), mix(0.92, 0.98, development), relativeHeight));
     float profile = mix(stratus, stratocumulus, smoothstep(0.06, 0.36, cloudFamily));
     profile = mix(profile, cumulus, smoothstep(0.32, 0.7, cloudFamily));
     return mix(profile, storm, smoothstep(0.68, 0.94, cloudFamily));
@@ -140,7 +144,7 @@ float openmwseCloudHeightProfileUpperBound(float cloudFamily, float development)
     return mix(profileTop, stormTop, smoothstep(0.68, 0.94, cloudFamily));
 }
 
-/// Return conservative world-space bounds specialized to one requested cloud family.
+/// Return conservative world-space bounds for the deck and every requested convective cell.
 vec2 openmwseCloudLayerHeightBounds(OpenMWSECloudLayer layer)
 {
     float fixedBaseHeight = openmwseCloudWaterHeight() + layer.parameters.z;
@@ -153,34 +157,41 @@ vec2 openmwseCloudLayerHeightBounds(OpenMWSECloudLayer layer)
     float nominalThickness = max(layer.parameters.w, 1.0);
     float requestedFamily = clamp(layer.shape.x, 0.0, 1.0);
     float requestedDevelopment = clamp(layer.shape.z, 0.0, 1.0);
-    float conservativeFamily = clamp(requestedFamily + 0.1, 0.0, 1.0);
+    float convectiveEnvelopeWeight = smoothstep(0.02, 0.42, layer.organization.y)
+        * clamp(layer.organization.z, 0.0, 1.0);
+    float stormEnvelopeWeight = max(clamp(layer.organization.w, 0.0, 1.0), convectiveEnvelopeWeight);
+    float conservativeFamily
+        = max(clamp(requestedFamily + 0.1, 0.0, 1.0), mix(requestedFamily, 1.0, stormEnvelopeWeight));
+    float conservativeDevelopment
+        = max(requestedDevelopment, requestedDevelopment * mix(0.62, 1.0, stormEnvelopeWeight));
     float envelopeScale
-        = openmwseCloudEnvelopeThicknessScale(conservativeFamily, requestedDevelopment);
+        = openmwseCloudEnvelopeThicknessScale(conservativeFamily, conservativeDevelopment);
     float profileTop
-        = openmwseCloudHeightProfileUpperBound(conservativeFamily, requestedDevelopment);
-    float anvilTop = layer.shape.w > 0.001 && requestedFamily > 0.68 ? 0.95 : 0.0;
+        = openmwseCloudHeightProfileUpperBound(conservativeFamily, conservativeDevelopment);
+    float anvilTop = layer.shape.w * stormEnvelopeWeight > 0.001 ? 0.95 : 0.0;
     float maximumProfileHeight = max(profileTop, anvilTop);
-    const float maximumBaseVariation = 0.28;
+    float maximumBaseVariation = mix(0.08, 0.28, clamp(layer.structure.y, 0.0, 1.0));
     return vec2(nominalBaseHeight - nominalThickness * maximumBaseVariation - terrainExcursion,
         nominalBaseHeight + nominalThickness
             * (maximumBaseVariation + envelopeScale * maximumProfileHeight) + terrainExcursion);
 }
 
-/// Derive stable type-aware base-noise coordinates with cheap low-frequency curl and wind shear.
+/// Derive stable type-aware base-noise coordinates with coherent convective height and cheap wind shear.
 vec3 openmwseCloudBaseNoiseCoordinates(
     vec3 advectedPosition, OpenMWSECloudColumnProperties columnProperties, vec4 shape,
-    float relativeHeight, float distortionAmount)
+    float nominalThickness, float relativeHeight, float distortionAmount)
 {
     float featureScale = max(shape.y, 0.25);
     float cloudFamily = mix(columnProperties.family, shape.x, smoothstep(0.78, 1.0, shape.x));
-    float structureScale
-        = max(mix(featureScale, featureScale * 0.58, smoothstep(0.68, 0.94, cloudFamily)), 0.65);
-    float horizontalScale = mix(0.0000135, 0.0000195, cloudFamily) / structureScale;
-    float verticalScale = mix(0.000024, 0.0000185, cloudFamily) / structureScale;
+    float domainScale = mix(0.82, 1.22, smoothstep(0.72, 1.6, featureScale));
+    float horizontalDomain = max(70000.0,
+        nominalThickness * mix(0.9, 1.08, cloudFamily) * domainScale);
+    float verticalDomain = max(65000.0,
+        nominalThickness * mix(0.82, 1.0, cloudFamily) * domainScale);
     vec3 decorrelatedPosition = advectedPosition;
     decorrelatedPosition.z += advectedPosition.x * 0.31 + advectedPosition.y * 0.17;
-    vec3 noiseCoordinates = decorrelatedPosition * vec3(horizontalScale, horizontalScale, verticalScale);
-    vec2 curlCoordinates = advectedPosition.xy * (0.000018 / structureScale);
+    vec3 noiseCoordinates = decorrelatedPosition / vec3(horizontalDomain, horizontalDomain, verticalDomain);
+    vec2 curlCoordinates = advectedPosition.xy / (horizontalDomain * 1.35);
     vec2 curl = vec2(openmwseCloudValueNoise(curlCoordinates + vec2(17.3, -9.1)),
                     openmwseCloudValueNoise(curlCoordinates.yx + vec2(-4.7, 23.9)))
         - 0.5;
@@ -188,11 +199,15 @@ vec3 openmwseCloudBaseNoiseCoordinates(
     noiseCoordinates.z += dot(curl, vec2(0.57, -0.43)) * distortionAmount
         * mix(0.08, 0.2, cloudFamily) * columnProperties.development;
     noiseCoordinates.xy += vec2(-0.24, 0.15) * relativeHeight * shape.w * columnProperties.development;
+    float envelopeDecorrelation = 1.0 - smoothstep(0.28, 0.92,
+        max(columnProperties.development, columnProperties.stormCellWeight));
+    noiseCoordinates.z += envelopeDecorrelation * mix(0.18, 0.52, cloudFamily);
     return noiseCoordinates;
 }
 
-/// Erode reconstructed base density with packed medium-scale cells without creating independent Worley mass.
-float openmwseCloudTypedBaseNoise(vec4 noiseSample, float cloudFamily)
+/// Erode reconstructed base density by type and height while retaining smooth organized outflow mass.
+float openmwseCloudTypedBaseNoise(
+    vec4 noiseSample, float cloudFamily, float relativeHeight, float outflowPresence)
 {
     float reconstructedNoise = openmwseCloudBaseFromNoise(noiseSample);
     float worleyFbm = dot(noiseSample.gba, vec3(0.625, 0.25, 0.125));
@@ -200,47 +215,99 @@ float openmwseCloudTypedBaseNoise(vec4 noiseSample, float cloudFamily)
     float cumulusCarving = smoothstep(0.3, 0.62, cloudFamily)
         * (1.0 - smoothstep(0.84, 0.98, cloudFamily));
     erosionStrength += cumulusCarving * 0.12;
+    float upperBillowCarving = smoothstep(0.38, 0.9, relativeHeight)
+        * smoothstep(0.28, 0.82, cloudFamily);
+    erosionStrength += upperBillowCarving * mix(0.12, 0.34, smoothstep(0.7, 1.0, cloudFamily));
+    float organizedOutflowSmoothing
+        = clamp(outflowPresence, 0.0, 1.0) * smoothstep(0.58, 0.82, relativeHeight);
+    erosionStrength *= mix(1.0, 0.22, organizedOutflowSmoothing);
     return openmwseCloudRemap(reconstructedNoise, (1.0 - worleyFbm) * erosionStrength, 1.0);
 }
 
-/// Return family, deck, convective-body, and outflow thickness scales for one weather column.
-vec4 openmwseCloudComponentThicknessScales(
+/// Return the local convective body weight without assigning it an independent volume.
+float openmwseCloudConvectiveBodyWeight(
+    OpenMWSECloudColumnProperties columnProperties, OpenMWSECloudLayer layer)
+{
+    float maturity = smoothstep(0.04, 0.82, clamp(layer.organization.z, 0.0, 1.0));
+    float ambientConvection = smoothstep(0.14, 0.9, columnProperties.convectivePotential)
+        * smoothstep(0.02, 0.52, clamp(layer.organization.y, 0.0, 1.0)) * maturity
+        * (1.0 - clamp(layer.organization.w, 0.0, 1.0))
+        * mix(0.68, 0.28, clamp(layer.organization.x, 0.0, 1.0));
+    return clamp(max(columnProperties.stormCellWeight, ambientConvection), 0.0, 1.0);
+}
+
+/// Return how strongly the background cloud mass should behave as a coherent level deck.
+float openmwseCloudBackgroundDeckWeight(OpenMWSECloudLayer layer)
+{
+    float deckContinuity = smoothstep(0.18, 0.94, clamp(layer.organization.x, 0.0, 1.0));
+    float stormDeckWeight = smoothstep(0.35, 0.8, clamp(layer.organization.w, 0.0, 1.0));
+    return max(deckContinuity, stormDeckWeight);
+}
+
+/// Return the normalized top heights and anvil base for one coherent dimensional profile.
+vec4 openmwseCloudVerticalStructure(
     OpenMWSECloudColumnProperties columnProperties, OpenMWSECloudLayer layer)
 {
     float requestedDevelopment = clamp(layer.shape.z, 0.0, 1.0);
-    float familyEnvelopeThickness = openmwseCloudEnvelopeThicknessScale(
-        columnProperties.family, columnProperties.development);
+    float deckContinuity = smoothstep(0.18, 0.94, clamp(layer.organization.x, 0.0, 1.0));
     float deckFamily = mix(0.12, 0.26, columnProperties.baseVariation);
     float deckDevelopment = requestedDevelopment * mix(0.2, 0.48,
         smoothstep(0.3, 0.9, columnProperties.convectivePotential));
-    float deckEnvelopeThickness
-        = openmwseCloudEnvelopeThicknessScale(deckFamily, deckDevelopment);
-    float developedEnvelopeThickness = openmwseCloudEnvelopeThicknessScale(1.0,
-        max(columnProperties.development,
-            max(columnProperties.stormCellWeight, columnProperties.stormOutflowWeight)));
-    float bodyEnvelopeThickness = mix(deckEnvelopeThickness, developedEnvelopeThickness,
-        pow(columnProperties.stormCellWeight, 0.78));
-    float outflowEnvelopeThickness = mix(deckEnvelopeThickness, developedEnvelopeThickness,
-        pow(columnProperties.stormOutflowWeight, 0.68));
-    return vec4(familyEnvelopeThickness, deckEnvelopeThickness,
-        bodyEnvelopeThickness, outflowEnvelopeThickness);
+    float backgroundDeckWeight = openmwseCloudBackgroundDeckWeight(layer);
+    float familyTop = openmwseCloudEnvelopeThicknessScale(
+        columnProperties.family, columnProperties.development) / openmwseCloudMaximumThicknessScale;
+    float isolatedFlatTop = familyTop * mix(0.32, 0.52,
+        smoothstep(0.2, 0.85, columnProperties.family));
+    float isolatedTop = mix(isolatedFlatTop, familyTop,
+        pow(clamp(columnProperties.localCoverage, 0.0, 1.0), 0.62));
+    float deckTop = openmwseCloudEnvelopeThicknessScale(
+        deckFamily, deckDevelopment) / openmwseCloudMaximumThicknessScale;
+    float backgroundTop = mix(isolatedTop, deckTop, backgroundDeckWeight);
+
+    float convectiveBodyWeight = openmwseCloudConvectiveBodyWeight(columnProperties, layer);
+    float developedTop = openmwseCloudEnvelopeThicknessScale(1.0,
+        max(columnProperties.development, requestedDevelopment * convectiveBodyWeight))
+        / openmwseCloudMaximumThicknessScale;
+    float coreTop = mix(backgroundTop, developedTop, pow(convectiveBodyWeight, 0.9));
+
+    float anvilStrength = clamp(layer.shape.w, 0.0, 1.0)
+        * clamp(layer.organization.w, 0.0, 1.0);
+    float outflowPresence = smoothstep(0.02, 0.14,
+        columnProperties.stormOutflowPotential) * anvilStrength;
+    float organizedStormTop = openmwseCloudEnvelopeThicknessScale(1.0,
+        max(requestedDevelopment, clamp(layer.organization.z, 0.0, 1.0)))
+        / openmwseCloudMaximumThicknessScale;
+    float anvilTop = mix(max(backgroundTop, coreTop * 0.82), organizedStormTop * 0.96,
+        outflowPresence);
+    float anvilDepth = mix(0.08, 0.17, anvilStrength) * mix(0.65, 1.0, outflowPresence);
+    float anvilBase = max(backgroundTop * 0.82, anvilTop - anvilDepth);
+    return clamp(vec4(backgroundTop, coreTop, anvilBase, anvilTop), 0.0, 1.0);
 }
 
-/// Return the locally varied cloud base height and conservative support thickness.
+/// Express world height in the shared vertical coordinate used by every local cloud column.
+float openmwseCloudProfileHeightFraction(
+    float worldHeight, float localBaseHeight, OpenMWSECloudLayer layer)
+{
+    float profileThickness
+        = max(layer.parameters.w, 1.0) * openmwseCloudMaximumThicknessScale;
+    return clamp((worldHeight - localBaseHeight) / profileThickness, 0.0, 1.0);
+}
+
+/// Return the locally varied base and conservative height of the coherent dimensional profile.
 vec2 openmwseCloudLocalLayerFromProperties(
     vec3 worldPosition, OpenMWSECloudColumnProperties columnProperties, OpenMWSECloudLayer layer)
 {
     float nominalBaseHeight = openmwseCloudNominalBaseHeight(worldPosition, layer);
     float nominalThickness = max(layer.parameters.w, 1.0);
-    float requestedFamily = clamp(layer.shape.x, 0.0, 1.0);
-    float baseVariation = mix(0.28, 0.1, requestedFamily);
+    float baseVariation = mix(0.08, 0.28, clamp(layer.structure.y, 0.0, 1.0));
     float localBaseHeight
         = nominalBaseHeight + (columnProperties.baseVariation * 2.0 - 1.0) * nominalThickness * baseVariation;
-    vec4 thicknessScales = openmwseCloudComponentThicknessScales(columnProperties, layer);
-    float stormWeight = smoothstep(0.78, 0.98, requestedFamily);
-    float stormEnvelopeThickness = max(thicknessScales.z, thicknessScales.w);
-    float envelopeThickness = mix(thicknessScales.x, stormEnvelopeThickness, stormWeight);
-    return vec2(localBaseHeight, nominalThickness * envelopeThickness);
+    vec4 verticalStructure = openmwseCloudVerticalStructure(columnProperties, layer);
+    float localBodyTop = localBaseHeight + nominalThickness * openmwseCloudMaximumThicknessScale
+        * max(verticalStructure.x, verticalStructure.y);
+    float sharedOutflowTop = nominalBaseHeight
+        + nominalThickness * openmwseCloudMaximumThicknessScale * verticalStructure.w;
+    return vec2(localBaseHeight, max(localBodyTop, sharedOutflowTop) - localBaseHeight);
 }
 
 /// Return the locally varied cloud base height and thickness for a world-space column.
@@ -250,7 +317,8 @@ vec2 openmwseCloudLocalLayer(vec3 worldPosition, OpenMWSECloudLayer layer)
     return openmwseCloudLocalLayerFromProperties(
         worldPosition,
         openmwseCloudColumnProperties(
-            openmwseCloudColumnPosition(worldPosition, advectedPosition, layer), layer.parameters, layer.shape),
+            openmwseCloudColumnPosition(worldPosition, advectedPosition, layer), layer.parameters, layer.shape,
+            layer.organization, layer.structure),
         layer);
 }
 
@@ -268,112 +336,74 @@ vec2 openmwseCloudLayerIntersection(vec3 origin, vec3 direction, float lowerHeig
 
 /// Apply the typed dimensional profile and canonical coverage erosion to reconstructed base noise.
 float openmwseCloudDensityFromNoise(
-    vec3 worldPosition, vec3 advectedPosition, float cloudNoise,
+    vec3 worldPosition, float cloudNoise,
     OpenMWSECloudColumnProperties columnProperties, OpenMWSECloudLayer layer)
 {
     vec2 localLayer = openmwseCloudLocalLayerFromProperties(worldPosition, columnProperties, layer);
     if (worldPosition.z < localLayer.x || worldPosition.z > localLayer.x + localLayer.y)
         return 0.0;
-    float heightAboveBase = worldPosition.z - localLayer.x;
-    float nominalThickness = max(layer.parameters.w, 1.0);
-    vec4 componentThickness = nominalThickness
-        * openmwseCloudComponentThicknessScales(columnProperties, layer);
-    vec4 componentRelativeHeight = clamp(heightAboveBase / componentThickness, 0.0, 1.0);
-    float relativeHeight = clamp(heightAboveBase / localLayer.y, 0.0, 1.0);
-    float familyRelativeHeight = componentRelativeHeight.x;
-    float deckRelativeHeight = componentRelativeHeight.y;
-    float bodyRelativeHeight = componentRelativeHeight.z;
-    float outflowRelativeHeight = componentRelativeHeight.w;
+    float relativeHeight
+        = openmwseCloudProfileHeightFraction(worldPosition.z, localLayer.x, layer);
+    float outflowRelativeHeight = openmwseCloudProfileHeightFraction(
+        worldPosition.z, openmwseCloudNominalBaseHeight(worldPosition, layer), layer);
     float cloudFamily = columnProperties.family;
     float development = columnProperties.development;
     float localCoverage = columnProperties.localCoverage;
-    if (max(localCoverage, max(columnProperties.stormSystemWeight,
-            columnProperties.stormOutflowWeight)) <= 0.001)
+    if (max(localCoverage, max(columnProperties.convectiveShoulderWeight,
+            max(columnProperties.stormSystemWeight, columnProperties.stormOutflowWeight))) <= 0.001)
         return 0.0;
-    float stormWeight = smoothstep(0.78, 0.98, layer.shape.x);
-    float upperOutflow = smoothstep(0.68, 0.78, outflowRelativeHeight)
-        * (1.0 - smoothstep(0.92, 0.98, outflowRelativeHeight));
-    float anvilStrength = clamp(layer.shape.w, 0.0, 1.0);
-    float outflowSupport = stormWeight * anvilStrength * columnProperties.stormOutflowWeight
-        * smoothstep(0.2, 0.72, columnProperties.organizationPotential)
-        * smoothstep(0.18, 0.78, columnProperties.convectivePotential);
-    float profileFamily = clamp(cloudFamily + upperOutflow * outflowSupport * 0.16, 0.0, 1.0);
-    float familyHeightProfile
-        = openmwseCloudHeightProfile(familyRelativeHeight, profileFamily, development);
-    float deckFamily = mix(0.14, 0.26, columnProperties.baseVariation);
-    float deckDevelopment = min(development, 0.48);
-    float deckHeightProfile = openmwseCloudHeightProfile(deckRelativeHeight, deckFamily, deckDevelopment);
-    float broadStormBodyWeight
-        = max(columnProperties.stormCellWeight, columnProperties.stormOutflowWeight * 0.28);
-    float stormBodyWeight = mix(broadStormBodyWeight, columnProperties.stormCellWeight,
-        smoothstep(0.18, 0.52, bodyRelativeHeight));
-    float towerTaperExponent = mix(0.72, 2.4,
-        smoothstep(0.36, 0.9, bodyRelativeHeight));
-    stormBodyWeight = pow(max(stormBodyWeight, 0.0), towerTaperExponent);
-    float towerDevelopment = max(development, stormBodyWeight * 0.72);
-    float developedCell = stormWeight
-        * columnProperties.stormCellWeight
-        * smoothstep(0.32, 0.9, development);
-    float towerHeightProfile = openmwseCloudHeightProfile(bodyRelativeHeight, 1.0, towerDevelopment);
-    float stormHeightProfile
-        = max(deckHeightProfile, towerHeightProfile * stormBodyWeight);
-    float heightProfile = mix(familyHeightProfile, stormHeightProfile, stormWeight);
-    float stormSystemDeck = stormWeight * columnProperties.stormSystemWeight
-        * (1.0 - smoothstep(0.42, 0.62, deckRelativeHeight));
-    float anvilProfile = smoothstep(0.68, 0.78, outflowRelativeHeight)
-        * (1.0 - smoothstep(0.92, 0.98, outflowRelativeHeight));
+    vec4 verticalStructure = openmwseCloudVerticalStructure(columnProperties, layer);
+    float bottomProfile = smoothstep(0.015, 0.075, relativeHeight);
+    float backgroundFade = mix(0.055, 0.11, smoothstep(0.25, 0.9, cloudFamily));
+    float backgroundVertical = bottomProfile * (1.0 - smoothstep(
+        max(verticalStructure.x - backgroundFade, 0.0), verticalStructure.x, relativeHeight));
+
+    float convectiveBodyWeight = openmwseCloudConvectiveBodyWeight(columnProperties, layer);
+    float coreFade = mix(0.09, 0.16, clamp(layer.structure.x, 0.0, 1.0));
+    float coreVertical = bottomProfile * (1.0 - smoothstep(
+        max(verticalStructure.y - coreFade, 0.0), verticalStructure.y, relativeHeight));
+    float lowerShoulderVertical = bottomProfile
+        * (1.0 - smoothstep(verticalStructure.x * 0.55,
+            max(verticalStructure.x * 0.92, 0.001), relativeHeight));
+
+    float anvilFade = mix(0.025, 0.06, clamp(layer.structure.x, 0.0, 1.0));
+    float outflowVertical = smoothstep(verticalStructure.z,
+        min(verticalStructure.z + anvilFade, verticalStructure.w), outflowRelativeHeight)
+        * (1.0 - smoothstep(max(verticalStructure.w - anvilFade, verticalStructure.z),
+            verticalStructure.w, outflowRelativeHeight));
+    float anvilStrength = clamp(layer.shape.w, 0.0, 1.0)
+        * clamp(layer.organization.w, 0.0, 1.0);
+    float outflowPotential = smoothstep(0.02, 0.24,
+        columnProperties.stormOutflowPotential) * anvilStrength;
+    float deckContinuity = smoothstep(0.18, 0.94, clamp(layer.organization.x, 0.0, 1.0));
+    float developedCell = convectiveBodyWeight * smoothstep(0.32, 0.9, development);
     float requestedCoverage = clamp(layer.parameters.x, 0.0, 1.0);
     float stormDeckCoverage
         = openmwseCloudColumnOccupancy(columnProperties.organizationPotential, requestedCoverage);
-    float expandedCoverage = openmwseCloudLocalCoverage(columnProperties.organizationPotential,
-        clamp(requestedCoverage + outflowSupport * 0.12, 0.0, 1.0));
-    float convectiveOrganization = mix(0.5, 0.72, columnProperties.organizationPotential);
-    float stratiformOrganization = mix(0.86, 0.96, columnProperties.organizationPotential);
-    float lowerStormDeck = stormWeight * (1.0 - smoothstep(0.16, 0.38, deckRelativeHeight));
-    float organizationFamily = mix(clamp(layer.shape.x, 0.0, 1.0), 0.2, lowerStormDeck);
-    float typeOrganization = mix(stratiformOrganization, convectiveOrganization,
-        smoothstep(0.3, 0.78, organizationFamily));
-    float coherentDeckCoverage = max(localCoverage, stormDeckCoverage * 0.58);
-    float organizedCoverage = mix(localCoverage, coherentDeckCoverage, lowerStormDeck);
-    float cloudCoverage
-        = mix(organizedCoverage, expandedCoverage, upperOutflow * outflowSupport) * typeOrganization;
-    float reconstructionThreshold
-        = mix(0.27, 0.31, smoothstep(0.18, 0.78, cloudFamily)) + developedCell * 0.02;
-    float typedCloudNoise = openmwseCloudRemap(cloudNoise, reconstructionThreshold, 1.0);
-    float multipliedProfileNoise = typedCloudNoise * heightProfile;
-    float erodedProfileNoise = max(typedCloudNoise - (1.0 - heightProfile), 0.0);
-    float profileErosionWeight = smoothstep(0.2, 0.68, cloudFamily);
-    float dimensionalNoise
-        = mix(multipliedProfileNoise, erodedProfileNoise, profileErosionWeight);
-    float coveredNoise = openmwseCloudRemap(dimensionalNoise, 1.0 - cloudCoverage, 1.0);
-    float stormSystemCoverage
-        = mix(0.62, 0.92, columnProperties.stormSystemWeight) * columnProperties.stormSystemWeight;
-    float stormSystemNoise = openmwseCloudRemap(typedCloudNoise * deckHeightProfile,
-        1.0 - stormSystemCoverage, 1.0) * stormSystemDeck;
-    coveredNoise = max(coveredNoise, stormSystemNoise);
+    float coherentDeckCoverage = max(localCoverage,
+        stormDeckCoverage * mix(0.42, 0.82, deckContinuity));
+    float isolatedTaperHeight = smoothstep(
+        verticalStructure.x * 0.32, verticalStructure.x, relativeHeight);
+    float isolatedCoverage = pow(max(localCoverage, 0.0001),
+        mix(0.72, 2.2, isolatedTaperHeight));
+    float backgroundCoverage = mix(isolatedCoverage, coherentDeckCoverage,
+        openmwseCloudBackgroundDeckWeight(layer));
+    float backgroundEnvelope = backgroundVertical * backgroundCoverage;
+    float coreTaper = mix(0.72, 1.9,
+        smoothstep(verticalStructure.x * 0.72, verticalStructure.y, relativeHeight));
+    float coreEnvelope = coreVertical * pow(max(convectiveBodyWeight, 0.0001), coreTaper);
+    float shoulderEnvelope = lowerShoulderVertical
+        * columnProperties.convectiveShoulderWeight * mix(0.28, 0.52, anvilStrength);
+    float outflowEnvelope = outflowVertical * outflowPotential;
 
-    float bodyCoverage = stormWeight * smoothstep(0.06, 0.82, stormBodyWeight)
-        * mix(0.5, 0.8, stormBodyWeight);
-    bodyCoverage *= mix(1.0, 0.72, smoothstep(0.56, 0.9, bodyRelativeHeight));
-    float bodyThreshold = reconstructionThreshold
-        + smoothstep(0.54, 0.92, bodyRelativeHeight) * 0.07;
-    float bodyBaseNoise = openmwseCloudRemap(cloudNoise, bodyThreshold, 1.0);
-    float bodyDimensionalNoise
-        = max(bodyBaseNoise - (1.0 - towerHeightProfile * stormBodyWeight), 0.0);
-    float stormBodyNoise = openmwseCloudRemap(bodyDimensionalNoise,
-        1.0 - bodyCoverage, 1.0) * developedCell;
-    coveredNoise = max(coveredNoise, stormBodyNoise);
-
-    float anvilPresence = smoothstep(0.08, 0.72, outflowSupport);
-    float anvilSystemCoverage = mix(0.38, 0.66, anvilPresence);
-    float anvilBaseNoise = openmwseCloudRemap(cloudNoise, reconstructionThreshold + 0.045, 1.0);
-    float anvilDimensionalNoise
-        = max(anvilBaseNoise - (1.0 - anvilProfile), 0.0);
-    float anvilNoise = openmwseCloudRemap(anvilDimensionalNoise,
-        1.0 - anvilSystemCoverage, 1.0) * outflowSupport;
-    coveredNoise = max(coveredNoise, anvilNoise);
-    float dimensionalExponent = 0.65;
-    float reconstructedDensity = pow(coveredNoise, dimensionalExponent) * cloudCoverage;
+    float envelopeComplement = (1.0 - clamp(backgroundEnvelope, 0.0, 1.0))
+        * (1.0 - clamp(coreEnvelope, 0.0, 1.0))
+        * (1.0 - clamp(shoulderEnvelope, 0.0, 1.0))
+        * (1.0 - clamp(outflowEnvelope, 0.0, 1.0));
+    float dimensionalEnvelope = 1.0 - envelopeComplement;
+    float coherentShapeNoise = mix(cloudNoise, 1.0,
+        clamp(outflowEnvelope * 0.58, 0.0, 0.58));
+    float reconstructedDensity = max(coherentShapeNoise - (1.0 - dimensionalEnvelope), 0.0);
     float developedDensityScale = mix(1.0, 1.18, developedCell);
     return reconstructedDensity * max(layer.parameters.y, 0.0) * developedDensityScale
         * openmwseCloudOrographicDensityScale(worldPosition, layer);
@@ -392,24 +422,29 @@ float openmwseCloudDensity(
     vec3 advectedPosition = openmwseCloudLayerPosition(worldPosition, layer);
     OpenMWSECloudColumnProperties columnProperties
         = openmwseCloudColumnProperties(
-            openmwseCloudColumnPosition(worldPosition, advectedPosition, layer), layer.parameters, layer.shape);
-    if (max(columnProperties.localCoverage,
-            max(columnProperties.stormSystemWeight, columnProperties.stormOutflowWeight)) <= 0.001)
+            openmwseCloudColumnPosition(worldPosition, advectedPosition, layer), layer.parameters, layer.shape,
+            layer.organization, layer.structure);
+    if (max(columnProperties.localCoverage, max(columnProperties.convectiveShoulderWeight,
+            max(columnProperties.stormSystemWeight, columnProperties.stormOutflowWeight))) <= 0.001)
         return 0.0;
     vec2 localHeightRange = openmwseCloudLocalLayerFromProperties(worldPosition, columnProperties, layer);
     if (worldPosition.z < localHeightRange.x || worldPosition.z > localHeightRange.x + localHeightRange.y)
         return 0.0;
-    float relativeHeight = clamp((worldPosition.z - localHeightRange.x) / localHeightRange.y, 0.0, 1.0);
+    float relativeHeight
+        = openmwseCloudProfileHeightFraction(worldPosition.z, localHeightRange.x, layer);
     vec3 baseCoordinates
         = openmwseCloudBaseNoiseCoordinates(
-            advectedPosition, columnProperties, layer.shape, relativeHeight, billowDetailAmount);
+            advectedPosition, columnProperties, layer.shape, max(layer.parameters.w, 1.0),
+            relativeHeight, billowDetailAmount);
     vec4 baseNoiseSample = openmwseCloudNoiseSample(baseCoordinates);
     float noiseFamily
         = mix(columnProperties.family, layer.shape.x, smoothstep(0.78, 1.0, layer.shape.x));
-    float baseNoise = openmwseCloudTypedBaseNoise(baseNoiseSample, noiseFamily);
+    float outflowPresence = smoothstep(0.02, 0.14, columnProperties.stormOutflowPotential)
+        * clamp(layer.shape.w, 0.0, 1.0) * clamp(layer.organization.w, 0.0, 1.0);
+    float baseNoise
+        = openmwseCloudTypedBaseNoise(baseNoiseSample, noiseFamily, relativeHeight, outflowPresence);
     float coarseDensity
-        = openmwseCloudDensityFromNoise(
-            worldPosition, advectedPosition, baseNoise, columnProperties, layer);
+        = openmwseCloudDensityFromNoise(worldPosition, baseNoise, columnProperties, layer);
     if (coarseDensity <= 0.001 || billowDetailAmount <= 0.01)
         return coarseDensity;
 
@@ -423,7 +458,8 @@ float openmwseCloudDensity(
     float normalizedCoarseDensity = coarseDensity / max(layer.parameters.y, 0.001);
     float detailedDensity = openmwseCloudRemap(normalizedCoarseDensity, heightErosion * erosionStrength, 1.0)
         * max(layer.parameters.y, 0.0);
-    return mix(coarseDensity, detailedDensity, billowDetailAmount);
+    float effectiveBillowDetailAmount = billowDetailAmount * mix(1.0, 0.3, outflowPresence);
+    return mix(coarseDensity, detailedDensity, effectiveBillowDetailAmount);
 }
 
 /// Evaluate cloud density from only the stable low-frequency field.
@@ -435,22 +471,27 @@ float openmwseCloudBroadDensity(vec3 worldPosition, OpenMWSECloudLayer layer)
     vec3 advectedPosition = openmwseCloudLayerPosition(worldPosition, layer);
     OpenMWSECloudColumnProperties columnProperties
         = openmwseCloudColumnProperties(
-            openmwseCloudColumnPosition(worldPosition, advectedPosition, layer), layer.parameters, layer.shape);
-    if (max(columnProperties.localCoverage,
-            max(columnProperties.stormSystemWeight, columnProperties.stormOutflowWeight)) <= 0.001)
+            openmwseCloudColumnPosition(worldPosition, advectedPosition, layer), layer.parameters, layer.shape,
+            layer.organization, layer.structure);
+    if (max(columnProperties.localCoverage, max(columnProperties.convectiveShoulderWeight,
+            max(columnProperties.stormSystemWeight, columnProperties.stormOutflowWeight))) <= 0.001)
         return 0.0;
     vec2 localHeightRange = openmwseCloudLocalLayerFromProperties(worldPosition, columnProperties, layer);
     if (worldPosition.z < localHeightRange.x || worldPosition.z > localHeightRange.x + localHeightRange.y)
         return 0.0;
-    float relativeHeight = clamp((worldPosition.z - localHeightRange.x) / localHeightRange.y, 0.0, 1.0);
+    float relativeHeight
+        = openmwseCloudProfileHeightFraction(worldPosition.z, localHeightRange.x, layer);
     vec3 baseCoordinates
-        = openmwseCloudBaseNoiseCoordinates(advectedPosition, columnProperties, layer.shape, relativeHeight, 0.0);
+        = openmwseCloudBaseNoiseCoordinates(advectedPosition, columnProperties, layer.shape,
+            max(layer.parameters.w, 1.0), relativeHeight, 0.0);
     vec4 baseNoiseSample = openmwseCloudNoiseSample(baseCoordinates);
     float noiseFamily
         = mix(columnProperties.family, layer.shape.x, smoothstep(0.78, 1.0, layer.shape.x));
-    float baseNoise = openmwseCloudTypedBaseNoise(baseNoiseSample, noiseFamily);
-    return openmwseCloudDensityFromNoise(
-        worldPosition, advectedPosition, baseNoise, columnProperties, layer);
+    float outflowPresence = smoothstep(0.02, 0.14, columnProperties.stormOutflowPotential)
+        * clamp(layer.shape.w, 0.0, 1.0) * clamp(layer.organization.w, 0.0, 1.0);
+    float baseNoise
+        = openmwseCloudTypedBaseNoise(baseNoiseSample, noiseFamily, relativeHeight, outflowPresence);
+    return openmwseCloudDensityFromNoise(worldPosition, baseNoise, columnProperties, layer);
 }
 
 /// Evaluate stable broad density from every enabled stratum for temporal classification.
@@ -483,38 +524,53 @@ float openmwseCloudMultipleScatteringPhase(float cosineAngle)
 
 /// Approximate one stratum's optical depth toward the sun from a cloud sample.
 float openmwseCloudSunOpticalDepth(vec3 samplePosition, vec3 sunDirection, int quality,
-    float localDensity, OpenMWSECloudLayer layer)
+    float localDensity, float shadowDither, OpenMWSECloudLayer layer)
 {
     if (!openmwseCloudLayerEnabled(layer))
         return 0.0;
     vec2 layerHeightBounds = openmwseCloudLayerHeightBounds(layer);
     if (sunDirection.z > 0.0 && samplePosition.z >= layerHeightBounds.y)
         return 0.0;
-    vec2 localHeightRange = openmwseCloudLocalLayer(samplePosition, layer);
-    float layerTop = localHeightRange.x + localHeightRange.y;
-    float distanceToTop = max(layerTop - samplePosition.z, 0.0) / max(sunDirection.z, 0.12);
+    float distanceToTop = min(max(layerHeightBounds.y - samplePosition.z, 0.0),
+        max(layer.parameters.w, 1.0) * 0.65) / max(sunDirection.z, 0.12);
     vec3 coneReference = abs(sunDirection.z) < 0.95 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
     vec3 coneRight = normalize(cross(sunDirection, coneReference));
     vec3 coneUp = cross(coneRight, sunDirection);
-    vec3 nearPosition = samplePosition + sunDirection * (distanceToTop * 0.28)
-        + coneRight * (distanceToTop * 0.035);
+    float conePattern = floor(shadowDither * 4.0);
+    vec2 nearPatternDirection = vec2(1.0, 0.0);
+    if (conePattern < 1.0)
+        nearPatternDirection = vec2(1.0, 0.0);
+    else if (conePattern < 2.0)
+        nearPatternDirection = vec2(0.0, 1.0);
+    else if (conePattern < 3.0)
+        nearPatternDirection = vec2(-1.0, 0.0);
+    else
+        nearPatternDirection = vec2(0.0, -1.0);
+    vec2 farPatternDirection = vec2(-nearPatternDirection.y, nearPatternDirection.x);
+    vec3 nearConeDirection
+        = coneRight * nearPatternDirection.x + coneUp * nearPatternDirection.y;
+    vec3 farConeDirection
+        = coneRight * farPatternDirection.x + coneUp * farPatternDirection.y;
+    vec3 nearPosition = samplePosition + sunDirection * (distanceToTop * 0.125)
+        + nearConeDirection * (distanceToTop * 0.025);
     float nearDensity = openmwseCloudBroadDensity(nearPosition, layer);
     float farDensity = quality >= 3
-        ? openmwseCloudBroadDensity(samplePosition + sunDirection * (distanceToTop * 0.72)
-              + (coneUp * 0.8 - coneRight * 0.6) * (distanceToTop * 0.11), layer)
+        ? openmwseCloudBroadDensity(samplePosition + sunDirection * (distanceToTop * 0.625)
+              + farConeDirection * (distanceToTop * 0.07), layer)
         : nearDensity;
-    return (localDensity * 0.28 + nearDensity * 0.42 + farDensity * 0.3)
-        * distanceToTop * 0.00018;
+    float nearSegmentDensity = mix(localDensity, nearDensity, 0.65);
+    return (nearSegmentDensity * 0.25 + farDensity * 0.75) * distanceToTop * 0.00018;
 }
 
 /// Approximate direct-sun access through both cloud strata without duplicating transport policy.
 float openmwseCloudSunAccess(vec3 samplePosition, vec3 sunDirection, int quality,
-    float mainDensity, float lowDensity, OpenMWSECloudLayer mainLayer, OpenMWSECloudLayer lowLayer)
+    float mainDensity, float lowDensity, float shadowDither,
+    OpenMWSECloudLayer mainLayer, OpenMWSECloudLayer lowLayer)
 {
     float opticalDepth = openmwseCloudSunOpticalDepth(
-        samplePosition, sunDirection, quality, mainDensity, mainLayer);
+        samplePosition, sunDirection, quality, mainDensity, shadowDither, mainLayer);
     opticalDepth += openmwseCloudSunOpticalDepth(
-        samplePosition, sunDirection, quality, lowDensity, lowLayer);
+        samplePosition, sunDirection, quality, lowDensity, shadowDither, lowLayer);
     return exp(-opticalDepth);
 }
 
@@ -587,8 +643,17 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
     float firstIntervalLength = firstInterval.y - firstInterval.x;
     float secondIntervalLength = separatedIntervals ? secondInterval.y - secondInterval.x : 0.0;
     float traversedIntervalLength = firstIntervalLength + secondIntervalLength;
-    float stepLength = traversedIntervalLength / float(sampleCount);
+    float minimumLayerThickness = 1e20;
+    if (mainLayerEnabled)
+        minimumLayerThickness = min(minimumLayerThickness, max(mainLayer.parameters.w, 1.0));
+    if (lowLayerEnabled)
+        minimumLayerThickness = min(minimumLayerThickness, max(lowLayer.parameters.w, 1.0));
+    float fineStepLength = clamp(minimumLayerThickness * 0.16, 3500.0, 10000.0);
+    float coarseStepLength = max(
+        traversedIntervalLength / float(sampleCount), fineStepLength * 2.5);
     float distanceAlongCloudIntervals = 0.0;
+    bool fineSampling = false;
+    int consecutiveEmptyFineSamples = 0;
     float transmittance = 1.0;
     vec3 mainScatteredLight = vec3(0.0);
     vec3 lowScatteredLight = vec3(0.0);
@@ -600,9 +665,11 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
     float phase = 0.18 + 0.68 * openmwseCloudMultipleScatteringPhase(dot(worldDirection, sunDirection));
     vec3 incidentSolarRadiance = openmwseIncidentSolarRadiance(solarRadiance, atmosphere);
     vec3 directLight = incidentSolarRadiance * (0.3 + 2.15 * phase);
-    vec3 viewSkyRadiance = openmwseAtmosphereSkyRadiance(worldDirection, atmosphere);
-    vec3 environmentIrradiance = max(openmwseAtmosphereEnvironmentIrradiance(skyIrradiance, atmosphere),
-        max(viewSkyRadiance * 1.05, atmosphere.skyColor * 0.9));
+    OpenMWSEAerialPerspectiveParameters cloudTopAtmosphere = atmosphere;
+    cloudTopAtmosphere.observerHeight = atmosphere.weatherCloudTopHeight + 1.0;
+    vec3 viewSkyRadiance = openmwseAtmosphereSkyRadiance(worldDirection, cloudTopAtmosphere);
+    vec3 environmentIrradiance = max(openmwseAtmosphereEnvironmentIrradiance(skyIrradiance, cloudTopAtmosphere),
+        cloudTopAtmosphere.skyColor * 0.9);
     environmentIrradiance += incidentSolarRadiance * 0.06;
     vec3 lowerHemisphereIrradiance = max(groundIrradiance, environmentIrradiance * 0.62);
 
@@ -617,14 +684,40 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
             = sampleSecondInterval ? distanceAlongCloudIntervals - firstIntervalLength : distanceAlongCloudIntervals;
         vec2 activeInterval = sampleSecondInterval ? secondInterval : firstInterval;
         float activeIntervalLength = sampleSecondInterval ? secondIntervalLength : firstIntervalLength;
-        float segmentLength = min(stepLength, activeIntervalLength - intervalPathOffset);
-        if (segmentLength <= 0.0)
+        float remainingIntervalLength = activeIntervalLength - intervalPathOffset;
+        if (remainingIntervalLength <= 0.0)
         {
             distanceAlongCloudIntervals = firstIntervalLength;
+            fineSampling = false;
+            consecutiveEmptyFineSamples = 0;
             continue;
         }
-        float distanceAlongRay = activeInterval.x + intervalPathOffset;
         float sampleOffset = quadratureSampling ? 0.5 : fract(rayDither + float(sampleIndex) * 0.61803398875);
+        if (!fineSampling)
+        {
+            float probeLength = min(coarseStepLength, remainingIntervalLength);
+            float probeDistance = activeInterval.x + intervalPathOffset + probeLength * sampleOffset;
+            vec3 probePosition = rayOrigin + worldDirection * probeDistance;
+            float broadDensity = 0.0;
+            if (mainLayerEnabled)
+                broadDensity += openmwseCloudBroadDensity(probePosition, mainLayer);
+            if (lowLayerEnabled)
+                broadDensity += openmwseCloudBroadDensity(probePosition, lowLayer);
+            if (broadDensity <= 0.0005)
+            {
+                distanceAlongCloudIntervals += probeLength;
+                continue;
+            }
+
+            float entryAdvance = max(probeLength * sampleOffset - fineStepLength, 0.0);
+            intervalPathOffset += entryAdvance;
+            distanceAlongCloudIntervals += entryAdvance;
+            remainingIntervalLength -= entryAdvance;
+            fineSampling = true;
+        }
+
+        float segmentLength = min(fineStepLength, remainingIntervalLength);
+        float distanceAlongRay = activeInterval.x + intervalPathOffset;
         float sampleDistance = distanceAlongRay + segmentLength * sampleOffset;
         vec3 samplePosition = rayOrigin + worldDirection * sampleDistance;
         float mainDensity = 0.0;
@@ -667,33 +760,32 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
         float density = mainDensity + lowDensity;
         if (density > 0.001)
         {
-            float sunAccess = openmwseCloudSunAccess(
-                samplePosition, sunDirection, quality, mainDensity, lowDensity, mainLayer, lowLayer);
-            float extinction = density * segmentLength * 0.0002;
-            float sampleOpacity = 1.0 - exp(-extinction);
             float relativeHeight = 0.0;
-            float developedCloudWeight = 0.0;
             if (mainDensity > 0.001)
             {
                 vec2 mainHeightRange = openmwseCloudLocalLayer(samplePosition, mainLayer);
                 relativeHeight += mainDensity
                     * clamp((samplePosition.z - mainHeightRange.x) / mainHeightRange.y, 0.0, 1.0);
-                developedCloudWeight += mainDensity * mainLayer.shape.x * mainLayer.shape.z;
             }
             if (lowDensity > 0.001)
             {
                 vec2 lowHeightRange = openmwseCloudLocalLayer(samplePosition, lowLayer);
                 relativeHeight += lowDensity
                     * clamp((samplePosition.z - lowHeightRange.x) / lowHeightRange.y, 0.0, 1.0);
-                developedCloudWeight += lowDensity * lowLayer.shape.x * lowLayer.shape.z;
             }
             relativeHeight /= density;
-            developedCloudWeight /= density;
+            float shadowDither = fract(rayDither + float(sampleIndex) * 0.61803398875);
+            float sunAccess = openmwseCloudSunAccess(
+                samplePosition, sunDirection, quality, mainDensity, lowDensity, shadowDither,
+                mainLayer, lowLayer);
+            float daylightTopExposure = smoothstep(0.42, 0.84, relativeHeight)
+                * smoothstep(0.18, 0.7, sunDirection.z);
+            float extinction = density * segmentLength * 0.0002;
+            float sampleOpacity = 1.0 - exp(-extinction);
             vec3 ambientLight
                 = mix(lowerHemisphereIrradiance, environmentIrradiance, smoothstep(0.08, 0.92, relativeHeight));
-            float ambientAccess = mix(0.34, 0.98, smoothstep(0.04, 0.96, relativeHeight));
-            ambientAccess *= mix(0.58, 1.0, sqrt(sunAccess));
-            ambientAccess *= mix(1.0, 0.56, smoothstep(0.32, 1.2, density));
+            ambientLight += incidentSolarRadiance * daylightTopExposure * 0.025;
+            float ambientAccess = mix(0.42, 0.98, smoothstep(0.04, 0.96, relativeHeight));
             float powder = 1.0 - exp(-density * segmentLength * 0.00034);
             float edgeVisibility = 1.0 - smoothstep(0.25, 1.15, density);
             float silverLining = sunAccess * edgeVisibility * phase * (0.03 + 0.18 * powder);
@@ -704,11 +796,9 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
                 * (secondarySunAccess * 0.18 + tertiarySunAccess * 0.06);
             vec3 multipleScatteringLight = incidentSolarRadiance
                 * (0.18 + 0.48 * phase) * multipleScatteringSun;
-            float stormDarkening = mix(1.0, 0.55, developedCloudWeight * (1.0 - sunAccess));
-            vec3 sampleLight = (ambientLight * ambientAccess
+            vec3 sampleLight = ambientLight * ambientAccess
                 + directLight * (sunAccess * (0.62 + 0.38 * powder) + silverLining)
-                + multipleScatteringLight)
-                * stormDarkening;
+                + multipleScatteringLight;
             float contribution = transmittance * sampleOpacity;
             float mainContribution = contribution * mainDensity / density;
             float lowContribution = contribution * lowDensity / density;
@@ -721,6 +811,17 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
             transmittance *= 1.0 - sampleOpacity;
             if (transmittance < 0.015)
                 break;
+        }
+        if (density > 0.001)
+            consecutiveEmptyFineSamples = 0;
+        else
+        {
+            ++consecutiveEmptyFineSamples;
+            if (consecutiveEmptyFineSamples >= 2)
+            {
+                fineSampling = false;
+                consecutiveEmptyFineSamples = 0;
+            }
         }
         distanceAlongCloudIntervals += segmentLength;
     }

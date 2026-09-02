@@ -39,6 +39,18 @@ shared {
         return omw.atmosphereCloudShapeParameters;
     }
 
+    /// Expose independently controlled deck and convective organization.
+    vec4 openmwseCloudOrganizationParameters()
+    {
+        return omw.atmosphereCloudOrganizationParameters;
+    }
+
+    /// Expose independently controlled tower taper and base variation.
+    vec4 openmwseCloudStructureParameters()
+    {
+        return omw.atmosphereCloudStructureParameters;
+    }
+
     /// Expose the independently placeable low-cloud layer to the shared implementation.
     vec4 openmwseLowCloudParameters()
     {
@@ -106,6 +118,9 @@ shared {
         parameters.skyColor = omw.skyColor.rgb;
         parameters.fogColor = omw.fogColor.rgb;
         parameters.sunDirection = omw.sunPos.xyz;
+        parameters.solarRadiance = omw.atmosphereSolarRadiance;
+        parameters.skyIrradiance = omw.atmosphereSkyIrradiance;
+        parameters.groundIrradiance = omw.atmosphereGroundIrradiance;
         parameters.weatherWeight = omw.atmosphereWeatherWeight;
         parameters.fogStart = omw.fogNear;
         parameters.fogEnd = omw.fogFar;
@@ -115,6 +130,9 @@ shared {
         parameters.exponentialFog = 0.0;
 #endif
         parameters.referenceHeight = omw.waterHeight;
+        parameters.observerHeight = omw.eyePos.z;
+        parameters.weatherCloudTopHeight = openmwseCloudLayerHeightBounds(openmwseMainCloudLayer()).y;
+        parameters.weatherCloudCoverage = omw.atmosphereCloudParameters.x;
         return parameters;
     }
 
@@ -298,11 +316,11 @@ shared {
             vec3 advectedPosition = openmwseCloudLayerPosition(samplePosition, cloudLayer);
             OpenMWSECloudColumnProperties columnProperties = openmwseCloudColumnProperties(
                 openmwseCloudColumnPosition(samplePosition, advectedPosition, cloudLayer),
-                cloudLayer.parameters, cloudLayer.shape);
+                cloudLayer.parameters, cloudLayer.shape, cloudLayer.organization, cloudLayer.structure);
             vec2 localLayer
                 = openmwseCloudLocalLayerFromProperties(samplePosition, columnProperties, cloudLayer);
             float relativeHeight
-                = clamp((samplePosition.z - localLayer.x) / max(localLayer.y, 1.0), 0.0, 1.0);
+                = openmwseCloudProfileHeightFraction(samplePosition.z, localLayer.x, cloudLayer);
             float heightSupport = openmwseCloudHeightProfile(
                 relativeHeight, columnProperties.family, columnProperties.development);
             float columnSupport = openmwseCloudLocalCoverage(

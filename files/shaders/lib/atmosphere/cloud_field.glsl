@@ -5,8 +5,6 @@ const float openmwseCloudMaximumDistance = 500000.0;
 const float openmwseCloudBaseVariation = 0.22;
 const float openmwseCloudMinimumThicknessScale = 0.45;
 const float openmwseCloudMaximumThicknessScale = 1.45;
-const float openmwseCloudConvectiveCoordinateScale = 1.8;
-
 /// Carry the weather-column signals needed to reconstruct one typed cloud volume.
 struct OpenMWSECloudColumnProperties
 {
@@ -16,8 +14,10 @@ struct OpenMWSECloudColumnProperties
     float development;
     float family;
     float convectivePotential;
+    float convectiveShoulderWeight;
     float stormSystemWeight;
     float stormCellWeight;
+    float stormOutflowPotential;
     float stormOutflowWeight;
 };
 
@@ -71,77 +71,68 @@ float openmwseCloudColumnOccupancy(float organizationPotential, float requestedC
 vec2 openmwseCloudWeatherCoordinates(vec2 advectedWorldPosition, vec4 shape)
 {
     float featureScale = max(shape.y, 0.25);
-    return advectedWorldPosition * (0.0000032 / featureScale) + vec2(0.37, -0.21);
-}
-
-/// Map broad weather coordinates into the smaller cells that organize convective updrafts.
-vec2 openmwseCloudConvectiveWeatherCoordinates(vec2 weatherCoordinates)
-{
-    return weatherCoordinates * openmwseCloudConvectiveCoordinateScale + vec2(-0.31, 0.27);
+    return advectedWorldPosition * (0.0000024 / featureScale) + vec2(0.37, -0.21);
 }
 
 /// Evaluate the authoritative world-space weather field for column occupancy and morphology.
 OpenMWSECloudColumnProperties openmwseCloudColumnProperties(
-    vec2 advectedWorldPosition, vec4 parameters, vec4 shape)
+    vec2 advectedWorldPosition, vec4 parameters, vec4 shape, vec4 organization, vec4 structure)
 {
     vec2 weatherCoordinates = openmwseCloudWeatherCoordinates(advectedWorldPosition, shape);
     vec4 weather = openmwseCloudWeatherSample(weatherCoordinates);
     float requestedFamily = clamp(shape.x, 0.0, 1.0);
     float requestedDevelopment = clamp(shape.z, 0.0, 1.0);
-    float convectiveBias = smoothstep(0.34, 0.72, requestedFamily);
-    float stormBias = smoothstep(0.78, 1.0, requestedFamily);
-    float cellularDevelopmentWeight = max(stormBias, convectiveBias * 0.72);
-    vec4 convectiveWeather = weather;
-    if (cellularDevelopmentWeight > 0.001)
-        convectiveWeather
-            = openmwseCloudWeatherSample(openmwseCloudConvectiveWeatherCoordinates(weatherCoordinates));
-    float convectiveSupportPotential
-        = mix(weather.b, convectiveWeather.b, cellularDevelopmentWeight);
-    float convectiveDevelopmentPotential
-        = clamp(convectiveWeather.b * mix(0.8, 1.3, convectiveWeather.r), 0.0, 1.0);
-    float developmentPotential
-        = mix(weather.b, convectiveDevelopmentPotential, cellularDevelopmentWeight);
-    float convectiveSupport = smoothstep(0.36, 0.88, convectiveSupportPotential);
-    float cellularPotential = weather.r * mix(0.18, 1.0, convectiveSupport);
-    float stormPotential = max(cellularPotential, weather.r * 0.74);
-    float organizationPotential = mix(weather.r, cellularPotential, convectiveBias);
-    organizationPotential = mix(organizationPotential, stormPotential, stormBias);
+    float deckContinuity = clamp(organization.x, 0.0, 1.0);
+    float requestedConvectiveFrequency = clamp(organization.y, 0.0, 1.0);
+    float requestedConvectiveMaturity = clamp(organization.z, 0.0, 1.0);
+    float stormBias = clamp(organization.w, 0.0, 1.0);
+    float organizationPotential = weather.r;
     float columnOccupancy = openmwseCloudLocalCoverage(organizationPotential, parameters.x);
-    float outflowOccupancy = openmwseCloudLocalCoverage(
-        organizationPotential, clamp(parameters.x + 0.14 * stormBias, 0.0, 1.0));
-    float familyVariation = mix(0.12, 0.46, smoothstep(0.28, 0.7, requestedFamily));
-    float variedFamily = mix(requestedFamily, weather.a, familyVariation);
-    float nonStormConvectiveUplift = (1.0 - stormBias) * convectiveBias
-        * smoothstep(0.82, 0.98, developmentPotential) * 0.34;
-    variedFamily = clamp(variedFamily + nonStormConvectiveUplift, 0.0, 1.0);
-    float stormDeckFamily = mix(0.12, 0.26, weather.a);
-    float stormSystemWeight = smoothstep(0.34, 0.76, weather.b)
-        * smoothstep(0.04, 0.64, outflowOccupancy) * requestedDevelopment;
-    float stormCellPotential = max(convectiveWeather.b, weather.b * 0.82);
-    float stormOutflowPotential = max(convectiveWeather.b, weather.b * 0.92);
-    float stormCellWeight = smoothstep(0.68, 0.94, stormCellPotential)
-        * smoothstep(0.12, 0.72, columnOccupancy) * requestedDevelopment;
-    float stormOutflowWeight = smoothstep(0.52, 0.88, stormOutflowPotential)
-        * smoothstep(0.06, 0.62, outflowOccupancy) * requestedDevelopment;
-    float stormFamily = mix(stormDeckFamily, requestedFamily, stormCellWeight);
-    float localFamily = mix(variedFamily, stormFamily, stormBias);
-    float developedColumn = smoothstep(0.3, 0.9, developmentPotential);
-    float deckDevelopment = requestedDevelopment * mix(0.2, 0.48, developedColumn);
-    float cellDevelopment = requestedDevelopment * mix(0.62, 1.0, developedColumn);
-    float stormDevelopment = mix(deckDevelopment, cellDevelopment, stormCellWeight);
-    float convectiveDevelopmentScale = mix(0.35, 1.3, developedColumn);
-    float nonStormDevelopmentScale = mix(developedColumn, convectiveDevelopmentScale, convectiveBias);
-    float nonStormDevelopment = requestedDevelopment * nonStormDevelopmentScale;
-    float localDevelopment = clamp(mix(nonStormDevelopment, stormDevelopment, stormBias), 0.0, 1.0);
-    return OpenMWSECloudColumnProperties(organizationPotential, columnOccupancy, weather.g, localDevelopment,
-        localFamily, stormCellPotential, stormSystemWeight, stormCellWeight, stormOutflowWeight);
+
+    // The weather resource stores a normalized density-function description of each column:
+    // R is deck organization, G is convective core height, B is spreading outflow, and A is base variation.
+    float concentratedConvectiveCoverage
+        = mix(requestedConvectiveFrequency, requestedConvectiveFrequency * 0.34, stormBias);
+    float coreThreshold = mix(0.84, 0.12, sqrt(concentratedConvectiveCoverage));
+    float coreOccupancy = smoothstep(coreThreshold, min(coreThreshold + 0.2, 1.0), weather.g);
+    float coreShape = smoothstep(0.08, 0.94, weather.g);
+    float maturity = smoothstep(0.04, 0.82, requestedConvectiveMaturity);
+    float stormCellWeight = coreOccupancy * coreShape * maturity;
+
+    float shoulderCoverage = clamp(concentratedConvectiveCoverage * 1.9, 0.0, 0.72);
+    float outflowThreshold = mix(0.76, 0.08, sqrt(shoulderCoverage));
+    float outflowOccupancy
+        = smoothstep(outflowThreshold, min(outflowThreshold + 0.2, 1.0), weather.b);
+    float convectiveShoulderWeight = outflowOccupancy * smoothstep(0.2, 0.88, weather.b)
+        * maturity * mix(0.46, 0.82, stormBias);
+    float stormSystemWeight = smoothstep(0.22, 0.76, organizationPotential)
+        * requestedDevelopment * stormBias;
+    float stormOutflowWeight = outflowOccupancy * smoothstep(0.18, 0.9, weather.b)
+        * requestedDevelopment * maturity * stormBias * clamp(shape.w, 0.0, 1.0);
+
+    float developedColumn = max(stormCellWeight, convectiveShoulderWeight * 0.58);
+    float ambientConvection = smoothstep(0.14, 0.9, weather.g)
+        * smoothstep(0.02, 0.52, requestedConvectiveFrequency) * maturity
+        * (1.0 - stormBias) * mix(0.68, 0.28, deckContinuity);
+    float localConvectiveDevelopment = max(developedColumn, ambientConvection);
+    float localFamily = mix(requestedFamily, 1.0,
+        localConvectiveDevelopment * smoothstep(0.08, 0.72, requestedConvectiveMaturity));
+    float deckDevelopment = requestedDevelopment * mix(0.24, 0.42, deckContinuity);
+    float localDevelopment = mix(deckDevelopment,
+        max(requestedDevelopment, requestedConvectiveMaturity), localConvectiveDevelopment);
+    localDevelopment = clamp(localDevelopment, 0.0, 1.0);
+    float baseVariation = mix(0.5, weather.a, clamp(structure.y, 0.0, 1.0));
+    return OpenMWSECloudColumnProperties(organizationPotential, columnOccupancy, baseVariation, localDevelopment,
+        localFamily, weather.g, convectiveShoulderWeight, stormSystemWeight, stormCellWeight,
+        weather.b, stormOutflowWeight);
 }
 
 /// Evaluate the broad weather column shared by cloud density and surface shadows.
 float openmwseCloudColumnNoise(vec2 advectedWorldPosition)
 {
     return openmwseCloudColumnProperties(advectedWorldPosition, openmwseCloudParameters(),
-        openmwseCloudShapeParameters()).organizationPotential;
+        openmwseCloudShapeParameters(), openmwseCloudOrganizationParameters(),
+        openmwseCloudStructureParameters()).organizationPotential;
 }
 
 /// Convert requested coverage and ranked organization potential into column occupancy.
@@ -151,7 +142,8 @@ float openmwseCloudLocalCoverage(float organizationPotential, float requestedCov
     float occupancyThreshold = 1.0 - requestedCoverage;
     float transitionWidth = mix(0.045, 0.11, smoothstep(0.72, 1.0, requestedCoverage));
     float blanketWeight = smoothstep(0.78, 0.98, requestedCoverage);
-    float fullDensityThreshold = mix(1.0, occupancyThreshold + transitionWidth, blanketWeight);
+    float fullDensityThreshold
+        = min(1.0, occupancyThreshold + mix(0.22, transitionWidth, blanketWeight));
     return smoothstep(occupancyThreshold - transitionWidth, fullDensityThreshold, organizationPotential);
 }
 
@@ -171,7 +163,8 @@ float openmwseCloudColumnDensity(vec2 worldPosition)
     vec4 parameters = openmwseCloudParameters();
     OpenMWSECloudColumnProperties properties = openmwseCloudColumnProperties(
         openmwseCloudAdvectedPosition(vec3(worldPosition, 0.0)).xy, parameters,
-        openmwseCloudShapeParameters());
+        openmwseCloudShapeParameters(), openmwseCloudOrganizationParameters(),
+        openmwseCloudStructureParameters());
     float normalizedDensity = smoothstep(0.08, 0.82, properties.localCoverage);
     return normalizedDensity * max(parameters.y, 0.0);
 }

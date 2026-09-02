@@ -817,7 +817,7 @@ namespace MWRender
         AtmosphereVolumeState diagnosticVolumes = atmosphere.mVolumes;
         if (!mAtmosphereDiagnosticMedia.mMainClouds)
         {
-            diagnosticVolumes.mCloudCoverage = 0.f;
+            diagnosticVolumes.mCloudDeckCoverage = 0.f;
             diagnosticVolumes.mCloudDensity = 0.f;
         }
         if (!mAtmosphereDiagnosticMedia.mLowClouds)
@@ -834,10 +834,9 @@ namespace MWRender
         const bool atmosphereEnabled
             = Settings::shaders().mAtmosphericEffects && mSky->isEnabled() && atmosphere.mEnabled;
         const osg::Vec4f skyColor = mSky->getSkyColor();
-        const osg::Vec3f scatteringSunDirection
-            = getScatteringSunDirection(mSky->getSunDirection(), mSunVisibility > 0.f);
+        const osg::Vec3f scatteringSunDirection = getScatteringSunDirection(mSky->getSunDirection(), !mNight);
         mAtmosphereDiagnosticState = { fogStart, fogEnd, mNearClip, mViewDistance, atmosphereEnabled, diagnosticVolumes,
-            scatteringSunDirection, atmosphere.mLighting, atmosphere.mSunDiscColor };
+            scatteringSunDirection, atmosphere.mLighting, atmosphere.mSunDiscColor, cloudFieldOffset };
         const float atmosphereHistoryLightingWeight = mAtmosphereHistoryLighting.update(
             { atmosphere.mLighting.mSolarRadiance, atmosphere.mLighting.mSkyIrradiance,
                 atmosphere.mLighting.mGroundIrradiance, atmosphere.mInScattering, atmosphere.mOutScattering,
@@ -846,10 +845,13 @@ namespace MWRender
             atmosphereEnabled);
         mStateUpdater->setAtmosphere(atmosphereEnabled, mSky->getSkyColor(), atmosphere.mInScattering,
             atmosphere.mOutScattering, atmosphere.mWeatherWeight, scatteringSunDirection,
-            { diagnosticVolumes.mCloudCoverage, diagnosticVolumes.mCloudDensity,
+            { diagnosticVolumes.mCloudDeckCoverage, diagnosticVolumes.mCloudDensity,
                 diagnosticVolumes.mCloudBaseAltitudeWorldUnits, diagnosticVolumes.mCloudThicknessWorldUnits },
             { atmosphere.mVolumes.mCloudType, atmosphere.mVolumes.mCloudFeatureScale,
                 atmosphere.mVolumes.mCloudVerticalDevelopment, atmosphere.mVolumes.mCloudAnvilStrength },
+            { atmosphere.mVolumes.mCloudDeckContinuity, atmosphere.mVolumes.mCloudConvectiveFrequency,
+                atmosphere.mVolumes.mCloudConvectiveMaturity, atmosphere.mVolumes.mCloudStormOrganization },
+            { atmosphere.mVolumes.mCloudTowerTaper, atmosphere.mVolumes.mCloudBaseVariation, 0.f, 0.f },
             { diagnosticVolumes.mLowCloudCoverage, diagnosticVolumes.mLowCloudDensity,
                 atmosphere.mVolumes.mLowCloudBaseAltitudeWorldUnits, atmosphere.mVolumes.mLowCloudThicknessWorldUnits },
             { atmosphere.mVolumes.mLowCloudType, atmosphere.mVolumes.mLowCloudFeatureScale,
@@ -882,10 +884,13 @@ namespace MWRender
         stateUpdater->setWindSpeed(world->getWindSpeed());
         stateUpdater->setSkyColor(mSky->getSkyColor());
         stateUpdater->setAtmosphere(atmosphere.mInScattering, atmosphere.mOutScattering,
-            { diagnosticVolumes.mCloudCoverage, diagnosticVolumes.mCloudDensity,
+            { diagnosticVolumes.mCloudDeckCoverage, diagnosticVolumes.mCloudDensity,
                 diagnosticVolumes.mCloudBaseAltitudeWorldUnits, diagnosticVolumes.mCloudThicknessWorldUnits },
             { atmosphere.mVolumes.mCloudType, atmosphere.mVolumes.mCloudFeatureScale,
                 atmosphere.mVolumes.mCloudVerticalDevelopment, atmosphere.mVolumes.mCloudAnvilStrength },
+            { atmosphere.mVolumes.mCloudDeckContinuity, atmosphere.mVolumes.mCloudConvectiveFrequency,
+                atmosphere.mVolumes.mCloudConvectiveMaturity, atmosphere.mVolumes.mCloudStormOrganization },
+            { atmosphere.mVolumes.mCloudTowerTaper, atmosphere.mVolumes.mCloudBaseVariation, 0.f, 0.f },
             { diagnosticVolumes.mLowCloudCoverage, diagnosticVolumes.mLowCloudDensity,
                 atmosphere.mVolumes.mLowCloudBaseAltitudeWorldUnits, atmosphere.mVolumes.mLowCloudThicknessWorldUnits },
             { atmosphere.mVolumes.mLowCloudType, atmosphere.mVolumes.mLowCloudFeatureScale,

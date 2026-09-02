@@ -20,6 +20,18 @@ vec4 openmwseCloudShapeParameters()
     return atmosphere.cloudShapeParameters;
 }
 
+/// Expose independently controlled deck and convective organization.
+vec4 openmwseCloudOrganizationParameters()
+{
+    return atmosphere.cloudOrganizationParameters;
+}
+
+/// Expose independently controlled tower taper and base variation.
+vec4 openmwseCloudStructureParameters()
+{
+    return atmosphere.cloudStructureParameters;
+}
+
 /// Expose the independently placeable low-cloud layer to the shared implementation.
 vec4 openmwseLowCloudParameters()
 {
@@ -112,9 +124,12 @@ OpenMWSEAerialPerspectiveParameters openmwseAerialPerspectiveParameters()
 #if @exponentialFog
     parameters.exponentialFog = 1.0;
 #else
-        parameters.exponentialFog = 0.0;
+    parameters.exponentialFog = 0.0;
 #endif
     parameters.referenceHeight = waterHeight;
+    parameters.observerHeight = atmosphereEyePosition().z;
+    parameters.weatherCloudTopHeight = openmwseCloudLayerHeightBounds(openmwseMainCloudLayer()).y;
+    parameters.weatherCloudCoverage = atmosphere.cloudParameters.x;
     return parameters;
 }
 

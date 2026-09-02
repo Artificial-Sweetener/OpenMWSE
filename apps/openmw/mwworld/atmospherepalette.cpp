@@ -148,7 +148,7 @@ namespace MWWorld
         /// Store validated per-weather cloud, mist, and shaft controls in world units.
         struct VolumeProfile
         {
-            float mCloudCoverage;
+            float mCloudDeckCoverage;
             float mCloudDensity;
             float mCloudBaseAltitudeWorldUnits;
             float mCloudThicknessWorldUnits;
@@ -156,6 +156,12 @@ namespace MWWorld
             float mCloudFeatureScale;
             float mCloudVerticalDevelopment;
             float mCloudAnvilStrength;
+            float mCloudDeckContinuity;
+            float mCloudConvectiveFrequency;
+            float mCloudConvectiveMaturity;
+            float mCloudStormOrganization;
+            float mCloudTowerTaper;
+            float mCloudBaseVariation;
             float mCloudTerrainFollowing;
             float mCloudTerrainClearanceWorldUnits;
             float mLowCloudCoverage;
@@ -181,7 +187,7 @@ namespace MWWorld
         {
             if (!source.IsMap())
                 throw std::runtime_error("OpenMWSE atmosphere data is missing volume profile: " + std::string(path));
-            return { readBoundedFloat(source, "cloudCoverage", path, 0.f, 1.f),
+            return { readBoundedFloat(source, "cloudDeckCoverage", path, 0.f, 1.f),
                 readBoundedFloat(source, "cloudDensity", path, 0.f, 4.f),
                 readBoundedFloat(source, "cloudAltitude", path, -10000.f, 200000.f),
                 readBoundedFloat(source, "cloudThickness", path, 1.f, 200000.f),
@@ -189,6 +195,12 @@ namespace MWWorld
                 readBoundedFloat(source, "cloudFeatureScale", path, 0.25f, 4.f),
                 readBoundedFloat(source, "cloudVerticalDevelopment", path, 0.f, 1.f),
                 readBoundedFloat(source, "cloudAnvilStrength", path, 0.f, 1.f),
+                readBoundedFloat(source, "cloudDeckContinuity", path, 0.f, 1.f),
+                readBoundedFloat(source, "cloudConvectiveFrequency", path, 0.f, 1.f),
+                readBoundedFloat(source, "cloudConvectiveMaturity", path, 0.f, 1.f),
+                readBoundedFloat(source, "cloudStormOrganization", path, 0.f, 1.f),
+                readBoundedFloat(source, "cloudTowerTaper", path, 0.f, 1.f),
+                readBoundedFloat(source, "cloudBaseVariation", path, 0.f, 1.f),
                 readBoundedFloat(source, "cloudTerrainFollowing", path, 0.f, 1.f),
                 readBoundedFloat(source, "cloudTerrainClearance", path, -20000.f, 100000.f),
                 readBoundedFloat(source, "lowCloudCoverage", path, 0.f, 1.f),
@@ -209,35 +221,74 @@ namespace MWWorld
                 readBoundedFloat(source, "fogAnisotropy", path, 0.f, 0.95f) };
         }
 
-        /// Interpolate weather volume controls during a weather transition.
-        VolumeProfile blend(const VolumeProfile& from, const VolumeProfile& to, float factor)
+        /// Return a Hermite transition across a normalized subrange.
+        float smoothRange(float lower, float upper, float value)
         {
-            return { std::lerp(from.mCloudCoverage, to.mCloudCoverage, factor),
-                std::lerp(from.mCloudDensity, to.mCloudDensity, factor),
-                std::lerp(from.mCloudBaseAltitudeWorldUnits, to.mCloudBaseAltitudeWorldUnits, factor),
-                std::lerp(from.mCloudThicknessWorldUnits, to.mCloudThicknessWorldUnits, factor),
-                std::lerp(from.mCloudType, to.mCloudType, factor),
-                std::lerp(from.mCloudFeatureScale, to.mCloudFeatureScale, factor),
-                std::lerp(from.mCloudVerticalDevelopment, to.mCloudVerticalDevelopment, factor),
-                std::lerp(from.mCloudAnvilStrength, to.mCloudAnvilStrength, factor),
-                std::lerp(from.mCloudTerrainFollowing, to.mCloudTerrainFollowing, factor),
-                std::lerp(from.mCloudTerrainClearanceWorldUnits, to.mCloudTerrainClearanceWorldUnits, factor),
-                std::lerp(from.mLowCloudCoverage, to.mLowCloudCoverage, factor),
-                std::lerp(from.mLowCloudDensity, to.mLowCloudDensity, factor),
-                std::lerp(from.mLowCloudBaseAltitudeWorldUnits, to.mLowCloudBaseAltitudeWorldUnits, factor),
-                std::lerp(from.mLowCloudThicknessWorldUnits, to.mLowCloudThicknessWorldUnits, factor),
-                std::lerp(from.mLowCloudType, to.mLowCloudType, factor),
-                std::lerp(from.mLowCloudFeatureScale, to.mLowCloudFeatureScale, factor),
-                std::lerp(from.mLowCloudVerticalDevelopment, to.mLowCloudVerticalDevelopment, factor),
-                std::lerp(from.mLowCloudEnvironmentInfluence, to.mLowCloudEnvironmentInfluence, factor),
-                std::lerp(from.mMistDensity, to.mMistDensity, factor),
-                std::lerp(from.mMistBaseAltitudeWorldUnits, to.mMistBaseAltitudeWorldUnits, factor),
-                std::lerp(from.mMistThicknessWorldUnits, to.mMistThicknessWorldUnits, factor),
-                std::lerp(from.mShaftIntensity, to.mShaftIntensity, factor),
-                std::lerp(from.mFogDensity, to.mFogDensity, factor),
-                std::lerp(from.mFogBaseAltitudeWorldUnits, to.mFogBaseAltitudeWorldUnits, factor),
-                std::lerp(from.mFogThicknessWorldUnits, to.mFogThicknessWorldUnits, factor),
-                std::lerp(from.mFogAnisotropy, to.mFogAnisotropy, factor) };
+            const float normalized = std::clamp((value - lower) / std::max(upper - lower, 0.0001f), 0.f, 1.f);
+            return normalized * normalized * (3.f - 2.f * normalized);
+        }
+
+        /// Stage visible deck, convection, and remnants without changing authoritative weather timing.
+        WeatherPresentationState makeWeatherPresentationState(
+            const VolumeProfile& from, const VolumeProfile& to, float transition)
+        {
+            const float fromSeverity
+                = std::max({ from.mCloudDeckCoverage, from.mCloudStormOrganization, from.mCloudConvectiveMaturity });
+            const float toSeverity
+                = std::max({ to.mCloudDeckCoverage, to.mCloudStormOrganization, to.mCloudConvectiveMaturity });
+            if (toSeverity > fromSeverity + 0.01f)
+            {
+                return { smoothRange(0.f, 0.72f, transition), smoothRange(0.18f, 1.f, transition),
+                    smoothRange(0.08f, 0.92f, transition) };
+            }
+            if (toSeverity + 0.01f < fromSeverity)
+            {
+                return { smoothRange(0.18f, 1.f, transition), smoothRange(0.f, 0.62f, transition),
+                    smoothRange(0.35f, 1.f, transition) };
+            }
+            const float blend = smoothRange(0.f, 1.f, transition);
+            return { blend, blend, blend };
+        }
+
+        /// Interpolate weather volumes using independently staged presentation channels.
+        VolumeProfile blend(
+            const VolumeProfile& from, const VolumeProfile& to, const WeatherPresentationState& presentation)
+        {
+            const float deck = presentation.mDeckBlend;
+            const float convection = presentation.mConvectionBlend;
+            const float remnant = presentation.mRemnantBlend;
+            return { std::lerp(from.mCloudDeckCoverage, to.mCloudDeckCoverage, deck),
+                std::lerp(from.mCloudDensity, to.mCloudDensity, deck),
+                std::lerp(from.mCloudBaseAltitudeWorldUnits, to.mCloudBaseAltitudeWorldUnits, deck),
+                std::lerp(from.mCloudThicknessWorldUnits, to.mCloudThicknessWorldUnits, convection),
+                std::lerp(from.mCloudType, to.mCloudType, convection),
+                std::lerp(from.mCloudFeatureScale, to.mCloudFeatureScale, convection),
+                std::lerp(from.mCloudVerticalDevelopment, to.mCloudVerticalDevelopment, convection),
+                std::lerp(from.mCloudAnvilStrength, to.mCloudAnvilStrength, convection),
+                std::lerp(from.mCloudDeckContinuity, to.mCloudDeckContinuity, deck),
+                std::lerp(from.mCloudConvectiveFrequency, to.mCloudConvectiveFrequency, convection),
+                std::lerp(from.mCloudConvectiveMaturity, to.mCloudConvectiveMaturity, convection),
+                std::lerp(from.mCloudStormOrganization, to.mCloudStormOrganization, convection),
+                std::lerp(from.mCloudTowerTaper, to.mCloudTowerTaper, convection),
+                std::lerp(from.mCloudBaseVariation, to.mCloudBaseVariation, deck),
+                std::lerp(from.mCloudTerrainFollowing, to.mCloudTerrainFollowing, remnant),
+                std::lerp(from.mCloudTerrainClearanceWorldUnits, to.mCloudTerrainClearanceWorldUnits, remnant),
+                std::lerp(from.mLowCloudCoverage, to.mLowCloudCoverage, remnant),
+                std::lerp(from.mLowCloudDensity, to.mLowCloudDensity, remnant),
+                std::lerp(from.mLowCloudBaseAltitudeWorldUnits, to.mLowCloudBaseAltitudeWorldUnits, remnant),
+                std::lerp(from.mLowCloudThicknessWorldUnits, to.mLowCloudThicknessWorldUnits, remnant),
+                std::lerp(from.mLowCloudType, to.mLowCloudType, remnant),
+                std::lerp(from.mLowCloudFeatureScale, to.mLowCloudFeatureScale, remnant),
+                std::lerp(from.mLowCloudVerticalDevelopment, to.mLowCloudVerticalDevelopment, remnant),
+                std::lerp(from.mLowCloudEnvironmentInfluence, to.mLowCloudEnvironmentInfluence, remnant),
+                std::lerp(from.mMistDensity, to.mMistDensity, remnant),
+                std::lerp(from.mMistBaseAltitudeWorldUnits, to.mMistBaseAltitudeWorldUnits, remnant),
+                std::lerp(from.mMistThicknessWorldUnits, to.mMistThicknessWorldUnits, remnant),
+                std::lerp(from.mShaftIntensity, to.mShaftIntensity, deck),
+                std::lerp(from.mFogDensity, to.mFogDensity, remnant),
+                std::lerp(from.mFogBaseAltitudeWorldUnits, to.mFogBaseAltitudeWorldUnits, remnant),
+                std::lerp(from.mFogThicknessWorldUnits, to.mFogThicknessWorldUnits, remnant),
+                std::lerp(from.mFogAnisotropy, to.mFogAnisotropy, remnant) };
         }
 
         /// Resolve a canonical weather name to its volume-profile index.
@@ -495,7 +546,9 @@ namespace MWWorld
         const VolumeProfile& currentVolume = mImpl->mVolumes[weatherIndex(currentWeather)];
         const VolumeProfile& nextVolume
             = nextWeather.empty() ? currentVolume : mImpl->mVolumes[weatherIndex(nextWeather)];
-        const VolumeProfile volume = blend(currentVolume, nextVolume, transition);
+        const WeatherPresentationState presentation
+            = makeWeatherPresentationState(currentVolume, nextVolume, transition);
+        const VolumeProfile volume = blend(currentVolume, nextVolume, presentation);
 
         MWRender::AtmosphereState result;
         result.mInScattering = mImpl->mApplied.mInScattering;
@@ -503,10 +556,12 @@ namespace MWWorld
         result.mWeatherWeight = weatherWeight * weatherWeight;
         result.mEnabled = true;
         const VolumeModifiers& environment = mImpl->mAppliedVolumes;
-        result.mVolumes = { volume.mCloudCoverage, volume.mCloudDensity * environment.mCloudDensityMultiplier,
+        result.mVolumes = { volume.mCloudDeckCoverage, volume.mCloudDensity * environment.mCloudDensityMultiplier,
             volume.mCloudBaseAltitudeWorldUnits + environment.mCloudAltitudeOffsetWorldUnits,
             volume.mCloudThicknessWorldUnits * environment.mCloudThicknessMultiplier, volume.mCloudType,
             volume.mCloudFeatureScale, volume.mCloudVerticalDevelopment, volume.mCloudAnvilStrength,
+            volume.mCloudDeckContinuity, volume.mCloudConvectiveFrequency, volume.mCloudConvectiveMaturity,
+            volume.mCloudStormOrganization, volume.mCloudTowerTaper, volume.mCloudBaseVariation,
             volume.mCloudTerrainFollowing, volume.mCloudTerrainClearanceWorldUnits,
             std::clamp(volume.mLowCloudCoverage
                     * std::lerp(1.f, environment.mLowCloudOccurrenceMultiplier, volume.mLowCloudEnvironmentInfluence),

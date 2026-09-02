@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -52,7 +53,8 @@ namespace MWWorld
             EXPECT_FLOAT_EQ(clear.mWeatherWeight, 1.f);
             EXPECT_EQ(clear.mInScattering, osg::Vec3f(0.25f, 0.38f, 0.48f));
             EXPECT_EQ(clear.mOutScattering, osg::Vec3f(0.07f, 0.36f, 0.76f));
-            EXPECT_FLOAT_EQ(clear.mVolumes.mCloudCoverage, 0.22f);
+            EXPECT_FLOAT_EQ(clear.mVolumes.mCloudDeckCoverage, 0.26f);
+            EXPECT_FLOAT_EQ(clear.mVolumes.mCloudConvectiveFrequency, 0.18f);
             EXPECT_FLOAT_EQ(clear.mVolumes.mTerrainReferenceHeightWorldUnits, 12000.f);
             EXPECT_FLOAT_EQ(clear.mVolumes.mMistDensity, 0.0432f);
             EXPECT_FLOAT_EQ(clear.mVolumes.mShaftIntensity, 0.75f);
@@ -62,9 +64,9 @@ namespace MWWorld
             EXPECT_FLOAT_EQ(palette.getState("Rain", "Cloudy", 0.5f).mWeatherWeight, 0.25f);
 
             const MWRender::AtmosphereState rainToCloudy = palette.getState("Rain", "Cloudy", 0.5f);
-            EXPECT_FLOAT_EQ(rainToCloudy.mVolumes.mCloudCoverage, 0.77f);
-            EXPECT_FLOAT_EQ(rainToCloudy.mVolumes.mMistDensity, 0.065f * 1.08f);
-            EXPECT_FLOAT_EQ(rainToCloudy.mVolumes.mShaftIntensity, 0.575f);
+            EXPECT_GT(rainToCloudy.mVolumes.mCloudDeckCoverage, 0.8f);
+            EXPECT_GT(rainToCloudy.mVolumes.mMistDensity, 0.08f * 1.08f);
+            EXPECT_LT(rainToCloudy.mVolumes.mCloudStormOrganization, 0.4f);
 
             const MWRender::AtmosphereState cloudy = palette.getState("Cloudy", {}, 0.f);
             const MWRender::AtmosphereState thunderstorm = palette.getState("Thunderstorm", {}, 0.f);
@@ -72,6 +74,9 @@ namespace MWWorld
             EXPECT_GT(thunderstorm.mVolumes.mCloudVerticalDevelopment, cloudy.mVolumes.mCloudVerticalDevelopment);
             EXPECT_GT(thunderstorm.mVolumes.mCloudThicknessWorldUnits, cloudy.mVolumes.mCloudThicknessWorldUnits);
             EXPECT_GT(thunderstorm.mVolumes.mCloudAnvilStrength, cloudy.mVolumes.mCloudAnvilStrength);
+            EXPECT_GT(thunderstorm.mVolumes.mCloudDeckCoverage, 0.9f);
+            EXPECT_GT(thunderstorm.mVolumes.mCloudConvectiveFrequency, cloudy.mVolumes.mCloudConvectiveFrequency);
+            EXPECT_GT(thunderstorm.mVolumes.mCloudStormOrganization, cloudy.mVolumes.mCloudStormOrganization);
 
             const MWRender::AtmosphereState foggy = palette.getState("Foggy", {}, 0.f);
             EXPECT_GT(foggy.mVolumes.mFogDensity, foggy.mVolumes.mMistDensity);
@@ -93,10 +98,10 @@ namespace MWWorld
             ASSERT_TRUE(paletteStream.is_open());
             ASSERT_TRUE(volumeStream.is_open());
             std::string contents((std::istreambuf_iterator<char>(volumeStream)), std::istreambuf_iterator<char>());
-            const std::string valid = R"("cloudCoverage": 0.22)";
+            const std::string valid = R"("cloudDeckCoverage": 0.26)";
             const std::size_t position = contents.find(valid);
             ASSERT_NE(position, std::string::npos);
-            contents.replace(position, valid.size(), R"("cloudCoverage": 1.8)");
+            contents.replace(position, valid.size(), R"("cloudDeckCoverage": 1.8)");
 
             std::istringstream invalid(contents);
             try
@@ -106,7 +111,8 @@ namespace MWWorld
             }
             catch (const std::runtime_error& error)
             {
-                EXPECT_NE(std::string(error.what()).find("atmosphere-volumes.Clear.cloudCoverage"), std::string::npos);
+                EXPECT_NE(
+                    std::string(error.what()).find("atmosphere-volumes.Clear.cloudDeckCoverage"), std::string::npos);
             }
         }
 
@@ -135,7 +141,7 @@ namespace MWWorld
             EXPECT_NEAR(weather.front().mSkyColor.getDayValue().r(), 0.70862132f, 1e-6f);
 
             const MWRender::AtmosphereState clear = palette.getState("Clear", {}, 0.f);
-            EXPECT_FLOAT_EQ(clear.mVolumes.mCloudCoverage, 0.22f);
+            EXPECT_FLOAT_EQ(clear.mVolumes.mCloudDeckCoverage, 0.26f);
             EXPECT_FLOAT_EQ(clear.mVolumes.mCloudBaseAltitudeWorldUnits, 52000.f);
             EXPECT_NEAR(clear.mVolumes.mMistDensity, 0.0424f, 1e-6f);
         }
@@ -161,6 +167,40 @@ namespace MWWorld
             EXPECT_FLOAT_EQ(clear.mVolumes.mTerrainReferenceHeightWorldUnits, 42.f);
             EXPECT_FLOAT_EQ(clear.mVolumes.mMistDensity, 0.04f * 1.65f);
             EXPECT_GT(clear.mVolumes.mLowCloudCoverage, 0.03f);
+        }
+
+        TEST(MWWorldAtmospherePaletteTest, stagesDeckConvectionAndClearingRemnantsWithinVanillaTransitions)
+        {
+            const std::filesystem::path palettePath
+                = std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/data-mw/openmwse/atmosphere.json";
+            const std::filesystem::path volumePath
+                = std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/data-mw/openmwse/atmosphere-volumes.json";
+            std::ifstream paletteStream(palettePath);
+            std::ifstream volumeStream(volumePath);
+            ASSERT_TRUE(paletteStream.is_open());
+            ASSERT_TRUE(volumeStream.is_open());
+            AtmospherePalette palette(paletteStream, volumeStream);
+
+            const MWRender::AtmosphereState clear = palette.getState("Clear", {}, 0.f);
+            const MWRender::AtmosphereState rain = palette.getState("Rain", {}, 0.f);
+            const MWRender::AtmosphereState building = palette.getState("Clear", "Rain", 0.5f);
+            EXPECT_GT(building.mVolumes.mCloudDeckCoverage,
+                std::lerp(clear.mVolumes.mCloudDeckCoverage, rain.mVolumes.mCloudDeckCoverage, 0.5f));
+            EXPECT_LT(building.mVolumes.mCloudStormOrganization,
+                std::lerp(clear.mVolumes.mCloudStormOrganization, rain.mVolumes.mCloudStormOrganization, 0.5f));
+
+            const MWRender::AtmosphereState clearing = palette.getState("Rain", "Clear", 0.5f);
+            EXPECT_GT(clearing.mVolumes.mCloudDeckCoverage,
+                std::lerp(rain.mVolumes.mCloudDeckCoverage, clear.mVolumes.mCloudDeckCoverage, 0.5f));
+            EXPECT_LT(clearing.mVolumes.mCloudStormOrganization,
+                std::lerp(rain.mVolumes.mCloudStormOrganization, clear.mVolumes.mCloudStormOrganization, 0.5f));
+            EXPECT_GT(clearing.mVolumes.mMistDensity,
+                std::lerp(rain.mVolumes.mMistDensity, clear.mVolumes.mMistDensity, 0.5f));
+
+            EXPECT_FLOAT_EQ(palette.getState("Cloudy", "Thunderstorm", 0.f).mVolumes.mCloudDeckCoverage,
+                palette.getState("Cloudy", {}, 0.f).mVolumes.mCloudDeckCoverage);
+            EXPECT_FLOAT_EQ(palette.getState("Cloudy", "Thunderstorm", 1.f).mVolumes.mCloudStormOrganization,
+                palette.getState("Thunderstorm", {}, 0.f).mVolumes.mCloudStormOrganization);
         }
     }
 }

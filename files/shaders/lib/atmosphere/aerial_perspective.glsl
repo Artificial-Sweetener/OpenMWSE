@@ -17,6 +17,9 @@ struct OpenMWSEAerialPerspectiveParameters
     float fogEnd;
     float exponentialFog;
     float referenceHeight;
+    float observerHeight;
+    float weatherCloudTopHeight;
+    float weatherCloudCoverage;
 };
 
 /// Approximate near-horizon astronomical refraction using NOAA's piecewise solar correction.
@@ -218,6 +221,31 @@ vec3 openmwseAtmosphereScatteredLight(vec3 worldDirection, float opticalDistance
     return mix(baseColor * (1.0 - visibility), scatteredColor, parameters.weatherWeight);
 }
 
+/// Return the clear-air recovery visible above the weather-cloud layer.
+float openmwseClearAirRecovery(OpenMWSEAerialPerspectiveParameters parameters)
+{
+    float cloudLayerDepth = max(parameters.weatherCloudTopHeight - parameters.referenceHeight, 1.0);
+    float altitudeBlendWidth = clamp(cloudLayerDepth * 0.12, 1800.0, 9000.0);
+    float aboveClouds = smoothstep(parameters.weatherCloudTopHeight - altitudeBlendWidth * 0.2,
+        parameters.weatherCloudTopHeight + altitudeBlendWidth, parameters.observerHeight);
+    float cloudWeatherInfluence = smoothstep(0.18, 0.82, parameters.weatherCloudCoverage);
+    float daylight = smoothstep(-0.04, 0.18, normalize(parameters.sunDirection).z);
+    return aboveClouds * cloudWeatherInfluence * daylight;
+}
+
+/// Recover molecular clear-air chromaticity without introducing a second authored sky palette.
+vec3 openmwseClearAirSkyColor(vec3 weatherSkyColor, float skyAmount)
+{
+    const vec3 luminanceWeights = vec3(0.2126, 0.7152, 0.0722);
+    const vec3 molecularZenithChromaticity = vec3(0.371, 0.637, 1.108);
+    float weatherLuminance = max(dot(weatherSkyColor, luminanceWeights), 0.001);
+    vec3 normalizedZenith = molecularZenithChromaticity
+        / dot(molecularZenithChromaticity, luminanceWeights);
+    vec3 normalizedHorizon = mix(vec3(1.0), normalizedZenith, 0.38);
+    vec3 clearChromaticity = mix(normalizedHorizon, normalizedZenith, skyAmount);
+    return clearChromaticity * weatherLuminance * mix(1.08, 1.2, skyAmount);
+}
+
 /// Evaluate the canonical directional sky radiance that also owns the fog-colored horizon.
 vec3 openmwseAtmosphereSkyRadiance(
     vec3 worldDirection, OpenMWSEAerialPerspectiveParameters parameters)
@@ -226,6 +254,13 @@ vec3 openmwseAtmosphereSkyRadiance(
     float skyAmount = 1.0 - pow(
         clamp(1.0 - 2.22 * clamp(worldDirection.z - 0.075, 0.0, 1.0), 0.0, 1.0), 1.15);
     vec3 directionalSky = mix(parameters.fogColor, parameters.skyColor, skyAmount);
+    float clearAirRecovery = openmwseClearAirRecovery(parameters);
+    vec3 clearAirSky = openmwseClearAirSkyColor(directionalSky, skyAmount);
+    directionalSky = mix(directionalSky, clearAirSky, clearAirRecovery);
+    parameters.fogColor = mix(parameters.fogColor,
+        openmwseClearAirSkyColor(parameters.fogColor, 0.0), clearAirRecovery);
+    parameters.skyColor = mix(parameters.skyColor,
+        openmwseClearAirSkyColor(parameters.skyColor, 1.0), clearAirRecovery);
     return openmwseAtmosphereScatteredLight(
         worldDirection, 1.0, 0.0, directionalSky, parameters);
 }
@@ -280,9 +315,9 @@ vec3 openmwseAtmosphereEnvironmentIrradiance(
     sunAzimuth = azimuthLength > 1e-4 ? sunAzimuth / azimuthLength : vec2(1.0, 0.0);
     vec3 sunwardSkyDirection = normalize(vec3(sunAzimuth, 0.35));
     vec3 zenithRadiance
-        = openmwseAtmosphereScatteredLight(vec3(0.0, 0.0, 1.0), 1.0, 0.0, parameters.skyColor, parameters);
+        = openmwseAtmosphereSkyRadiance(vec3(0.0, 0.0, 1.0), parameters);
     vec3 sunwardRadiance
-        = openmwseAtmosphereScatteredLight(sunwardSkyDirection, 1.0, 0.0, parameters.skyColor, parameters);
+        = openmwseAtmosphereSkyRadiance(sunwardSkyDirection, parameters);
     vec3 directionalSkyIrradiance = zenithRadiance * 0.62 + sunwardRadiance * 0.38;
     return mix(weatherSkyIrradiance, directionalSkyIrradiance, 0.65 * clamp(parameters.weatherWeight, 0.0, 1.0));
 }

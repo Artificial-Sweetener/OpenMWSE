@@ -18,6 +18,14 @@ namespace MWWorld
     struct AtmosphereEnvironmentState;
     class Weather;
 
+    /// Describes staged visual progress within an authoritative vanilla weather transition.
+    struct WeatherPresentationState
+    {
+        float mDeckBlend = 0.f;
+        float mConvectionBlend = 0.f;
+        float mRemnantBlend = 0.f;
+    };
+
     class AtmospherePalette
     {
     public:

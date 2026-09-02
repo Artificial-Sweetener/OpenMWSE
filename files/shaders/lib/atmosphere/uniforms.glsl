@@ -13,6 +13,10 @@ struct Atmosphere
     vec4 cloudParameters;
     // morphology from stratus to storm, feature scale, vertical development, anvil strength
     vec4 cloudShapeParameters;
+    // deck continuity, convective frequency, convective maturity, storm organization
+    vec4 cloudOrganizationParameters;
+    // tower taper, base-height variation, reserved, reserved
+    vec4 cloudStructureParameters;
     // coverage, density, base altitude in world units, thickness in world units
     vec4 lowCloudParameters;
     // morphology, feature scale, vertical development, environment influence

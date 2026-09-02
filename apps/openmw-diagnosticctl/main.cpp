@@ -337,8 +337,7 @@ namespace
             const std::string name = entry.path().filename().string();
             if (name != "userdata")
             {
-                result.emplace(
-                    std::filesystem::relative(entry.path(), root), FileFingerprint{ 0, entry.last_write_time(), {} });
+                result.emplace(std::filesystem::relative(entry.path(), root), FileFingerprint{});
                 continue;
             }
 
@@ -680,6 +679,7 @@ namespace
                   "      [--game-hour hour] [--cloud-seed integer] [--recent-precipitation weight]\n"
                   "      [--atmosphere-warmup-frames count]\n"
                   "      [--environment-traits name=weight,...] [--environment-terrain-height world-units]\n"
+                  "      [--camera-x world-units] [--camera-y world-units] [--camera-z world-units]\n"
                   "      [--camera-pitch radians] [--camera-yaw radians] [--camera-roll radians]\n"
                   "      [--disable-main-clouds] [--disable-low-clouds] [--disable-mist] [--disable-fog]\n"
                   "      [--disable-distance-fog] [--disable-precipitation] [--disable-lightning]\n"
@@ -754,8 +754,8 @@ namespace
         const YAML::Node expected = YAML::Load(payloadText(expectedBytes));
         const YAML::Node actual = YAML::Load(payloadText(actualBytes));
         const std::string provider = actual["provider"].as<std::string>("");
-        if (provider != "gameplay@4" && provider != "gameplay@5" && provider != "gameplay@6"
-            && provider != "gameplay@7")
+        if (provider != "gameplay@4" && provider != "gameplay@5" && provider != "gameplay@6" && provider != "gameplay@7"
+            && provider != "gameplay@8")
             throw std::runtime_error("replay state was reported by an incompatible gameplay provider");
         for (const char* key : { "cell", "weather" })
         {
@@ -856,7 +856,11 @@ namespace
         const std::optional<std::string> cameraPitch = findOption(arguments, "--camera-pitch");
         const std::optional<std::string> cameraYaw = findOption(arguments, "--camera-yaw");
         const std::optional<std::string> cameraRoll = findOption(arguments, "--camera-roll");
-        const bool cameraOverride = cameraPitch || cameraYaw || cameraRoll;
+        const std::optional<std::string> cameraX = findOption(arguments, "--camera-x");
+        const std::optional<std::string> cameraY = findOption(arguments, "--camera-y");
+        const std::optional<std::string> cameraZ = findOption(arguments, "--camera-z");
+        const bool cameraPositionOverride = cameraX || cameraY || cameraZ;
+        const bool cameraOverride = cameraPitch || cameraYaw || cameraRoll || cameraPositionOverride;
         std::optional<Diagnostics::AtmosphereScenario> atmosphereScenario = parseAtmosphereScenarioOptions(arguments);
         const std::uint32_t atmosphereWarmupFrames = parseFrameCountOption(
             "--atmosphere-warmup-frames", findOption(arguments, "--atmosphere-warmup-frames").value_or("0"), 600);
@@ -976,8 +980,11 @@ namespace
         {
             const YAML::Node restoredState = YAML::Load(payloadText(expectedWorldState));
             const YAML::Node restoredAngles = restoredState["camera-angles"];
+            const YAML::Node restoredPosition = restoredState["camera"];
             if (!restoredAngles.IsSequence() || restoredAngles.size() != 3)
                 throw std::runtime_error("replay state contains invalid camera angles");
+            if (!restoredPosition.IsSequence() || restoredPosition.size() != 3)
+                throw std::runtime_error("replay state contains invalid camera coordinates");
             const double pitch
                 = cameraPitch ? parseFiniteOption("--camera-pitch", *cameraPitch) : restoredAngles[0].as<double>();
             const double yaw
@@ -989,7 +996,18 @@ namespace
 
             YAML::Emitter cameraState;
             cameraState << YAML::BeginMap << YAML::Key << "camera-angles" << YAML::Value << YAML::Flow << YAML::BeginSeq
-                        << pitch << yaw << roll << YAML::EndSeq << YAML::EndMap;
+                        << pitch << yaw << roll << YAML::EndSeq;
+            std::array<double, 3> requestedPosition{};
+            if (cameraPositionOverride)
+            {
+                requestedPosition
+                    = { cameraX ? parseFiniteOption("--camera-x", *cameraX) : restoredPosition[0].as<double>(),
+                          cameraY ? parseFiniteOption("--camera-y", *cameraY) : restoredPosition[1].as<double>(),
+                          cameraZ ? parseFiniteOption("--camera-z", *cameraZ) : restoredPosition[2].as<double>() };
+                cameraState << YAML::Key << "camera-position" << YAML::Value << YAML::Flow << YAML::BeginSeq
+                            << requestedPosition[0] << requestedPosition[1] << requestedPosition[2] << YAML::EndSeq;
+            }
+            cameraState << YAML::EndMap;
             if (!cameraState.good())
                 throw std::runtime_error("failed serializing diagnostic camera state");
             const Diagnostics::Response applied = Diagnostics::transact(
@@ -1002,6 +1020,17 @@ namespace
                 || std::abs(actualAngles[1].as<double>() - yaw) > 0.0001
                 || std::abs(actualAngles[2].as<double>() - roll) > 0.0001)
                 throw std::runtime_error("diagnostic child did not apply the requested camera angles");
+            if (cameraPositionOverride)
+            {
+                const YAML::Node actualPosition = actual["camera-position"];
+                if (!actualPosition.IsSequence() || actualPosition.size() != 3)
+                    throw std::runtime_error("diagnostic child omitted the requested camera coordinates");
+                for (std::size_t index = 0; index < requestedPosition.size(); ++index)
+                {
+                    if (std::abs(actualPosition[index].as<double>() - requestedPosition[index]) > 0.01)
+                        throw std::runtime_error("diagnostic child did not apply the requested camera coordinates");
+                }
+            }
             std::cout << "camera-override-parity: true\n";
         }
 

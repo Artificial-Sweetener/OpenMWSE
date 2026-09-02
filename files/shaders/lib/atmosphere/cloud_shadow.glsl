@@ -18,6 +18,18 @@ vec4 openmwseCloudShadowShapeParameters()
     return atmosphere.cloudShapeParameters;
 }
 
+/// Expose surface-lighting cloud organization to the shared cloud-field implementation.
+vec4 openmwseCloudShadowOrganizationParameters()
+{
+    return atmosphere.cloudOrganizationParameters;
+}
+
+/// Expose surface-lighting cloud structure to the shared cloud-field implementation.
+vec4 openmwseCloudShadowStructureParameters()
+{
+    return atmosphere.cloudStructureParameters;
+}
+
 /// Expose the exterior water datum to the shared cloud-field implementation.
 float openmwseCloudShadowWaterHeight()
 {
@@ -48,6 +60,8 @@ vec4 openmwseCloudShadowWeatherSample(vec2 coordinates)
 #define openmwseCloudMaximumThicknessScale openmwseCloudShadowMaximumThicknessScale
 #define openmwseCloudParameters openmwseCloudShadowParameters
 #define openmwseCloudShapeParameters openmwseCloudShadowShapeParameters
+#define openmwseCloudOrganizationParameters openmwseCloudShadowOrganizationParameters
+#define openmwseCloudStructureParameters openmwseCloudShadowStructureParameters
 #define openmwseCloudWaterHeight openmwseCloudShadowWaterHeight
 #define openmwseCloudAdvectionOffsetWorldUnits openmwseCloudShadowAdvectionOffsetWorldUnits
 #define openmwseCloudNoiseSample openmwseCloudShadowNoiseSample
@@ -83,6 +97,8 @@ vec4 openmwseCloudShadowWeatherSample(vec2 coordinates)
 #undef openmwseCloudWaterHeight
 #undef openmwseCloudParameters
 #undef openmwseCloudShapeParameters
+#undef openmwseCloudOrganizationParameters
+#undef openmwseCloudStructureParameters
 #undef openmwseCloudMaximumThicknessScale
 #undef openmwseCloudMinimumThicknessScale
 #undef openmwseCloudBaseVariation
@@ -96,7 +112,8 @@ float openmwseLowCloudShadowColumnDensity(vec2 worldPosition)
     vec3 advectedPosition = openmwseCloudShadowAdvectedPosition(vec3(worldPosition, 0.0));
     advectedPosition.xy += vec2(137000.0, -91000.0);
     OpenMWSECloudColumnProperties properties
-        = openmwseCloudShadowColumnProperties(advectedPosition.xy, parameters, shape);
+        = openmwseCloudShadowColumnProperties(advectedPosition.xy, parameters, shape,
+            vec4(0.72, 0.08, 0.16, 0.0), vec4(0.72, 0.42, 0.0, 0.0));
     return smoothstep(0.08, 0.82, properties.localCoverage) * max(parameters.y, 0.0);
 }
 

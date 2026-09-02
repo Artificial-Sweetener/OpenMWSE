@@ -106,6 +106,7 @@ namespace SceneUtil
         void setAtmosphere(bool enabled, const osg::Vec4f& skyColor, const osg::Vec3f& inScattering,
             const osg::Vec3f& outScattering, float weatherWeight, const osg::Vec3f& sunDirection,
             const osg::Vec4f& cloudParameters, const osg::Vec4f& cloudShapeParameters,
+            const osg::Vec4f& cloudOrganizationParameters, const osg::Vec4f& cloudStructureParameters,
             const osg::Vec4f& lowCloudParameters, const osg::Vec4f& lowCloudShapeParameters,
             const osg::Vec4f& mistParameters, const osg::Vec4f& fogVolumeParameters,
             const osg::Vec4f& mediumReferenceParameters, const osg::Vec4f& orographicParameters,
@@ -147,6 +148,8 @@ namespace SceneUtil
         osg::Vec3f mAtmosphereSunDirection{ 0.f, 0.f, 1.f };
         osg::Vec4f mAtmosphereCloudParameters;
         osg::Vec4f mAtmosphereCloudShapeParameters;
+        osg::Vec4f mAtmosphereCloudOrganizationParameters;
+        osg::Vec4f mAtmosphereCloudStructureParameters;
         osg::Vec4f mAtmosphereLowCloudParameters;
         osg::Vec4f mAtmosphereLowCloudShapeParameters;
         osg::Vec4f mAtmosphereMistParameters;
