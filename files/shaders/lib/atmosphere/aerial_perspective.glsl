@@ -233,6 +233,32 @@ float openmwseClearAirRecovery(OpenMWSEAerialPerspectiveParameters parameters)
     return aboveClouds * cloudWeatherInfluence * daylight;
 }
 
+/// Recover top-of-cloud solar radiance from weather-darkened ground lighting without changing its chromaticity.
+vec3 openmwseClearAirSolarRadiance(
+    vec3 weatherSolarRadiance, OpenMWSEAerialPerspectiveParameters parameters)
+{
+    const vec3 luminanceWeights = vec3(0.2126, 0.7152, 0.0722);
+    float recovery = openmwseClearAirRecovery(parameters);
+    float weatherLuminance = max(dot(weatherSolarRadiance, luminanceWeights), 0.001);
+    float daylight = smoothstep(-0.08, 0.28, normalize(parameters.sunDirection).z);
+    float clearLuminance = max(weatherLuminance, mix(weatherLuminance, 0.95, daylight));
+    return mix(weatherSolarRadiance,
+        weatherSolarRadiance * (clearLuminance / weatherLuminance), recovery);
+}
+
+/// Recover upper-hemisphere irradiance above an optically thick weather deck from the canonical sky state.
+vec3 openmwseClearAirSkyIrradiance(
+    vec3 weatherSkyIrradiance, OpenMWSEAerialPerspectiveParameters parameters)
+{
+    const vec3 luminanceWeights = vec3(0.2126, 0.7152, 0.0722);
+    float recovery = openmwseClearAirRecovery(parameters);
+    float weatherLuminance = max(dot(weatherSkyIrradiance, luminanceWeights), 0.001);
+    float daylight = smoothstep(-0.08, 0.28, normalize(parameters.sunDirection).z);
+    float clearLuminance = max(weatherLuminance, mix(0.035, 0.34, daylight));
+    return mix(weatherSkyIrradiance,
+        weatherSkyIrradiance * (clearLuminance / weatherLuminance), recovery);
+}
+
 /// Recover molecular clear-air chromaticity without introducing a second authored sky palette.
 vec3 openmwseClearAirSkyColor(vec3 weatherSkyColor, float skyAmount)
 {
@@ -255,6 +281,8 @@ vec3 openmwseAtmosphereSkyRadiance(
         clamp(1.0 - 2.22 * clamp(worldDirection.z - 0.075, 0.0, 1.0), 0.0, 1.0), 1.15);
     vec3 directionalSky = mix(parameters.fogColor, parameters.skyColor, skyAmount);
     float clearAirRecovery = openmwseClearAirRecovery(parameters);
+    parameters.solarRadiance = openmwseClearAirSolarRadiance(parameters.solarRadiance, parameters);
+    parameters.skyIrradiance = openmwseClearAirSkyIrradiance(parameters.skyIrradiance, parameters);
     vec3 clearAirSky = openmwseClearAirSkyColor(directionalSky, skyAmount);
     directionalSky = mix(directionalSky, clearAirSky, clearAirRecovery);
     parameters.fogColor = mix(parameters.fogColor,
@@ -285,13 +313,24 @@ vec3 openmwseApplyAerialPerspective(
         localRadiance, worldDirection, distanceFromEye, 1e20, parameters);
 }
 
+/// Blend local radiance toward a precomputed atmospheric target with a caller-owned distance compression.
+vec3 openmwseApplyAerialPerspectiveTowardTargetWithScale(vec3 localRadiance, vec3 atmosphericTarget,
+    float distanceFromEye, float opticalDistanceScale, float opticalDistanceLimit,
+    OpenMWSEAerialPerspectiveParameters parameters)
+{
+    float fogOpticalDistance = min(
+        openmwseFogOpticalDistance(distanceFromEye, parameters) * opticalDistanceScale,
+        opticalDistanceLimit);
+    float visibility = openmwseFogVisibility(fogOpticalDistance, parameters);
+    return mix(atmosphericTarget, localRadiance, visibility);
+}
+
 /// Blend local radiance toward a precomputed atmospheric target under bounded fog opacity.
 vec3 openmwseApplyAerialPerspectiveTowardTarget(vec3 localRadiance, vec3 atmosphericTarget,
     float distanceFromEye, float opticalDistanceLimit, OpenMWSEAerialPerspectiveParameters parameters)
 {
-    float fogOpticalDistance = min(openmwseFogOpticalDistance(distanceFromEye, parameters), opticalDistanceLimit);
-    float visibility = openmwseFogVisibility(fogOpticalDistance, parameters);
-    return mix(atmosphericTarget, localRadiance, visibility);
+    return openmwseApplyAerialPerspectiveTowardTargetWithScale(
+        localRadiance, atmosphericTarget, distanceFromEye, 1.0, opticalDistanceLimit, parameters);
 }
 
 /// Resolve incident sunlight without attenuating weather-colored surface radiance a second time.

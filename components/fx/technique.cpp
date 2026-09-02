@@ -584,7 +584,10 @@ namespace Fx
             sampler->setFilter(osg::Texture::MAG_FILTER, proxy.mMagFilter);
         }
         if (is3D)
+        {
+            sampler->setUseHardwareMipMapGeneration(true);
             sampler->setWrap(osg::Texture::WRAP_R, proxy.mWrapR);
+        }
         sampler->setWrap(osg::Texture::WRAP_S, proxy.mWrapS);
         sampler->setWrap(osg::Texture::WRAP_T, proxy.mWrapT);
         sampler->setInternalFormatMode(proxy.mCompression);

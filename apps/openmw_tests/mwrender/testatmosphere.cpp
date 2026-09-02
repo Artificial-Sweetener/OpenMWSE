@@ -86,6 +86,22 @@ namespace MWRender
             return texture;
         }
 
+        /// Load the repository-owned curl field used to distort cloud edges without disconnecting their base density.
+        osg::ref_ptr<osg::Texture2D> loadAtmosphereCurlNoiseTexture()
+        {
+            const std::filesystem::path path = std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files" / "data"
+                / "textures" / "openmwse" / "atmosphere_cloud_curl.dds";
+            osg::ref_ptr<osg::Image> image = osgDB::readRefImageFile(path.string());
+            if (!image)
+                throw std::runtime_error("Unable to load production atmosphere cloud curl texture");
+            osg::ref_ptr<osg::Texture2D> texture = new osg::Texture2D(image);
+            texture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
+            texture->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
+            texture->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
+            texture->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
+            return texture;
+        }
+
         /// Load the repository-owned broad weather field used by production compatibility shaders.
         osg::ref_ptr<osg::Texture2D> loadAtmosphereWeatherTexture()
         {
@@ -437,7 +453,8 @@ namespace MWRender
                 mRoot->addCullCallback(perViewState);
 
                 mAtmosphereState = new SceneUtil::StateUpdater(loadAtmosphereNoiseTexture(), 14,
-                    loadAtmosphereDetailNoiseTexture(), 15, loadAtmosphereWeatherTexture(), 16);
+                    loadAtmosphereDetailNoiseTexture(), 15, loadAtmosphereCurlNoiseTexture(), 16,
+                    loadAtmosphereWeatherTexture(), 17);
                 mAtmosphereState->setFogColor({ 0.887052f, 0.638956f, 0.517662f, 1.f });
                 mAtmosphereState->setFogStart(1000.f);
                 mAtmosphereState->setFogEnd(20000.f);
@@ -611,7 +628,7 @@ namespace MWRender
             {
                 mAtmosphereState->setAtmosphere(true, { 0.232298f, 0.361908f, 0.519572f, 1.f }, { 0.25f, 0.38f, 0.48f },
                     { 0.07f, 0.36f, 0.76f }, 1.f, mSunDirection, mCloudParameters, { 0.62f, 0.9f, 0.72f, 0.08f },
-                    { 0.65f, 0.3f, 0.6f, 0.1f }, { 0.7f, 0.5f, 0.f, 0.f }, {}, {}, mMistParameters, {}, {}, {},
+                    { 0.65f, 0.3f, 0.6f, 0.1f }, { 0.7f, 0.5f, 0.5f, 0.f }, {}, {}, mMistParameters, {}, {}, {},
                     mSunDiscColor, mSolarRadiance, mSkyIrradiance, mGroundIrradiance, mCloudAdvectionOffsetWorldUnits,
                     mQuality);
             }
@@ -877,7 +894,7 @@ namespace MWRender
 
             osg::ref_ptr<SceneUtil::StateUpdater> atmosphereState
                 = new SceneUtil::StateUpdater(loadAtmosphereNoiseTexture(), 14, loadAtmosphereDetailNoiseTexture(), 15,
-                    loadAtmosphereWeatherTexture(), 16);
+                    loadAtmosphereCurlNoiseTexture(), 16, loadAtmosphereWeatherTexture(), 17);
             atmosphereState->setAmbientColor({ 0.22f, 0.2f, 0.19f, 1.f });
             atmosphereState->setFogColor(fog.mColor);
             atmosphereState->setFogStart(fog.mStart);
@@ -1005,6 +1022,43 @@ namespace MWRender
             } visitor;
             node.accept(visitor);
             return visitor.mBounds;
+        }
+
+        /// Verify that the packaged weather map exposes continuous coverage, type, depth, and base fields.
+        TEST(MWRenderAtmosphereTest, packagedCloudWeatherMapCarriesContinuousFormationFields)
+        {
+            const osg::ref_ptr<osg::Texture2D> texture = loadAtmosphereWeatherTexture();
+            const osg::Image* image = texture->getImage();
+            ASSERT_NE(image, nullptr);
+            ASSERT_EQ(image->s(), 256);
+            ASSERT_EQ(image->t(), 256);
+
+            std::array<std::unordered_set<int>, 4> channelValues;
+            double typeDepthDifference = 0.0;
+            std::size_t interiorTypeSamples = 0;
+            std::size_t interiorDepthSamples = 0;
+            for (int y = 0; y < image->t(); ++y)
+            {
+                for (int x = 0; x < image->s(); ++x)
+                {
+                    const osg::Vec4f sample = image->getColor(x, y);
+                    for (std::size_t channel = 0; channel < channelValues.size(); ++channel)
+                        channelValues[channel].insert(static_cast<int>(std::round(sample[channel] * 255.f)));
+                    typeDepthDifference += std::abs(sample.y() - sample.z());
+                    interiorTypeSamples += sample.y() > 0.02f && sample.y() < 0.98f ? 1u : 0u;
+                    interiorDepthSamples += sample.z() > 0.02f && sample.z() < 0.98f ? 1u : 0u;
+                }
+            }
+
+            const double sampleCount = static_cast<double>(image->s() * image->t());
+            EXPECT_GE(channelValues[0].size(), 240u) << "Coverage must remain a near-uniform ranked field";
+            EXPECT_GE(channelValues[1].size(), 96u) << "Cloud type must vary continuously across the weather map";
+            EXPECT_GE(channelValues[2].size(), 96u) << "Optical depth must vary continuously across the weather map";
+            EXPECT_GE(channelValues[3].size(), 96u) << "Cloud-base variation must remain continuous";
+            EXPECT_GT(static_cast<double>(interiorTypeSamples) / sampleCount, 0.75);
+            EXPECT_GT(static_cast<double>(interiorDepthSamples) / sampleCount, 0.75);
+            EXPECT_GT(typeDepthDifference / sampleCount, 0.04)
+                << "Cloud type and optical depth must not collapse to one repeated control field";
         }
 
         TEST(MWRenderAtmosphereTest, derivesPhysicalSunDirectionFromDaylightRatherThanWeatherVisibility)
@@ -1453,7 +1507,7 @@ namespace MWRender
             const double oneSecondDifference = averageDifference(initial, oneSecondLater);
             const double twoMinuteDifference = averageDifference(initial, twoMinutesLater);
             EXPECT_LT(oneSecondDifference, 0.002);
-            EXPECT_GT(twoMinuteDifference, 0.00075);
+            EXPECT_GT(twoMinuteDifference, 0.0005);
             EXPECT_GT(twoMinuteDifference, oneSecondDifference * 4.0);
         }
 

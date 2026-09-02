@@ -324,7 +324,8 @@ namespace MWRender
         osg::ref_ptr<osg::Texture3D> atmosphereNoiseTexture
             = new osg::Texture3D(mResourceSystem->getImageManager()->getImage(
                 VFS::Path::Normalized("textures/openmwse/atmosphere_cloud_noise.dds"), true));
-        atmosphereNoiseTexture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
+        atmosphereNoiseTexture->setUseHardwareMipMapGeneration(true);
+        atmosphereNoiseTexture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR_MIPMAP_LINEAR);
         atmosphereNoiseTexture->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
         atmosphereNoiseTexture->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
         atmosphereNoiseTexture->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
@@ -333,11 +334,19 @@ namespace MWRender
         osg::ref_ptr<osg::Texture3D> atmosphereDetailNoiseTexture
             = new osg::Texture3D(mResourceSystem->getImageManager()->getImage(
                 VFS::Path::Normalized("textures/openmwse/atmosphere_cloud_detail.dds"), true));
-        atmosphereDetailNoiseTexture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
+        atmosphereDetailNoiseTexture->setUseHardwareMipMapGeneration(true);
+        atmosphereDetailNoiseTexture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR_MIPMAP_LINEAR);
         atmosphereDetailNoiseTexture->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
         atmosphereDetailNoiseTexture->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
         atmosphereDetailNoiseTexture->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
         atmosphereDetailNoiseTexture->setWrap(osg::Texture::WRAP_R, osg::Texture::REPEAT);
+        osg::ref_ptr<osg::Texture2D> atmosphereCurlNoiseTexture
+            = new osg::Texture2D(mResourceSystem->getImageManager()->getImage(
+                VFS::Path::Normalized("textures/openmwse/atmosphere_cloud_curl.dds"), true));
+        atmosphereCurlNoiseTexture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
+        atmosphereCurlNoiseTexture->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
+        atmosphereCurlNoiseTexture->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
+        atmosphereCurlNoiseTexture->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
         osg::ref_ptr<osg::Texture2D> atmosphereWeatherTexture
             = new osg::Texture2D(mResourceSystem->getImageManager()->getImage(
                 VFS::Path::Normalized("textures/openmwse/atmosphere_cloud_weather.dds"), true));
@@ -347,10 +356,10 @@ namespace MWRender
         atmosphereWeatherTexture->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
         const int atmosphereNoiseTextureUnit
             = mResourceSystem->getSceneManager()->getShaderManager().reserveGlobalTextureUnits(
-                Shader::ShaderManager::Slot::AtmosphereNoise, 3);
+                Shader::ShaderManager::Slot::AtmosphereNoise, 4);
         mStateUpdater = new SceneUtil::StateUpdater(atmosphereNoiseTexture, atmosphereNoiseTextureUnit,
-            atmosphereDetailNoiseTexture, atmosphereNoiseTextureUnit + 1, atmosphereWeatherTexture,
-            atmosphereNoiseTextureUnit + 2);
+            atmosphereDetailNoiseTexture, atmosphereNoiseTextureUnit + 1, atmosphereCurlNoiseTexture,
+            atmosphereNoiseTextureUnit + 2, atmosphereWeatherTexture, atmosphereNoiseTextureUnit + 3);
         sceneRoot->addUpdateCallback(mStateUpdater);
 
         mSharedUniformStateUpdater = new SceneUtil::SharedUniformStateUpdater(Settings::fog().mSkyBlendingStart);
@@ -851,7 +860,8 @@ namespace MWRender
                 atmosphere.mVolumes.mCloudVerticalDevelopment, atmosphere.mVolumes.mCloudAnvilStrength },
             { atmosphere.mVolumes.mCloudDeckContinuity, atmosphere.mVolumes.mCloudConvectiveFrequency,
                 atmosphere.mVolumes.mCloudConvectiveMaturity, atmosphere.mVolumes.mCloudStormOrganization },
-            { atmosphere.mVolumes.mCloudTowerTaper, atmosphere.mVolumes.mCloudBaseVariation, 0.f, 0.f },
+            { atmosphere.mVolumes.mCloudTowerTaper, atmosphere.mVolumes.mCloudBaseVariation,
+                atmosphere.mVolumes.mCloudDeckType, 0.f },
             { diagnosticVolumes.mLowCloudCoverage, diagnosticVolumes.mLowCloudDensity,
                 atmosphere.mVolumes.mLowCloudBaseAltitudeWorldUnits, atmosphere.mVolumes.mLowCloudThicknessWorldUnits },
             { atmosphere.mVolumes.mLowCloudType, atmosphere.mVolumes.mLowCloudFeatureScale,
@@ -890,7 +900,8 @@ namespace MWRender
                 atmosphere.mVolumes.mCloudVerticalDevelopment, atmosphere.mVolumes.mCloudAnvilStrength },
             { atmosphere.mVolumes.mCloudDeckContinuity, atmosphere.mVolumes.mCloudConvectiveFrequency,
                 atmosphere.mVolumes.mCloudConvectiveMaturity, atmosphere.mVolumes.mCloudStormOrganization },
-            { atmosphere.mVolumes.mCloudTowerTaper, atmosphere.mVolumes.mCloudBaseVariation, 0.f, 0.f },
+            { atmosphere.mVolumes.mCloudTowerTaper, atmosphere.mVolumes.mCloudBaseVariation,
+                atmosphere.mVolumes.mCloudDeckType, 0.f },
             { diagnosticVolumes.mLowCloudCoverage, diagnosticVolumes.mLowCloudDensity,
                 atmosphere.mVolumes.mLowCloudBaseAltitudeWorldUnits, atmosphere.mVolumes.mLowCloudThicknessWorldUnits },
             { atmosphere.mVolumes.mLowCloudType, atmosphere.mVolumes.mLowCloudFeatureScale,

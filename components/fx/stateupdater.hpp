@@ -360,7 +360,7 @@ namespace Fx
             static constexpr std::string_view sName = "atmosphereCloudOrganizationParameters";
         };
 
-        /// Bind independent tower taper and cloud-base variation controls.
+        /// Bind tower taper, cloud-base variation, and the stratiform deck family.
         struct AtmosphereCloudStructureParameters : Std140::Vec4
         {
             static constexpr std::string_view sName = "atmosphereCloudStructureParameters";

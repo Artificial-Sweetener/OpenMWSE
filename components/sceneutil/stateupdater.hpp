@@ -85,9 +85,10 @@ namespace SceneUtil
     class StateUpdater : public StateSetUpdater
     {
     public:
-        /// Bind the canonical atmosphere weather, base, and detail fields to scene shaders using reserved units.
+        /// Bind the canonical atmosphere weather, base, detail, and curl fields to scene shaders using reserved units.
         StateUpdater(osg::Texture3D* atmosphereNoiseTexture = nullptr, int atmosphereNoiseTextureUnit = -1,
             osg::Texture3D* atmosphereDetailNoiseTexture = nullptr, int atmosphereDetailNoiseTextureUnit = -1,
+            osg::Texture2D* atmosphereCurlNoiseTexture = nullptr, int atmosphereCurlNoiseTextureUnit = -1,
             osg::Texture2D* atmosphereWeatherTexture = nullptr, int atmosphereWeatherTextureUnit = -1);
 
         void setDefaults(osg::StateSet* stateset) override;
@@ -134,6 +135,8 @@ namespace SceneUtil
         int mAtmosphereNoiseTextureUnit = -1;
         osg::ref_ptr<osg::Texture3D> mAtmosphereDetailNoiseTexture;
         int mAtmosphereDetailNoiseTextureUnit = -1;
+        osg::ref_ptr<osg::Texture2D> mAtmosphereCurlNoiseTexture;
+        int mAtmosphereCurlNoiseTextureUnit = -1;
         osg::ref_ptr<osg::Texture2D> mAtmosphereWeatherTexture;
         int mAtmosphereWeatherTextureUnit = -1;
         osg::Vec4f mAmbientColor;

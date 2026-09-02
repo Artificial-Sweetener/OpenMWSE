@@ -9,40 +9,14 @@ import hashlib
 import math
 import os
 import struct
-from dataclasses import dataclass
 from pathlib import Path
 
 
-BASE_TEXTURE_SIZE = 128
+BASE_TEXTURE_SIZE = 64
 DETAIL_TEXTURE_SIZE = 32
 WEATHER_TEXTURE_SIZE = 256
+CURL_TEXTURE_SIZE = 128
 RANDOM_SEED = 0x4F4D5753
-
-
-@dataclass(frozen=True)
-class ConvectiveCore:
-    """Describe one asymmetric updraft lobe in normalized weather-map space."""
-
-    center_x: float
-    center_y: float
-    major_radius: float
-    minor_radius: float
-    angle: float
-    strength: float
-
-
-@dataclass(frozen=True)
-class ConvectiveSystem:
-    """Describe a clustered updraft system and its broader spreading outflow."""
-
-    cores: tuple[ConvectiveCore, ...]
-    outflow_x: float
-    outflow_y: float
-    outflow_major_radius: float
-    outflow_minor_radius: float
-    outflow_angle: float
-    maturity: float
-
 
 def hash_u32(x: int, y: int, z: int, seed: int = RANDOM_SEED) -> int:
     """Return a stable 32-bit integer hash for a periodic lattice coordinate."""
@@ -69,8 +43,10 @@ def perlin_fade(value: float) -> float:
     return value * value * value * (value * (value * 6.0 - 15.0) + 10.0)
 
 
-def periodic_gradient_noise(x: float, y: float, z: float, frequency: int) -> float:
-    """Evaluate tileable three-dimensional gradient noise at one lattice frequency."""
+def gradient_noise(
+    x: float, y: float, z: float, frequency: int, *, tile: bool = True
+) -> float:
+    """Evaluate the three-dimensional Perlin function with optional tiling."""
     scaled_x = x * frequency
     scaled_y = y * frequency
     scaled_z = z * frequency
@@ -84,20 +60,27 @@ def periodic_gradient_noise(x: float, y: float, z: float, frequency: int) -> flo
     blend_y = perlin_fade(fractional_y)
     blend_z = perlin_fade(fractional_z)
 
-    gradients = (
-        (1.0, 1.0, 0.0),
-        (-1.0, 1.0, 0.0),
-        (1.0, -1.0, 0.0),
-        (-1.0, -1.0, 0.0),
-        (1.0, 0.0, 1.0),
-        (-1.0, 0.0, 1.0),
-        (1.0, 0.0, -1.0),
-        (-1.0, 0.0, -1.0),
-        (0.0, 1.0, 1.0),
-        (0.0, -1.0, 1.0),
-        (0.0, 1.0, -1.0),
-        (0.0, -1.0, -1.0),
+    domain = 69.0
+    wrapped_cells = (
+        cell_x - math.floor(cell_x / domain) * domain,
+        cell_y - math.floor(cell_y / domain) * domain,
+        cell_z - math.floor(cell_z / domain) * domain,
     )
+    incremented_cells = tuple(value + 1.0 if value <= domain - 1.5 else 0.0 for value in wrapped_cells)
+    if tile:
+        incremented_cells = tuple(value % frequency for value in incremented_cells)
+
+    def lattice_gradient(grid_x: float, grid_y: float, grid_z: float) -> tuple[float, float, float]:
+        """Return the normalized gradient produced by the Perlin hash."""
+        product = ((grid_x + 50.0) ** 2) * ((grid_y + 161.0) ** 2)
+        components = (
+            product / (635.298681 + grid_z * 48.500388),
+            product / (682.357502 + grid_z * 65.294118),
+            product / (668.926525 + grid_z * 63.934599),
+        )
+        gradient = tuple(component - math.floor(component) - 0.49999 for component in components)
+        inverse_length = 1.0 / max(math.sqrt(sum(component * component for component in gradient)), 1e-8)
+        return tuple(component * inverse_length for component in gradient)
 
     planes: list[float] = []
     for corner_z in range(2):
@@ -105,10 +88,10 @@ def periodic_gradient_noise(x: float, y: float, z: float, frequency: int) -> flo
         for corner_y in range(2):
             values: list[float] = []
             for corner_x in range(2):
-                wrapped_x = (cell_x + corner_x) % frequency
-                wrapped_y = (cell_y + corner_y) % frequency
-                wrapped_z = (cell_z + corner_z) % frequency
-                gradient = gradients[hash_u32(wrapped_x, wrapped_y, wrapped_z) % len(gradients)]
+                grid_x = wrapped_cells[0] if corner_x == 0 else incremented_cells[0]
+                grid_y = wrapped_cells[1] if corner_y == 0 else incremented_cells[1]
+                grid_z = wrapped_cells[2] if corner_z == 0 else incremented_cells[2]
+                gradient = lattice_gradient(grid_x, grid_y, grid_z)
                 displacement = (
                     fractional_x - corner_x,
                     fractional_y - corner_y,
@@ -118,18 +101,38 @@ def periodic_gradient_noise(x: float, y: float, z: float, frequency: int) -> flo
             lower, upper = values
             rows.append(lerp(lower, upper, blend_x))
         planes.append(lerp(rows[0], rows[1], blend_y))
-    return 0.5 + lerp(planes[0], planes[1], blend_z) * 0.5
+    perlin = lerp(planes[0], planes[1], blend_z) / math.sqrt(0.75)
+    return (perlin * 1.5 + 1.0) * 0.5
 
 
-def periodic_worley_inverse(x: float, y: float, z: float, frequency: int) -> float:
-    """Evaluate one minus the clamped squared tileable Worley feature-point distance."""
-    scaled_x = x * frequency
-    scaled_y = y * frequency
-    scaled_z = z * frequency
+def periodic_worley_distance(
+    x: float, y: float, z: float, frequency: int, seed: float = 0.0
+) -> float:
+    """Evaluate the clamped nearest squared Voronoi distance."""
+    scaled_x = x * frequency + 0.5
+    scaled_y = y * frequency + 0.5
+    scaled_z = z * frequency + 0.5
     cell_x = math.floor(scaled_x)
     cell_y = math.floor(scaled_y)
     cell_z = math.floor(scaled_z)
-    nearest_squared = 3.0
+    fractional_x = scaled_x - cell_x
+    fractional_y = scaled_y - cell_y
+    fractional_z = scaled_z - cell_z
+    nearest_squared = 1.0
+
+    def voronoi_hash(
+        grid_x: float, grid_y: float, grid_z: float
+    ) -> tuple[float, float, float]:
+        """Return the periodic Voronoi feature-point offset."""
+        grid_x %= frequency
+        grid_y %= frequency
+        grid_z %= frequency
+        hashes = (
+            grid_x * 127.1 + grid_y * 311.7 + grid_z * 74.7,
+            grid_x * 269.5 + grid_y * 183.3 + grid_z * 246.1,
+            grid_x * 113.5 + grid_y * 271.9 + grid_z * 124.6,
+        )
+        return tuple((math.sin(value) * 43758.5453123) % 1.0 for value in hashes)
 
     for offset_z in (-1, 0, 1):
         for offset_y in (-1, 0, 1):
@@ -137,20 +140,46 @@ def periodic_worley_inverse(x: float, y: float, z: float, frequency: int) -> flo
                 candidate_x = cell_x + offset_x
                 candidate_y = cell_y + offset_y
                 candidate_z = cell_z + offset_z
-                wrapped_x = candidate_x % frequency
-                wrapped_y = candidate_y % frequency
-                wrapped_z = candidate_z % frequency
-                point_x = candidate_x + hash_unit(wrapped_x, wrapped_y, wrapped_z, 1)
-                point_y = candidate_y + hash_unit(wrapped_x, wrapped_y, wrapped_z, 2)
-                point_z = candidate_z + hash_unit(wrapped_x, wrapped_y, wrapped_z, 3)
+                feature = voronoi_hash(
+                    candidate_x + seed * 10.0,
+                    candidate_y + seed * 10.0,
+                    candidate_z + seed * 10.0,
+                )
+                point_x = offset_x + feature[0] - fractional_x
+                point_y = offset_y + feature[1] - fractional_y
+                point_z = offset_z + feature[2] - fractional_z
                 distance_squared = (
-                    (point_x - scaled_x) ** 2
-                    + (point_y - scaled_y) ** 2
-                    + (point_z - scaled_z) ** 2
+                    point_x * point_x + point_y * point_y + point_z * point_z
                 )
                 nearest_squared = min(nearest_squared, distance_squared)
 
-    return 1.0 - min(max(nearest_squared, 0.0), 1.0)
+    return min(max(nearest_squared, 0.0), 1.0)
+
+
+def periodic_perlin_fbm(
+    x: float, y: float, z: float, base_frequency: int, octave_count: int
+) -> float:
+    """Accumulate the unnormalized octave weights expected by the cloud-noise remaps."""
+    value = 0.0
+    amplitude = 1.0
+    frequency = base_frequency
+    for _ in range(octave_count):
+        value += gradient_noise(x, y, z, frequency) * amplitude
+        amplitude *= 0.5
+        frequency *= 2
+    return value
+
+
+def periodic_worley_fbm_from_distances(
+    base_distance: float, second_distance: float, third_distance: float
+) -> float:
+    """Combine one inverse and two subtractive Worley octaves into cellular cloud tissue."""
+    return (1.0 - base_distance) - second_distance * 0.3 - third_distance * 0.3
+
+
+def periodic_worley_two_octaves(base_distance: float, second_distance: float) -> float:
+    """Combine the two Worley octaves used by the broad weather-coverage field."""
+    return (1.0 - base_distance) - second_distance * 0.25
 
 
 def remap(value: float, lower: float, upper: float) -> float:
@@ -172,149 +201,6 @@ def dilate_perlin_worley(perlin: float, worley: float, blend: float) -> float:
     return min(max(combined * dilation, 0.0), 1.0)
 
 
-def periodic_delta(first: float, second: float) -> float:
-    """Return the shortest signed displacement between two coordinates on a unit torus."""
-    return (first - second + 0.5) % 1.0 - 0.5
-
-
-def smootherstep(value: float) -> float:
-    """Apply a quintic smooth step to a value already mapped to the unit interval."""
-    value = min(max(value, 0.0), 1.0)
-    return value * value * value * (value * (value * 6.0 - 15.0) + 10.0)
-
-
-def periodic_ellipse_influence(
-    x: float,
-    y: float,
-    center_x: float,
-    center_y: float,
-    major_radius: float,
-    minor_radius: float,
-    angle: float,
-) -> float:
-    """Evaluate a smoothly bounded anisotropic influence on a tileable weather map."""
-    delta_x = periodic_delta(x, center_x)
-    delta_y = periodic_delta(y, center_y)
-    cosine = math.cos(angle)
-    sine = math.sin(angle)
-    along = (delta_x * cosine + delta_y * sine) / max(major_radius, 1e-6)
-    across = (-delta_x * sine + delta_y * cosine) / max(minor_radius, 1e-6)
-    normalized_radius = math.sqrt(along * along + across * across)
-    return smootherstep(1.0 - normalized_radius)
-
-
-def generate_convective_systems() -> list[ConvectiveSystem]:
-    """Build a deterministic tileable set of asymmetric convective cores and outflows."""
-    systems: list[ConvectiveSystem] = []
-    system_grid = 2
-    for grid_y in range(system_grid):
-        for grid_x in range(system_grid):
-            system_index = grid_y * system_grid + grid_x
-            center_x = (grid_x + lerp(0.16, 0.84, hash_unit(grid_x, grid_y, 0, 31))) / system_grid
-            center_y = (grid_y + lerp(0.16, 0.84, hash_unit(grid_x, grid_y, 0, 32))) / system_grid
-            angle = hash_unit(grid_x, grid_y, 0, 33) * math.tau
-            core_major = lerp(0.066, 0.096, hash_unit(grid_x, grid_y, 0, 34))
-            core_minor = core_major * lerp(0.62, 0.86, hash_unit(grid_x, grid_y, 0, 35))
-            cores = [ConvectiveCore(center_x, center_y, core_major, core_minor, angle, 1.0)]
-            for satellite_index in range(4):
-                satellite_angle = (
-                    angle
-                    + satellite_index * 2.3999632297
-                    + lerp(-0.48, 0.48, hash_unit(system_index, satellite_index, 0, 36))
-                )
-                satellite_distance = core_major * lerp(
-                    0.52, 1.38, hash_unit(system_index, satellite_index, 0, 37)
-                )
-                satellite_x = (center_x + math.cos(satellite_angle) * satellite_distance) % 1.0
-                satellite_y = (center_y + math.sin(satellite_angle) * satellite_distance) % 1.0
-                satellite_major = core_major * lerp(
-                    0.34, 0.68, hash_unit(system_index, satellite_index, 0, 38)
-                )
-                satellite_minor = satellite_major * lerp(
-                    0.56, 0.9, hash_unit(system_index, satellite_index, 0, 39)
-                )
-                satellite_orientation = satellite_angle + lerp(
-                    -0.72, 0.72, hash_unit(system_index, satellite_index, 0, 45)
-                )
-                satellite_strength = lerp(
-                    0.54, 0.88, hash_unit(system_index, satellite_index, 0, 46)
-                )
-                cores.append(
-                    ConvectiveCore(
-                        satellite_x,
-                        satellite_y,
-                        satellite_major,
-                        satellite_minor,
-                        satellite_orientation,
-                        satellite_strength,
-                    )
-                )
-            outflow_angle = angle + lerp(-0.45, 0.45, hash_unit(grid_x, grid_y, 0, 40))
-            outflow_offset = core_major * lerp(0.3, 0.72, hash_unit(grid_x, grid_y, 0, 41))
-            outflow_x = (center_x + math.cos(outflow_angle) * outflow_offset) % 1.0
-            outflow_y = (center_y + math.sin(outflow_angle) * outflow_offset) % 1.0
-            outflow_major = core_major * lerp(2.25, 3.25, hash_unit(grid_x, grid_y, 0, 42))
-            outflow_minor = core_minor * lerp(1.65, 2.35, hash_unit(grid_x, grid_y, 0, 43))
-            systems.append(
-                ConvectiveSystem(
-                    tuple(cores),
-                    outflow_x,
-                    outflow_y,
-                    outflow_major,
-                    outflow_minor,
-                    outflow_angle,
-                    hash_unit(system_index, 0, 0, 44),
-                )
-            )
-    return systems
-
-
-def sample_convective_structure(
-    x: float, y: float, systems: list[ConvectiveSystem]
-) -> tuple[float, float]:
-    """Return smoothly unioned core and anvil potentials for one weather-map texel."""
-    warp_x = (
-        periodic_gradient_noise(x, y, 0.237, 3) * 0.65
-        + periodic_gradient_noise(x, y, 0.237, 7) * 0.35
-        - 0.5
-    ) * 0.026
-    warp_y = (
-        periodic_gradient_noise(x, y, 0.829, 4) * 0.65
-        + periodic_gradient_noise(x, y, 0.829, 9) * 0.35
-        - 0.5
-    ) * 0.026
-    warped_x = (x + warp_x) % 1.0
-    warped_y = (y + warp_y) % 1.0
-    core_complement = 1.0
-    outflow_complement = 1.0
-    for system in systems:
-        system_core_complement = 1.0
-        for core in system.cores:
-            core_influence = periodic_ellipse_influence(
-                warped_x,
-                warped_y,
-                core.center_x,
-                core.center_y,
-                core.major_radius,
-                core.minor_radius,
-                core.angle,
-            ) * core.strength
-            system_core_complement *= 1.0 - min(max(core_influence, 0.0), 1.0)
-        system_core = 1.0 - system_core_complement
-        outflow = periodic_ellipse_influence(
-            warped_x,
-            warped_y,
-            system.outflow_x,
-            system.outflow_y,
-            system.outflow_major_radius,
-            system.outflow_minor_radius,
-            system.outflow_angle,
-        ) * lerp(0.72, 1.0, system.maturity)
-        core_complement *= 1.0 - system_core
-        outflow_complement *= 1.0 - min(max(max(outflow, system_core * 0.88), 0.0), 1.0)
-    return 1.0 - core_complement, 1.0 - outflow_complement
-
-
 def rank_values(values: list[float]) -> list[float]:
     """Convert a scalar field to a deterministic uniform-rank field while preserving topology."""
     ranks = [0.0] * len(values)
@@ -333,22 +219,31 @@ def generate_base_slice(arguments: tuple[int, int]) -> bytes:
         y = (y_index + 0.5) / size
         for x_index in range(size):
             x = (x_index + 0.5) / size
-            worley_8 = periodic_worley_inverse(x, y, z, 8)
-            worley_16 = periodic_worley_inverse(x, y, z, 16)
-            worley_32 = periodic_worley_inverse(x, y, z, 32)
-            worley_64 = periodic_worley_inverse(x, y, z, 64)
-            value_fbm = (
-                periodic_gradient_noise(x, y, z, 8) * 0.625
-                + periodic_gradient_noise(x, y, z, 16) * 0.25
-                + periodic_gradient_noise(x, y, z, 32) * 0.125
+            distances = {
+                frequency: periodic_worley_distance(x, y, z, frequency)
+                for frequency in (6, 12, 24, 48, 96)
+            }
+            perlin = remap(periodic_perlin_fbm(x, y, z, 4, 7), 0.3, 1.4)
+            large_worley = periodic_worley_fbm_from_distances(
+                distances[6], distances[12], distances[24]
             )
-            shape_worley_fbm = worley_8 * 0.625 + worley_16 * 0.25 + worley_32 * 0.125
-            perlin_worley = remap(
-                dilate_perlin_worley(value_fbm, shape_worley_fbm, 0.3), 0.35, 0.84
+            dilating_worley = remap(large_worley, -0.3, 1.3)
+            perlin_worley = dilate_perlin_worley(perlin, dilating_worley, 0.3)
+            large_worley_fbm = remap(large_worley, -0.4, 1.0)
+            medium_worley_fbm = remap(
+                periodic_worley_fbm_from_distances(
+                    distances[12], distances[24], distances[48]
+                ),
+                -0.4,
+                1.0,
             )
-            large_worley_fbm = worley_16 * 0.625 + worley_32 * 0.25 + worley_64 * 0.125
-            medium_worley_fbm = worley_32 * 0.625 + worley_64 * 0.375
-            small_worley_fbm = worley_64
+            small_worley_fbm = remap(
+                periodic_worley_fbm_from_distances(
+                    distances[24], distances[48], distances[96]
+                ),
+                -0.4,
+                1.0,
+            )
             for value in (perlin_worley, large_worley_fbm, medium_worley_fbm, small_worley_fbm):
                 voxels[index] = round(min(max(value, 0.0), 1.0) * 255.0)
                 index += 1
@@ -375,15 +270,33 @@ def generate_detail_voxels(size: int = DETAIL_TEXTURE_SIZE) -> bytes:
             y = (y_index + 0.5) / size
             for x_index in range(size):
                 x = (x_index + 0.5) / size
-                worley_2 = periodic_worley_inverse(x, y, z, 2)
-                worley_4 = periodic_worley_inverse(x, y, z, 4)
-                worley_8 = periodic_worley_inverse(x, y, z, 8)
-                worley_16 = periodic_worley_inverse(x, y, z, 16)
+                distances = {
+                    frequency: periodic_worley_distance(x, y, z, frequency)
+                    for frequency in (5, 8, 10, 16, 20, 32, 40)
+                }
                 values = (
-                    worley_2 * 0.625 + worley_4 * 0.25 + worley_8 * 0.125,
-                    worley_4 * 0.625 + worley_8 * 0.25 + worley_16 * 0.125,
-                    worley_8 * 0.75 + worley_16 * 0.25,
-                    periodic_gradient_noise(x, y, z, 8),
+                    remap(
+                        periodic_worley_fbm_from_distances(
+                            distances[5], distances[10], distances[20]
+                        ),
+                        -1.0,
+                        1.0,
+                    ),
+                    remap(
+                        periodic_worley_fbm_from_distances(
+                            distances[8], distances[16], distances[32]
+                        ),
+                        -1.0,
+                        1.0,
+                    ),
+                    remap(
+                        periodic_worley_fbm_from_distances(
+                            distances[10], distances[20], distances[40]
+                        ),
+                        -1.0,
+                        1.0,
+                    ),
+                    1.0,
                 )
                 for value in values:
                     voxels[index] = round(min(max(value, 0.0), 1.0) * 255.0)
@@ -392,61 +305,98 @@ def generate_detail_voxels(size: int = DETAIL_TEXTURE_SIZE) -> bytes:
 
 
 def generate_weather_texels(size: int = WEATHER_TEXTURE_SIZE) -> bytes:
-    """Generate coverage plus NDF-style core, outflow, and cloud-base column fields."""
+    """Generate coverage, cloud-type, optical-depth, and base-height fields."""
     weather_values: list[tuple[float, float, float, float]] = []
-    convective_systems = generate_convective_systems()
     for y_index in range(size):
         y = (y_index + 0.5) / size
         for x_index in range(size):
             x = (x_index + 0.5) / size
-            coverage_perlin = (
-                periodic_gradient_noise(x, y, 0.173, 3) * 0.55
-                + periodic_gradient_noise(x, y, 0.173, 6) * 0.3
-                + periodic_gradient_noise(x, y, 0.173, 12) * 0.15
+            coverage_perlin = periodic_perlin_fbm(x, y, 0.0, 9, 7)
+            coverage_worley = periodic_worley_two_octaves(
+                periodic_worley_distance(x, y, 0.0, 9, 1.0),
+                periodic_worley_distance(x, y, 0.0, 18, 1.0),
             )
-            coverage_worley = (
-                periodic_worley_inverse(x, y, 0.173, 5) * 0.7
-                + periodic_worley_inverse(x, y, 0.173, 10) * 0.3
-            )
-            coverage_erosion = (
-                periodic_gradient_noise(x, y, 0.613, 7) * 0.68
-                + periodic_gradient_noise(x, y, 0.613, 14) * 0.32
-            )
+            coverage_difference = periodic_perlin_fbm(x, y, 200.0, 9, 7)
             coverage = dilate_perlin_worley(
-                remap(coverage_perlin, 0.28, 0.72), remap(coverage_worley, 0.18, 0.92), 0.35
+                remap(coverage_perlin, 1.0, 1.25),
+                remap(coverage_worley, 0.65, 0.9),
+                1.0,
             )
-            coverage = remap(coverage - remap(coverage_erosion, 0.28, 0.72) * 0.42, -0.2, 0.68)
+            coverage -= remap(coverage_difference, 1.0, 1.4)
             base_height = (
-                periodic_gradient_noise(x, y, 0.419, 4) * 0.55
-                + periodic_gradient_noise(x, y, 0.419, 8) * 0.3
-                + periodic_gradient_noise(x, y, 0.419, 16) * 0.15
+                gradient_noise(x, y, 0.419, 4) * 0.55
+                + gradient_noise(x, y, 0.419, 8) * 0.3
+                + gradient_noise(x, y, 0.419, 16) * 0.15
             )
-            convective_core, storm_outflow = sample_convective_structure(x, y, convective_systems)
-            core_sculpt = (
-                periodic_gradient_noise(x, y, 0.731, 7) * 0.68
-                + periodic_gradient_noise(x, y, 0.731, 15) * 0.32
-            )
-            outflow_sculpt = periodic_gradient_noise(x, y, 0.887, 6)
-            convective_core *= lerp(0.76, 1.0, remap(core_sculpt, 0.28, 0.72))
-            storm_outflow *= lerp(0.84, 1.0, remap(outflow_sculpt, 0.28, 0.72))
+            cloud_type = periodic_perlin_fbm(x, y, 500.0, 9, 7)
+            optical_depth = periodic_perlin_fbm(x, y, 100.0, 6, 7)
             weather_values.append((
                 coverage,
-                convective_core,
-                storm_outflow,
+                remap(cloud_type, 0.85, 1.9),
+                remap(optical_depth, 0.5, 1.3),
                 remap(base_height, 0.3, 0.7),
             ))
 
-    coverage_ranks = rank_values([value[0] for value in weather_values])
     texels = bytearray(size * size * 4)
     index = 0
-    for weather_index, (_, convective_core, storm_outflow, base_height) in enumerate(weather_values):
+    for coverage, cloud_type, optical_depth, base_height in weather_values:
         for value in (
-            coverage_ranks[weather_index],
-            convective_core,
-            storm_outflow,
+            coverage,
+            cloud_type,
+            optical_depth,
             base_height,
         ):
             texels[index] = round(min(max(value, 0.0), 1.0) * 255.0)
+            index += 1
+    return bytes(texels)
+
+
+def perlin_five_octaves(x: float, y: float, z: float) -> float:
+    """Accumulate the five non-tileable Perlin octaves used by the curl field."""
+    value = 0.0
+    amplitude = 1.0
+    for scale in (1.0, 2.02, 2.02 * 2.03, 2.02 * 2.03 * 2.01, 2.02 * 2.03 * 2.01 * 2.01):
+        value += amplitude * gradient_noise(x * scale, y * scale, z * scale, 1, tile=False)
+        amplitude *= 0.5
+    return value
+
+
+def curl_noise(x: float, y: float, z: float) -> tuple[float, float, float]:
+    """Evaluate the finite-difference curl of the five-octave Perlin field."""
+    epsilon = 0.05
+
+    def noise(sample_x: float, sample_y: float, sample_z: float) -> float:
+        return perlin_five_octaves(sample_x, sample_y, sample_z)
+
+    derivative_y = (noise(x, y + epsilon, z) - noise(x, y - epsilon, z)) / (2.0 * epsilon)
+    derivative_z = (noise(x, y, z + epsilon) - noise(x, y, z - epsilon)) / (2.0 * epsilon)
+    curl_x = derivative_y - derivative_z
+
+    derivative_z = (noise(x, y, z + epsilon) - noise(x, y, z - epsilon)) / (2.0 * epsilon)
+    derivative_x = (noise(x + epsilon, y, z) - noise(x - epsilon, y, z)) / (2.0 * epsilon)
+    curl_y = derivative_z - derivative_x
+
+    derivative_x = (noise(x + epsilon, y, z) - noise(x - epsilon, y, z)) / (2.0 * epsilon)
+    derivative_y = (noise(x, y + epsilon, z) - noise(x, y - epsilon, z)) / (2.0 * epsilon)
+    curl_z = derivative_x - derivative_y
+    return curl_x, curl_y, curl_z
+
+
+def generate_curl_texels(size: int = CURL_TEXTURE_SIZE) -> bytes:
+    """Generate the encoded two-dimensional curl field consumed by cloud-detail erosion."""
+    texels = bytearray(size * size * 4)
+    index = 0
+    for y_index in range(size):
+        y = y_index / size * 4.0
+        for x_index in range(size):
+            x = x_index / size * 4.0
+            curl = curl_noise(x, y, 0.0)
+            for value in curl:
+                remapped = (value + 0.5) / 3.5
+                encoded = (remapped + 1.0) * 0.5
+                texels[index] = round(min(max(encoded, 0.0), 1.0) * 255.0)
+                index += 1
+            texels[index] = 255
             index += 1
     return bytes(texels)
 
@@ -508,11 +458,12 @@ def dds_texture(texels: bytes, size: int) -> bytes:
 
 
 def main() -> int:
-    """Write or verify the canonical cloud weather, base, and detail resources."""
+    """Write or verify the canonical cloud weather, base, detail, and curl resources."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("base_output", type=Path)
     parser.add_argument("detail_output", type=Path)
     parser.add_argument("weather_output", type=Path)
+    parser.add_argument("curl_output", type=Path)
     parser.add_argument("--check", action="store_true")
     arguments = parser.parse_args()
 
@@ -520,6 +471,7 @@ def main() -> int:
         (arguments.base_output, dds_volume(generate_base_voxels(), BASE_TEXTURE_SIZE)),
         (arguments.detail_output, dds_volume(generate_detail_voxels(), DETAIL_TEXTURE_SIZE)),
         (arguments.weather_output, dds_texture(generate_weather_texels(), WEATHER_TEXTURE_SIZE)),
+        (arguments.curl_output, dds_texture(generate_curl_texels(), CURL_TEXTURE_SIZE)),
     )
     if arguments.check:
         success = True

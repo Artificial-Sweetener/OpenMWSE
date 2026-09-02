@@ -152,6 +152,7 @@ namespace MWWorld
             float mCloudDensity;
             float mCloudBaseAltitudeWorldUnits;
             float mCloudThicknessWorldUnits;
+            float mCloudDeckType;
             float mCloudType;
             float mCloudFeatureScale;
             float mCloudVerticalDevelopment;
@@ -191,6 +192,7 @@ namespace MWWorld
                 readBoundedFloat(source, "cloudDensity", path, 0.f, 4.f),
                 readBoundedFloat(source, "cloudAltitude", path, -10000.f, 200000.f),
                 readBoundedFloat(source, "cloudThickness", path, 1.f, 200000.f),
+                readBoundedFloat(source, "cloudDeckType", path, 0.f, 1.f),
                 readBoundedFloat(source, "cloudType", path, 0.f, 1.f),
                 readBoundedFloat(source, "cloudFeatureScale", path, 0.25f, 4.f),
                 readBoundedFloat(source, "cloudVerticalDevelopment", path, 0.f, 1.f),
@@ -261,6 +263,7 @@ namespace MWWorld
                 std::lerp(from.mCloudDensity, to.mCloudDensity, deck),
                 std::lerp(from.mCloudBaseAltitudeWorldUnits, to.mCloudBaseAltitudeWorldUnits, deck),
                 std::lerp(from.mCloudThicknessWorldUnits, to.mCloudThicknessWorldUnits, convection),
+                std::lerp(from.mCloudDeckType, to.mCloudDeckType, deck),
                 std::lerp(from.mCloudType, to.mCloudType, convection),
                 std::lerp(from.mCloudFeatureScale, to.mCloudFeatureScale, convection),
                 std::lerp(from.mCloudVerticalDevelopment, to.mCloudVerticalDevelopment, convection),
@@ -558,7 +561,8 @@ namespace MWWorld
         const VolumeModifiers& environment = mImpl->mAppliedVolumes;
         result.mVolumes = { volume.mCloudDeckCoverage, volume.mCloudDensity * environment.mCloudDensityMultiplier,
             volume.mCloudBaseAltitudeWorldUnits + environment.mCloudAltitudeOffsetWorldUnits,
-            volume.mCloudThicknessWorldUnits * environment.mCloudThicknessMultiplier, volume.mCloudType,
+            volume.mCloudThicknessWorldUnits * environment.mCloudThicknessMultiplier, volume.mCloudDeckType,
+            volume.mCloudType,
             volume.mCloudFeatureScale, volume.mCloudVerticalDevelopment, volume.mCloudAnvilStrength,
             volume.mCloudDeckContinuity, volume.mCloudConvectiveFrequency, volume.mCloudConvectiveMaturity,
             volume.mCloudStormOrganization, volume.mCloudTowerTaper, volume.mCloudBaseVariation,

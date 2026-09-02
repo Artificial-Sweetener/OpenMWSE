@@ -422,6 +422,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << volumes.mCloudBaseAltitudeWorldUnits << ", " << volumes.mCloudThicknessWorldUnits << ", "
                            << volumes.mCloudType << ", " << volumes.mCloudFeatureScale << ", "
                            << volumes.mCloudVerticalDevelopment << ", " << volumes.mCloudAnvilStrength << "]\n"
+                           << "  cloud-deck-type: " << volumes.mCloudDeckType << "\n"
                            << "  cloud-organization: [" << volumes.mCloudDeckContinuity << ", "
                            << volumes.mCloudConvectiveFrequency << ", " << volumes.mCloudConvectiveMaturity << ", "
                            << volumes.mCloudStormOrganization << "]\n"

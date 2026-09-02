@@ -1,6 +1,6 @@
 sampler_3d openmwseCloudNoiseTexture {
     source = "textures/openmwse/atmosphere_cloud_noise.dds";
-    min_filter = linear;
+    min_filter = linear_mipmap_linear;
     mag_filter = linear;
     wrap_s = repeat;
     wrap_t = repeat;
@@ -9,11 +9,19 @@ sampler_3d openmwseCloudNoiseTexture {
 
 sampler_3d openmwseCloudDetailNoiseTexture {
     source = "textures/openmwse/atmosphere_cloud_detail.dds";
-    min_filter = linear;
+    min_filter = linear_mipmap_linear;
     mag_filter = linear;
     wrap_s = repeat;
     wrap_t = repeat;
     wrap_r = repeat;
+}
+
+sampler_2d openmwseCloudCurlNoiseTexture {
+    source = "textures/openmwse/atmosphere_cloud_curl.dds";
+    min_filter = nearest;
+    mag_filter = nearest;
+    wrap_s = repeat;
+    wrap_t = repeat;
 }
 
 sampler_2d openmwseCloudWeatherTexture {
@@ -81,6 +89,12 @@ shared {
         return omw.waterHeight;
     }
 
+    /// Return the native post-process camera position used by spherical cloud geometry.
+    vec3 openmwseCloudEyePosition()
+    {
+        return omw.eyePos.xyz;
+    }
+
     /// Expose integrated world-space cloud displacement to deterministic cloud advection.
     vec2 openmwseCloudAdvectionOffsetWorldUnits()
     {
@@ -88,15 +102,21 @@ shared {
     }
 
     /// Sample the canonical tileable multi-channel cloud shape volume.
-    vec4 openmwseCloudNoiseSample(vec3 coordinates)
+    vec4 openmwseCloudNoiseSample(vec3 coordinates, float lodBias)
     {
-        return omw_Texture3D(openmwseCloudNoiseTexture, fract(coordinates));
+        return omw_Texture3DLod(openmwseCloudNoiseTexture, fract(coordinates), lodBias);
     }
 
     /// Sample the independent high-frequency cloud erosion volume.
-    vec4 openmwseCloudDetailNoiseSample(vec3 coordinates)
+    vec4 openmwseCloudDetailNoiseSample(vec3 coordinates, float lodBias)
     {
-        return omw_Texture3D(openmwseCloudDetailNoiseTexture, fract(coordinates));
+        return omw_Texture3DLod(openmwseCloudDetailNoiseTexture, fract(coordinates), lodBias);
+    }
+
+    /// Sample the encoded curl field for base-weighted detail distortion.
+    vec3 openmwseCloudCurlNoiseSample(vec2 coordinates)
+    {
+        return omw_Texture2D(openmwseCloudCurlNoiseTexture, fract(coordinates)).rgb;
     }
 
     /// Sample the canonical broad cloud-organization and morphology field.
@@ -235,7 +255,7 @@ shared {
         return 1.0 / max(omw.atmosphereVolumeResolutionScale, 0.001);
     }
 
-    const float maximumAtmosphereHistoryAdvectionWorldUnits = 2400.0;
+    const float maximumAtmosphereHistoryAdvectionWorldUnits = 128.0;
 
     /// Report whether camera translation makes a single-depth volume-history reprojection unreliable.
     bool atmosphereCameraTranslated()
@@ -314,14 +334,14 @@ shared {
             float sampleDistance = mix(cloudInterval.x, cloudInterval.y, intervalPosition);
             vec3 samplePosition = rayOrigin + rayDirection * sampleDistance;
             vec3 advectedPosition = openmwseCloudLayerPosition(samplePosition, cloudLayer);
-            OpenMWSECloudColumnProperties columnProperties = openmwseCloudColumnProperties(
-                openmwseCloudColumnPosition(samplePosition, advectedPosition, cloudLayer),
-                cloudLayer.parameters, cloudLayer.shape, cloudLayer.organization, cloudLayer.structure);
+            OpenMWSECloudColumnProperties columnProperties
+                = openmwseCloudLayerColumnProperties(samplePosition, advectedPosition, cloudLayer);
             vec2 localLayer
                 = openmwseCloudLocalLayerFromProperties(samplePosition, columnProperties, cloudLayer);
-            float relativeHeight
-                = openmwseCloudProfileHeightFraction(samplePosition.z, localLayer.x, cloudLayer);
-            float heightSupport = openmwseCloudHeightProfile(
+            vec3 fieldPosition = openmwseCloudFieldPosition(samplePosition, cloudLayer);
+            float relativeHeight = clamp(
+                (fieldPosition.z - localLayer.x) / max(localLayer.y, 1.0), 0.0, 1.0);
+            float heightSupport = openmwseCloudTypeHeightDensity(
                 relativeHeight, columnProperties.family, columnProperties.development);
             float columnSupport = openmwseCloudLocalCoverage(
                 columnProperties.organizationPotential, cloudLayer.parameters.x);
@@ -424,8 +444,8 @@ render_target AtmosphereVolumeHistory {
     source_type = half_float;
     source_format = rgba;
     mipmaps = false;
-    min_filter = nearest;
-    mag_filter = nearest;
+    min_filter = linear;
+    mag_filter = linear;
     clear_color = vec4(0.0, 0.0, 0.0, 1.0);
 }
 
@@ -644,7 +664,7 @@ fragment classifyAtmosphereVolume(target=AtmosphereVolumeMetadataHistory, rt1=At
             if (mainCloudEnabled)
             {
                 vec2 mainHeightBounds = openmwseCloudLayerHeightBounds(mainCloudLayer);
-                mainCloudInterval = openmwseCloudLayerIntersection(omw.eyePos.xyz, rayDirection,
+                mainCloudInterval = openmwseMainCloudLayerIntersection(omw.eyePos.xyz, rayDirection,
                     mainHeightBounds.x, mainHeightBounds.y);
                 mainCloudInterval.y = min(mainCloudInterval.y, cloudMaximumDistance);
             }
@@ -932,5 +952,6 @@ technique {
     version = "1.0";
     author = "OpenMWSE contributors";
     flags = disable_interiors, disable_underwater, disable_sunglare, hidden;
+    glsl_extensions = GL_EXT_gpu_shader4;
     pass_lights = true;
 }

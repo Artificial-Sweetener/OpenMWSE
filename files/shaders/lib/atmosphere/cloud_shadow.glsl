@@ -58,6 +58,10 @@ vec4 openmwseCloudShadowWeatherSample(vec2 coordinates)
 #define openmwseCloudBaseVariation openmwseCloudShadowBaseVariation
 #define openmwseCloudMinimumThicknessScale openmwseCloudShadowMinimumThicknessScale
 #define openmwseCloudMaximumThicknessScale openmwseCloudShadowMaximumThicknessScale
+#define openmwseCloudWorldUnitsPerMeter openmwseCloudShadowWorldUnitsPerMeter
+#define openmwseCloudReferenceShapeNoiseScale openmwseCloudShadowReferenceShapeNoiseScale
+#define openmwseCloudReferenceWeatherScale openmwseCloudShadowReferenceWeatherScale
+#define openmwseCloudLowFormationScale openmwseCloudShadowLowFormationScale
 #define openmwseCloudParameters openmwseCloudShadowParameters
 #define openmwseCloudShapeParameters openmwseCloudShadowShapeParameters
 #define openmwseCloudOrganizationParameters openmwseCloudShadowOrganizationParameters
@@ -67,13 +71,16 @@ vec4 openmwseCloudShadowWeatherSample(vec2 coordinates)
 #define openmwseCloudNoiseSample openmwseCloudShadowNoiseSample
 #define openmwseCloudWeatherSample openmwseCloudShadowWeatherSample
 #define openmwseCloudRemap openmwseCloudShadowRemap
+#define openmwseCloudRemapUnclamped openmwseCloudShadowRemapUnclamped
 #define openmwseCloudBaseFromNoise openmwseCloudShadowBaseFromNoise
 #define openmwseCloudHash openmwseCloudShadowHash
 #define openmwseCloudValueNoise openmwseCloudShadowValueNoise
 #define openmwseCloudAdvectedPosition openmwseCloudShadowAdvectedPosition
 #define openmwseCloudWeatherCoordinates openmwseCloudShadowWeatherCoordinates
+#define openmwseCloudWeatherCoordinatesForScale openmwseCloudShadowWeatherCoordinatesForScale
 #define openmwseCloudConvectiveWeatherCoordinates openmwseCloudShadowConvectiveWeatherCoordinates
 #define openmwseCloudColumnProperties openmwseCloudShadowColumnProperties
+#define openmwseCloudColumnPropertiesForScale openmwseCloudShadowColumnPropertiesForScale
 #define openmwseCloudColumnNoise openmwseCloudShadowColumnNoise
 #define openmwseCloudLocalCoverage openmwseCloudShadowLocalCoverage
 #define openmwseCloudColumnOccupancy openmwseCloudShadowColumnOccupancy
@@ -84,13 +91,16 @@ vec4 openmwseCloudShadowWeatherSample(vec2 coordinates)
 #undef openmwseCloudLocalCoverage
 #undef openmwseCloudColumnNoise
 #undef openmwseCloudColumnProperties
+#undef openmwseCloudColumnPropertiesForScale
 #undef openmwseCloudConvectiveWeatherCoordinates
 #undef openmwseCloudWeatherCoordinates
+#undef openmwseCloudWeatherCoordinatesForScale
 #undef openmwseCloudAdvectedPosition
 #undef openmwseCloudValueNoise
 #undef openmwseCloudHash
 #undef openmwseCloudAdvectionOffsetWorldUnits
 #undef openmwseCloudBaseFromNoise
+#undef openmwseCloudRemapUnclamped
 #undef openmwseCloudRemap
 #undef openmwseCloudNoiseSample
 #undef openmwseCloudWeatherSample
@@ -100,6 +110,10 @@ vec4 openmwseCloudShadowWeatherSample(vec2 coordinates)
 #undef openmwseCloudOrganizationParameters
 #undef openmwseCloudStructureParameters
 #undef openmwseCloudMaximumThicknessScale
+#undef openmwseCloudLowFormationScale
+#undef openmwseCloudReferenceWeatherScale
+#undef openmwseCloudReferenceShapeNoiseScale
+#undef openmwseCloudWorldUnitsPerMeter
 #undef openmwseCloudMinimumThicknessScale
 #undef openmwseCloudBaseVariation
 #undef openmwseCloudMaximumDistance
@@ -112,8 +126,9 @@ float openmwseLowCloudShadowColumnDensity(vec2 worldPosition)
     vec3 advectedPosition = openmwseCloudShadowAdvectedPosition(vec3(worldPosition, 0.0));
     advectedPosition.xy += vec2(137000.0, -91000.0);
     OpenMWSECloudColumnProperties properties
-        = openmwseCloudShadowColumnProperties(advectedPosition.xy, parameters, shape,
-            vec4(0.72, 0.08, 0.16, 0.0), vec4(0.72, 0.42, 0.0, 0.0));
+        = openmwseCloudShadowColumnPropertiesForScale(advectedPosition.xy, parameters, shape,
+            vec4(0.72, 0.08, 0.16, 0.0), vec4(0.72, 0.42, 0.0, 0.0),
+            openmwseCloudShadowLowFormationScale);
     return smoothstep(0.08, 0.82, properties.localCoverage) * max(parameters.y, 0.0);
 }
 

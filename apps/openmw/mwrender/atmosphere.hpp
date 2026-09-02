@@ -28,6 +28,7 @@ namespace MWRender
         float mCloudDensity = 0.f;
         float mCloudBaseAltitudeWorldUnits = 55000.f;
         float mCloudThicknessWorldUnits = 18000.f;
+        float mCloudDeckType = 0.35f;
         float mCloudType = 0.5f;
         float mCloudFeatureScale = 1.f;
         float mCloudVerticalDevelopment = 0.5f;

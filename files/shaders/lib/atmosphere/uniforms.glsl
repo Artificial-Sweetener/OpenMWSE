@@ -43,6 +43,7 @@ struct Atmosphere
 uniform Atmosphere atmosphere;
 uniform sampler3D openmwseCloudNoiseTexture;
 uniform sampler3D openmwseCloudDetailNoiseTexture;
+uniform sampler2D openmwseCloudCurlNoiseTexture;
 uniform sampler2D openmwseCloudWeatherTexture;
 
 #endif

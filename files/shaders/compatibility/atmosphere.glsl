@@ -62,6 +62,15 @@ float openmwseCloudWaterHeight()
     return waterHeight;
 }
 
+/// Return the reflected or main-view camera position used by spherical cloud geometry.
+vec3 openmwseCloudEyePosition()
+{
+    vec3 position = osg_ViewMatrixInverse[3].xyz;
+    if (isReflection)
+        position.z = 2.0 * waterHeight - position.z;
+    return position;
+}
+
 /// Expose integrated world-space cloud displacement to deterministic cloud advection.
 vec2 openmwseCloudAdvectionOffsetWorldUnits()
 {
@@ -69,15 +78,21 @@ vec2 openmwseCloudAdvectionOffsetWorldUnits()
 }
 
 /// Sample the canonical tileable multi-channel cloud shape volume.
-vec4 openmwseCloudNoiseSample(vec3 coordinates)
+vec4 openmwseCloudNoiseSample(vec3 coordinates, float lodBias)
 {
     return texture3D(openmwseCloudNoiseTexture, fract(coordinates));
 }
 
 /// Sample the independent high-frequency cloud erosion volume.
-vec4 openmwseCloudDetailNoiseSample(vec3 coordinates)
+vec4 openmwseCloudDetailNoiseSample(vec3 coordinates, float lodBias)
 {
     return texture3D(openmwseCloudDetailNoiseTexture, fract(coordinates));
+}
+
+/// Sample the encoded curl field for base-weighted detail distortion.
+vec3 openmwseCloudCurlNoiseSample(vec2 coordinates)
+{
+    return texture2D(openmwseCloudCurlNoiseTexture, fract(coordinates)).rgb;
 }
 
 /// Sample the canonical broad cloud-organization and morphology field.
@@ -100,10 +115,7 @@ vec3 atmosphereWorldDirection(vec3 viewDirection)
 /// Return the main or water-reflected camera position in world space.
 vec3 atmosphereEyePosition()
 {
-    vec3 position = osg_ViewMatrixInverse[3].xyz;
-    if (isReflection)
-        position.z = 2.0 * waterHeight - position.z;
-    return position;
+    return openmwseCloudEyePosition();
 }
 
 /// Assemble shared aerial-perspective parameters from compatibility shader uniforms.

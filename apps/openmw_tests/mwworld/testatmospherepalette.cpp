@@ -54,6 +54,7 @@ namespace MWWorld
             EXPECT_EQ(clear.mInScattering, osg::Vec3f(0.25f, 0.38f, 0.48f));
             EXPECT_EQ(clear.mOutScattering, osg::Vec3f(0.07f, 0.36f, 0.76f));
             EXPECT_FLOAT_EQ(clear.mVolumes.mCloudDeckCoverage, 0.26f);
+            EXPECT_FLOAT_EQ(clear.mVolumes.mCloudDeckType, 0.58f);
             EXPECT_FLOAT_EQ(clear.mVolumes.mCloudConvectiveFrequency, 0.18f);
             EXPECT_FLOAT_EQ(clear.mVolumes.mTerrainReferenceHeightWorldUnits, 12000.f);
             EXPECT_FLOAT_EQ(clear.mVolumes.mMistDensity, 0.0432f);
@@ -70,7 +71,9 @@ namespace MWWorld
 
             const MWRender::AtmosphereState cloudy = palette.getState("Cloudy", {}, 0.f);
             const MWRender::AtmosphereState thunderstorm = palette.getState("Thunderstorm", {}, 0.f);
+            EXPECT_LT(thunderstorm.mVolumes.mCloudDeckType, cloudy.mVolumes.mCloudDeckType);
             EXPECT_GT(thunderstorm.mVolumes.mCloudType, cloudy.mVolumes.mCloudType);
+            EXPECT_GT(thunderstorm.mVolumes.mCloudType, thunderstorm.mVolumes.mCloudDeckType);
             EXPECT_GT(thunderstorm.mVolumes.mCloudVerticalDevelopment, cloudy.mVolumes.mCloudVerticalDevelopment);
             EXPECT_GT(thunderstorm.mVolumes.mCloudThicknessWorldUnits, cloudy.mVolumes.mCloudThicknessWorldUnits);
             EXPECT_GT(thunderstorm.mVolumes.mCloudAnvilStrength, cloudy.mVolumes.mCloudAnvilStrength);

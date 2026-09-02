@@ -5,6 +5,7 @@ endif()
 set(BUILTIN_DATA_FILES
     textures/openmwse/atmosphere_cloud_noise.dds
     textures/openmwse/atmosphere_cloud_detail.dds
+    textures/openmwse/atmosphere_cloud_curl.dds
     textures/openmwse/atmosphere_cloud_weather.dds
     textures/omw_map_color_palette.dds
     textures/omw_menu_scroll_down.dds

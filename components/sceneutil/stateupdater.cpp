@@ -16,11 +16,14 @@ namespace SceneUtil
 {
     StateUpdater::StateUpdater(osg::Texture3D* atmosphereNoiseTexture, int atmosphereNoiseTextureUnit,
         osg::Texture3D* atmosphereDetailNoiseTexture, int atmosphereDetailNoiseTextureUnit,
+        osg::Texture2D* atmosphereCurlNoiseTexture, int atmosphereCurlNoiseTextureUnit,
         osg::Texture2D* atmosphereWeatherTexture, int atmosphereWeatherTextureUnit)
         : mAtmosphereNoiseTexture(atmosphereNoiseTexture)
         , mAtmosphereNoiseTextureUnit(atmosphereNoiseTextureUnit)
         , mAtmosphereDetailNoiseTexture(atmosphereDetailNoiseTexture)
         , mAtmosphereDetailNoiseTextureUnit(atmosphereDetailNoiseTextureUnit)
+        , mAtmosphereCurlNoiseTexture(atmosphereCurlNoiseTexture)
+        , mAtmosphereCurlNoiseTextureUnit(atmosphereCurlNoiseTextureUnit)
         , mAtmosphereWeatherTexture(atmosphereWeatherTexture)
         , mAtmosphereWeatherTextureUnit(atmosphereWeatherTextureUnit)
     {
@@ -174,6 +177,14 @@ namespace SceneUtil
                 mAtmosphereDetailNoiseTextureUnit, mAtmosphereDetailNoiseTexture, osg::StateAttribute::ON);
             stateset->addUniform(
                 new osg::Uniform("openmwseCloudDetailNoiseTexture", mAtmosphereDetailNoiseTextureUnit));
+        }
+
+        if (mAtmosphereCurlNoiseTexture && mAtmosphereCurlNoiseTextureUnit >= 0)
+        {
+            stateset->setTextureAttribute(
+                mAtmosphereCurlNoiseTextureUnit, mAtmosphereCurlNoiseTexture, osg::StateAttribute::ON);
+            stateset->addUniform(
+                new osg::Uniform("openmwseCloudCurlNoiseTexture", mAtmosphereCurlNoiseTextureUnit));
         }
 
         if (mAtmosphereWeatherTexture && mAtmosphereWeatherTextureUnit >= 0)

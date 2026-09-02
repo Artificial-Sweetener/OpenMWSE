@@ -83,6 +83,7 @@ namespace Fx
 #define omw_Texture2D @texture2D
 #define omw_Texture2DArray @texture2DArray
 #define omw_Texture3D @texture3D
+#define omw_Texture3DLod @texture3DLod
 #define omw_Vertex @vertex
 #define omw_FragColor @fragColor
 
@@ -342,6 +343,7 @@ mat4 omw_InvProjectionMatrix()
                   { "@texture2DArray", mLegacyGLSL ? "texture2DArray" : "texture" },
                   { "@texture2D", mLegacyGLSL ? "texture2D" : "texture" },
                   { "@texture3D", mLegacyGLSL ? "texture3D" : "texture" },
+                  { "@texture3DLod", mLegacyGLSL ? "texture3DLod" : "textureLod" },
                   { "@vertex", mLegacyGLSL ? "gl_Vertex" : "_omw_Vertex" },
                   { "@fragColor", mLegacyGLSL ? "gl_FragColor" : "_omw_FragColor" },
                   { "@useBindings", mLegacyGLSL ? "0" : "1" },
