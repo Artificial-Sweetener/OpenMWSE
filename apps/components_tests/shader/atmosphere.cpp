@@ -146,6 +146,7 @@ namespace
         float volumeResolutionScale = 0.5f;
         osg::Vec2f cloudDensitySliceExtent{ 500000.f, 500000.f };
         int cloudDensitySliceAxis = 0;
+        int cloudDensitySliceQuantity = 0;
         bool renderCloudDensitySlice = false;
     };
 
@@ -386,6 +387,7 @@ namespace
                 source += R"glsl(
 uniform vec2 openmwseTestCloudDensitySliceExtent;
 uniform int openmwseTestCloudDensitySliceAxis;
+uniform int openmwseTestCloudDensitySliceQuantity;
 
 void main()
 {
@@ -395,14 +397,24 @@ void main()
         : vec3(sliceCoordinates.x * openmwseTestCloudDensitySliceExtent.x, 0.0,
             sliceCoordinates.y * openmwseTestCloudDensitySliceExtent.y);
     vec3 samplePosition = omw.eyePos.xyz + sliceOffset;
-    float density = openmwseCloudDensity(samplePosition, 0.0, 250.0, openmwseMainCloudLayer());
-    omw_FragColor = vec4(density, density, density, 1.0);
+    OpenMWSECloudLayer mainLayer = openmwseMainCloudLayer();
+    OpenMWSECloudLayer lowLayer = openmwseLowCloudLayer();
+    float density = openmwseCloudDensity(samplePosition, 0.0, 250.0, mainLayer);
+    float diagnosticValue = density;
+    if (openmwseTestCloudDensitySliceQuantity == 1 && density > 0.01)
+    {
+        diagnosticValue = openmwseCloudSunAccess(samplePosition, normalize(omw.sunPos.xyz),
+            omw.atmosphereQuality, density, 0.0, mainLayer, lowLayer);
+    }
+    omw_FragColor = vec4(diagnosticValue, diagnosticValue, diagnosticValue, density);
 }
 )glsl";
                 shader->setShaderSource(source);
             }
             state->addUniform(new osg::Uniform("openmwseTestCloudDensitySliceExtent", inputs.cloudDensitySliceExtent));
             state->addUniform(new osg::Uniform("openmwseTestCloudDensitySliceAxis", inputs.cloudDensitySliceAxis));
+            state->addUniform(
+                new osg::Uniform("openmwseTestCloudDensitySliceQuantity", inputs.cloudDensitySliceQuantity));
         }
         if (inputs.reverseZ)
         {
@@ -1921,6 +1933,197 @@ void main()
         }
         EXPECT_LT(longestVerticalBoundary, density.height / 4)
             << "Clear-weather density must not expose tall vertical coverage-map boundaries";
+    }
+
+    /// Verify that production Clear-cloud profiles do not repeat broad horizontal density shelves.
+    TEST(AtmosphereShaderTest, productionClearCloudProfilesAvoidRepeatedHorizontalBands)
+    {
+        NativePassInputs inputs = makeProductionAtmosphereInputs("Clear", "Day");
+        inputs.width = 192;
+        inputs.height = 128;
+        inputs.eyePosition = { 43333.f, 236667.f, 78000.f };
+        inputs.cloudDensitySliceExtent = { 333333.f, 130000.f };
+        inputs.cloudDensitySliceAxis = 1;
+        inputs.renderCloudDensitySlice = true;
+        inputs.mistParameters = {};
+        inputs.lowCloudParameters = {};
+        const PassImage density = renderNativeAtmospherePass("integrateAtmosphereVolume", inputs);
+        ASSERT_EQ(density.width, inputs.width);
+        ASSERT_EQ(density.height, inputs.height);
+
+        int broadBoundaryRows = 0;
+        int longestBroadBoundaryRun = 0;
+        int currentBroadBoundaryRun = 0;
+        for (int y = 1; y < density.height; ++y)
+        {
+            int changedSupport = 0;
+            for (int x = 0; x < density.width; ++x)
+            {
+                const bool previousOccupied = density.at(x, y - 1).x() > 0.01f;
+                const bool currentOccupied = density.at(x, y).x() > 0.01f;
+                changedSupport += previousOccupied != currentOccupied ? 1 : 0;
+            }
+            const bool broadBoundary = changedSupport > density.width / 5;
+            broadBoundaryRows += broadBoundary ? 1 : 0;
+            currentBroadBoundaryRun = broadBoundary ? currentBroadBoundaryRun + 1 : 0;
+            longestBroadBoundaryRun = std::max(longestBroadBoundaryRun, currentBroadBoundaryRun);
+        }
+
+        EXPECT_EQ(broadBoundaryRows, 0)
+            << "Clear-weather density must not be assembled from repeated full-width height bands";
+        EXPECT_LE(longestBroadBoundaryRun, 2)
+            << "Cloud support must change through a shaped boundary rather than a horizontal density shelf";
+    }
+
+    /// Verify that Clear weather produces a varied population rather than one dominant macro-scale blob.
+    TEST(AtmosphereShaderTest, productionClearCloudPopulationUsesConvectiveCellScale)
+    {
+        NativePassInputs inputs = makeProductionAtmosphereInputs("Clear", "Day");
+        inputs.width = 128;
+        inputs.height = 128;
+        inputs.eyePosition = { 43333.f, 236667.f, 65000.f };
+        inputs.cloudDensitySliceExtent = { 500000.f, 500000.f };
+        inputs.renderCloudDensitySlice = true;
+        inputs.mistParameters = {};
+        inputs.lowCloudParameters = {};
+        const PassImage density = renderNativeAtmospherePass("integrateAtmosphereVolume", inputs);
+        ASSERT_EQ(density.width, inputs.width);
+        ASSERT_EQ(density.height, inputs.height);
+
+        std::vector<bool> visited(density.pixels.size());
+        std::size_t occupiedPixels = 0;
+        std::size_t largestComponent = 0;
+        std::size_t substantialComponents = 0;
+        for (int y = 0; y < density.height; ++y)
+            for (int x = 0; x < density.width; ++x)
+            {
+                const std::size_t startIndex = static_cast<std::size_t>(y * density.width + x);
+                if (visited[startIndex] || density.pixels[startIndex].x() <= 0.01f)
+                    continue;
+
+                std::vector<std::pair<int, int>> pending{ { x, y } };
+                visited[startIndex] = true;
+                std::size_t componentSize = 0;
+                while (!pending.empty())
+                {
+                    const auto [currentX, currentY] = pending.back();
+                    pending.pop_back();
+                    ++componentSize;
+                    for (const auto [offsetX, offsetY] :
+                        std::array{ std::pair{ -1, 0 }, std::pair{ 1, 0 }, std::pair{ 0, -1 }, std::pair{ 0, 1 } })
+                    {
+                        const int neighborX = currentX + offsetX;
+                        const int neighborY = currentY + offsetY;
+                        if (neighborX < 0 || neighborX >= density.width || neighborY < 0 || neighborY >= density.height)
+                            continue;
+                        const std::size_t neighborIndex
+                            = static_cast<std::size_t>(neighborY * density.width + neighborX);
+                        if (visited[neighborIndex] || density.pixels[neighborIndex].x() <= 0.01f)
+                            continue;
+                        visited[neighborIndex] = true;
+                        pending.emplace_back(neighborX, neighborY);
+                    }
+                }
+                occupiedPixels += componentSize;
+                largestComponent = std::max(largestComponent, componentSize);
+                substantialComponents += componentSize >= 12 ? 1u : 0u;
+            }
+
+        ASSERT_GT(occupiedPixels, 0u);
+        EXPECT_GE(substantialComponents, 5u)
+            << "Clear weather must contain several independently shaped cloud masses"
+            << " components=" << substantialComponents << " occupied=" << occupiedPixels;
+        EXPECT_LT(static_cast<double>(largestComponent) / static_cast<double>(occupiedPixels), 0.45)
+            << "A single weather-map feature must not dominate the entire Clear cloud population"
+            << " largest=" << largestComponent << " occupied=" << occupiedPixels;
+    }
+
+    /// Verify that adaptive traversal does not erase broad cloud support as temporal sample positions change.
+    TEST(AtmosphereShaderTest, adaptiveCloudTraversalRetainsSupportAcrossTemporalDither)
+    {
+        NativePassInputs inputs = makeProductionAtmosphereInputs("Clear", "Day");
+        inputs.width = 96;
+        inputs.height = 54;
+        inputs.eyePosition = { 0.f, 0.f, 1200.f };
+        inputs.viewDirection = { 1.f, 0.f, 0.18f };
+        inputs.farPlane = 500000.f;
+        inputs.fogNear = 1000000.f;
+        inputs.fogFar = 2000000.f;
+        inputs.mistParameters = {};
+        inputs.lowCloudParameters = {};
+        inputs.historyValid = true;
+        inputs.historyLightingWeight = 1.f;
+
+        std::vector<float> minimumOpacity(static_cast<std::size_t>(inputs.width * inputs.height), 1.f);
+        std::vector<float> maximumOpacity(minimumOpacity.size(), 0.f);
+        for (int frameNumber = 40; frameNumber < 48; ++frameNumber)
+        {
+            inputs.frameNumber = frameNumber;
+            const PassImage frame = renderNativeAtmospherePass("integrateAtmosphereVolume", inputs);
+            ASSERT_EQ(frame.pixels.size(), minimumOpacity.size());
+            for (std::size_t index = 0; index < frame.pixels.size(); ++index)
+            {
+                const float opacity = 1.f - frame.pixels[index].w();
+                minimumOpacity[index] = std::min(minimumOpacity[index], opacity);
+                maximumOpacity[index] = std::max(maximumOpacity[index], opacity);
+            }
+        }
+
+        std::size_t occupiedPixels = 0;
+        std::size_t droppedSupportPixels = 0;
+        for (std::size_t index = 0; index < minimumOpacity.size(); ++index)
+        {
+            if (maximumOpacity[index] <= 0.08f)
+                continue;
+            ++occupiedPixels;
+            droppedSupportPixels += minimumOpacity[index] < 0.01f ? 1u : 0u;
+        }
+
+        ASSERT_GT(occupiedPixels, 0u);
+        EXPECT_LT(static_cast<double>(droppedSupportPixels) / static_cast<double>(occupiedPixels), 0.03)
+            << "Changing temporal dither must not make established cloud tissue disappear from the raw volume"
+            << " dropped=" << droppedSupportPixels << " occupied=" << occupiedPixels;
+    }
+
+    /// Verify that cloud sun access varies continuously across an occupied density field.
+    TEST(AtmosphereShaderTest, productionCloudLightingAvoidsQuantizedSunAccessContours)
+    {
+        NativePassInputs inputs = makeProductionAtmosphereInputs("Clear", "Day");
+        inputs.width = 192;
+        inputs.height = 128;
+        inputs.eyePosition = { 43333.f, 236667.f, 78000.f };
+        inputs.cloudDensitySliceExtent = { 333333.f, 130000.f };
+        inputs.cloudDensitySliceAxis = 1;
+        inputs.cloudDensitySliceQuantity = 1;
+        inputs.renderCloudDensitySlice = true;
+        inputs.mistParameters = {};
+        inputs.lowCloudParameters = {};
+        inputs.sunDirection = { 0.55f, 0.25f, 0.8f, 0.f };
+        const PassImage lighting = renderNativeAtmospherePass("integrateAtmosphereVolume", inputs);
+        ASSERT_EQ(lighting.width, inputs.width);
+        ASSERT_EQ(lighting.height, inputs.height);
+
+        std::size_t comparedNeighbors = 0;
+        std::size_t discontinuousNeighbors = 0;
+        for (int y = 1; y < lighting.height - 1; ++y)
+            for (int x = 1; x < lighting.width - 1; ++x)
+            {
+                const osg::Vec4f& current = lighting.at(x, y);
+                if (current.w() <= 0.08f)
+                    continue;
+                for (const osg::Vec4f* neighbor : { &lighting.at(x - 1, y), &lighting.at(x, y - 1) })
+                {
+                    if (neighbor->w() <= 0.08f)
+                        continue;
+                    ++comparedNeighbors;
+                    discontinuousNeighbors += std::abs(current.x() - neighbor->x()) > 0.2f ? 1u : 0u;
+                }
+            }
+
+        ASSERT_GT(comparedNeighbors, 0u);
+        EXPECT_LT(static_cast<double>(discontinuousNeighbors) / static_cast<double>(comparedNeighbors), 0.02)
+            << "A sparse light-ray approximation must not quantize smooth occupied clouds into lighting contours"
+            << " discontinuous=" << discontinuousNeighbors << " compared=" << comparedNeighbors;
     }
 
     /// Verify that organized storms retain a connected body and spread an outflow above the tapered crown.

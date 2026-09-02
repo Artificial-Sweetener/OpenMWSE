@@ -258,8 +258,10 @@ vec4 openmwseCloudVerticalStructure(
         columnProperties.family, columnProperties.development) / openmwseCloudMaximumThicknessScale;
     float isolatedFlatTop = familyTop * mix(0.32, 0.52,
         smoothstep(0.2, 0.85, columnProperties.family));
+    float isolatedLiftPotential = smoothstep(0.08, 0.92, columnProperties.convectivePotential)
+        * mix(0.38, 1.0, requestedDevelopment);
     float isolatedTop = mix(isolatedFlatTop, familyTop,
-        pow(clamp(columnProperties.localCoverage, 0.0, 1.0), 0.62));
+        pow(clamp(isolatedLiftPotential, 0.0, 1.0), 0.72));
     float deckTop = openmwseCloudEnvelopeThicknessScale(
         deckFamily, deckDevelopment) / openmwseCloudMaximumThicknessScale;
     float backgroundTop = mix(isolatedTop, deckTop, backgroundDeckWeight);
@@ -506,6 +508,18 @@ float openmwseCloudBroadDensity(vec3 worldPosition)
     return density;
 }
 
+/// Evaluate stable low-frequency occupancy for the cloud strata active in one integration.
+float openmwseCloudBroadDensityForLayers(vec3 worldPosition, bool mainLayerEnabled,
+    bool lowLayerEnabled, OpenMWSECloudLayer mainLayer, OpenMWSECloudLayer lowLayer)
+{
+    float density = 0.0;
+    if (mainLayerEnabled)
+        density += openmwseCloudBroadDensity(worldPosition, mainLayer);
+    if (lowLayerEnabled)
+        density += openmwseCloudBroadDensity(worldPosition, lowLayer);
+    return density;
+}
+
 /// Evaluate a normalized Henyey-Greenstein phase lobe for cloud droplets.
 float openmwseCloudMiePhase(float cosineAngle, float anisotropy)
 {
@@ -524,7 +538,7 @@ float openmwseCloudMultipleScatteringPhase(float cosineAngle)
 
 /// Approximate one stratum's optical depth toward the sun from a cloud sample.
 float openmwseCloudSunOpticalDepth(vec3 samplePosition, vec3 sunDirection, int quality,
-    float localDensity, float shadowDither, OpenMWSECloudLayer layer)
+    float localDensity, OpenMWSECloudLayer layer)
 {
     if (!openmwseCloudLayerEnabled(layer))
         return 0.0;
@@ -536,25 +550,12 @@ float openmwseCloudSunOpticalDepth(vec3 samplePosition, vec3 sunDirection, int q
     vec3 coneReference = abs(sunDirection.z) < 0.95 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
     vec3 coneRight = normalize(cross(sunDirection, coneReference));
     vec3 coneUp = cross(coneRight, sunDirection);
-    float conePattern = floor(shadowDither * 4.0);
-    vec2 nearPatternDirection = vec2(1.0, 0.0);
-    if (conePattern < 1.0)
-        nearPatternDirection = vec2(1.0, 0.0);
-    else if (conePattern < 2.0)
-        nearPatternDirection = vec2(0.0, 1.0);
-    else if (conePattern < 3.0)
-        nearPatternDirection = vec2(-1.0, 0.0);
-    else
-        nearPatternDirection = vec2(0.0, -1.0);
-    vec2 farPatternDirection = vec2(-nearPatternDirection.y, nearPatternDirection.x);
-    vec3 nearConeDirection
-        = coneRight * nearPatternDirection.x + coneUp * nearPatternDirection.y;
-    vec3 farConeDirection
-        = coneRight * farPatternDirection.x + coneUp * farPatternDirection.y;
+    vec3 nearConeDirection = coneRight * 0.89442719 + coneUp * 0.4472136;
+    vec3 farConeDirection = coneRight * -0.37139068 + coneUp * 0.92847669;
     vec3 nearPosition = samplePosition + sunDirection * (distanceToTop * 0.125)
         + nearConeDirection * (distanceToTop * 0.025);
     float nearDensity = openmwseCloudBroadDensity(nearPosition, layer);
-    float farDensity = quality >= 3
+    float farDensity = quality >= 2
         ? openmwseCloudBroadDensity(samplePosition + sunDirection * (distanceToTop * 0.625)
               + farConeDirection * (distanceToTop * 0.07), layer)
         : nearDensity;
@@ -564,13 +565,13 @@ float openmwseCloudSunOpticalDepth(vec3 samplePosition, vec3 sunDirection, int q
 
 /// Approximate direct-sun access through both cloud strata without duplicating transport policy.
 float openmwseCloudSunAccess(vec3 samplePosition, vec3 sunDirection, int quality,
-    float mainDensity, float lowDensity, float shadowDither,
+    float mainDensity, float lowDensity,
     OpenMWSECloudLayer mainLayer, OpenMWSECloudLayer lowLayer)
 {
     float opticalDepth = openmwseCloudSunOpticalDepth(
-        samplePosition, sunDirection, quality, mainDensity, shadowDither, mainLayer);
+        samplePosition, sunDirection, quality, mainDensity, mainLayer);
     opticalDepth += openmwseCloudSunOpticalDepth(
-        samplePosition, sunDirection, quality, lowDensity, shadowDither, lowLayer);
+        samplePosition, sunDirection, quality, lowDensity, lowLayer);
     return exp(-opticalDepth);
 }
 
@@ -693,32 +694,45 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
             continue;
         }
         float sampleOffset = quadratureSampling ? 0.5 : fract(rayDither + float(sampleIndex) * 0.61803398875);
+        float densitySampleOffset = sampleOffset;
         if (!fineSampling)
         {
             float probeLength = min(coarseStepLength, remainingIntervalLength);
-            float probeDistance = activeInterval.x + intervalPathOffset + probeLength * sampleOffset;
-            vec3 probePosition = rayOrigin + worldDirection * probeDistance;
-            float broadDensity = 0.0;
-            if (mainLayerEnabled)
-                broadDensity += openmwseCloudBroadDensity(probePosition, mainLayer);
-            if (lowLayerEnabled)
-                broadDensity += openmwseCloudBroadDensity(probePosition, lowLayer);
-            if (broadDensity <= 0.0005)
+            const float firstProbeFraction = 1.0 / 6.0;
+            const float secondProbeFraction = 0.5;
+            const float thirdProbeFraction = 5.0 / 6.0;
+            float probeStartDistance = activeInterval.x + intervalPathOffset;
+            float firstBroadDensity = openmwseCloudBroadDensityForLayers(
+                rayOrigin + worldDirection * (probeStartDistance + probeLength * firstProbeFraction),
+                mainLayerEnabled, lowLayerEnabled, mainLayer, lowLayer);
+            float secondBroadDensity = openmwseCloudBroadDensityForLayers(
+                rayOrigin + worldDirection * (probeStartDistance + probeLength * secondProbeFraction),
+                mainLayerEnabled, lowLayerEnabled, mainLayer, lowLayer);
+            float thirdBroadDensity = openmwseCloudBroadDensityForLayers(
+                rayOrigin + worldDirection * (probeStartDistance + probeLength * thirdProbeFraction),
+                mainLayerEnabled, lowLayerEnabled, mainLayer, lowLayer);
+            if (max(firstBroadDensity, max(secondBroadDensity, thirdBroadDensity)) <= 0.0005)
             {
                 distanceAlongCloudIntervals += probeLength;
                 continue;
             }
 
-            float entryAdvance = max(probeLength * sampleOffset - fineStepLength, 0.0);
+            float occupiedProbeFraction = firstBroadDensity > 0.0005 ? firstProbeFraction
+                : secondBroadDensity > 0.0005 ? secondProbeFraction
+                                              : thirdProbeFraction;
+            float occupiedProbeOffset = probeLength * occupiedProbeFraction;
+            float entryAdvance = max(occupiedProbeOffset - fineStepLength * 0.5, 0.0);
             intervalPathOffset += entryAdvance;
             distanceAlongCloudIntervals += entryAdvance;
             remainingIntervalLength -= entryAdvance;
+            densitySampleOffset = clamp(
+                (occupiedProbeOffset - entryAdvance) / min(fineStepLength, remainingIntervalLength), 0.0, 1.0);
             fineSampling = true;
         }
 
         float segmentLength = min(fineStepLength, remainingIntervalLength);
         float distanceAlongRay = activeInterval.x + intervalPathOffset;
-        float sampleDistance = distanceAlongRay + segmentLength * sampleOffset;
+        float sampleDistance = distanceAlongRay + segmentLength * densitySampleOffset;
         vec3 samplePosition = rayOrigin + worldDirection * sampleDistance;
         float mainDensity = 0.0;
         float lowDensity = 0.0;
@@ -774,10 +788,8 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
                     * clamp((samplePosition.z - lowHeightRange.x) / lowHeightRange.y, 0.0, 1.0);
             }
             relativeHeight /= density;
-            float shadowDither = fract(rayDither + float(sampleIndex) * 0.61803398875);
             float sunAccess = openmwseCloudSunAccess(
-                samplePosition, sunDirection, quality, mainDensity, lowDensity, shadowDither,
-                mainLayer, lowLayer);
+                samplePosition, sunDirection, quality, mainDensity, lowDensity, mainLayer, lowLayer);
             float daylightTopExposure = smoothstep(0.42, 0.84, relativeHeight)
                 * smoothstep(0.18, 0.7, sunDirection.z);
             float extinction = density * segmentLength * 0.0002;
