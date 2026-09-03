@@ -275,6 +275,27 @@ namespace Fx
                         error(std::format("target '{}' not defined", it->second->mTarget));
                 }
 
+                const auto& secondary = it->second->mSecondaryTarget;
+                if (!secondary.empty())
+                {
+                    if (it->second->mType != Pass::Type::Pixel || it->second->mTarget.empty())
+                        error("secondary_target requires a pixel pass with a primary target");
+                    const auto secondaryIt = mRenderTargets.find(secondary);
+                    if (secondaryIt == mRenderTargets.end())
+                        error(std::format("secondary target '{}' not defined", secondary));
+                    if (secondary == it->second->mTarget)
+                        error("secondary_target must differ from the primary target");
+                    const auto& primarySize = mRenderTargets.at(it->second->mTarget).mSize;
+                    const auto& secondarySize = secondaryIt->second.mSize;
+                    if (primarySize.mWidthRatio != secondarySize.mWidthRatio
+                        || primarySize.mHeightRatio != secondarySize.mHeightRatio
+                        || primarySize.mWidth != secondarySize.mWidth || primarySize.mHeight != secondarySize.mHeight)
+                        error("simultaneous targets require matching size definitions");
+                    for (const auto& input : it->second->mRenderTargets)
+                        if (input == secondary || input == it->second->mTarget)
+                            error("simultaneous targets cannot also be pass inputs");
+                }
+
                 mPasses.emplace_back(it->second);
             }
 
@@ -930,6 +951,11 @@ namespace Fx
             {
                 expect<Lexer::Literal>();
                 pass->mTarget = std::get<Lexer::Literal>(mToken).mValue;
+            }
+            else if (key == "secondary_target")
+            {
+                expect<Lexer::Literal>();
+                pass->mSecondaryTarget = std::get<Lexer::Literal>(mToken).mValue;
             }
             else if (key == "rt1")
             {

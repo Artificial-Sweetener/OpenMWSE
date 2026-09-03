@@ -183,7 +183,7 @@ namespace MWWorld
             float mFogAnisotropy;
         };
 
-        /// Parse and validate one weather volume profile with field-qualified errors.
+        /// Parse bounded world-unit weather profiles, including deep convective shells, with field-qualified errors.
         VolumeProfile readVolumeProfile(const YAML::Node& source, std::string_view path)
         {
             if (!source.IsMap())
@@ -191,7 +191,7 @@ namespace MWWorld
             return { readBoundedFloat(source, "cloudDeckCoverage", path, 0.f, 1.f),
                 readBoundedFloat(source, "cloudDensity", path, 0.f, 4.f),
                 readBoundedFloat(source, "cloudAltitude", path, -10000.f, 200000.f),
-                readBoundedFloat(source, "cloudThickness", path, 1.f, 200000.f),
+                readBoundedFloat(source, "cloudThickness", path, 1.f, 350000.f),
                 readBoundedFloat(source, "cloudDeckType", path, 0.f, 1.f),
                 readBoundedFloat(source, "cloudType", path, 0.f, 1.f),
                 readBoundedFloat(source, "cloudFeatureScale", path, 0.25f, 4.f),

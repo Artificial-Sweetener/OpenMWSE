@@ -91,8 +91,10 @@ namespace SceneUtil
             osg::Texture2D* atmosphereCurlNoiseTexture = nullptr, int atmosphereCurlNoiseTextureUnit = -1,
             osg::Texture2D* atmosphereWeatherTexture = nullptr, int atmosphereWeatherTextureUnit = -1);
 
+        /// Initialize scene uniforms, including independent shape motion derived from the coverage phase.
         void setDefaults(osg::StateSet* stateset) override;
 
+        /// Publish the current scene state and coherent coverage/shape phases to an existing render state set.
         void apply(osg::StateSet* stateset, osg::NodeVisitor*) override;
 
         void setAmbientColor(const osg::Vec4f& col);

@@ -333,14 +333,18 @@ namespace MWRender
             const int quality = Settings::shaders().mAtmosphericQuality.get();
             const float volumeResolutionScale = getAtmosphereVolumeResolutionScale(quality);
             auto& targets = atmosphere->getRenderTargetsMap();
-            for (const std::string_view name :
-                { "AtmosphereVolumeRaw", "AtmosphereVolumeHistory", "AtmosphereVolumeMetadataHistory" })
+            for (const std::string_view name : { "AtmosphereVolumeHistory", "AtmosphereVolumeMetadataHistory",
+                     "AtmosphereVolumeReprojected", "AtmosphereVolumeMetadataReprojected" })
             {
                 targets[name].mSize.mWidthRatio = volumeResolutionScale;
                 targets[name].mSize.mHeightRatio = volumeResolutionScale;
             }
-            targets["AtmosphereShafts"].mSize.mWidthRatio = volumeResolutionScale * 0.5f;
-            targets["AtmosphereShafts"].mSize.mHeightRatio = volumeResolutionScale * 0.5f;
+            for (const std::string_view name :
+                { "AtmosphereVolumeRaw", "AtmosphereVolumeMetadataRaw", "AtmosphereShafts" })
+            {
+                targets[name].mSize.mWidthRatio = volumeResolutionScale * 0.5f;
+                targets[name].mSize.mHeightRatio = volumeResolutionScale * 0.5f;
+            }
             atmosphere->setInternal(true);
             atmosphere->setLocked(true);
             atmosphere->setAlwaysEnabled(true);
@@ -808,33 +812,44 @@ namespace MWRender
 
                 node.mHandle = technique;
 
-                if (!pass->getTarget().empty())
+                for (const bool secondary : { false, true })
                 {
+                    const std::string target = secondary ? pass->getSecondaryTarget() : pass->getTarget();
+                    if (target.empty())
+                        continue;
                     // FIXME: https://gitlab.com/OpenMW/openmw/-/work_items/9034
-                    std::string target = pass->getTarget();
                     auto& renderTarget = technique->getRenderTargetsMap()[target];
-                    subPass.mTargetName = target;
-                    subPass.mSize = renderTarget.mSize;
-                    subPass.mRenderTexture = renderTarget.mTarget;
-                    subPass.mMipMap = renderTarget.mMipMap;
+                    if (secondary)
+                    {
+                        subPass.mSecondaryTargetName = target;
+                        subPass.mSecondaryTexture = renderTarget.mTarget;
+                    }
+                    else
+                    {
+                        subPass.mTargetName = target;
+                        subPass.mSize = renderTarget.mSize;
+                        subPass.mRenderTexture = renderTarget.mTarget;
+                        subPass.mMipMap = renderTarget.mMipMap;
+                        subPass.mRenderTarget = new osg::FrameBufferObject;
+                    }
 
                     const auto [w, h] = renderTarget.mSize.get(renderWidth(), renderHeight());
                     subPass.mStateSet->setAttributeAndModes(new osg::Viewport(0, 0, w, h));
 
-                    if (subPass.mMipMap)
+                    if (renderTarget.mMipMap)
                     {
-                        subPass.mRenderTexture->setNumMipmapLevels(osg::Image::computeNumberOfMipmapLevels(w, h));
+                        renderTarget.mTarget->setNumMipmapLevels(osg::Image::computeNumberOfMipmapLevels(w, h));
                     }
                     else
                     {
-                        subPass.mRenderTexture->setNumMipmapLevels(0);
+                        renderTarget.mTarget->setNumMipmapLevels(0);
                     }
-                    subPass.mRenderTexture->setTextureSize(w, h);
-                    subPass.mRenderTexture->dirtyTextureObject();
+                    renderTarget.mTarget->setTextureSize(w, h);
+                    renderTarget.mTarget->dirtyTextureObject();
 
-                    subPass.mRenderTarget = new osg::FrameBufferObject;
-                    subPass.mRenderTarget->setAttachment(osg::FrameBufferObject::BufferComponent::COLOR_BUFFER0,
-                        osg::FrameBufferAttachment(subPass.mRenderTexture));
+                    subPass.mRenderTarget->setAttachment(
+                        secondary ? osg::Camera::COLOR_BUFFER1 : osg::Camera::COLOR_BUFFER0,
+                        osg::FrameBufferAttachment(renderTarget.mTarget));
 
                     if (std::find_if(attachmentsToDirty.cbegin(), attachmentsToDirty.cend(),
                             [renderTarget](const auto& rt) { return renderTarget.mTarget == rt.mTarget; })

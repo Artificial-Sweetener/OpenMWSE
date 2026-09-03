@@ -96,7 +96,7 @@ Diagnostics::Capsule OMW::Engine::createDiagnosticCapsule(unsigned frameNumber)
     manifest << "capsule-version: " << Diagnostics::capsuleVersion << '\n'
              << "build: " << quoteDiagnosticYaml(Version::getOpenmwVersionDescription()) << '\n'
              << "frame: " << frameNumber << '\n'
-             << "providers: [core@2, graphics@1, gameplay@8, performance@13]\n"
+             << "providers: [core@2, graphics@1, gameplay@8, performance@14]\n"
              << "content:\n";
     for (const std::string& content : mContentFiles)
     {
@@ -169,6 +169,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
         }
         std::ostringstream output;
         output << "request-frame: " << completed->mFirstFrame << '\n'
+               << "readback-rendered-frames: " << frameNumber - completed->mLastFrame << '\n'
                << "fixed-step: " << (mDiagnosticChild ? "true" : "false") << '\n'
                << "fixed-step-duration: " << mDiagnosticStepScheduler.frameDuration() << '\n';
         reportDiagnosticPerformance(completed->mFirstFrame, completed->mLastFrame, *mViewer, output);
@@ -256,7 +257,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << '\n'
                            << "performance-capture: " << (mDiagnosticCollection->active() ? "collecting" : "idle")
                            << '\n'
-                           << "providers: [core@2, graphics@1, gameplay@8, performance@13]\n";
+                           << "providers: [core@2, graphics@1, gameplay@8, performance@14]\n";
                     response.mPayload = diagnosticBytes(output.str());
                     break;
 

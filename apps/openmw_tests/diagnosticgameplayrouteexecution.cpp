@@ -31,3 +31,13 @@ TEST(DiagnosticGameplayRouteExecutionTest, RejectsInvalidAndOutOfRangeLimits)
     EXPECT_THROW(DiagnosticCtl::makeGameplayRouteExecutionPlan(1000, std::nullopt, "601"), std::invalid_argument);
     EXPECT_THROW(DiagnosticCtl::makeGameplayRouteExecutionPlan(100, "20", "21"), std::invalid_argument);
 }
+
+TEST(DiagnosticGameplayRouteExecutionTest, RequiresExactRouteProgressRatherThanRenderedFrameCount)
+{
+    EXPECT_NO_THROW(DiagnosticCtl::validateGameplayRouteProgress(100, 40, 60));
+    EXPECT_NO_THROW(DiagnosticCtl::validateGameplayRouteProgress(40, 40, 0));
+    EXPECT_THROW(DiagnosticCtl::validateGameplayRouteProgress(100, 40, 100), std::runtime_error);
+    EXPECT_THROW(DiagnosticCtl::validateGameplayRouteProgress(100, 40, 61), std::runtime_error);
+    EXPECT_THROW(DiagnosticCtl::validateGameplayRouteProgress(100, 40, 59), std::runtime_error);
+    EXPECT_THROW(DiagnosticCtl::validateGameplayRouteProgress(39, 40, 0), std::runtime_error);
+}

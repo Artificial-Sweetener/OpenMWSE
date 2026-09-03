@@ -60,6 +60,7 @@ namespace Fx
     {
     }
 
+    /// Declare stage-appropriate outputs, including an optional simultaneous second attachment.
     std::string Pass::getPassHeader(Technique& technique, std::string_view preamble, bool fragOut)
     {
         std::string header = R"GLSL(
@@ -345,9 +346,15 @@ mat4 omw_InvProjectionMatrix()
                   { "@texture3D", mLegacyGLSL ? "texture3D" : "texture" },
                   { "@texture3DLod", mLegacyGLSL ? "texture3DLod" : "textureLod" },
                   { "@vertex", mLegacyGLSL ? "gl_Vertex" : "_omw_Vertex" },
-                  { "@fragColor", mLegacyGLSL ? "gl_FragColor" : "_omw_FragColor" },
+                  { "@fragColor",
+                      mLegacyGLSL ? (mSecondaryTarget.empty() ? "gl_FragColor" : "gl_FragData[0]") : "_omw_FragColor" },
                   { "@useBindings", mLegacyGLSL ? "0" : "1" },
-                  { "@fragBinding", mLegacyGLSL ? "" : "out vec4 omw_FragColor;" } };
+                  { "@fragBinding",
+                      !fragOut                       ? ""
+                          : mSecondaryTarget.empty() ? (mLegacyGLSL ? "" : "out vec4 omw_FragColor;")
+                                                     : (mLegacyGLSL ? "#define omw_FragColor1 gl_FragData[1]"
+                                                                    : "out vec4 omw_FragColor;\n#define omw_FragColor1 "
+                                                                      "_omw_FragColor1\nout vec4 omw_FragColor1;") } };
 
         for (const auto& [define, value] : defines)
             for (size_t pos = header.find(define); pos != std::string::npos; pos = header.find(define))
@@ -386,6 +393,8 @@ mat4 omw_InvProjectionMatrix()
         if (!mLegacyGLSL)
         {
             program->addBindFragDataLocation("_omw_FragColor", 0);
+            if (!mSecondaryTarget.empty())
+                program->addBindFragDataLocation("_omw_FragColor1", 1);
             program->addBindAttribLocation("_omw_Vertex", 0);
         }
 

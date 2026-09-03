@@ -63,8 +63,8 @@ namespace MWRender
     {
         for (const auto& node : mPasses)
             for (const auto& pass : node.mPasses)
-                if (pass.mTargetName == name)
-                    return pass.mRenderTexture;
+                if (osg::Texture2D* output = pass.findOutput(name))
+                    return output;
         return nullptr;
     }
 
@@ -402,12 +402,12 @@ namespace MWRender
 
                 drawGeometry(renderInfo);
 
-                if (pass.mRenderTarget && pass.mRenderTexture->getNumMipmapLevels() > 0)
+                for (osg::Texture2D* output : { pass.mRenderTexture.get(), pass.mSecondaryTexture.get() })
                 {
+                    if (!output || output->getNumMipmapLevels() == 0)
+                        continue;
                     state.setActiveTextureUnit(0);
-                    state.applyTextureAttribute(0,
-                        pass.mRenderTarget->getAttachment(osg::FrameBufferObject::BufferComponent::COLOR_BUFFER0)
-                            .getTexture());
+                    state.applyTextureAttribute(0, output);
                     ext->glGenerateMipmap(GL_TEXTURE_2D);
                 }
 
@@ -444,9 +444,9 @@ namespace MWRender
         if (mAtmosphereDiagnostics && mAtmosphereDiagnostics->captureRequested())
         {
             mAtmosphereDiagnostics->captureFrame(renderInfo, mTextureScene.get(), mTextureDepth.get(),
-                mTextureNormals.get(),
-                mPreviousCanvas ? mPreviousCanvas->mTextureDepth.get() : nullptr,
-                findRenderTarget("AtmosphereVolumeRaw"), findRenderTarget("AtmosphereVolumeHistory"),
+                mTextureNormals.get(), mPreviousCanvas ? mPreviousCanvas->mTextureDepth.get() : nullptr,
+                findRenderTarget("AtmosphereVolumeRaw"), findRenderTarget("AtmosphereVolumeMetadataRaw"),
+                findRenderTarget("AtmosphereVolumeMetadataReprojected"), findRenderTarget("AtmosphereVolumeHistory"),
                 findRenderTarget("AtmosphereVolumeMetadataHistory"), findRenderTarget("AtmosphereShafts"),
                 mPreviousCanvas ? mPreviousCanvas->findRenderTarget("AtmosphereVolumeHistory") : nullptr,
                 mPreviousCanvas ? mPreviousCanvas->findRenderTarget("AtmosphereVolumeMetadataHistory") : nullptr,

@@ -566,6 +566,14 @@ is not wanted and you want a custom render target.
 +------------------+---------------------+-----------------------------------------------------------------------------+
 
 To use the render target a pass must be assigned to it, along with any optional blend modes.
+API revision 6 supports two simultaneous outputs on a fragment pass with
+``target=Color, secondary_target=Metadata``. Write ``omw_FragColor`` for the primary
+attachment and ``omw_FragColor1`` for the secondary attachment on every executed
+fragment path. Both targets must have identical width, height and ratio definitions,
+must be distinct, and must not also be bound as inputs to that pass. Each target
+retains its own format, filtering and mipmap settings. The same output names work
+with GLSL 120 and modern GLSL.
+
 As a restriction, only three render targets can be bound per pass with ``rt1``, ``rt2``, ``rt3``, respectively.
 
 Blending modes can be useful at times. Below is a simple shader which, when activated, will slowly turn the screen pure red.

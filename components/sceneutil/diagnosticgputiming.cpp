@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <deque>
 #include <map>
 #include <mutex>
@@ -29,7 +30,6 @@ namespace SceneUtil
     {
         constexpr std::string_view collectionCategory = "diagnostic_gpu_passes";
         constexpr std::string_view passInstanceKey = "OpenMW diagnostic GPU pass instance";
-        constexpr std::size_t retainedFrameCount = 1024;
         constexpr std::array passes{
             DiagnosticGpuPass{ "main-scene", sceneCameraName },
             DiagnosticGpuPass{ "shadow-maps", shadowCameraName },
@@ -101,6 +101,9 @@ namespace SceneUtil
 
                 TimestampPair pair;
                 pair.mFrame = currentFrame;
+                camera->getStats()->setAttribute(pair.mFrame, std::string(diagnosticGpuQueryStateStatistic),
+                    static_cast<int>(supportsTimestamps(extensions) ? DiagnosticGpuQueryState::Pending
+                                                                    : DiagnosticGpuQueryState::Unsupported));
                 if (supportsTimestamps(extensions))
                 {
                     const std::array<GLuint, 2> ids = acquireQueries(*extensions, queries);
@@ -254,17 +257,25 @@ namespace SceneUtil
                             std::string(diagnosticGpuPassEndTimestampStatistic),
                             static_cast<double>(end) * nanosecondsToSeconds);
                     }
+                    // Publish completion last so the report owner cannot observe a complete but unwritten interval.
+                    camera->getStats()->setAttribute(pair.mFrame, std::string(diagnosticGpuQueryStateStatistic),
+                        static_cast<int>(
+                            end >= start ? DiagnosticGpuQueryState::Complete : DiagnosticGpuQueryState::Invalid));
                     queries.mReusable.push_back({ pair.mStart, pair.mEnd });
                     queries.mPending.pop_front();
                 }
             }
 
             /// Bound unresolved query storage if a driver stops returning timestamp results.
-            static void trimPending(osg::GLExtensions& extensions, ContextQueries& queries)
+            void trimPending(osg::GLExtensions& extensions, ContextQueries& queries)
             {
-                while (queries.mPending.size() > retainedFrameCount)
+                while (queries.mPending.size() > diagnosticGpuTimingRetainedFrames)
                 {
                     const TimestampPair& pair = queries.mPending.front();
+                    osg::ref_ptr<osg::Camera> camera;
+                    if (mCamera.lock(camera) && camera->getStats() != nullptr)
+                        camera->getStats()->setAttribute(pair.mFrame, std::string(diagnosticGpuQueryStateStatistic),
+                            static_cast<int>(DiagnosticGpuQueryState::Dropped));
                     const GLuint ids[]{ pair.mStart, pair.mEnd };
                     extensions.glDeleteQueries(2, ids);
                     queries.mPending.pop_front();
@@ -359,7 +370,7 @@ namespace SceneUtil
                     std::lock_guard lock(mMutex);
                     std::deque<PendingInterval>& pending = mPending[contextId];
                     pending.push_back(interval);
-                    while (pending.size() > retainedFrameCount)
+                    while (pending.size() > diagnosticGpuTimingRetainedFrames)
                     {
                         deleteInterval(*extensions, pending.front());
                         pending.pop_front();
@@ -554,7 +565,7 @@ namespace SceneUtil
             camera.setStats(new osg::Stats(camera.getName()));
             stats = camera.getStats();
         }
-        stats->allocate(retainedFrameCount);
+        stats->allocate(diagnosticGpuTimingRetainedFrames);
         std::lock_guard lock(registryMutex);
         removeExpiredCameras();
         const bool firstRegistration = std::ranges::none_of(registeredCameras,
@@ -635,7 +646,7 @@ namespace SceneUtil
             target.setStats(new osg::Stats(target.getName()));
             stats = target.getStats();
         }
-        stats->allocate(retainedFrameCount);
+        stats->allocate(diagnosticGpuTimingRetainedFrames);
         stats->collectStats(std::string(collectionCategory), collectionEnabled);
         registeredCameras.emplace_back(&target);
         attachGpuTimestampCallbacks(target);
@@ -657,5 +668,24 @@ namespace SceneUtil
                 camera = registeredCameras.erase(camera);
         }
         return result;
+    }
+
+    bool diagnosticGpuQueriesPending(unsigned firstFrame, unsigned lastFrame)
+    {
+        const std::string statistic(diagnosticGpuQueryStateStatistic);
+        for (const auto& camera : diagnosticGpuPassCameras())
+        {
+            const osg::Stats* stats = camera->getStats();
+            if (stats == nullptr)
+                continue;
+            for (std::uint64_t frame = firstFrame; frame <= lastFrame; ++frame)
+            {
+                double queryState = 0;
+                if (stats->getAttribute(static_cast<unsigned>(frame), statistic, queryState)
+                    && queryState == static_cast<int>(DiagnosticGpuQueryState::Pending))
+                    return true;
+            }
+        }
+        return false;
     }
 }

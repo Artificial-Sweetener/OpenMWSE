@@ -44,7 +44,7 @@ namespace OMW
         /// Begin a future bounded sample interval when no collection is active.
         bool start(std::uint64_t requestId, std::uint32_t sampleCount, unsigned currentFrame);
 
-        /// Complete a collection after delayed render statistics have reached their owners.
+        /// Report after sampled queries retire or before bounded history expires, without blocking rendering.
         std::optional<CompletedDiagnosticCollection> update(unsigned currentFrame);
 
         /// Return whether a performance request currently owns collection.
@@ -70,6 +70,7 @@ namespace OMW
         std::vector<EnabledCategory> mEnabledCategories;
         std::optional<CompletedDiagnosticCollection> mPending;
         unsigned mCompletionFrame = 0;
+        unsigned mRetirementLimitFrame = 0;
     };
 }
 

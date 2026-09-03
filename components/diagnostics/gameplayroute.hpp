@@ -9,6 +9,7 @@
 
 namespace Diagnostics
 {
+    class Capsule;
     inline constexpr unsigned gameplayRouteVersion = 1;
     inline constexpr std::size_t maximumGameplayRouteFrames = 10000;
     inline constexpr double maximumGameplayRouteFrameDuration = 0.2;
@@ -32,6 +33,9 @@ namespace Diagnostics
 
     /// Decode and validate a versioned portable diagnostic route.
     std::vector<GameplayRouteFrame> decodeGameplayRoute(std::span<const std::byte> payload);
+
+    /// Copy a capsule and attach a validated route, rejecting an existing route without altering the source.
+    Capsule withGameplayRoute(const Capsule& source, std::span<const std::byte> payload);
 }
 
 #endif

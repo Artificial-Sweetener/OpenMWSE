@@ -9,6 +9,8 @@
 #include <osg/Vec3f>
 #include <osg/Vec4f>
 
+#include <components/sceneutil/cloudadvection.hpp>
+
 namespace MWRender
 {
     /// Returns the internal atmosphere buffer scale for a user-facing quality level.
@@ -199,8 +201,8 @@ namespace MWRender
             const double gameTimeRate = static_cast<double>(gameTimeScale) / defaultGameTimeScale;
             const double speedWorldUnitsPerSecond
                 = worldUnitsPerCloudSpeedSecond * static_cast<double>(cloudSpeed) * gameTimeRate;
-            const osg::Vec2d frameDelta
-                = osg::Vec2d(0.78, 0.36) * (speedWorldUnitsPerSecond * static_cast<double>(elapsedSeconds));
+            const osg::Vec2d frameDelta = SceneUtil::cloudCoverageWindDirection()
+                * (speedWorldUnitsPerSecond * static_cast<double>(elapsedSeconds));
             mAccumulatedOffsetWorldUnits += frameDelta;
             mState.mOffsetWorldUnits.set(static_cast<float>(mAccumulatedOffsetWorldUnits.x()),
                 static_cast<float>(mAccumulatedOffsetWorldUnits.y()));

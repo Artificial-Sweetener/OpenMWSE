@@ -1,6 +1,8 @@
 #ifndef OPENMWSE_ATMOSPHERE_AERIAL_PERSPECTIVE_GLSL
 #define OPENMWSE_ATMOSPHERE_AERIAL_PERSPECTIVE_GLSL
 
+#include "units.glsl"
+
 /// Carry canonical scene-linear atmosphere state into shared aerial-perspective equations.
 struct OpenMWSEAerialPerspectiveParameters
 {
@@ -155,13 +157,46 @@ float openmwseLinearFogOpticalDistance(float distanceFromEye, float fogStart, fl
     return clamp((distanceFromEye - fogStart) / max(fogEnd - fogStart, 1e-4), 0.0, 1.0);
 }
 
-/// Select the configured fog transfer function for a world-space distance.
-float openmwseFogOpticalDistance(float distanceFromEye, OpenMWSEAerialPerspectiveParameters parameters)
+/// Integrate a constant-below-datum, exponential-above-datum density profile along a straight view segment.
+vec2 openmwseAtmosphereMeanLayerDensities(float startHeight, float endHeight)
 {
-    float linearDistance = openmwseLinearFogOpticalDistance(distanceFromEye, parameters.fogStart, parameters.fogEnd);
-    float exponentialDistance
-        = openmwseExponentialFogOpticalDistance(distanceFromEye, parameters.fogStart, parameters.fogEnd);
-    return mix(linearDistance, exponentialDistance, step(0.5, parameters.exponentialFog));
+    float lowHeight = min(startHeight, endHeight);
+    float highHeight = max(startHeight, endHeight);
+    if (highHeight <= 0.0)
+        return vec2(1.0);
+    const vec2 scaleHeights = vec2(8000.0, 1200.0) * openmwseAtmosphereWorldUnitsPerMeter;
+    float heightSpan = highHeight - lowHeight;
+    vec2 lowerDensity = exp(-max(lowHeight, 0.0) / scaleHeights);
+    vec2 aboveSpan = (highHeight - max(lowHeight, 0.0)) / scaleHeights;
+    // The Taylor limit avoids cancellation for horizontal and nearly horizontal rays.
+    vec2 integral = vec2(1.0) - aboveSpan * 0.5 + aboveSpan * aboveSpan / 6.0;
+    if (max(aboveSpan.x, aboveSpan.y) > 0.01)
+        integral = (vec2(1.0) - exp(-aboveSpan)) / max(aboveSpan, vec2(1e-6));
+    float belowFraction = clamp(-lowHeight / max(heightSpan, 1e-6), 0.0, 1.0);
+    return mix(lowerDensity * integral, vec2(1.0), belowFraction);
+}
+
+/// Integrate the configured view-path atmosphere while preserving its reference-height fog transfer.
+float openmwseFogOpticalDistance(float distanceFromEye, vec3 worldDirection,
+    OpenMWSEAerialPerspectiveParameters parameters)
+{
+    float exponential = step(0.5, parameters.exponentialFog);
+    float curveStart = parameters.fogStart / mix(1.0, 4.4, exponential);
+    float curveRange = max((parameters.fogEnd - curveStart) / mix(1.0, 4.4, exponential), 1e-4);
+    float activeDistance = max(distanceFromEye - curveStart, 0.0);
+    if (activeDistance <= 0.0)
+        return 0.0;
+    float relativeObserverHeight = parameters.observerHeight - parameters.referenceHeight;
+    vec2 meanDensities = openmwseAtmosphereMeanLayerDensities(
+        relativeObserverHeight + worldDirection.z * curveStart,
+        relativeObserverHeight + worldDirection.z * distanceFromEye);
+    // Retain the canonical scalar extinction at the reference height. Molecular green-band extinction
+    // takes its physical share; weather visibility supplies the remaining lower-atmosphere aerosol.
+    const float molecularExtinction = 0.013558 / (1000.0 * openmwseAtmosphereWorldUnitsPerMeter);
+    float molecularFraction = clamp(molecularExtinction * curveRange, 0.0, 1.0);
+    float meanDensity = mix(meanDensities.y, meanDensities.x, molecularFraction);
+    float opticalDistance = activeDistance * meanDensity / curveRange;
+    return mix(min(opticalDistance, 1.0), opticalDistance, exponential);
 }
 
 /// Convert optical distance into direct scene-radiance visibility.
@@ -297,7 +332,7 @@ vec3 openmwseAtmosphereSkyRadiance(
 vec3 openmwseApplyAerialPerspectiveWithOpticalLimit(vec3 localRadiance, vec3 worldDirection,
     float distanceFromEye, float opticalDistanceLimit, OpenMWSEAerialPerspectiveParameters parameters)
 {
-    float fogOpticalDistance = openmwseFogOpticalDistance(distanceFromEye, parameters);
+    float fogOpticalDistance = openmwseFogOpticalDistance(distanceFromEye, worldDirection, parameters);
     fogOpticalDistance = min(fogOpticalDistance, opticalDistanceLimit);
     float visibility = openmwseFogVisibility(fogOpticalDistance, parameters);
     vec3 scatteredLight = openmwseAtmosphereScatteredLight(worldDirection,
@@ -315,11 +350,11 @@ vec3 openmwseApplyAerialPerspective(
 
 /// Blend local radiance toward a precomputed atmospheric target with a caller-owned distance compression.
 vec3 openmwseApplyAerialPerspectiveTowardTargetWithScale(vec3 localRadiance, vec3 atmosphericTarget,
-    float distanceFromEye, float opticalDistanceScale, float opticalDistanceLimit,
+    vec3 worldDirection, float distanceFromEye, float opticalDistanceScale, float opticalDistanceLimit,
     OpenMWSEAerialPerspectiveParameters parameters)
 {
     float fogOpticalDistance = min(
-        openmwseFogOpticalDistance(distanceFromEye, parameters) * opticalDistanceScale,
+        openmwseFogOpticalDistance(distanceFromEye, worldDirection, parameters) * opticalDistanceScale,
         opticalDistanceLimit);
     float visibility = openmwseFogVisibility(fogOpticalDistance, parameters);
     return mix(atmosphericTarget, localRadiance, visibility);
@@ -327,10 +362,10 @@ vec3 openmwseApplyAerialPerspectiveTowardTargetWithScale(vec3 localRadiance, vec
 
 /// Blend local radiance toward a precomputed atmospheric target under bounded fog opacity.
 vec3 openmwseApplyAerialPerspectiveTowardTarget(vec3 localRadiance, vec3 atmosphericTarget,
-    float distanceFromEye, float opticalDistanceLimit, OpenMWSEAerialPerspectiveParameters parameters)
+    vec3 worldDirection, float distanceFromEye, float opticalDistanceLimit, OpenMWSEAerialPerspectiveParameters parameters)
 {
     return openmwseApplyAerialPerspectiveTowardTargetWithScale(
-        localRadiance, atmosphericTarget, distanceFromEye, 1.0, opticalDistanceLimit, parameters);
+        localRadiance, atmosphericTarget, worldDirection, distanceFromEye, 1.0, opticalDistanceLimit, parameters);
 }
 
 /// Resolve incident sunlight without attenuating weather-colored surface radiance a second time.

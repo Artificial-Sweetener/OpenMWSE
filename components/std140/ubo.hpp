@@ -127,6 +127,16 @@ namespace Std140
         using BufferType = std::array<char, getGPUSize()>;
         using TupleType = std::tuple<CArgs...>;
 
+        /// Read one typed value from an already published std140 buffer without aliasing packed storage.
+        template <class T>
+        static typename T::Value read(const BufferType& buffer)
+        {
+            static_assert((std::is_same_v<T, CArgs> || ...));
+            typename T::Value value;
+            std::memcpy(&value, buffer.data() + getOffset<T>(), sizeof(value));
+            return value;
+        }
+
         template <class T>
         typename T::Value& get()
         {

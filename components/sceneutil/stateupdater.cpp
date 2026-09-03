@@ -3,6 +3,7 @@
 #include <osg/Fog>
 #include <osg/PolygonMode>
 
+#include "cloudadvection.hpp"
 #include "depth.hpp"
 #include "rtt.hpp"
 #include "statesetupdater.hpp"
@@ -220,6 +221,8 @@ namespace SceneUtil
         stateset->addUniform(new osg::Uniform("atmosphere.groundIrradiance", mAtmosphereGroundIrradiance));
         stateset->addUniform(
             new osg::Uniform("atmosphere.cloudAdvectionOffsetWorldUnits", mAtmosphereCloudAdvectionOffsetWorldUnits));
+        stateset->addUniform(new osg::Uniform("atmosphere.cloudShapeAdvectionOffsetWorldUnits",
+            cloudShapeAdvectionOffset(mAtmosphereCloudAdvectionOffsetWorldUnits)));
         stateset->addUniform(new osg::Uniform("atmosphere.quality", mAtmosphereQuality));
 
         stateset->addUniform(new osg::Uniform("waterHeight", mWaterHeight));
@@ -261,6 +264,8 @@ namespace SceneUtil
         stateset->getUniform("atmosphere.groundIrradiance")->set(mAtmosphereGroundIrradiance);
         stateset->getUniform("atmosphere.cloudAdvectionOffsetWorldUnits")
             ->set(mAtmosphereCloudAdvectionOffsetWorldUnits);
+        stateset->getUniform("atmosphere.cloudShapeAdvectionOffsetWorldUnits")
+            ->set(cloudShapeAdvectionOffset(mAtmosphereCloudAdvectionOffsetWorldUnits));
         stateset->getUniform("atmosphere.quality")->set(mAtmosphereQuality);
 
         stateset->getUniform("waterHeight")->set(mWaterHeight);

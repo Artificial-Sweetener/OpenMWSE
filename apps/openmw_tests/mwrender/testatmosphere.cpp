@@ -1145,6 +1145,26 @@ namespace MWRender
                 (resumed.mOffsetWorldUnits - paused.mOffsetWorldUnits).y(), resumed.mFrameDeltaWorldUnits.y(), 0.002f);
         }
 
+        /// Keep the independent shape phase linear, continuous across speed changes, and frozen while paused.
+        TEST(MWRenderAtmosphereTest, shapeAdvectionPreservesIntegratedWeatherClock)
+        {
+            CloudAdvectionController controller;
+            controller.update(2.f, false, 1.25f, 30.f);
+            const osg::Vec3f first = SceneUtil::cloudShapeAdvectionOffset(controller.getState().mOffsetWorldUnits);
+            EXPECT_LT(first.z(), 0.f);
+            const float coverageDistance = controller.getState().mOffsetWorldUnits.length();
+            EXPECT_NEAR(osg::Vec2f(first.x(), first.y()).length(), coverageDistance * 0.5f, 0.0001f);
+            EXPECT_NEAR(first.z(), -coverageDistance * 0.25f, 0.0001f);
+            controller.update(0.5f, false, 2.f, 100.f);
+            const osg::Vec3f second = SceneUtil::cloudShapeAdvectionOffset(controller.getState().mOffsetWorldUnits);
+            const osg::Vec3f frameDelta
+                = SceneUtil::cloudShapeAdvectionOffset(controller.getState().mFrameDeltaWorldUnits);
+            EXPECT_LT((second - first - frameDelta).length(), 0.0001f);
+            controller.update(20.f, true, 5.f, 300.f);
+            EXPECT_EQ(SceneUtil::cloudShapeAdvectionOffset(controller.getState().mOffsetWorldUnits), second);
+            EXPECT_EQ(SceneUtil::cloudShapeAdvectionOffset(controller.getState().mFrameDeltaWorldUnits), osg::Vec3f());
+        }
+
         TEST(MWRenderAtmosphereTest, reservedSuspendedMediumIsOpticallyNeutralByDefault)
         {
             const AtmosphereState atmosphere;
@@ -1199,6 +1219,7 @@ namespace MWRender
             EXPECT_FLOAT_EQ(controller.update(stable, true), 0.f);
         }
 
+        /// Publish matching canonical volume references and derived shape phases during initialization and updates.
         TEST(MWRenderAtmosphereTest, sceneUniformStatePublishesCanonicalVolumeReferences)
         {
             osg::ref_ptr<SceneUtil::StateUpdater> updater = new SceneUtil::StateUpdater;
@@ -1211,11 +1232,14 @@ namespace MWRender
             updater->setDefaults(state);
 
             osg::Vec2f publishedOffset;
+            osg::Vec3f publishedShapeOffset;
             osg::Vec4f publishedMediumReference;
             osg::Vec4f publishedOrography;
             osg::Vec4f publishedOrganization;
             osg::Vec4f publishedStructure;
             ASSERT_TRUE(state->getUniform("atmosphere.cloudAdvectionOffsetWorldUnits")->get(publishedOffset));
+            ASSERT_TRUE(state->getUniform("atmosphere.cloudShapeAdvectionOffsetWorldUnits")->get(publishedShapeOffset));
+            EXPECT_EQ(publishedShapeOffset, SceneUtil::cloudShapeAdvectionOffset({ 1234.f, 567.f }));
             ASSERT_TRUE(state->getUniform("atmosphere.mediumReferenceParameters")->get(publishedMediumReference));
             ASSERT_TRUE(state->getUniform("atmosphere.orographicParameters")->get(publishedOrography));
             ASSERT_TRUE(state->getUniform("atmosphere.cloudOrganizationParameters")->get(publishedOrganization));
@@ -1233,6 +1257,8 @@ namespace MWRender
                 { 1.f, 0.8f, 0.6f }, { 0.3f, 0.4f, 0.55f }, { 0.45f, 0.5f, 0.6f }, { 1240.f, 570.f }, 2);
             updater->apply(state, nullptr);
             ASSERT_TRUE(state->getUniform("atmosphere.cloudAdvectionOffsetWorldUnits")->get(publishedOffset));
+            ASSERT_TRUE(state->getUniform("atmosphere.cloudShapeAdvectionOffsetWorldUnits")->get(publishedShapeOffset));
+            EXPECT_EQ(publishedShapeOffset, SceneUtil::cloudShapeAdvectionOffset({ 1240.f, 570.f }));
             ASSERT_TRUE(state->getUniform("atmosphere.mediumReferenceParameters")->get(publishedMediumReference));
             ASSERT_TRUE(state->getUniform("atmosphere.orographicParameters")->get(publishedOrography));
             EXPECT_EQ(publishedOffset, osg::Vec2f(1240.f, 570.f));

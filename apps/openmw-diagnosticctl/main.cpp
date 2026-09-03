@@ -688,7 +688,9 @@ namespace
                   "      [--route-shadow-casters terrain|objects]\n"
                   "      [--headed]\n"
                   "      [--setting \"Section:name=value\"]...\n"
-                  "  openmw-diagnosticctl inspect-capsule --capsule capture.omwdiag [--entry name]\n";
+                  "  openmw-diagnosticctl inspect-capsule --capsule capture.omwdiag [--entry name]\n"
+                  "  openmw-diagnosticctl add-route --capsule capture.omwdiag --route route.yaml --output "
+                  "motion.omwdiag\n";
     }
 
     /// Wait for every production render stage to restore normal state before continuing.
@@ -1142,6 +1144,14 @@ namespace
                     static_cast<std::streamsize>(performance.mPayload.size()));
                 if (!performanceFile)
                     throw std::runtime_error("failed writing gameplay-route performance evidence");
+                completedFixedFrames += segmentFrames;
+                waitForScheduledFrames(endpoint, requestId, completedFixedFrames);
+                const Diagnostics::Response routeStatus
+                    = Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::InspectSession, {} });
+                requireSuccessfulResponse(routeStatus);
+                const YAML::Node status = YAML::Load(payloadText(routeStatus.mPayload));
+                DiagnosticCtl::validateGameplayRouteProgress(routeFrames.size() - completedFrames, segmentFrames,
+                    status["route-frames-remaining"].as<std::size_t>());
                 completedFrames += segmentFrames;
                 ++segmentIndex;
                 if (captureRouteFrames)
@@ -1252,6 +1262,31 @@ namespace
         return 0;
     }
 
+    /// Attach a bounded, validated route to a new capsule without launching an engine or changing the source.
+    int addRoute(std::span<char*> arguments)
+    {
+        const std::filesystem::path source = findOption(arguments, "--capsule").value_or(std::string());
+        const std::filesystem::path route = findOption(arguments, "--route").value_or(std::string());
+        const std::filesystem::path output = findOption(arguments, "--output").value_or(std::string());
+        if (source.empty() || route.empty() || output.empty())
+            throw std::invalid_argument("add-route requires --capsule, --route, and --output");
+        std::ifstream input(route, std::ios::binary | std::ios::ate);
+        if (!input)
+            throw std::runtime_error("failed opening gameplay route");
+        const std::streamoff size = input.tellg();
+        if (size <= 0 || static_cast<std::uint64_t>(size) > Diagnostics::maximumCapsuleEntrySize)
+            throw std::length_error("gameplay route file size is outside capsule entry bounds");
+        std::vector<std::byte> payload(static_cast<std::size_t>(size));
+        input.seekg(0);
+        input.read(reinterpret_cast<char*>(payload.data()), static_cast<std::streamsize>(payload.size()));
+        if (!input)
+            throw std::runtime_error("failed reading gameplay route");
+        Diagnostics::writeCapsuleAtomically(
+            output, Diagnostics::withGameplayRoute(Diagnostics::readCapsule(source), payload));
+        std::cout << "route-capsule: " << output << '\n';
+        return 0;
+    }
+
     /// Parse and execute the bounded diagnostic controller command surface.
     int runController(int argc, char** argv)
     {
@@ -1271,6 +1306,8 @@ namespace
             return runIsolated(arguments);
         if (operation == "inspect-capsule")
             return inspectCapsule(arguments);
+        if (operation == "add-route")
+            return addRoute(arguments);
         return runAttachCommand(operation, arguments);
     }
 }

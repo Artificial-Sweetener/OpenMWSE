@@ -13,6 +13,7 @@ set(SHADER_FILES
     lib/atmosphere/clouds.glsl
     lib/atmosphere/diagnostics.glsl
     lib/atmosphere/uniforms.glsl
+    lib/atmosphere/units.glsl
     lib/water/fresnel.glsl
     lib/water/rain_ripples.glsl
     lib/water/ripples.glsl

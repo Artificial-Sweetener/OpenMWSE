@@ -22,6 +22,13 @@ namespace
 
 namespace DiagnosticCtl
 {
+    void validateGameplayRouteProgress(
+        std::size_t remainingBefore, std::size_t scheduledFrames, std::size_t remainingAfter)
+    {
+        if (scheduledFrames > remainingBefore || remainingAfter != remainingBefore - scheduledFrames)
+            throw std::runtime_error("gameplay route did not consume its scheduled states; inspect the engine log");
+    }
+
     GameplayRouteExecutionPlan makeGameplayRouteExecutionPlan(std::size_t availableFrameCount,
         std::optional<std::string_view> requestedFrameCount, std::optional<std::string_view> requestedSegmentFrameCount)
     {

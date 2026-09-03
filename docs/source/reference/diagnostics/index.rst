@@ -18,6 +18,7 @@ Execution modes
   state from a capsule. The controller rejects a visible or foreground child window, waits for readiness and capture barriers,
   records evidence, shuts down and reaps the child, proves temporary-workspace cleanup, and verifies that the source profile did
   not change.
+  The offscreen frame boundary explicitly submits queued OpenGL commands without waiting for GPU completion.
 * ``run --headed`` and ``replay --headed`` use the same isolated child, copied state, device-free input, evidence providers, and
   cleanup contract in a visible production graphics window. This mode supports representative driver presentation behavior and
   visible route-parity review without automating or modifying the normal game profile.
@@ -44,6 +45,18 @@ Replay that capture after rebuilding::
       --capsule <capture-directory>\capture.omwdiag --artifacts <replay-directory> \
       --frames 120 --performance-samples 64
 
+Attach an authored route to an existing save capsule without launching the engine::
+
+  openmw-diagnosticctl add-route --capsule <capture-directory>\capture.omwdiag \
+      --route <route-directory>\route.yaml --output <artifact-directory>\motion.omwdiag
+
+The command validates the version-1 route and writes a new capsule. The source remains unchanged; an existing output or a
+source capsule already containing a route is rejected. Route YAML contains ``route-version: 1`` and a ``frames`` sequence.
+Each frame specifies ``dt`` in seconds within (0, 0.2], ``cell`` as a serialized cell identity, ``position`` in world units,
+``rotation`` and ``camera`` as three-component radians, and ``first-person`` as a boolean. An exterior cell identity is
+``Esm3ExteriorCell:2:8``; interior identities are content record IDs. Routes contain at most 10,000 frames.
+Replay the resulting capsule with the command above to execute the route in an isolated headless child.
+
 Record a representative gameplay route from an interactive session by pressing Shift+F11 after loading the desired save. Play
 the route once, then press Shift+F11 again. OpenMWSE writes a timestamped ``gameplay-route-*.omwdiag`` capsule beneath the
 diagnostic artifact directory. The capsule contains the initial loadable world snapshot and one bounded sequence of rendered
@@ -57,7 +70,9 @@ Replay the recorded route in a visible isolated child after rebuilding::
 
 Route replay applies the recorded player and camera state authoritatively at each world update; it does not synthesize keyboard,
 mouse, physics, or gameplay decisions. This preserves the recorded viewport, cell traversal, streaming pressure, and rendering
-workload while making repeated candidate comparisons independent of physical input timing. The controller measures every route
+workload while making repeated candidate comparisons independent of physical input timing. The controller verifies that each
+scheduled route state was consumed before accepting a segment. Rendering frames without advancing the route is a replay failure.
+The controller measures every route
 frame in bounded segments, writes ``performance-segment-*.txt``, captures full graphics evidence at each segment boundary, and
 then closes and cleans the isolated child. Use the same capsule, build configuration, driver state, and replay command for every
 baseline and candidate repetition.
@@ -182,7 +197,7 @@ The versioned providers expose these evidence domains:
   cloud-field offset used by procedural density and shadow evaluation. Readers also accept ``gameplay@4``, ``gameplay@5``,
   ``gameplay@6``, and ``gameplay@7`` capsules.
   The replay controller checks stable save fields before applying any explicit atmosphere scenario and advancing the simulation.
-* ``performance@13`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
+* ``performance@14`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
   scopes for scripts, Lua, mechanics, physics, world, and UI, resource caches and work queues, navigation and paging activity,
   scene statistics, delayed per-camera GPU/render timing, and camera-owned GPU passes for the main scene, shadow maps, water
   reflection, sky render target, post-processing, precipitation occlusion, ripples, and terrain-composite generation. It divides
@@ -195,8 +210,13 @@ The versioned providers expose these evidence domains:
   model used for the capture. On Windows, camera passes also report render-thread hardware cycles so active execution can be
   distinguished from elapsed time spent blocked or descheduled. The report measures callback work outside its own camera
   intervals so delayed GPU-query maintenance can be separated from engine draw work. GPU queries are polled only after an
-  eight-frame readback delay, and collection retains two
-  additional rendered frames before reporting the final sample.
+  eight-frame readback delay. After two additional rendered frames, collection reports once all recorded camera query pairs
+  in the requested interval have retired. It continues rendering while pairs remain pending, stopping before the 1,024-frame
+  statistics history can overwrite the first requested sample. These readback frames do not extend the measured interval;
+  ``readback-rendered-frames`` records their count. Per-camera ``gpu-query-status`` counts distinguish
+  unsupported timestamps, pending pairs, completed pairs, invalid results, and pairs dropped at the retention limit.
+  ``not-recorded`` counts frames without a query lifecycle record, including frames when that camera did not render.
+  Pending or unsupported results are not zero-duration samples; their durations remain unavailable.
   Groundcover attribution includes submitted model batches and drawables plus a diagnostic-only conservative per-instance
   frustum and distance test of instances accepted by cluster visibility. The additional instance test runs only during bounded
   scene-statistics collection and measures potential GPU rejection without changing submitted work.
@@ -237,6 +257,16 @@ the names and semantics in one provider response. Graphics-provider bundle versi
 adding a newly named optional attachment remains compatible, while changing an existing attachment's meaning, layout, numeric
 representation, or coordinate convention requires a new bundle or provider version. Readers reject unsupported versions and
 must not infer compatibility from the OpenMWSE release number.
+
+Checkerboard atmosphere traces use the named attachments ``atmosphere-volume-checkerboard-raw`` and
+``atmosphere-volume-checkerboard-metadata-raw``. Their texels represent one selected member of each 2x2 resolved block,
+not a uniform ray grid. The optional 1x1 RGBA ``atmosphere-checkerboard-layout`` records frame phase (0–3), resolved width,
+resolved height, and block size (2). Phase comes from the published post-processing uniform snapshot, not
+the viewer's potentially newer frame stamp. Block (x,y) selects index (phase + (x+y) mod 2) mod 4, with offset
+(index mod 2, floor(index/2)). Resolved radiance and metadata retain their uniform ray-grid attachment names.
+The optional ``atmosphere-volume-metadata-reprojected`` attachment exposes the half-resolution reconstruction
+decision before fresh-ray repair. Its alpha is negative only where an untraced pixel lacks usable history;
+the repair pass integrates those rays and writes final metadata with the usual nonnegative medium identifiers.
 
 The fixed-step scheduler controls simulation and rendering clocks after loading the real save. Readiness and graphics-completion
 barriers prevent capture races. A disconnected controller cancels pending work, and controller destruction terminates and reaps

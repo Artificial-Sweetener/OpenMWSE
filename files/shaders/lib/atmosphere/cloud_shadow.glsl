@@ -54,11 +54,12 @@ vec4 openmwseCloudShadowWeatherSample(vec2 coordinates)
     return texture2D(openmwseCloudWeatherTexture, fract(coordinates));
 }
 
-#define openmwseCloudMaximumDistance openmwseCloudShadowMaximumDistance
+#define openmwseCloudMaximumMarchingDistance openmwseCloudShadowMaximumMarchingDistance
+#define openmwseCloudMaximumEntryDistance openmwseCloudShadowMaximumEntryDistance
+#define openmwseCloudMaximumRayDistance openmwseCloudShadowMaximumRayDistance
 #define openmwseCloudBaseVariation openmwseCloudShadowBaseVariation
 #define openmwseCloudMinimumThicknessScale openmwseCloudShadowMinimumThicknessScale
 #define openmwseCloudMaximumThicknessScale openmwseCloudShadowMaximumThicknessScale
-#define openmwseCloudWorldUnitsPerMeter openmwseCloudShadowWorldUnitsPerMeter
 #define openmwseCloudReferenceShapeNoiseScale openmwseCloudShadowReferenceShapeNoiseScale
 #define openmwseCloudReferenceWeatherScale openmwseCloudShadowReferenceWeatherScale
 #define openmwseCloudLowFormationScale openmwseCloudShadowLowFormationScale
@@ -113,10 +114,11 @@ vec4 openmwseCloudShadowWeatherSample(vec2 coordinates)
 #undef openmwseCloudLowFormationScale
 #undef openmwseCloudReferenceWeatherScale
 #undef openmwseCloudReferenceShapeNoiseScale
-#undef openmwseCloudWorldUnitsPerMeter
 #undef openmwseCloudMinimumThicknessScale
 #undef openmwseCloudBaseVariation
-#undef openmwseCloudMaximumDistance
+#undef openmwseCloudMaximumRayDistance
+#undef openmwseCloudMaximumEntryDistance
+#undef openmwseCloudMaximumMarchingDistance
 
 /// Evaluate normalized low-cloud optical density from the shared weather field.
 float openmwseLowCloudShadowColumnDensity(vec2 worldPosition)

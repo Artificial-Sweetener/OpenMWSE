@@ -5,6 +5,7 @@
 #include "shadowmapdiagnostics.hpp"
 
 #include <chrono>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -15,6 +16,7 @@
 #include <osg/Texture2D>
 
 #include <components/debug/debuglog.hpp>
+#include <components/fx/stateupdater.hpp>
 
 namespace MWRender
 {
@@ -129,9 +131,10 @@ namespace MWRender
 
     void AtmosphereDiagnostics::captureFrame(osg::RenderInfo& renderInfo, osg::Texture* sceneColor,
         osg::Texture* sceneDepth, osg::Texture* sceneNormals, osg::Texture* previousSceneDepth,
-        osg::Texture2D* rawVolume, osg::Texture2D* resolvedVolume, osg::Texture2D* volumeMetadata,
-        osg::Texture2D* shafts, osg::Texture2D* previousResolvedVolume, osg::Texture2D* previousVolumeMetadata,
-        unsigned int finalFramebuffer, int finalWidth, int finalHeight)
+        osg::Texture2D* rawVolume, osg::Texture2D* rawVolumeMetadata, osg::Texture2D* reprojectedMetadata,
+        osg::Texture2D* resolvedVolume, osg::Texture2D* volumeMetadata, osg::Texture2D* shafts,
+        osg::Texture2D* previousResolvedVolume, osg::Texture2D* previousVolumeMetadata, unsigned int finalFramebuffer,
+        int finalWidth, int finalHeight)
     {
         std::filesystem::path outputDirectory;
         CaptureStage captureStage;
@@ -195,7 +198,22 @@ namespace MWRender
             appendDepth(sceneDepth, "scene-opaque-depth");
             appendColor(sceneNormals, "scene-normals");
             appendDepth(previousSceneDepth, "previous-scene-opaque-depth");
-            appendColor(rawVolume, "atmosphere-volume-raw");
+            appendColor(rawVolume, "atmosphere-volume-checkerboard-raw");
+            appendColor(rawVolumeMetadata, "atmosphere-volume-checkerboard-metadata-raw");
+            appendColor(reprojectedMetadata, "atmosphere-volume-metadata-reprojected");
+            if (resolvedVolume)
+            {
+                std::optional<int> shaderFrame;
+                const auto& stateSets = renderInfo.getState()->getStateSetStack();
+                for (auto it = stateSets.rbegin(); it != stateSets.rend() && !shaderFrame; ++it)
+                    shaderFrame = Fx::StateUpdater::getPublishedFrameNumber(**it);
+                if (!shaderFrame)
+                    throw std::runtime_error("Atmosphere capture cannot identify the published shader frame");
+                const int phase = *shaderFrame % 4;
+                images.push_back({ "atmosphere-checkerboard-layout", 1, 1, 4,
+                    { static_cast<float>(phase), static_cast<float>(resolvedVolume->getTextureWidth()),
+                        static_cast<float>(resolvedVolume->getTextureHeight()), 2.f } });
+            }
             appendColor(resolvedVolume, "atmosphere-volume-resolved");
             appendColor(volumeMetadata, "atmosphere-volume-metadata");
             appendColor(shafts, "atmosphere-shafts");

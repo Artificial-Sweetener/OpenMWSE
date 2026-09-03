@@ -37,6 +37,8 @@ struct Atmosphere
     vec3 groundIrradiance;
     // Integrated world-space offset shared by visible clouds, reflections, and surface shadows.
     vec2 cloudAdvectionOffsetWorldUnits;
+    // Independent 3D shape-noise displacement, derived from the same integrated weather phase.
+    vec3 cloudShapeAdvectionOffsetWorldUnits;
     int quality;
 };
 

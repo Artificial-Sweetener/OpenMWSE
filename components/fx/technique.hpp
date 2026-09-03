@@ -61,11 +61,11 @@ namespace Fx
                     if (subpass.mInputTargetNames[inputIndex].empty())
                         continue;
                     const auto source = std::find_if(mPasses.begin(), mPasses.end(), [&](const auto& candidate) {
-                        return candidate.mTargetName == subpass.mInputTargetNames[inputIndex];
+                        return candidate.findOutput(subpass.mInputTargetNames[inputIndex]) != nullptr;
                     });
                     if (source != mPasses.end())
-                        subpass.mStateSet->setTextureAttribute(
-                            subpass.mInputTextureUnits[inputIndex], source->mRenderTexture);
+                        subpass.mStateSet->setTextureAttribute(subpass.mInputTextureUnits[inputIndex],
+                            source->findOutput(subpass.mInputTargetNames[inputIndex]));
                 }
             }
         }
@@ -89,7 +89,7 @@ namespace Fx
         /// Transfer-assign a complete frame-local dispatch graph.
         DispatchNode& operator=(DispatchNode&&) noexcept = default;
 
-        /// Own one compiled pass, output attachment, and up to three named input bindings.
+        /// Own one compiled pass, up to two simultaneous outputs, and three named input bindings.
         struct SubPass
         {
             /// Create an uncompiled subpass with an independent state set.
@@ -99,16 +99,29 @@ namespace Fx
             osg::ref_ptr<osg::FrameBufferObject> mRenderTarget;
             osg::ref_ptr<osg::Texture2D> mRenderTexture;
             std::string mTargetName;
+            osg::ref_ptr<osg::Texture2D> mSecondaryTexture;
+            std::string mSecondaryTargetName;
             std::array<std::string, 3> mInputTargetNames;
             std::array<int, 3> mInputTextureUnits{ -1, -1, -1 };
             bool mResolve = false;
             Types::SizeProxy mSize;
             bool mMipMap = false;
 
+            /// Locate a named output in this frame-local pass, including its secondary attachment.
+            osg::Texture2D* findOutput(std::string_view name) const
+            {
+                if (name.empty())
+                    return nullptr;
+                if (name == mTargetName)
+                    return mRenderTexture;
+                return name == mSecondaryTargetName ? mSecondaryTexture.get() : nullptr;
+            }
+
             /// Deep-copy a subpass and attach its copied texture to a new framebuffer.
             SubPass(const SubPass& other, const osg::CopyOp& copyOp = osg::CopyOp::SHALLOW_COPY)
                 : mStateSet(new osg::StateSet(*other.mStateSet, copyOp))
                 , mTargetName(other.mTargetName)
+                , mSecondaryTargetName(other.mSecondaryTargetName)
                 , mInputTargetNames(other.mInputTargetNames)
                 , mInputTextureUnits(other.mInputTextureUnits)
                 , mResolve(other.mResolve)
@@ -117,11 +130,16 @@ namespace Fx
             {
                 if (other.mRenderTexture)
                     mRenderTexture = new osg::Texture2D(*other.mRenderTexture, copyOp);
+                if (other.mSecondaryTexture)
+                    mSecondaryTexture = new osg::Texture2D(*other.mSecondaryTexture, copyOp);
                 if (other.mRenderTarget)
                 {
                     mRenderTarget = new osg::FrameBufferObject;
                     mRenderTarget->setAttachment(osg::FrameBufferObject::BufferComponent::COLOR_BUFFER0,
                         osg::FrameBufferAttachment(mRenderTexture));
+                    if (mSecondaryTexture)
+                        mRenderTarget->setAttachment(osg::FrameBufferObject::BufferComponent::COLOR_BUFFER1,
+                            osg::FrameBufferAttachment(mSecondaryTexture));
                 }
             }
 
@@ -191,6 +209,7 @@ namespace Fx
         Technique(const VFS::Manager& vfs, Resource::ImageManager& imageManager, VFS::Path::NormalizedView fileName,
             std::string name, int width, int height, bool ubo, bool supportsNormals);
 
+        /// Compile the pass graph and validate named outputs, dimensions and simultaneous-input hazards.
         bool compile();
 
         std::string getName() const;
@@ -282,6 +301,7 @@ namespace Fx
         {
         }
 
+        /// Parse pass output, input and blending declarations before the shader body.
         void parseBlockHeader();
 
         bool parseBool();

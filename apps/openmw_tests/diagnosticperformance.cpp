@@ -53,6 +53,35 @@ TEST(DiagnosticPerformanceTest, TerrainSelectionWorkFollowsDiagnosticCollectionL
     EXPECT_FALSE(Terrain::diagnosticViewSelectionCollectionEnabled(*camera));
 }
 
+/// Keep absent, unfinished, unsupported, and invalid query results distinct from completed GPU measurements.
+TEST(DiagnosticPerformanceTest, ReportsQueryLifecycleWithoutInventingDurations)
+{
+    osgViewer::Viewer viewer;
+    osg::Camera* camera = viewer.getCamera();
+    camera->setName("QueryLifecycleCamera");
+    SceneUtil::enableDiagnosticGpuPassStatistics(*camera);
+    constexpr std::array states{ SceneUtil::DiagnosticGpuQueryState::Unsupported,
+        SceneUtil::DiagnosticGpuQueryState::Pending, SceneUtil::DiagnosticGpuQueryState::Complete,
+        SceneUtil::DiagnosticGpuQueryState::Invalid, SceneUtil::DiagnosticGpuQueryState::Dropped };
+    for (unsigned index = 0; index < states.size(); ++index)
+        camera->getStats()->setAttribute(
+            100 + index, std::string(SceneUtil::diagnosticGpuQueryStateStatistic), static_cast<int>(states[index]));
+    camera->getStats()->setAttribute(102, std::string(SceneUtil::diagnosticGpuPassTimeStatistic), 0.003);
+    camera->getStats()->setAttribute(
+        106, std::string(SceneUtil::diagnosticGpuQueryStateStatistic), std::numeric_limits<double>::quiet_NaN());
+
+    std::ostringstream output;
+    OMW::reportDiagnosticPerformance(100, 106, viewer, output);
+    const std::string report = output.str();
+    EXPECT_NE(report.find("  - camera: \"QueryLifecycleCamera\"\n    unsupported: 1\n    pending: 1\n"
+                          "    complete: 1\n    invalid: 2\n    dropped: 1\n    not-recorded: 1\n"),
+        std::string::npos)
+        << report;
+    EXPECT_NE(
+        report.find("  unclassified-cameras:\n    available: true\n    count: 1\n    median: 0.003"), std::string::npos)
+        << report;
+}
+
 TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCameras)
 {
     constexpr unsigned frame = 42;
@@ -173,7 +202,7 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     OMW::reportDiagnosticPerformance(frame, frame, viewer, output);
     const std::string report = output.str();
 
-    EXPECT_NE(report.find("provider: performance@13"), std::string::npos);
+    EXPECT_NE(report.find("provider: performance@14"), std::string::npos);
     EXPECT_NE(report.find("threading-model: automatic-selection"), std::string::npos);
     EXPECT_NE(report.find("presentation:\n  swap-buffers:\n    available: true\n    count: 1"), std::string::npos)
         << report;

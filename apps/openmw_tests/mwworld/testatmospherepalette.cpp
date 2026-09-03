@@ -54,7 +54,8 @@ namespace MWWorld
             EXPECT_EQ(clear.mInScattering, osg::Vec3f(0.25f, 0.38f, 0.48f));
             EXPECT_EQ(clear.mOutScattering, osg::Vec3f(0.07f, 0.36f, 0.76f));
             EXPECT_FLOAT_EQ(clear.mVolumes.mCloudDeckCoverage, 0.26f);
-            EXPECT_FLOAT_EQ(clear.mVolumes.mCloudDeckType, 0.58f);
+            EXPECT_FLOAT_EQ(clear.mVolumes.mCloudDeckType, 0.04f);
+            EXPECT_GT(clear.mVolumes.mCloudType, clear.mVolumes.mCloudDeckType);
             EXPECT_FLOAT_EQ(clear.mVolumes.mCloudConvectiveFrequency, 0.18f);
             EXPECT_FLOAT_EQ(clear.mVolumes.mTerrainReferenceHeightWorldUnits, 12000.f);
             EXPECT_FLOAT_EQ(clear.mVolumes.mMistDensity, 0.0432f);
@@ -71,13 +72,17 @@ namespace MWWorld
 
             const MWRender::AtmosphereState cloudy = palette.getState("Cloudy", {}, 0.f);
             const MWRender::AtmosphereState thunderstorm = palette.getState("Thunderstorm", {}, 0.f);
-            EXPECT_LT(thunderstorm.mVolumes.mCloudDeckType, cloudy.mVolumes.mCloudDeckType);
+            EXPECT_FLOAT_EQ(clear.mVolumes.mCloudThicknessWorldUnits, cloudy.mVolumes.mCloudThicknessWorldUnits);
+            EXPECT_FLOAT_EQ(cloudy.mVolumes.mCloudThicknessWorldUnits, thunderstorm.mVolumes.mCloudThicknessWorldUnits);
+            EXPECT_LT(cloudy.mVolumes.mCloudDeckType, cloudy.mVolumes.mCloudType);
             EXPECT_GT(thunderstorm.mVolumes.mCloudType, cloudy.mVolumes.mCloudType);
             EXPECT_GT(thunderstorm.mVolumes.mCloudType, thunderstorm.mVolumes.mCloudDeckType);
             EXPECT_GT(thunderstorm.mVolumes.mCloudVerticalDevelopment, cloudy.mVolumes.mCloudVerticalDevelopment);
-            EXPECT_GT(thunderstorm.mVolumes.mCloudThicknessWorldUnits, cloudy.mVolumes.mCloudThicknessWorldUnits);
-            EXPECT_GT(thunderstorm.mVolumes.mCloudAnvilStrength, cloudy.mVolumes.mCloudAnvilStrength);
+            EXPECT_FLOAT_EQ(clear.mVolumes.mCloudAnvilStrength, 1.f);
+            EXPECT_FLOAT_EQ(cloudy.mVolumes.mCloudAnvilStrength, 1.f);
+            EXPECT_FLOAT_EQ(thunderstorm.mVolumes.mCloudAnvilStrength, 1.f);
             EXPECT_GT(thunderstorm.mVolumes.mCloudDeckCoverage, 0.9f);
+            EXPECT_GT(cloudy.mVolumes.mCloudConvectiveFrequency, clear.mVolumes.mCloudConvectiveFrequency);
             EXPECT_GT(thunderstorm.mVolumes.mCloudConvectiveFrequency, cloudy.mVolumes.mCloudConvectiveFrequency);
             EXPECT_GT(thunderstorm.mVolumes.mCloudStormOrganization, cloudy.mVolumes.mCloudStormOrganization);
 
@@ -116,6 +121,48 @@ namespace MWWorld
             {
                 EXPECT_NE(
                     std::string(error.what()).find("atmosphere-volumes.Clear.cloudDeckCoverage"), std::string::npos);
+            }
+        }
+
+        /// Accept a five-kilometre nominal convective shell while retaining a finite, field-identified loading bound.
+        TEST(MWWorldAtmospherePaletteTest, boundsDeepConvectiveShellThickness)
+        {
+            const std::filesystem::path dataDirectory
+                = std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/data-mw/openmwse";
+            std::ifstream volumeStream(dataDirectory / "atmosphere-volumes.json");
+            ASSERT_TRUE(volumeStream.is_open());
+            const std::string original(
+                (std::istreambuf_iterator<char>(volumeStream)), std::istreambuf_iterator<char>());
+            const std::string originalThickness = R"("cloudThickness": 200000.0)";
+            const std::size_t position = original.find(originalThickness);
+            ASSERT_NE(position, std::string::npos);
+
+            for (const float thickness : { 1.f, 350000.f, 0.f, 350001.f })
+            {
+                std::string contents = original;
+                contents.replace(
+                    position, originalThickness.size(), "\"cloudThickness\": " + std::to_string(thickness));
+                std::istringstream volumes(contents);
+                std::ifstream paletteStream(dataDirectory / "atmosphere.json");
+                ASSERT_TRUE(paletteStream.is_open());
+                if (thickness >= 1.f && thickness <= 350000.f)
+                {
+                    AtmospherePalette palette(paletteStream, volumes);
+                    EXPECT_FLOAT_EQ(palette.getState("Clear", {}, 0.f).mVolumes.mCloudThicknessWorldUnits, thickness);
+                }
+                else
+                {
+                    try
+                    {
+                        AtmospherePalette palette(paletteStream, volumes);
+                        FAIL() << "Expected invalid shell thickness to be rejected: " << thickness;
+                    }
+                    catch (const std::runtime_error& error)
+                    {
+                        EXPECT_NE(std::string(error.what()).find("atmosphere-volumes.Clear.cloudThickness"),
+                            std::string::npos);
+                    }
+                }
             }
         }
 

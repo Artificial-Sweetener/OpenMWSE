@@ -77,6 +77,12 @@ vec2 openmwseCloudAdvectionOffsetWorldUnits()
     return atmosphere.cloudAdvectionOffsetWorldUnits;
 }
 
+/// Share the primary view's independently moving cloud tissue with reflected cloud transport.
+vec3 openmwseCloudShapeAdvectionOffsetWorldUnits()
+{
+    return atmosphere.cloudShapeAdvectionOffsetWorldUnits;
+}
+
 /// Sample the canonical tileable multi-channel cloud shape volume.
 vec4 openmwseCloudNoiseSample(vec3 coordinates, float lodBias)
 {
@@ -165,7 +171,7 @@ vec4 atmosphereCloudScattering(vec3 worldDirection, vec3 atmosphericTarget)
 {
     if (atmosphere.enabled == false)
         return vec4(0.0, 0.0, 0.0, 1.0);
-    return openmwseIntegrateCloudsStable(atmosphereEyePosition(), worldDirection, openmwseCloudMaximumDistance,
+    return openmwseIntegrateCloudsStable(atmosphereEyePosition(), worldDirection, openmwseCloudMaximumRayDistance,
         atmosphere.quality, atmosphere.solarRadiance, atmosphere.skyIrradiance, atmosphere.groundIrradiance,
         atmosphericTarget, openmwseAerialPerspectiveParameters());
 }

@@ -1,13 +1,18 @@
 #ifndef OPENMWSE_ATMOSPHERE_CLOUD_FIELD_GLSL
 #define OPENMWSE_ATMOSPHERE_CLOUD_FIELD_GLSL
 
-const float openmwseCloudWorldUnitsPerMeter = 69.99125109;
-const float openmwseCloudMaximumDistance = 30000.0 * openmwseCloudWorldUnitsPerMeter;
+#include "units.glsl"
+
+// Distinguish the empty approach to a visible shell from the bounded march inside it.
+const float openmwseCloudMaximumMarchingDistance = 30000.0 * openmwseAtmosphereWorldUnitsPerMeter;
+const float openmwseCloudMaximumEntryDistance = 70000.0 * openmwseAtmosphereWorldUnitsPerMeter;
+const float openmwseCloudMaximumRayDistance
+    = openmwseCloudMaximumEntryDistance + openmwseCloudMaximumMarchingDistance;
 const float openmwseCloudBaseVariation = 0.22;
 const float openmwseCloudMinimumThicknessScale = 0.45;
 const float openmwseCloudMaximumThicknessScale = 1.45;
-const float openmwseCloudReferenceShapeNoiseScale = 0.0006 / openmwseCloudWorldUnitsPerMeter;
-const float openmwseCloudReferenceWeatherScale = 0.00002 / openmwseCloudWorldUnitsPerMeter;
+const float openmwseCloudReferenceShapeNoiseScale = 0.0006 / openmwseAtmosphereWorldUnitsPerMeter;
+const float openmwseCloudReferenceWeatherScale = 0.00002 / openmwseAtmosphereWorldUnitsPerMeter;
 const float openmwseCloudLowFormationScale = 0.18;
 /// Carry the weather-column signals needed to reconstruct one typed cloud volume.
 struct OpenMWSECloudColumnProperties
@@ -15,7 +20,6 @@ struct OpenMWSECloudColumnProperties
     float organizationPotential;
     float localCoverage;
     float baseVariation;
-    float development;
     float family;
     float precipitation;
 };
@@ -97,7 +101,6 @@ OpenMWSECloudColumnProperties openmwseCloudColumnPropertiesForScale(
     vec4 weather = openmwseCloudWeatherSample(weatherCoordinates);
     float requestedFamily = clamp(shape.x, 0.0, 1.0);
     float requestedDeckFamily = clamp(structure.z, 0.0, 1.0);
-    float requestedDevelopment = clamp(shape.z, 0.0, 1.0);
     float deckContinuity = clamp(organization.x, 0.0, 1.0);
     float convectiveMaturity = clamp(organization.z, 0.0, 1.0);
     float stormBias = clamp(organization.w, 0.0, 1.0);
@@ -113,14 +116,17 @@ OpenMWSECloudColumnProperties openmwseCloudColumnPropertiesForScale(
     float deckCoverage = mix(coverageMinimum, 1.0,
         clamp(organizationPotential * coverageAmount, 0.0, 1.0));
 
-    // The G channel is the continuous small/medium/large selector. Weather presentation changes
-    // its amount and minimum while preserving per-column variation, including dry mature convection.
-    // Keep mature storms within the authored type range: saturating broad portions of this channel
-    // merges neighboring updrafts into one monolithic large-type crown.
-    float typeAmount = mix(0.55, 1.4, requestedFamily)
-        * mix(0.82, 1.0, convectiveMaturity);
-    float typeMinimum = requestedDeckFamily;
-    float weatherFamily = mix(typeMinimum, 1.0, clamp(weather.g * typeAmount, 0.0, 1.0));
+    // The G channel continuously selects small, medium, and large profiles inside one deep shell.
+    // Convective frequency controls the type amount without thresholding the weather field into terrain-like
+    // height contours, while the deck and convective types remain the two weather-owned endpoints.
+    float convectiveFrequency = clamp(organization.y, 0.0, 1.0);
+    float effectiveFrequency = convectiveFrequency * mix(0.35, 1.0, convectiveMaturity);
+    float typeAmount = mix(1.35, 2.05, sqrt(effectiveFrequency))
+        * mix(0.92, 1.08, requestedFamily);
+    float typeMinimum = 0.14 * stormBias * convectiveMaturity;
+    float typeSelection = mix(typeMinimum, 1.0,
+        clamp(weather.g * typeAmount, 0.0, 1.0));
+    float weatherFamily = mix(requestedDeckFamily, requestedFamily, typeSelection);
     float baseVariation = mix(0.5, weather.a, clamp(structure.y, 0.0, 1.0));
     // Precipitation is independent from coverage and type in weather-map B.
     // OpenMW's presentation state controls its amount while the map keeps wet optical regions local.
@@ -129,7 +135,7 @@ OpenMWSECloudColumnProperties openmwseCloudColumnPropertiesForScale(
     float precipitation = mix(precipitationMinimum, 1.0,
         clamp(weather.b * precipitationAmount, 0.0, 1.0));
     return OpenMWSECloudColumnProperties(organizationPotential, deckCoverage,
-        baseVariation, requestedDevelopment, weatherFamily, precipitation);
+        baseVariation, weatherFamily, precipitation);
 }
 
 /// Evaluate the authoritative main-cloud weather field for column occupancy and morphology.

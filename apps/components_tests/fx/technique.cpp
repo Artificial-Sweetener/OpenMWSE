@@ -285,6 +285,37 @@ namespace
         EXPECT_EQ(mTechnique->getPasses()[0]->getTarget(), "rendertarget");
     }
 
+    TEST(TechniqueOutputTest, validatesSimultaneousOutputContracts)
+    {
+        const auto check = [](std::string_view header, std::string_view secondarySize, std::string_view error) {
+            const std::string source = "render_target color { width_ratio=0.5; height_ratio=0.5; }\n"
+                "render_target metadata { " + std::string(secondarySize) + " }\n"
+                "fragment integrate(" + std::string(header) + ") { void main() { omw_FragColor=vec4(1.0); } }\n"
+                "fragment display {}\ntechnique { passes=integrate,display; }";
+            TestingOpenMW::VFSTestFile file(source);
+            auto vfs = TestingOpenMW::createTestVFS({ { VFS::Path::NormalizedView("shaders/outputs.omwfx"), &file } });
+            Resource::ImageManager images(vfs.get(), 0);
+            Technique technique(
+                *vfs, images, VFS::Path::NormalizedView("shaders/outputs.omwfx"), "outputs", 64, 64, false, true);
+            EXPECT_EQ(technique.compile(), error.empty()) << technique.getLastError();
+            if (error.empty())
+            {
+                ASSERT_EQ(technique.getPasses().size(), 2u);
+                EXPECT_EQ(technique.getPasses()[0]->getSecondaryTarget(), "metadata");
+            }
+            else
+                EXPECT_THAT(technique.getLastError(), HasSubstr(error));
+        };
+        constexpr std::string_view size = "width_ratio=0.5; height_ratio=0.5;";
+        check("target=color,secondary_target=metadata", size, "");
+        check("secondary_target=metadata", size, "requires a pixel pass with a primary target");
+        check("target=color,secondary_target=missing", size, "not defined");
+        check("target=color,secondary_target=color", size, "must differ");
+        check("target=color,secondary_target=metadata", "width=32; height=32;", "matching size definitions");
+        check("target=color,secondary_target=metadata,rt1=metadata", size, "cannot also be pass inputs");
+        check("target=color,secondary_target=metadata,rt1=color", size, "cannot also be pass inputs");
+    }
+
     TEST(DispatchNodeTest, frameCopyOwnsAndRebindsRenderTargets)
     {
         DispatchNode source;
@@ -294,11 +325,18 @@ namespace
         producer.mRenderTarget = new osg::FrameBufferObject;
         producer.mRenderTarget->setAttachment(
             osg::Camera::COLOR_BUFFER0, osg::FrameBufferAttachment(producer.mRenderTexture));
+        producer.mSecondaryTargetName = "metadata";
+        producer.mSecondaryTexture = new osg::Texture2D;
+        producer.mRenderTarget->setAttachment(
+            osg::Camera::COLOR_BUFFER1, osg::FrameBufferAttachment(producer.mSecondaryTexture));
 
         DispatchNode::SubPass consumer;
         consumer.mInputTargetNames[0] = "history";
         consumer.mInputTextureUnits[0] = 7;
         consumer.mStateSet->setTextureAttribute(7, producer.mRenderTexture);
+        consumer.mInputTargetNames[1] = "metadata";
+        consumer.mInputTextureUnits[1] = 8;
+        consumer.mStateSet->setTextureAttribute(8, producer.mSecondaryTexture);
         source.mPasses.emplace_back(std::move(producer));
         source.mPasses.emplace_back(std::move(consumer));
 
@@ -312,6 +350,13 @@ namespace
             frame.mPasses[0].mRenderTexture);
         EXPECT_EQ(frame.mPasses[0].mRenderTarget->getAttachment(osg::Camera::COLOR_BUFFER0).getTexture(),
             frame.mPasses[0].mRenderTexture);
+        EXPECT_NE(frame.mPasses[0].mSecondaryTexture, source.mPasses[0].mSecondaryTexture);
+        EXPECT_EQ(frame.mPasses[1].mStateSet->getTextureAttribute(8, osg::StateAttribute::TEXTURE),
+            frame.mPasses[0].mSecondaryTexture);
+        EXPECT_EQ(frame.mPasses[0].mRenderTarget->getAttachment(osg::Camera::COLOR_BUFFER1).getTexture(),
+            frame.mPasses[0].mSecondaryTexture);
+        EXPECT_EQ(frame.mPasses[0].findOutput("metadata"), frame.mPasses[0].mSecondaryTexture);
+        EXPECT_EQ(frame.mPasses[0].findOutput("missing"), nullptr);
     }
 
     TEST_F(TechniqueTest, uniform_properties)

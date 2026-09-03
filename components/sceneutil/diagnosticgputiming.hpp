@@ -42,6 +42,17 @@ namespace SceneUtil
         = "OpenMW diagnostic GPU pass begin timestamp";
     inline constexpr std::string_view diagnosticGpuPassEndTimestampStatistic
         = "OpenMW diagnostic GPU pass end timestamp";
+    /// Identify the lifecycle of a camera timestamp pair independently of its eventual duration.
+    enum class DiagnosticGpuQueryState
+    {
+        Unsupported,
+        Pending,
+        Complete,
+        Invalid,
+        Dropped,
+    };
+    /// Store DiagnosticGpuQueryState per sampled camera frame, including unavailable GPU durations.
+    inline constexpr std::string_view diagnosticGpuQueryStateStatistic = "OpenMW diagnostic GPU query state";
     inline constexpr std::string_view diagnosticCpuPassTimeStatistic = "OpenMW diagnostic CPU pass time taken";
     inline constexpr std::string_view diagnosticCpuPassBeginStatistic = "OpenMW diagnostic CPU pass begin time";
     inline constexpr std::string_view diagnosticCpuPassEndStatistic = "OpenMW diagnostic CPU pass end time";
@@ -51,6 +62,8 @@ namespace SceneUtil
         = "OpenMW diagnostic CPU pass end callback overhead";
     /// Delay query polling until the GPU has had a bounded number of frames to complete the interval.
     inline constexpr unsigned diagnosticGpuTimingReadbackLatencyFrames = 8;
+    /// Bound query and statistics history so delayed reports can finish before their sampled frames expire.
+    inline constexpr unsigned diagnosticGpuTimingRetainedFrames = 1024;
 
     /// Return the versioned camera-pass identities emitted by performance diagnostics.
     std::span<const DiagnosticGpuPass> diagnosticGpuPasses();
@@ -82,6 +95,9 @@ namespace SceneUtil
 
     /// Return live cameras registered for diagnostic GPU-pass reporting.
     std::vector<osg::ref_ptr<osg::Camera>> diagnosticGpuPassCameras();
+
+    /// Return whether a recorded camera query in the inclusive interval still awaits asynchronous readback.
+    bool diagnosticGpuQueriesPending(unsigned firstFrame, unsigned lastFrame);
 }
 
 #endif

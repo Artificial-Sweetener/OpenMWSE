@@ -1,4 +1,5 @@
 #include "gameplayroute.hpp"
+#include "capsule.hpp"
 
 #include <yaml-cpp/yaml.h>
 
@@ -62,6 +63,16 @@ namespace Diagnostics
         const std::string text(output.c_str(), output.size());
         const auto* begin = reinterpret_cast<const std::byte*>(text.data());
         return { begin, begin + text.size() };
+    }
+
+    Capsule withGameplayRoute(const Capsule& source, std::span<const std::byte> payload)
+    {
+        if (source.find("state/gameplay-route.yaml"))
+            throw std::invalid_argument("source capsule already contains a gameplay route");
+        const auto frames = decodeGameplayRoute(payload);
+        Capsule result = source;
+        result.add({ "state/gameplay-route.yaml", CapsuleEntryType::GameplayTrace, encodeGameplayRoute(frames) });
+        return result;
     }
 
     std::vector<GameplayRouteFrame> decodeGameplayRoute(std::span<const std::byte> payload)

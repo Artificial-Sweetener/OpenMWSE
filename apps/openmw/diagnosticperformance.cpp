@@ -210,6 +210,35 @@ namespace OMW
             return values;
         }
 
+        /// Report physical-camera query lifecycles without treating missing or unfinished samples as zero time.
+        void reportGpuQueryStates(unsigned firstFrame, unsigned lastFrame, std::ostream& output)
+        {
+            constexpr std::array<std::string_view, 5> names{ "unsupported", "pending", "complete", "invalid",
+                "dropped" };
+            output << "gpu-query-status:\n";
+            for (const osg::ref_ptr<osg::Camera>& camera : SceneUtil::diagnosticGpuPassCameras())
+            {
+                std::array<std::size_t, names.size()> counts{};
+                std::size_t notRecorded = 0;
+                for (unsigned frame = firstFrame; frame <= lastFrame; ++frame)
+                {
+                    double value = 0.0;
+                    if (camera->getStats() == nullptr
+                        || !camera->getStats()->getAttribute(
+                            frame, std::string(SceneUtil::diagnosticGpuQueryStateStatistic), value))
+                        ++notRecorded;
+                    else if (!std::isfinite(value) || value < 0 || value >= names.size() || std::floor(value) != value)
+                        ++counts[static_cast<std::size_t>(SceneUtil::DiagnosticGpuQueryState::Invalid)];
+                    else
+                        ++counts[static_cast<std::size_t>(value)];
+                }
+                output << "  - camera: " << std::quoted(camera->getName()) << '\n';
+                for (std::size_t state = 0; state < names.size(); ++state)
+                    output << "    " << names[state] << ": " << counts[state] << '\n';
+                output << "    not-recorded: " << notRecorded << '\n';
+            }
+        }
+
         /// Collect and sum one diagnostic statistic across every registered camera.
         std::vector<double> collectAllCameraPasses(std::string_view statistic, unsigned firstFrame, unsigned lastFrame)
         {
@@ -537,7 +566,7 @@ namespace OMW
         forEachUserStatsValue(
             [&](const UserStats& value) { metrics.push_back({ value.mTaken, Metric::Owner::Viewer }); });
 
-        output << std::setprecision(17) << "provider: performance@13\n"
+        output << std::setprecision(17) << "provider: performance@14\n"
                << "threading-model: " << threadingModelName(viewer.getThreadingModel()) << '\n'
                << "first-sampled-frame: " << firstFrame << '\n'
                << "last-sampled-frame: " << lastFrame << '\n'
@@ -591,6 +620,7 @@ namespace OMW
         reportDistribution(output, { "after-interval", Metric::Owner::PrimaryCamera },
             collectAllCameraPasses(SceneUtil::diagnosticCpuPassEndOverheadStatistic, firstFrame, lastFrame));
 
+        reportGpuQueryStates(firstFrame, lastFrame, output);
         output << "gpu-passes:\n";
         for (const SceneUtil::DiagnosticGpuPass& pass : SceneUtil::diagnosticGpuPasses())
         {

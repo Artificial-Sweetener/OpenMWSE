@@ -14,7 +14,7 @@ namespace SceneUtil
         unsigned mSamples = 0;
     };
 
-    /// Create a pbuffer graphics context without creating a visible native desktop window.
+    /// Create a windowless pbuffer context that submits each frame without waiting for GPU completion.
     osg::ref_ptr<osg::GraphicsContext> createOffscreenContext(const OffscreenContextSettings& settings);
 }
 

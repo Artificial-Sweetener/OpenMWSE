@@ -14,6 +14,29 @@ namespace Fx
     {
     }
 
+    std::optional<int> StateUpdater::getPublishedFrameNumber(const osg::StateSet& stateset)
+    {
+        const auto* binding = dynamic_cast<const osg::UniformBufferBinding*>(
+            stateset.getAttribute(osg::StateAttribute::UNIFORMBUFFERBINDING,
+                static_cast<int>(Resource::SceneManager::UBOBinding::PostProcessor)));
+        if (binding)
+        {
+            const auto* buffer
+                = dynamic_cast<const osg::BufferTemplate<UniformData::BufferType>*>(binding->getBufferData());
+            if (!buffer)
+                throw std::runtime_error("Post-processing frame identity has an incompatible uniform buffer");
+            return UniformData::read<FrameNumber>(buffer->getData());
+        }
+        if (const osg::Uniform* uniform = stateset.getUniform("omw.frameNumber"))
+        {
+            int frame;
+            if (!uniform->get(frame))
+                throw std::runtime_error("Post-processing frame identity must be an integer uniform");
+            return frame;
+        }
+        return std::nullopt;
+    }
+
     void StateUpdater::setDefaults(osg::StateSet* stateset)
     {
         if (mUseUBO)

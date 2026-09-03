@@ -35,6 +35,7 @@ namespace MWRender
 
         void drawGeometry(osg::RenderInfo& renderInfo) const;
 
+        /// Execute the frame-local post-processing graph and maintain each output's mipmaps and history.
         void drawImplementation(osg::RenderInfo& renderInfo) const override;
 
         void resizeGLObjectBuffers(unsigned int maxSize) override;

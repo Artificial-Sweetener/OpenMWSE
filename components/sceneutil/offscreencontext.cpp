@@ -1,9 +1,26 @@
 #include "offscreencontext.hpp"
 
+#include <osg/GL>
+
 #include <stdexcept>
 
 namespace SceneUtil
 {
+    namespace
+    {
+        /// Submit a windowless frame when the platform's single-buffered swap does no work.
+        class OffscreenFrameSubmission final : public osg::GraphicsContext::SwapCallback
+        {
+        public:
+            /// Preserve native swap bookkeeping and submit commands without waiting for GPU completion.
+            void swapBuffersImplementation(osg::GraphicsContext* context) override
+            {
+                context->swapBuffersImplementation();
+                glFlush();
+            }
+        };
+    }
+
     osg::ref_ptr<osg::GraphicsContext> createOffscreenContext(const OffscreenContextSettings& settings)
     {
         if (settings.mWidth <= 0 || settings.mHeight <= 0)
@@ -28,6 +45,9 @@ namespace SceneUtil
         traits->sampleBuffers = settings.mSamples > 0 ? 1 : 0;
         traits->samples = settings.mSamples;
         traits->glContextProfileMask = 0;
-        return osg::GraphicsContext::createGraphicsContext(traits);
+        osg::ref_ptr<osg::GraphicsContext> context = osg::GraphicsContext::createGraphicsContext(traits);
+        if (context)
+            context->setSwapCallback(new OffscreenFrameSubmission);
+        return context;
     }
 }

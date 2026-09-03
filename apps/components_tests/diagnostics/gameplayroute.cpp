@@ -1,3 +1,4 @@
+#include <components/diagnostics/capsule.hpp>
 #include <components/diagnostics/gameplayroute.hpp>
 
 #include <gtest/gtest.h>
@@ -21,6 +22,25 @@ namespace
     {
         const std::vector source{ frame(), frame() };
         EXPECT_EQ(Diagnostics::decodeGameplayRoute(Diagnostics::encodeGameplayRoute(source)), source);
+    }
+
+    TEST(GameplayRoute, AttachesValidatedRouteWithoutChangingSourceCapsule)
+    {
+        Diagnostics::Capsule source;
+        source.add({ "state/save.omwsave", Diagnostics::CapsuleEntryType::WorldSnapshot, { std::byte{ 1 } } });
+        const std::vector frames{ frame(), frame() };
+        const auto payload = Diagnostics::encodeGameplayRoute(frames);
+        const auto result = Diagnostics::withGameplayRoute(source, payload);
+        ASSERT_EQ(source.entries().size(), 1u);
+        ASSERT_EQ(result.entries().size(), 2u);
+        EXPECT_EQ(result.entries()[0], source.entries()[0]);
+        const auto* route = result.find("state/gameplay-route.yaml");
+        ASSERT_NE(route, nullptr);
+        EXPECT_EQ(route->mType, Diagnostics::CapsuleEntryType::GameplayTrace);
+        EXPECT_EQ(Diagnostics::decodeGameplayRoute(route->mData), frames);
+        EXPECT_THROW(Diagnostics::withGameplayRoute(result, payload), std::invalid_argument);
+        EXPECT_ANY_THROW(Diagnostics::withGameplayRoute(source, {}));
+        EXPECT_EQ(source.entries().size(), 1u);
     }
 
     TEST(GameplayRoute, RejectsEmptyOversizedAndNonFiniteRoutes)

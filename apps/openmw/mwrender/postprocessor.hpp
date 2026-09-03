@@ -246,6 +246,7 @@ namespace MWRender
 
         void createObjectsForFrame(size_t frameId);
 
+        /// Rebuild frame-local pass bindings, including simultaneous output attachments and their sizes.
         void dirtyTechniques(bool dirtyAttachments = false);
 
         void update(size_t frameId);

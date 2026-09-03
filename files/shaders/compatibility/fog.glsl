@@ -29,6 +29,7 @@ uniform DirectionalLight sun;
 
 const vec3 WATER_COLOR = vec3(0.090195, 0.115685, 0.12745);
 
+/// Apply shared altitude-aware aerial perspective or the configured underwater/depth-fog transfer.
 void computeFog(vec3 pos, float euclideanDist, float linearDist, float near, float far, out float colorScale, out vec3 colorOffset)
 {
 #if @radialFog
@@ -77,11 +78,20 @@ void computeFog(vec3 pos, float euclideanDist, float linearDist, float near, flo
     float opticalDistance;
 #if @exponentialFog
     opticalDistance = openmwseExponentialFogOpticalDistance(dist, start, end);
-    float fogVisibility = exp(-opticalDistance);
 #else
     opticalDistance = openmwseLinearFogOpticalDistance(dist, start, end);
-    float fogVisibility = 1.0 - opticalDistance;
 #endif
+    OpenMWSEAerialPerspectiveParameters atmosphereParameters = openmwseAerialPerspectiveParameters();
+    if (atmosphere.enabled && !cameraBelowWater && !useWaterDepthFog && fog.depth < 0.0)
+    {
+        atmosphereParameters.fogStart = start;
+        atmosphereParameters.fogEnd = end;
+        vec3 worldDirection = atmosphereWorldDirection(normalize(pos));
+        // Planar fog uses projected distance, but its physical segment still reaches the same world height.
+        worldDirection.z *= euclideanDist / max(dist, 1e-4);
+        opticalDistance = openmwseFogOpticalDistance(dist, worldDirection, atmosphereParameters);
+    }
+    float fogVisibility = openmwseFogVisibility(opticalDistance, atmosphereParameters);
     float fogValue = 1.0 - fogVisibility;
     colorScale = fogVisibility;
 #ifdef ADDITIVE_BLENDING

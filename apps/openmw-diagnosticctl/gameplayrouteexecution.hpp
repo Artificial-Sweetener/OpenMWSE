@@ -19,6 +19,10 @@ namespace DiagnosticCtl
     GameplayRouteExecutionPlan makeGameplayRouteExecutionPlan(std::size_t availableFrameCount,
         std::optional<std::string_view> requestedFrameCount,
         std::optional<std::string_view> requestedSegmentFrameCount);
+
+    /// Reject a rendered segment that did not consume exactly its scheduled route states.
+    void validateGameplayRouteProgress(
+        std::size_t remainingBefore, std::size_t scheduledFrames, std::size_t remainingAfter);
 }
 
 #endif

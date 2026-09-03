@@ -281,5 +281,7 @@ copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/cloud_
     "resources/vfs/shaders/lib/atmosphere/cloud_field.glsl")
 copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/aerial_perspective.glsl" "${OPENMW_RESOURCES_ROOT}"
     "resources/vfs/shaders/lib/atmosphere/aerial_perspective.glsl")
+copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/units.glsl" "${OPENMW_RESOURCES_ROOT}"
+    "resources/vfs/shaders/lib/atmosphere/units.glsl")
 copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/util/dither.glsl" "${OPENMW_RESOURCES_ROOT}"
     "resources/vfs/shaders/lib/util/dither.glsl")

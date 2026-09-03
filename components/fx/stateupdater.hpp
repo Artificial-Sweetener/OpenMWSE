@@ -3,6 +3,9 @@
 
 #include <osg/BufferTemplate>
 
+#include <optional>
+
+#include <components/sceneutil/cloudadvection.hpp>
 #include <components/sceneutil/lightmanager.hpp>
 #include <components/sceneutil/statesetupdater.hpp>
 #include <components/std140/ubo.hpp>
@@ -103,6 +106,9 @@ namespace Fx
 
         void setFrameNumber(int frame) { mData.get<FrameNumber>() = frame; }
 
+        /// Read the frame identity published to a render state set, independent of subsequent updater changes.
+        static std::optional<int> getPublishedFrameNumber(const osg::StateSet& stateset);
+
         void setWindSpeed(float speed) { mData.get<WindSpeed>() = speed; }
 
         void setWeatherTransition(float transition)
@@ -139,6 +145,8 @@ namespace Fx
             mData.get<AtmosphereSkyIrradiance>() = skyIrradiance;
             mData.get<AtmosphereGroundIrradiance>() = groundIrradiance;
             mData.get<AtmosphereCloudAdvectionOffset>() = cloudAdvectionOffsetWorldUnits;
+            mData.get<AtmosphereCloudShapeAdvectionOffset>()
+                = SceneUtil::cloudShapeAdvectionOffset(cloudAdvectionOffsetWorldUnits);
             mData.get<AtmosphereCloudAdvectionDelta>() = cloudAdvectionDeltaWorldUnits;
             mData.get<AtmosphereHistoryLightingWeight>() = historyLightingWeight;
             mData.get<AtmosphereWeatherWeight>() = weatherWeight;
@@ -432,6 +440,12 @@ namespace Fx
             static constexpr std::string_view sName = "atmosphereCloudAdvectionOffsetWorldUnits";
         };
 
+        /// Store independent three-dimensional shape motion without changing coverage or low-media advection.
+        struct AtmosphereCloudShapeAdvectionOffset : Std140::Vec3
+        {
+            static constexpr std::string_view sName = "atmosphereCloudShapeAdvectionOffsetWorldUnits";
+        };
+
         /// Store exact current-frame cloud displacement in world units for temporal reprojection.
         struct AtmosphereCloudAdvectionDelta : Std140::Vec2
         {
@@ -477,8 +491,9 @@ namespace Fx
             AtmosphereLowCloudParameters, AtmosphereLowCloudShapeParameters, AtmosphereMistParameters,
             AtmosphereFogVolumeParameters, AtmosphereMediumReferenceParameters, AtmosphereOrographicParameters,
             AtmosphereSunDiscColor, AtmosphereSolarRadiance, AtmosphereSkyIrradiance, AtmosphereGroundIrradiance,
-            AtmosphereCloudAdvectionOffset, AtmosphereCloudAdvectionDelta, AtmosphereHistoryLightingWeight,
-            AtmosphereWeatherWeight, AtmosphereQuality, AtmosphereVolumeResolutionScale, AtmosphereEnabled>;
+            AtmosphereCloudAdvectionOffset, AtmosphereCloudShapeAdvectionOffset, AtmosphereCloudAdvectionDelta,
+            AtmosphereHistoryLightingWeight, AtmosphereWeatherWeight, AtmosphereQuality,
+            AtmosphereVolumeResolutionScale, AtmosphereEnabled>;
 
         UniformData mData;
         bool mUseUBO;

@@ -19,14 +19,13 @@ namespace OMW
     namespace
     {
         constexpr unsigned renderStatisticsLatency = SceneUtil::diagnosticGpuTimingReadbackLatencyFrames + 2;
-        constexpr std::size_t retainedFrameCount = 1024;
     }
 
     DiagnosticCollection::DiagnosticCollection(osgViewer::Viewer& viewer)
         : mViewer(viewer)
     {
         osg::Stats* viewerStats = mViewer.getViewerStats();
-        viewerStats->allocate(retainedFrameCount);
+        viewerStats->allocate(SceneUtil::diagnosticGpuTimingRetainedFrames);
         SceneUtil::enableDiagnosticGpuPassStatistics(*mViewer.getCamera());
 
         osgViewer::Viewer::Cameras cameras;
@@ -51,7 +50,10 @@ namespace OMW
             throw std::invalid_argument("diagnostic performance sample count is outside its bounds");
         const std::uint64_t lastFrame = static_cast<std::uint64_t>(currentFrame) + sampleCount - 1;
         const std::uint64_t completionFrame = lastFrame + renderStatisticsLatency;
-        if (completionFrame > std::numeric_limits<unsigned>::max())
+        // Leave two frames for the draw thread before the oldest requested statistic can be overwritten.
+        const std::uint64_t retirementLimit
+            = static_cast<std::uint64_t>(currentFrame) + SceneUtil::diagnosticGpuTimingRetainedFrames - 2;
+        if (retirementLimit > std::numeric_limits<unsigned>::max())
             throw std::overflow_error("diagnostic performance frame interval overflows");
 
         beginCollection();
@@ -61,12 +63,16 @@ namespace OMW
             .mLastFrame = static_cast<unsigned>(lastFrame),
         };
         mCompletionFrame = static_cast<unsigned>(completionFrame);
+        mRetirementLimitFrame = static_cast<unsigned>(retirementLimit);
         return true;
     }
 
     std::optional<CompletedDiagnosticCollection> DiagnosticCollection::update(unsigned currentFrame)
     {
         if (!mPending.has_value() || currentFrame < mCompletionFrame)
+            return std::nullopt;
+        if (currentFrame < mRetirementLimitFrame
+            && SceneUtil::diagnosticGpuQueriesPending(mPending->mFirstFrame, mPending->mLastFrame))
             return std::nullopt;
         CompletedDiagnosticCollection completed = *mPending;
         mPending.reset();

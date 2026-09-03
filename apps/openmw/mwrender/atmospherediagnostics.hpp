@@ -51,9 +51,9 @@ namespace MWRender
         /// Consume a request and write the supplied production textures and final framebuffer losslessly.
         void captureFrame(osg::RenderInfo& renderInfo, osg::Texture* sceneColor, osg::Texture* sceneDepth,
             osg::Texture* sceneNormals, osg::Texture* previousSceneDepth, osg::Texture2D* rawVolume,
-            osg::Texture2D* resolvedVolume, osg::Texture2D* volumeMetadata, osg::Texture2D* shafts,
-            osg::Texture2D* previousResolvedVolume, osg::Texture2D* previousVolumeMetadata,
-            unsigned int finalFramebuffer, int finalWidth, int finalHeight);
+            osg::Texture2D* rawVolumeMetadata, osg::Texture2D* reprojectedMetadata, osg::Texture2D* resolvedVolume,
+            osg::Texture2D* volumeMetadata, osg::Texture2D* shafts, osg::Texture2D* previousResolvedVolume,
+            osg::Texture2D* previousVolumeMetadata, unsigned int finalFramebuffer, int finalWidth, int finalHeight);
 
     private:
         /// Identify the frame currently owned by the render thread.

@@ -46,8 +46,12 @@ namespace Fx
 
         std::string getTarget() const { return mTarget; }
 
+        /// Return the optional simultaneous output written through omw_FragColor1.
+        const std::string& getSecondaryTarget() const { return mSecondaryTarget; }
+
         const std::array<std::string, 3>& getRenderTargets() const { return mRenderTargets; }
 
+        /// Bind the compiled stages and all declared fragment-output locations to a pass state set.
         void prepareStateSet(osg::StateSet* stateSet, const std::string& name) const;
 
         std::string getName() const { return mName; }
@@ -55,6 +59,7 @@ namespace Fx
         void dirty();
 
     private:
+        /// Generate stage-specific shader bindings and simultaneous-output declarations.
         std::string getPassHeader(Technique& technique, std::string_view preamble, bool fragOut = false);
 
         bool mCompiled;
@@ -72,6 +77,7 @@ namespace Fx
         std::array<std::string, 3> mRenderTargets;
 
         std::string mTarget;
+        std::string mSecondaryTarget;
 
         std::optional<osg::BlendFunc::BlendFuncMode> mBlendSource;
         std::optional<osg::BlendFunc::BlendFuncMode> mBlendDest;
