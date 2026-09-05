@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Generate the deterministic tileable 3D noise texture used by OpenMWSE clouds."""
+"""Generate the deterministic density, weather, curl, and sampling textures used by OpenMWSE clouds."""
 
 from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import heapq
 import hashlib
 import math
 import os
+import random
 import struct
 from pathlib import Path
 
@@ -16,6 +18,8 @@ BASE_TEXTURE_SIZE = 64
 DETAIL_TEXTURE_SIZE = 32
 WEATHER_TEXTURE_SIZE = 256
 CURL_TEXTURE_SIZE = 128
+BLUE_NOISE_TEXTURE_SIZE = 128
+CLOUD_VOLUME_MIP_COUNT = 6
 RANDOM_SEED = 0x4F4D5753
 
 def hash_u32(x: int, y: int, z: int, seed: int = RANDOM_SEED) -> int:
@@ -401,8 +405,154 @@ def generate_curl_texels(size: int = CURL_TEXTURE_SIZE) -> bytes:
     return bytes(texels)
 
 
-def dds_volume(voxels: bytes, size: int) -> bytes:
-    """Encode an uncompressed RGBA8 volume using the portable legacy DDS header."""
+def generate_blue_noise_texels(size: int = BLUE_NOISE_TEXTURE_SIZE) -> bytes:
+    """Generate a deterministic void-and-cluster threshold tile for ray-march sampling."""
+    pixel_count = size * size
+    occupied = [False] * pixel_count
+    indices = list(range(pixel_count))
+    random.Random(RANDOM_SEED ^ 0x424C5545).shuffle(indices)
+    for index in indices[: pixel_count // 2]:
+        occupied[index] = True
+
+    radius = 5
+    sigma = 1.5
+    kernel = [
+        (offset_x, offset_y, math.exp(-(offset_x * offset_x + offset_y * offset_y) / (2.0 * sigma * sigma)))
+        for offset_y in range(-radius, radius + 1)
+        for offset_x in range(-radius, radius + 1)
+    ]
+
+    def energy_field(pattern: list[bool]) -> list[float]:
+        """Return periodic Gaussian occupancy energy for one binary pattern."""
+        energy = [0.0] * pixel_count
+        for source, present in enumerate(pattern):
+            if not present:
+                continue
+            source_x = source % size
+            source_y = source // size
+            for offset_x, offset_y, weight in kernel:
+                target = ((source_y + offset_y) % size) * size + (source_x + offset_x) % size
+                energy[target] += weight
+        return energy
+
+    def ranked_pattern(pattern: list[bool]) -> list[int]:
+        """Rank clusters below half density and voids above it using incremental periodic energy."""
+        energy = energy_field(pattern)
+        versions = [0] * pixel_count
+        dense_heap: list[tuple[float, int, int]] = []
+        void_heap: list[tuple[float, int, int]] = []
+
+        def push(index: int) -> None:
+            entry = (energy[index], versions[index], index)
+            if pattern[index]:
+                heapq.heappush(dense_heap, (-entry[0], entry[1], entry[2]))
+            else:
+                heapq.heappush(void_heap, entry)
+
+        def rebuild_heaps() -> None:
+            dense_heap.clear()
+            void_heap.clear()
+            for index in range(pixel_count):
+                push(index)
+
+        def update(source: int, amount: float) -> None:
+            source_x = source % size
+            source_y = source // size
+            for offset_x, offset_y, weight in kernel:
+                target = ((source_y + offset_y) % size) * size + (source_x + offset_x) % size
+                energy[target] += amount * weight
+                versions[target] += 1
+                push(target)
+
+        def densest() -> int:
+            while True:
+                negative_energy, version, index = heapq.heappop(dense_heap)
+                if pattern[index] and version == versions[index] and -negative_energy == energy[index]:
+                    return index
+
+        def largest_void() -> int:
+            while True:
+                candidate_energy, version, index = heapq.heappop(void_heap)
+                if not pattern[index] and version == versions[index] and candidate_energy == energy[index]:
+                    return index
+
+        rebuild_heaps()
+        for _ in range(pixel_count * 4):
+            cluster = densest()
+            pattern[cluster] = False
+            update(cluster, -1.0)
+            void = largest_void()
+            pattern[void] = True
+            update(void, 1.0)
+            if cluster == void:
+                break
+
+        optimized = pattern.copy()
+        ranks = [-1] * pixel_count
+        rebuild_heaps()
+        for rank in range(pixel_count // 2 - 1, -1, -1):
+            cluster = densest()
+            ranks[cluster] = rank
+            pattern[cluster] = False
+            update(cluster, -1.0)
+
+        pattern[:] = optimized
+        energy[:] = energy_field(pattern)
+        versions[:] = [0] * pixel_count
+        rebuild_heaps()
+        for rank in range(pixel_count // 2, pixel_count):
+            void = largest_void()
+            ranks[void] = rank
+            pattern[void] = True
+            update(void, 1.0)
+        return ranks
+
+    ranks = ranked_pattern(occupied)
+    texels = bytearray(pixel_count * 4)
+    for index, rank in enumerate(ranks):
+        value = round(rank / max(pixel_count - 1, 1) * 255.0)
+        texels[index * 4 : index * 4 + 4] = bytes((value, value, value, 255))
+    return bytes(texels)
+
+
+def downsample_volume_rgba8(voxels: bytes, size: int) -> bytes:
+    """Box-filter one periodic RGBA8 volume mip to half resolution in all three axes."""
+    next_size = max(size // 2, 1)
+    next_voxels = bytearray(next_size * next_size * next_size * 4)
+    output_index = 0
+    for z_index in range(next_size):
+        for y_index in range(next_size):
+            for x_index in range(next_size):
+                channel_sums = [0, 0, 0, 0]
+                for z_offset in range(2 if size > 1 else 1):
+                    source_z = min(z_index * 2 + z_offset, size - 1)
+                    for y_offset in range(2 if size > 1 else 1):
+                        source_y = min(y_index * 2 + y_offset, size - 1)
+                        for x_offset in range(2 if size > 1 else 1):
+                            source_x = min(x_index * 2 + x_offset, size - 1)
+                            source_index = ((source_z * size + source_y) * size + source_x) * 4
+                            for channel in range(4):
+                                channel_sums[channel] += voxels[source_index + channel]
+                sample_count = 8 if size > 1 else 1
+                for channel_sum in channel_sums:
+                    next_voxels[output_index] = (channel_sum + sample_count // 2) // sample_count
+                    output_index += 1
+    return bytes(next_voxels)
+
+
+def volume_mip_chain_rgba8(voxels: bytes, size: int, mip_count: int) -> bytes:
+    """Encode consecutively filtered volume levels in DDS subresource order."""
+    levels = [voxels]
+    level_size = size
+    while len(levels) < mip_count:
+        levels.append(downsample_volume_rgba8(levels[-1], level_size))
+        level_size = max(level_size // 2, 1)
+    return b"".join(levels)
+
+
+def dds_volume(voxels: bytes, size: int, mip_count: int = CLOUD_VOLUME_MIP_COUNT) -> bytes:
+    """Encode an uncompressed RGBA8 volume with the mip chain required by explicit LOD sampling."""
+    mip_chain = volume_mip_chain_rgba8(voxels, size, mip_count)
     pixel_format = struct.pack(
         "<8I",
         32,
@@ -417,16 +567,16 @@ def dds_volume(voxels: bytes, size: int) -> bytes:
     header = struct.pack(
         "<7I11I",
         124,
-        0x0080100F,
+        0x0082100F,
         size,
         size,
         size * 4,
         size,
-        0,
+        mip_count,
         *([0] * 11),
     )
-    caps = struct.pack("<5I", 0x1008, 0x00200000, 0, 0, 0)
-    return b"DDS " + header + pixel_format + caps + voxels
+    caps = struct.pack("<5I", 0x401008, 0x00200000, 0, 0, 0)
+    return b"DDS " + header + pixel_format + caps + mip_chain
 
 
 def dds_texture(texels: bytes, size: int) -> bytes:
@@ -458,12 +608,13 @@ def dds_texture(texels: bytes, size: int) -> bytes:
 
 
 def main() -> int:
-    """Write or verify the canonical cloud weather, base, detail, and curl resources."""
+    """Write or verify the canonical cloud density, weather, curl, and sampling-noise resources."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("base_output", type=Path)
     parser.add_argument("detail_output", type=Path)
     parser.add_argument("weather_output", type=Path)
     parser.add_argument("curl_output", type=Path)
+    parser.add_argument("blue_noise_output", type=Path)
     parser.add_argument("--check", action="store_true")
     arguments = parser.parse_args()
 
@@ -472,6 +623,7 @@ def main() -> int:
         (arguments.detail_output, dds_volume(generate_detail_voxels(), DETAIL_TEXTURE_SIZE)),
         (arguments.weather_output, dds_texture(generate_weather_texels(), WEATHER_TEXTURE_SIZE)),
         (arguments.curl_output, dds_texture(generate_curl_texels(), CURL_TEXTURE_SIZE)),
+        (arguments.blue_noise_output, dds_texture(generate_blue_noise_texels(), BLUE_NOISE_TEXTURE_SIZE)),
     )
     if arguments.check:
         success = True

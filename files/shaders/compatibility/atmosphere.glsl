@@ -86,25 +86,25 @@ vec3 openmwseCloudShapeAdvectionOffsetWorldUnits()
 /// Sample the canonical tileable multi-channel cloud shape volume.
 vec4 openmwseCloudNoiseSample(vec3 coordinates, float lodBias)
 {
-    return texture3D(openmwseCloudNoiseTexture, fract(coordinates));
+    return texture3D(openmwseCloudNoiseTexture, coordinates);
 }
 
 /// Sample the independent high-frequency cloud erosion volume.
 vec4 openmwseCloudDetailNoiseSample(vec3 coordinates, float lodBias)
 {
-    return texture3D(openmwseCloudDetailNoiseTexture, fract(coordinates));
+    return texture3D(openmwseCloudDetailNoiseTexture, coordinates);
 }
 
 /// Sample the encoded curl field for base-weighted detail distortion.
 vec3 openmwseCloudCurlNoiseSample(vec2 coordinates)
 {
-    return texture2D(openmwseCloudCurlNoiseTexture, fract(coordinates)).rgb;
+    return texture2D(openmwseCloudCurlNoiseTexture, coordinates).rgb;
 }
 
 /// Sample the canonical broad cloud-organization and morphology field.
 vec4 openmwseCloudWeatherSample(vec2 coordinates)
 {
-    return texture2D(openmwseCloudWeatherTexture, fract(coordinates));
+    return texture2D(openmwseCloudWeatherTexture, coordinates);
 }
 
 #include "lib/atmosphere/clouds.glsl"
@@ -176,7 +176,7 @@ vec4 atmosphereCloudScattering(vec3 worldDirection, vec3 atmosphericTarget)
         atmosphericTarget, openmwseAerialPerspectiveParameters());
 }
 
-/// Draw the scene-linear analytic sun disc and halo above the visible horizon.
+/// Draw the refracted scene-linear sun disc while leaving broad glow to atmospheric scattering.
 vec3 atmosphereSunDisc(vec3 worldDirection)
 {
     vec3 geometricSunDirection = normalize(atmosphere.sunDirection);
@@ -184,14 +184,11 @@ vec3 atmosphereSunDisc(vec3 worldDirection)
     vec3 geometricViewDirection = openmwseGeometricDirectionFromApparent(worldDirection);
     float discAngularDistance
         = sqrt(max(2.0 * (1.0 - dot(geometricViewDirection, geometricSunDirection)), 0.0));
-    float haloAngularDistance
-        = sqrt(max(2.0 * (1.0 - dot(worldDirection, apparentSunDirection)), 0.0));
     float horizonVisibility = smoothstep(-0.034, -0.002, apparentSunDirection.z);
     float pixelHorizonVisibility = smoothstep(-0.001, 0.002, worldDirection.z);
     float disc = 1.0 - smoothstep(0.026, 0.03, discAngularDistance);
-    float halo = exp(-haloAngularDistance * haloAngularDistance * 360.0) * 0.32;
     vec3 sunColor = mix(vec3(1.0), atmosphere.sunDiscColor.rgb, 0.78);
-    return sunColor * (disc * 3.2 + halo) * atmosphere.sunDiscColor.a * horizonVisibility * pixelHorizonVisibility;
+    return sunColor * disc * 3.2 * atmosphere.sunDiscColor.a * horizonVisibility * pixelHorizonVisibility;
 }
 
 #endif

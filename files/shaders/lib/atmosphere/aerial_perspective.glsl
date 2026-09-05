@@ -138,7 +138,7 @@ vec3 openmwseLowSunScattering(vec3 worldDirection, float sunCosine, float solarE
 
     float groundHorizon = 1.0 - smoothstep(0.0, 0.42, max(worldDirection.z, 0.0));
     vec3 groundBounce = parameters.groundIrradiance * groundHorizon * civilTwilight * 0.035;
-    float pathWeight = 0.18 + 0.82 * clamp(opticalDistance, 0.0, 1.0);
+    float pathWeight = clamp(opticalDistance, 0.0, 1.0);
     return (singleScattering + multipleScattering + venusBelt + groundBounce) * pathWeight;
 }
 
@@ -245,7 +245,7 @@ vec3 openmwseAtmosphereScatteredLight(vec3 worldDirection, float opticalDistance
             = mix(vec3(1.22, 0.24, 0.055), vec3(1.0, 0.62, 0.24), longPathTransmittance) * solarAfterglow;
         vec3 twilightArch = vec3(0.22, 0.12, 0.34) * antiSolarArch;
         scatteredColor += (sunsetRadiance + twilightArch) * twilight * horizonBand
-            * (0.18 + 0.82 * clamp(opticalDistance, 0.0, 1.0));
+            * clamp(opticalDistance, 0.0, 1.0);
 
         float physicalLowSunWeight = 1.0 - smoothstep(0.02, 0.07, sunHeight);
         if (physicalLowSunWeight > 0.0)

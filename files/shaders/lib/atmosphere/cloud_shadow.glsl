@@ -45,13 +45,13 @@ vec2 openmwseCloudShadowAdvectionOffsetWorldUnits()
 /// Sample the canonical tileable multi-channel cloud volume for surface shadowing.
 vec4 openmwseCloudShadowNoiseSample(vec3 coordinates)
 {
-    return texture3D(openmwseCloudNoiseTexture, fract(coordinates));
+    return texture3D(openmwseCloudNoiseTexture, coordinates);
 }
 
 /// Sample the canonical broad cloud-organization field for surface shadowing.
 vec4 openmwseCloudShadowWeatherSample(vec2 coordinates)
 {
-    return texture2D(openmwseCloudWeatherTexture, fract(coordinates));
+    return texture2D(openmwseCloudWeatherTexture, coordinates);
 }
 
 #define openmwseCloudMaximumMarchingDistance openmwseCloudShadowMaximumMarchingDistance

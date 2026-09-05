@@ -22,6 +22,10 @@ const float openmwseCloudVirtualPlanetRadius
 // Use the same reduced extinction for the second solar path and its analytical view-segment integral.
 const float openmwseCloudSecondaryExtinctionScale = 0.1;
 
+// Use the two-point Gauss-Legendre abscissae for both deterministic and temporally interleaved segments.
+const float openmwseCloudQuadratureOffsetLow = 0.2113248654;
+const float openmwseCloudQuadratureOffsetHigh = 0.7886751346;
+
 // Share one distance scale between density mips and the near-detail marching allowance.
 const float openmwseCloudNoiseLodDistance = 30000.0 * openmwseAtmosphereWorldUnitsPerMeter;
 
@@ -154,6 +158,12 @@ float openmwseCloudFormationScale(OpenMWSECloudLayer layer)
 {
     return mix(openmwseCloudLowFormationScale, 1.0,
         1.0 - clamp(layer.terrainCoupling, 0.0, 1.0));
+}
+
+/// Preserve the feature-to-step relationship when a stratum compresses the formation domain.
+float openmwseCloudLayerMaximumMarchingDistance(OpenMWSECloudLayer layer)
+{
+    return openmwseCloudMaximumMarchingDistance * openmwseCloudFormationScale(layer);
 }
 
 /// Evaluate one layer's weather field with the same physical scale used by its density samples.
@@ -463,11 +473,17 @@ struct OpenMWSECloudDensitySample
     float precipitation;
 };
 
-/// Select the discrete noise mip from primary-ray distance plus an optional secondary-ray bias.
-float openmwseCloudNoiseLod(float distanceFromEye, float additionalLodBias)
+/// Select a continuous noise mip from distance, optical-path bias, and the layer's physical feature scale.
+float openmwseCloudNoiseLod(
+    float distanceFromEye, float additionalLodBias, OpenMWSECloudLayer layer)
 {
-    float distanceLod = floor(max(distanceFromEye, 0.0) / openmwseCloudNoiseLodDistance + 0.5);
-    return clamp(distanceLod + additionalLodBias, 0.0, 3.0);
+    // Rounding this value produces hard radial mip shells that are visible at Morrowind's
+    // compressed cloud scale. Preserve its distance schedule while blending adjacent mip levels. A
+    // reduced formation scale raises spatial frequency by its reciprocal, so compensate by selecting
+    // the equivalent coarser mip instead of undersampling low-cloud detail into coherent march bands.
+    float distanceLod = max(distanceFromEye, 0.0) / openmwseCloudNoiseLodDistance;
+    float formationLodBias = max(-log2(max(openmwseCloudFormationScale(layer), 0.001)), 0.0);
+    return clamp(distanceLod + additionalLodBias + formationLodBias, 0.0, 3.0);
 }
 
 /// Evaluate density at a distance-selected mip shared by view and secondary optical paths.
@@ -478,7 +494,7 @@ OpenMWSECloudDensitySample openmwseCloudDensitySample(vec3 worldPosition, float 
     vec2 layerHeightBounds = openmwseCloudLayerHeightBounds(layer);
     if (worldPosition.z < layerHeightBounds.x || worldPosition.z > layerHeightBounds.y)
         return OpenMWSECloudDensitySample(0.0, 0.0);
-    float noiseLod = openmwseCloudNoiseLod(distanceFromEye, additionalLodBias);
+    float noiseLod = openmwseCloudNoiseLod(distanceFromEye, additionalLodBias, layer);
     vec3 advectedPosition = openmwseCloudLayerPosition(worldPosition, layer);
     OpenMWSECloudColumnProperties columnProperties
         = openmwseCloudLayerColumnProperties(worldPosition, advectedPosition, layer);
@@ -711,6 +727,8 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
         lowInterval = openmwseCloudLayerIntersection(
             rayOrigin, worldDirection, lowHeightBounds.x, lowHeightBounds.y);
         lowInterval.y = min(lowInterval.y, maximumDistance);
+        lowInterval.y = min(lowInterval.y,
+            lowInterval.x + openmwseCloudLayerMaximumMarchingDistance(lowLayer));
     }
     bool mainIntervalValid = mainInterval.y > mainInterval.x;
     bool lowIntervalValid = lowInterval.y > lowInterval.x;
@@ -719,11 +737,13 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
 
     vec2 firstInterval = mainIntervalValid ? mainInterval : lowInterval;
     vec2 secondInterval = vec2(1.0, 0.0);
+    bool firstIntervalIsMain = mainIntervalValid;
     bool separatedIntervals = false;
     if (mainIntervalValid && lowIntervalValid)
     {
-        firstInterval = mainInterval.x <= lowInterval.x ? mainInterval : lowInterval;
-        secondInterval = mainInterval.x <= lowInterval.x ? lowInterval : mainInterval;
+        firstIntervalIsMain = mainInterval.x <= lowInterval.x;
+        firstInterval = firstIntervalIsMain ? mainInterval : lowInterval;
+        secondInterval = firstIntervalIsMain ? lowInterval : mainInterval;
         if (secondInterval.x <= firstInterval.y)
             firstInterval.y = max(firstInterval.y, secondInterval.y);
         else
@@ -744,23 +764,42 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
     float secondIntervalLength = separatedIntervals
         ? min(secondInterval.y - secondInterval.x, openmwseCloudMaximumMarchingDistance - firstIntervalLength) : 0.0;
     float traversedIntervalLength = firstIntervalLength + secondIntervalLength;
-    float referenceThickness = 1.0;
-    if (mainLayerEnabled)
-        referenceThickness = max(referenceThickness, mainLayer.parameters.w);
-    if (lowLayerEnabled)
-        referenceThickness = max(referenceThickness, lowLayer.parameters.w);
-    float uniformStepAllocation = clamp(traversedIntervalLength / (referenceThickness * 3.0), 0.15, 1.0);
-    int uniformSampleCount = int(ceil(float(maximumAllocatedSamples) * uniformStepAllocation));
-    if (uniformSampleCount < 8)
-        uniformSampleCount = 8;
-    // Allocate fine resolution independently from empty-space cost. A single shell keeps its small march step
-    // through occupied weather-map regions and advances several such steps when no density is possible.
-    float adaptiveStepAllocation = clamp(traversedIntervalLength / (referenceThickness * 1.25), 0.25, 1.0);
-    int adaptiveSampleCount = int(ceil(float(maximumAllocatedSamples) * adaptiveStepAllocation));
-    if (adaptiveSampleCount < 8)
-        adaptiveSampleCount = 8;
-    int fineSampleCount = quadratureSampling ? uniformSampleCount : adaptiveSampleCount;
-    float fineStepLength = traversedIntervalLength / float(fineSampleCount);
+    float firstReferenceThickness = firstIntervalIsMain
+        ? max(mainLayer.parameters.w, 1.0) : max(lowLayer.parameters.w, 1.0);
+    if (!separatedIntervals && mainIntervalValid && lowIntervalValid)
+        firstReferenceThickness = max(firstReferenceThickness,
+            firstIntervalIsMain ? lowLayer.parameters.w : mainLayer.parameters.w);
+    float firstStepAllocation = quadratureSampling
+        ? clamp(firstIntervalLength / (firstReferenceThickness * 3.0), 0.15, 1.0)
+        : clamp(firstIntervalLength / (firstReferenceThickness * 1.25), 0.25, 1.0);
+    float firstDesiredSampleCount
+        = max(8.0, float(maximumAllocatedSamples) * firstStepAllocation);
+    float secondDesiredSampleCount = 0.0;
+    if (separatedIntervals)
+    {
+        float secondReferenceThickness = firstIntervalIsMain
+            ? max(lowLayer.parameters.w, 1.0) : max(mainLayer.parameters.w, 1.0);
+        float secondStepAllocation = quadratureSampling
+            ? clamp(secondIntervalLength / (secondReferenceThickness * 3.0), 0.15, 1.0)
+            : clamp(secondIntervalLength / (secondReferenceThickness * 1.25), 0.25, 1.0);
+        secondDesiredSampleCount
+            = max(8.0, float(maximumAllocatedSamples) * secondStepAllocation);
+        // Leave room for the two clipped final segments after continuous allocations are rounded up.
+        float sampleBudgetScale = min(1.0,
+            float(maximumSampleCount - 2) / (firstDesiredSampleCount + secondDesiredSampleCount));
+        firstDesiredSampleCount = max(8.0, firstDesiredSampleCount * sampleBudgetScale);
+        secondDesiredSampleCount = max(8.0, secondDesiredSampleCount * sampleBudgetScale);
+    }
+    int firstFineSampleCount = int(ceil(firstDesiredSampleCount));
+    int secondFineSampleCount = int(ceil(secondDesiredSampleCount));
+    int fineSampleCount = firstFineSampleCount + secondFineSampleCount;
+    // A single marching step for the whole cloud shell is insufficient. Independently elevated strata need
+    // the same allocation per interval; sharing the deep deck's step size undersamples a thin low layer.
+    // Keep the step length continuous as view-ray intersection length changes. Dividing by the
+    // rounded loop count creates screen-space contour bands whenever that count crosses an integer.
+    float firstFineStepLength = firstIntervalLength / firstDesiredSampleCount;
+    float secondFineStepLength = separatedIntervals
+        ? secondIntervalLength / secondDesiredSampleCount : firstFineStepLength;
     float distanceAlongCloudIntervals = 0.0;
     float transmittance = 1.0;
     vec3 mainScatteredLight = vec3(0.0);
@@ -785,6 +824,8 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
         if (distanceAlongCloudIntervals >= traversedIntervalLength)
             break;
         bool sampleSecondInterval = separatedIntervals && distanceAlongCloudIntervals >= firstIntervalLength;
+        bool activeIntervalIsMain
+            = sampleSecondInterval ? !firstIntervalIsMain : firstIntervalIsMain;
         float intervalPathOffset
             = sampleSecondInterval ? distanceAlongCloudIntervals - firstIntervalLength : distanceAlongCloudIntervals;
         vec2 activeInterval = sampleSecondInterval ? secondInterval : firstInterval;
@@ -795,16 +836,23 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
             distanceAlongCloudIntervals = firstIntervalLength;
             continue;
         }
+        float fineStepLength = sampleSecondInterval ? secondFineStepLength : firstFineStepLength;
         float segmentLength = min(fineStepLength, remainingIntervalLength);
         float distanceAlongRay = activeInterval.x + intervalPathOffset;
+        // Keep one ray-coherent abscissa through the march, matching the blue-noise integration.
+        // The caller rotates this offset continuously between checkerboard refreshes.
         float sampleOffset = quadratureSampling ? 0.5 : rayDither;
         float sampleDistance = distanceAlongRay + segmentLength * sampleOffset;
         vec3 samplePosition = rayOrigin + worldDirection * sampleDistance;
         if (!quadratureSampling)
         {
-            bool potentialDensity = mainLayerEnabled
-                && openmwseCloudPotentialDensity(samplePosition, mainLayer);
-            potentialDensity = potentialDensity || (lowLayerEnabled
+            bool fullySampleLowInterval
+                = lowLayerEnabled && !activeIntervalIsMain && (!mainIntervalValid || separatedIntervals);
+            // A terrain-following low stratum can enter and leave its local height envelope inside one
+            // conservative interval. Do not skip the next valid segment from one empty point estimate.
+            bool potentialDensity = fullySampleLowInterval
+                || (mainLayerEnabled && openmwseCloudPotentialDensity(samplePosition, mainLayer));
+            potentialDensity = potentialDensity || (!fullySampleLowInterval && lowLayerEnabled
                 && openmwseCloudPotentialDensity(samplePosition, lowLayer));
             if (!potentialDensity)
             {
@@ -820,10 +868,8 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
         float lowPrecipitation = 0.0;
         if (quadratureSampling)
         {
-            const float firstQuadratureOffset = 0.2113248654;
-            const float secondQuadratureOffset = 0.7886751346;
-            float firstDistance = distanceAlongRay + segmentLength * firstQuadratureOffset;
-            float secondDistance = distanceAlongRay + segmentLength * secondQuadratureOffset;
+            float firstDistance = distanceAlongRay + segmentLength * openmwseCloudQuadratureOffsetLow;
+            float secondDistance = distanceAlongRay + segmentLength * openmwseCloudQuadratureOffsetHigh;
             if (mainLayerEnabled)
             {
                 OpenMWSECloudDensitySample firstSample = openmwseCloudDensitySample(
@@ -957,7 +1003,8 @@ vec4 openmwseIntegrateClouds(vec3 rayOrigin, vec3 worldDirection, float maximumD
     out float visibleDistanceSum)
 {
     return openmwseIntegrateCloudsInternal(rayOrigin, worldDirection, maximumDistance, quality, solarRadiance,
-        skyIrradiance, groundIrradiance, vec3(0.0), atmosphere, rayDither, quadratureSampling, false, visibleDistanceSum);
+        skyIrradiance, groundIrradiance, vec3(0.0), atmosphere, rayDither,
+        quadratureSampling, false, visibleDistanceSum);
 }
 
 /// Integrate deterministic reflected clouds without frame-dependent sampling noise.
