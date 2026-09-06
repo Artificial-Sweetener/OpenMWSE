@@ -29,6 +29,12 @@ uniform DirectionalLight sun;
 
 const vec3 WATER_COLOR = vec3(0.090195, 0.115685, 0.12745);
 
+/// Filter scene-linear ambient illumination through the water medium without scalar norm amplification.
+vec3 waterInScatteringColor()
+{
+    return WATER_COLOR * max(sun.ambient.xyz, vec3(0.0));
+}
+
 /// Apply shared altitude-aware aerial perspective or the configured underwater/depth-fog transfer.
 void computeFog(vec3 pos, float euclideanDist, float linearDist, float near, float far, out float colorScale, out vec3 colorOffset)
 {
@@ -42,6 +48,7 @@ void computeFog(vec3 pos, float euclideanDist, float linearDist, float near, flo
     bool useWaterDepthFog = false;
     float underwaterFogFactor = 1.0;
     float waterDepth = 0.0;
+    float airEuclideanDistance = euclideanDist;
 
     if (waterEnabled) {
         vec3 cameraPos = osg_ViewMatrixInverse[3].xyz;
@@ -53,7 +60,10 @@ void computeFog(vec3 pos, float euclideanDist, float linearDist, float near, flo
                 useWaterDepthFog = true;
                 const float visibility = 2500.0;
                 const float depthFade = 0.25;
-                waterDepth = dist * clamp((waterHeight - worldPos.z) / (cameraPos.z - worldPos.z), 0.0, 1.0);
+                float underwaterSegmentFraction
+                    = clamp((waterHeight - worldPos.z) / (cameraPos.z - worldPos.z), 0.0, 1.0);
+                waterDepth = dist * underwaterSegmentFraction;
+                airEuclideanDistance *= 1.0 - underwaterSegmentFraction;
                 float depthCorrection = sqrt(1.0 + 4.0 * depthFade * depthFade);
                 underwaterFogFactor = depthFade * depthFade
                     / (-0.5 * depthCorrection + 0.5 - waterDepth / visibility) + 0.5 * depthCorrection + 0.5;
@@ -82,13 +92,13 @@ void computeFog(vec3 pos, float euclideanDist, float linearDist, float near, flo
     opticalDistance = openmwseLinearFogOpticalDistance(dist, start, end);
 #endif
     OpenMWSEAerialPerspectiveParameters atmosphereParameters = openmwseAerialPerspectiveParameters();
-    if (atmosphere.enabled && !cameraBelowWater && !useWaterDepthFog && fog.depth < 0.0)
+    if (atmosphere.enabled && !cameraBelowWater && fog.depth < 0.0)
     {
         atmosphereParameters.fogStart = start;
         atmosphereParameters.fogEnd = end;
         vec3 worldDirection = atmosphereWorldDirection(normalize(pos));
         // Planar fog uses projected distance, but its physical segment still reaches the same world height.
-        worldDirection.z *= euclideanDist / max(dist, 1e-4);
+        worldDirection.z *= airEuclideanDistance / max(dist, 1e-4);
         opticalDistance = openmwseFogOpticalDistance(dist, worldDirection, atmosphereParameters);
     }
     float fogVisibility = openmwseFogVisibility(opticalDistance, atmosphereParameters);
@@ -97,7 +107,7 @@ void computeFog(vec3 pos, float euclideanDist, float linearDist, float near, flo
 #ifdef ADDITIVE_BLENDING
     colorOffset = vec3(0.0);
 #else
-    if (atmosphere.enabled && !cameraBelowWater && !useWaterDepthFog)
+    if (atmosphere.enabled && !cameraBelowWater)
         colorOffset = atmosphereScatter(normalize(pos), clamp(0.224 * opticalDistance, 0.0, 1.0),
             fogVisibility, fogColor.xyz);
     else
@@ -107,7 +117,7 @@ void computeFog(vec3 pos, float euclideanDist, float linearDist, float near, flo
     if (useWaterDepthFog) {
         colorScale *= 1.0 - underwaterFogFactor;
 #ifndef ADDITIVE_BLENDING
-        colorOffset += WATER_COLOR * length(sun.ambient.xyz) * underwaterFogFactor * (1.0 - fogValue);
+        colorOffset += waterInScatteringColor() * underwaterFogFactor * (1.0 - fogValue);
 #endif
     }
 

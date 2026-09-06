@@ -176,7 +176,7 @@ void main(void)
     // reflection
     vec3 reflection = sampleReflectionMap(screenCoords + reflectionCoordsOffset).rgb * fogScale + fogOffset;
 
-    vec3 waterColor = WATER_COLOR * sunFade;
+    vec3 waterColor = waterInScatteringColor();
 
     vec4 sunSpec = sun.specular;
     // alpha component is sun visibility; we want to start fading lighting effects when visibility is low

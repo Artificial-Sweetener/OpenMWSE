@@ -1324,7 +1324,51 @@ void main()
         EXPECT_NE(water->getShaderSource().find("sampleReflectionMap(screenCoords + reflectionCoordsOffset)"),
             std::string::npos);
         EXPECT_NE(water->getShaderSource().find("mix(max(reflection, vec3(0.0)), vec3(1.0), 0.05)"), std::string::npos);
+        EXPECT_NE(water->getShaderSource().find("vec3 waterInScatteringColor()"), std::string::npos);
+        EXPECT_NE(water->getShaderSource().find("vec3 waterColor = waterInScatteringColor()"), std::string::npos);
+        EXPECT_EQ(water->getShaderSource().find("WATER_COLOR * length(sun.ambient.xyz)"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("vec3 waterInScatteringColor()"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("colorOffset += waterInScatteringColor()"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("float airEuclideanDistance = euclideanDist"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("if (atmosphere.enabled && !cameraBelowWater && fog.depth < 0.0)"),
+            std::string::npos);
+        EXPECT_EQ(objects->getShaderSource().find("!cameraBelowWater && !useWaterDepthFog"), std::string::npos);
+        EXPECT_EQ(objects->getShaderSource().find("WATER_COLOR * length(sun.ambient.xyz)"), std::string::npos);
         EXPECT_EQ(water->getShaderSource().find("skyColorEstimate"), std::string::npos);
+    }
+
+    TEST(AtmosphereShaderTest, waterInScatteringPreservesAmbientSpectrumWithoutNormAmplification)
+    {
+        const osg::Vec3f waterFilter(0.090195f, 0.115685f, 0.12745f);
+        const osg::Vec3f cloudyAmbient(0.72f, 0.68f, 0.61f);
+        const osg::Vec3f filteredAmbient(waterFilter.x() * cloudyAmbient.x(),
+            waterFilter.y() * cloudyAmbient.y(), waterFilter.z() * cloudyAmbient.z());
+        const osg::Vec3f normAmplified = waterFilter * cloudyAmbient.length();
+
+        EXPECT_LT(filteredAmbient.x(), normAmplified.x());
+        EXPECT_LT(filteredAmbient.y(), normAmplified.y());
+        EXPECT_LT(filteredAmbient.z(), normAmplified.z());
+        EXPECT_NEAR(filteredAmbient.x(), 0.0649404f, 1e-7f);
+        EXPECT_NEAR(filteredAmbient.y(), 0.0786658f, 1e-7f);
+        EXPECT_NEAR(filteredAmbient.z(), 0.0777445f, 1e-7f);
+    }
+
+    TEST(AtmosphereShaderTest, submergedObjectTransportComposesAirBeforeWater)
+    {
+        const osg::Vec3f objectRadiance(0.18f, 0.12f, 0.08f);
+        const osg::Vec3f airInScattering(0.11f, 0.065f, 0.03f);
+        const osg::Vec3f waterInScattering(0.035f, 0.052f, 0.061f);
+        constexpr float airVisibility = 0.64f;
+        constexpr float waterVisibility = 0.25f;
+
+        const osg::Vec3f transported = objectRadiance * (airVisibility * waterVisibility) + airInScattering
+            + waterInScattering * ((1.f - waterVisibility) * airVisibility);
+
+        EXPECT_NEAR(transported.x(), 0.1556f, 1e-7f);
+        EXPECT_NEAR(transported.y(), 0.10916f, 1e-7f);
+        EXPECT_NEAR(transported.z(), 0.07208f, 1e-7f);
+        EXPECT_GT(transported.x(), transported.y());
+        EXPECT_GT(transported.y(), transported.z());
     }
 
     TEST(AtmosphereShaderTest, compilesAndLinksSkyProgramInGraphicsContext)
