@@ -224,6 +224,19 @@ Also:
 
 - Use `openmw-diagnosticctl` as the authoritative full-scene path for graphical, gameplay, and performance diagnosis. Retain
   focused tests for equations, shaders, permutations, subsystem contracts, and edge cases.
+- When the user reports taking a capture or recording, inspect the configured capture roots before asking them to identify or
+  locate it. Treat relative times such as "just captured" as actionable: compare the current local time with filename and
+  filesystem timestamps, then confirm candidates from embedded frame identity, cell, camera, weather, game time, and provider
+  state. Use embedded capture state when copied-file timestamps disagree.
+- Recognize `gameplay-route-*.omwdiag` as a Shift+F11 route recording and `atmosphere-*-frame-*.omwdiag` as a Shift+F12
+  production-attachment capture. F12 writes an ordinary screenshot; Shift+F12 writes that screenshot and, when configured, the
+  matching attachment bundle. Treat screenshots as visual pointers and `.omwdiag` state and attachments as authoritative.
+- Resolve locations instead of guessing. Read the screenshot directory from the OpenMW startup log. Resolve the diagnostic
+  artifact root from `--diagnostic-artifacts`, then `OPENMW_DIAGNOSTIC_ARTIFACTS`, then `<user-data>/diagnostics`; resolve
+  Shift+F12 bundles from `OPENMW_ATMOSPHERE_DIAGNOSTICS_DIR`. Search these roots newest-first and correlate artifacts across
+  directories by capture time and embedded state.
+- Request a new capture only when no suitable existing artifact reproduces the defect: Shift+F12 for a single-frame rendering
+  issue, or Shift+F11 once before and once after reproducing a motion or temporal issue.
 - Reproduce development issues with an isolated `run` capture or validated `.omwdiag` capsule and `replay`. Preserve the capsule,
   provider evidence, engine logs, performance trace, and graphics-parity report needed to support conclusions.
 - Never automate, mutate, or autonomously launch the user's normal game or profile. Hidden runs use temporary writable state and
