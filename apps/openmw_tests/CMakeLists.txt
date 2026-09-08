@@ -30,6 +30,7 @@ file(GLOB UNITTEST_SRC_FILES
     mwgui/weightedsearch.cpp
 
     mwrender/testatmosphere.cpp
+    mwrender/testdiagnosticbundle.cpp
     mwrender/testgroundcoverbatching.cpp
     mwrender/testgroundcoverlod.cpp
     mwrender/testgroundcovernearfar.cpp

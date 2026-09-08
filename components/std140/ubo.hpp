@@ -14,11 +14,12 @@
 
 namespace Std140
 {
+    /// Align a column-major matrix like its vec4 columns, including after arrays and scalar fields.
     struct Mat4
     {
         using Value = osg::Matrixf;
         Value mValue;
-        static constexpr size_t sAlign = sizeof(Value);
+        static constexpr size_t sAlign = sizeof(osg::Vec4f);
         static constexpr std::string_view sTypeName = "mat4";
     };
 
@@ -78,6 +79,22 @@ namespace Std140
         static constexpr std::string_view sTypeName = "bool";
     };
 
+    /// Identify arrays whose elements already occupy complete std140 sixteen-byte slots.
+    struct ArrayTag
+    {
+    };
+
+    /// Store fixed-length vec4 arrays with the same element stride on the CPU and in GLSL.
+    template <std::size_t Size>
+    struct Vec4Array : ArrayTag
+    {
+        using Value = std::array<osg::Vec4f, Size>;
+        Value mValue;
+        static constexpr std::size_t sAlign = sizeof(osg::Vec4f);
+        static constexpr std::size_t sArraySize = Size;
+        static constexpr std::string_view sTypeName = "vec4";
+    };
+
     template <class... CArgs>
     class UBO
     {
@@ -87,7 +104,17 @@ namespace Std140
         {
         };
 
-        static_assert((contains<CArgs, Mat4, Vec4, Vec3, Vec2, Float, Int, UInt, Bool>() && ...));
+        static_assert((contains<CArgs, Mat4, Vec4, Vec3, Vec2, Float, Int, UInt, Bool, ArrayTag>() && ...));
+
+        /// Include the GLSL array extent while keeping the public member name available for uniform lookup.
+        template <class T>
+        static std::string getMemberDeclaration()
+        {
+            std::string declaration = "    " + std::string(T::sTypeName) + " " + std::string(T::sName);
+            if constexpr (std::is_base_of_v<ArrayTag, T>)
+                declaration += "[" + std::to_string(T::sArraySize) + "]";
+            return declaration + ";\n";
+        }
 
         static constexpr size_t roundUpRemainder(size_t x, size_t multiple)
         {
@@ -119,8 +146,7 @@ namespace Std140
         static std::string getDefinition(const std::string& name)
         {
             std::string structDefinition = "struct " + name + " {\n";
-            ((structDefinition += ("    " + std::string(CArgs::sTypeName) + " " + std::string(CArgs::sName) + ";\n")),
-                ...);
+            ((structDefinition += getMemberDeclaration<CArgs>()), ...);
             return structDefinition + "};";
         }
 

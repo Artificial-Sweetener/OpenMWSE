@@ -824,10 +824,16 @@ namespace MWRender
 
         const AtmosphereState& atmosphere = mSky->getAtmosphereState();
         AtmosphereVolumeState diagnosticVolumes = atmosphere.mVolumes;
+        AtmosphereVolumeState outgoingCloudVolumes = atmosphere.mOutgoingCloudVolumes;
+        AtmosphereVolumeState incomingCloudVolumes = atmosphere.mIncomingCloudVolumes;
         if (!mAtmosphereDiagnosticMedia.mMainClouds)
         {
             diagnosticVolumes.mCloudDeckCoverage = 0.f;
             diagnosticVolumes.mCloudDensity = 0.f;
+            outgoingCloudVolumes.mCloudDeckCoverage = 0.f;
+            outgoingCloudVolumes.mCloudDensity = 0.f;
+            incomingCloudVolumes.mCloudDeckCoverage = 0.f;
+            incomingCloudVolumes.mCloudDensity = 0.f;
         }
         if (!mAtmosphereDiagnosticMedia.mLowClouds)
         {
@@ -839,11 +845,23 @@ namespace MWRender
         if (!mAtmosphereDiagnosticMedia.mFog)
             diagnosticVolumes.mFogDensity = 0.f;
         const CloudAdvectionState& cloudAdvection = mCloudAdvection.getState();
-        const osg::Vec2f cloudFieldOffset = cloudAdvection.mOffsetWorldUnits + mAtmosphereDiagnosticCloudFieldOffset;
+        const osg::Vec2f cloudFieldOffset = cloudAdvection.mOffsetWorldUnits;
         const bool atmosphereEnabled
             = Settings::shaders().mAtmosphericEffects && mSky->isEnabled() && atmosphere.mEnabled;
         const osg::Vec4f skyColor = mSky->getSkyColor();
         const osg::Vec3f scatteringSunDirection = getScatteringSunDirection(mSky->getSunDirection(), !mNight);
+        const auto cloudParameters = [](const AtmosphereVolumeState& volumes) {
+            return osg::Vec4f(volumes.mCloudDeckCoverage, volumes.mCloudDensity, volumes.mCloudBaseAltitudeWorldUnits,
+                volumes.mCloudThicknessWorldUnits);
+        };
+        const auto cloudLayers = SceneUtil::packCloudLayers(outgoingCloudVolumes.mCloudLayer,
+            incomingCloudVolumes.mCloudLayer, diagnosticVolumes.mEnvironmentalCloudLayer);
+        mStateUpdater->setCloudLayers(cloudLayers);
+        mPostProcessor->getStateUpdater()->setCloudLayers(cloudLayers);
+        const osg::Vec4f cloudScenarioParameters(
+            getCloudScenarioFieldPhase(outgoingCloudVolumes.mCloudScenarioIdentity),
+            getCloudScenarioFieldPhase(incomingCloudVolumes.mCloudScenarioIdentity),
+            atmosphere.mCloudScenarioTransition, atmosphere.mCloudScenarioTransition > 0.f ? 1.f : 0.f);
         mAtmosphereDiagnosticState = { fogStart, fogEnd, mNearClip, mViewDistance, atmosphereEnabled, diagnosticVolumes,
             scatteringSunDirection, atmosphere.mLighting, atmosphere.mSunDiscColor, cloudFieldOffset };
         const float atmosphereHistoryLightingWeight = mAtmosphereHistoryLighting.update(
@@ -854,18 +872,10 @@ namespace MWRender
             atmosphereEnabled);
         mStateUpdater->setAtmosphere(atmosphereEnabled, mSky->getSkyColor(), atmosphere.mInScattering,
             atmosphere.mOutScattering, atmosphere.mWeatherWeight, scatteringSunDirection,
-            { diagnosticVolumes.mCloudDeckCoverage, diagnosticVolumes.mCloudDensity,
-                diagnosticVolumes.mCloudBaseAltitudeWorldUnits, diagnosticVolumes.mCloudThicknessWorldUnits },
-            { atmosphere.mVolumes.mCloudType, atmosphere.mVolumes.mCloudFeatureScale,
-                atmosphere.mVolumes.mCloudVerticalDevelopment, atmosphere.mVolumes.mCloudAnvilStrength },
-            { atmosphere.mVolumes.mCloudDeckContinuity, atmosphere.mVolumes.mCloudConvectiveFrequency,
-                atmosphere.mVolumes.mCloudConvectiveMaturity, atmosphere.mVolumes.mCloudStormOrganization },
-            { atmosphere.mVolumes.mCloudTowerTaper, atmosphere.mVolumes.mCloudBaseVariation,
-                atmosphere.mVolumes.mCloudDeckType, 0.f },
+            cloudParameters(outgoingCloudVolumes), cloudParameters(incomingCloudVolumes), cloudScenarioParameters,
             { diagnosticVolumes.mLowCloudCoverage, diagnosticVolumes.mLowCloudDensity,
                 atmosphere.mVolumes.mLowCloudBaseAltitudeWorldUnits, atmosphere.mVolumes.mLowCloudThicknessWorldUnits },
-            { atmosphere.mVolumes.mLowCloudType, atmosphere.mVolumes.mLowCloudFeatureScale,
-                atmosphere.mVolumes.mLowCloudVerticalDevelopment, atmosphere.mVolumes.mLowCloudEnvironmentInfluence },
+            atmosphere.mVolumes.mLowCloudEnvironmentInfluence,
             { diagnosticVolumes.mMistDensity, diagnosticVolumes.mMistBaseAltitudeWorldUnits,
                 atmosphere.mVolumes.mMistThicknessWorldUnits, atmosphere.mVolumes.mShaftIntensity },
             { diagnosticVolumes.mFogDensity, diagnosticVolumes.mFogBaseAltitudeWorldUnits,
@@ -894,18 +904,10 @@ namespace MWRender
         stateUpdater->setWindSpeed(world->getWindSpeed());
         stateUpdater->setSkyColor(mSky->getSkyColor());
         stateUpdater->setAtmosphere(atmosphere.mInScattering, atmosphere.mOutScattering,
-            { diagnosticVolumes.mCloudDeckCoverage, diagnosticVolumes.mCloudDensity,
-                diagnosticVolumes.mCloudBaseAltitudeWorldUnits, diagnosticVolumes.mCloudThicknessWorldUnits },
-            { atmosphere.mVolumes.mCloudType, atmosphere.mVolumes.mCloudFeatureScale,
-                atmosphere.mVolumes.mCloudVerticalDevelopment, atmosphere.mVolumes.mCloudAnvilStrength },
-            { atmosphere.mVolumes.mCloudDeckContinuity, atmosphere.mVolumes.mCloudConvectiveFrequency,
-                atmosphere.mVolumes.mCloudConvectiveMaturity, atmosphere.mVolumes.mCloudStormOrganization },
-            { atmosphere.mVolumes.mCloudTowerTaper, atmosphere.mVolumes.mCloudBaseVariation,
-                atmosphere.mVolumes.mCloudDeckType, 0.f },
+            cloudParameters(outgoingCloudVolumes), cloudParameters(incomingCloudVolumes), cloudScenarioParameters,
             { diagnosticVolumes.mLowCloudCoverage, diagnosticVolumes.mLowCloudDensity,
                 atmosphere.mVolumes.mLowCloudBaseAltitudeWorldUnits, atmosphere.mVolumes.mLowCloudThicknessWorldUnits },
-            { atmosphere.mVolumes.mLowCloudType, atmosphere.mVolumes.mLowCloudFeatureScale,
-                atmosphere.mVolumes.mLowCloudVerticalDevelopment, atmosphere.mVolumes.mLowCloudEnvironmentInfluence },
+            atmosphere.mVolumes.mLowCloudEnvironmentInfluence,
             { diagnosticVolumes.mMistDensity, diagnosticVolumes.mMistBaseAltitudeWorldUnits,
                 atmosphere.mVolumes.mMistThicknessWorldUnits, atmosphere.mVolumes.mShaftIntensity },
             { diagnosticVolumes.mFogDensity, diagnosticVolumes.mFogBaseAltitudeWorldUnits,
@@ -936,28 +938,6 @@ namespace MWRender
     void RenderingManager::setAtmosphereDiagnosticDistanceFogEnabled(bool enabled)
     {
         mAtmosphereDiagnosticDistanceFogEnabled = enabled;
-        invalidateAtmosphereHistory();
-    }
-
-    void RenderingManager::setAtmosphereDiagnosticCloudSeed(std::uint32_t seed)
-    {
-        if (seed == 0)
-            mAtmosphereDiagnosticCloudFieldOffset.set(0.f, 0.f);
-        else
-        {
-            const auto scramble = [](std::uint32_t value) {
-                value ^= value >> 16;
-                value *= 0x7feb352du;
-                value ^= value >> 15;
-                value *= 0x846ca68bu;
-                return value ^ (value >> 16);
-            };
-            constexpr float fieldSpanWorldUnits = 600000.f;
-            constexpr float inverseUintMaximum = 1.f / static_cast<float>(std::numeric_limits<std::uint32_t>::max());
-            mAtmosphereDiagnosticCloudFieldOffset.set(
-                static_cast<float>(scramble(seed)) * inverseUintMaximum * fieldSpanWorldUnits,
-                static_cast<float>(scramble(seed ^ 0x9e3779b9u)) * inverseUintMaximum * fieldSpanWorldUnits);
-        }
         invalidateAtmosphereHistory();
     }
 
@@ -1675,6 +1655,12 @@ namespace MWRender
     float RenderingManager::getTerrainHeightAt(const osg::Vec3f& pos, ESM::RefId worldspace)
     {
         return getWorldspaceChunkMgr(worldspace).mTerrain->getHeightAt(pos);
+    }
+
+    void RenderingManager::setAtmosphereTerrain(const SceneUtil::AtmosphereTerrainGrid& terrain)
+    {
+        mStateUpdater->setAtmosphereTerrain(terrain);
+        mPostProcessor->getStateUpdater()->setAtmosphereTerrain(terrain);
     }
 
     void RenderingManager::overrideFieldOfView(float val)

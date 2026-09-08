@@ -1,6 +1,9 @@
 #ifndef OPENMW_COMPONENTS_SCENEUTIL_STATEUPDATER_H
 #define OPENMW_COMPONENTS_SCENEUTIL_STATEUPDATER_H
 
+#include "atmosphereterraingrid.hpp"
+#include "cloudlayer.hpp"
+
 #include <osg/Matrixf>
 #include <osg/Texture2D>
 #include <osg/Texture3D>
@@ -106,12 +109,17 @@ namespace SceneUtil
         void setFogEnd(float end);
 
         /// Publish canonical scene-linear atmosphere, volume, and lighting state to compatibility shaders.
+        /// Publish the same complete cloud models consumed by the postprocess path.
+        void setCloudLayers(const CloudLayerUniforms& layers) { mAtmosphereCloudLayers = layers; }
+
+        /// Publish fixed world terrain samples to all cloud consumers, including reflected views.
+        void setAtmosphereTerrain(const AtmosphereTerrainGrid& terrain) { mAtmosphereTerrain = terrain; }
+
         void setAtmosphere(bool enabled, const osg::Vec4f& skyColor, const osg::Vec3f& inScattering,
             const osg::Vec3f& outScattering, float weatherWeight, const osg::Vec3f& sunDirection,
-            const osg::Vec4f& cloudParameters, const osg::Vec4f& cloudShapeParameters,
-            const osg::Vec4f& cloudOrganizationParameters, const osg::Vec4f& cloudStructureParameters,
-            const osg::Vec4f& lowCloudParameters, const osg::Vec4f& lowCloudShapeParameters,
-            const osg::Vec4f& mistParameters, const osg::Vec4f& fogVolumeParameters,
+            const osg::Vec4f& cloudParameters, const osg::Vec4f& incomingCloudParameters,
+            const osg::Vec4f& cloudScenarioParameters, const osg::Vec4f& lowCloudParameters,
+            float lowCloudEnvironmentInfluence, const osg::Vec4f& mistParameters, const osg::Vec4f& fogVolumeParameters,
             const osg::Vec4f& mediumReferenceParameters, const osg::Vec4f& orographicParameters,
             const osg::Vec4f& sunDiscColor, const osg::Vec3f& solarRadiance, const osg::Vec3f& skyIrradiance,
             const osg::Vec3f& groundIrradiance, const osg::Vec2f& cloudAdvectionOffsetWorldUnits, int quality);
@@ -151,16 +159,18 @@ namespace SceneUtil
         osg::Vec3f mAtmosphereOutScattering;
         float mAtmosphereWeatherWeight = 0.f;
         osg::Vec3f mAtmosphereSunDirection{ 0.f, 0.f, 1.f };
+        CloudLayerUniforms mAtmosphereCloudLayers = packCloudLayers({}, {}, {});
         osg::Vec4f mAtmosphereCloudParameters;
-        osg::Vec4f mAtmosphereCloudShapeParameters;
-        osg::Vec4f mAtmosphereCloudOrganizationParameters;
-        osg::Vec4f mAtmosphereCloudStructureParameters;
+        /// Retain the independently phased incoming episode and its transition control.
+        osg::Vec4f mAtmosphereIncomingCloudParameters;
+        osg::Vec4f mAtmosphereCloudScenarioParameters;
         osg::Vec4f mAtmosphereLowCloudParameters;
-        osg::Vec4f mAtmosphereLowCloudShapeParameters;
+        float mAtmosphereLowCloudEnvironmentInfluence = 0.f;
         osg::Vec4f mAtmosphereMistParameters;
         osg::Vec4f mAtmosphereFogVolumeParameters;
         osg::Vec4f mAtmosphereMediumReferenceParameters;
         osg::Vec4f mAtmosphereOrographicParameters;
+        AtmosphereTerrainGrid mAtmosphereTerrain;
         osg::Vec4f mAtmosphereSunDiscColor;
         osg::Vec3f mAtmosphereSolarRadiance;
         osg::Vec3f mAtmosphereSkyIrradiance;

@@ -317,8 +317,8 @@ namespace MWWorld
         void changeWeather(const ESM::RefId& region, const ESM::RefId& id) override;
 
         /// Apply an exact weather state used only by the isolated diagnostic child.
-        void setDiagnosticWeatherState(
-            const ESM::RefId& current, const std::optional<ESM::RefId>& next, float transition);
+        void setDiagnosticWeatherState(const ESM::RefId& current, const std::optional<ESM::RefId>& next,
+            float transition, std::uint32_t cloudScenarioIdentity = 0);
 
         /// Select weather-side visual effects used only by the isolated diagnostic child.
         void setDiagnosticWeatherEffects(bool precipitationEnabled, bool lightningEnabled);

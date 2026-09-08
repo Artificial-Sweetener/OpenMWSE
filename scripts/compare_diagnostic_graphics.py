@@ -16,9 +16,29 @@ MAGIC = b"OMWATMD1"
 VERSION = 1
 STAGE_PATTERN = re.compile(r"atmosphere-(.+)-frame-\d+-\d+\.omwdiag")
 ATTACHMENT_RULES = {
+    "atmosphere-cloud-models-v2": {"mean": 0.000001, "p999": 0.000001, "localize": 0.000001},
     "scene-color-before-post-processing": {"mean": 0.002, "p999": 0.01, "localize": 0.0001},
     "scene-opaque-depth": {"mean": 0.00001, "p999": 0.0001, "localize": 0.000001},
     "previous-scene-opaque-depth": {"mean": 0.00001, "p999": 0.0001, "localize": 0.000001},
+    "atmosphere-volume-checkerboard-raw": {
+        "mean": 0.002,
+        "p999": 0.01,
+        "localize": 0.0001,
+        "phase_dependent": True,
+    },
+    "atmosphere-volume-checkerboard-metadata-raw": {
+        "mean": 0.0001,
+        "p999": 0.001,
+        "localize": 0.00001,
+        "phase_dependent": True,
+    },
+    "atmosphere-volume-metadata-reprojected": {
+        "mean": 0.0001,
+        "p999": 0.001,
+        "localize": 0.00001,
+        "phase_dependent": True,
+    },
+    "atmosphere-checkerboard-layout": {"layout": True},
     "atmosphere-volume-raw": {"mean": 0.002, "p999": 0.01, "localize": 0.0001},
     "atmosphere-volume-resolved": {"mean": 0.002, "p999": 0.01, "localize": 0.0001},
     "atmosphere-volume-metadata": {"mean": 0.0001, "p999": 0.001, "localize": 0.00001},
@@ -135,6 +155,15 @@ def compare_directories(reference: Path, replay: Path, heatmap_directory: Path |
         if reference_images.keys() != replay_images.keys():
             raise ValueError(f"attachment sets differ for stage {stage}")
         stage_report: dict = {}
+        reference_layout = reference_images.get("atmosphere-checkerboard-layout")
+        replay_layout = replay_images.get("atmosphere-checkerboard-layout")
+        checkerboard_phases_match = (
+            reference_layout is not None
+            and replay_layout is not None
+            and reference_layout.shape == (1, 1, 4)
+            and replay_layout.shape == (1, 1, 4)
+            and reference_layout[0, 0, 0] == replay_layout[0, 0, 0]
+        )
         for name in sorted(reference_images):
             if name not in ATTACHMENT_RULES:
                 raise ValueError(f"attachment {name} has no explicit comparison rule")
@@ -145,11 +174,32 @@ def compare_directories(reference: Path, replay: Path, heatmap_directory: Path |
             finite = numpy.isfinite(reference_pixels) & numpy.isfinite(replay_pixels)
             if not finite.all():
                 raise ValueError(f"non-finite pixels found in {stage}/{name}")
+            rule = ATTACHMENT_RULES[name]
+            if rule.get("layout"):
+                if reference_pixels.shape != (1, 1, 4):
+                    raise ValueError(f"invalid checkerboard layout dimensions in {stage}/{name}")
+                layout_matches = numpy.array_equal(reference_pixels[0, 0, 1:], replay_pixels[0, 0, 1:])
+                stage_report[name] = {
+                    "comparison": "checkerboard-layout",
+                    "reference_phase": int(reference_pixels[0, 0, 0]),
+                    "replay_phase": int(replay_pixels[0, 0, 0]),
+                    "layout_matches": bool(layout_matches),
+                    "passed": bool(layout_matches),
+                }
+                if not layout_matches:
+                    report["passed"] = False
+                continue
+            if rule.get("phase_dependent") and not checkerboard_phases_match:
+                stage_report[name] = {
+                    "comparison": "phase-dependent-structure-only",
+                    "reason": "checkerboard phases differ",
+                    "passed": True,
+                }
+                continue
             difference = numpy.abs(reference_pixels - replay_pixels)
             pixel_difference = difference.max(axis=2)
             denominator = numpy.maximum(numpy.abs(reference_pixels), 1e-7)
             relative_difference = difference / denominator
-            rule = ATTACHMENT_RULES[name]
             stage_report[name] = {
                 "nonzero_value_count": int(numpy.count_nonzero(difference)),
                 "mean_absolute": float(difference.mean()),

@@ -533,6 +533,7 @@ namespace
         const std::optional<std::string> weatherTo = findOption(arguments, "--weather-to");
         const std::optional<std::string> transition = findOption(arguments, "--weather-transition");
         const std::optional<std::string> gameHour = findOption(arguments, "--game-hour");
+        const std::optional<std::string> startGameHour = findOption(arguments, "--start-game-hour");
         const std::optional<std::string> cloudSeed = findOption(arguments, "--cloud-seed");
         const std::optional<std::string> recentPrecipitation = findOption(arguments, "--recent-precipitation");
         const std::optional<std::string> environmentTraits = findOption(arguments, "--environment-traits");
@@ -562,6 +563,8 @@ namespace
         }
         if (gameHour)
             scenario.mGameHour = parseFiniteOption("--game-hour", *gameHour);
+        if (startGameHour)
+            scenario.mStartGameHour = parseFiniteOption("--start-game-hour", *startGameHour);
         if (disableMainClouds || disableLowClouds || disableMist || disableFog)
             scenario.mMedia = Diagnostics::DiagnosticAtmosphereMedia{ !disableMainClouds, !disableLowClouds,
                 !disableMist, !disableFog };
@@ -676,14 +679,16 @@ namespace
                   "      --artifacts directory [--save save.omwsave | --capsule capture.omwdiag]\n"
                   "      [--frames count] [--performance-samples count] [--fixed-dt seconds]\n"
                   "      [--weather name | --weather-from name --weather-to name --weather-transition progress]\n"
-                  "      [--game-hour hour] [--cloud-seed integer] [--recent-precipitation weight]\n"
+                  "      [--game-hour hour | --start-game-hour hour] [--cloud-seed integer] [--recent-precipitation "
+                  "weight]\n"
                   "      [--atmosphere-warmup-frames count]\n"
                   "      [--environment-traits name=weight,...] [--environment-terrain-height world-units]\n"
                   "      [--camera-x world-units] [--camera-y world-units] [--camera-z world-units]\n"
                   "      [--camera-pitch radians] [--camera-yaw radians] [--camera-roll radians]\n"
                   "      [--disable-main-clouds] [--disable-low-clouds] [--disable-mist] [--disable-fog]\n"
                   "      [--disable-distance-fog] [--disable-precipitation] [--disable-lightning]\n"
-                  "      [--capture-route-frames] [--skip-graphics-capture | --normal-only-graphics-capture]\n"
+                  "      [--capture-route-frames | --capture-route-native-frames] [--skip-graphics-capture | "
+                  "--normal-only-graphics-capture]\n"
                   "      [--bypass-route-shadows]\n"
                   "      [--route-shadow-casters terrain|objects]\n"
                   "      [--headed]\n"
@@ -855,7 +860,8 @@ namespace
         const std::filesystem::path sourceConfigOption = findOption(arguments, "--config").value_or(std::string());
         const std::filesystem::path artifactsOption = findOption(arguments, "--artifacts").value_or(std::string());
         const bool headed = hasFlag(arguments, "--headed");
-        const bool captureRouteFrames = hasFlag(arguments, "--capture-route-frames");
+        const bool captureRouteNativeFrames = hasFlag(arguments, "--capture-route-native-frames");
+        const bool captureRouteFrames = captureRouteNativeFrames || hasFlag(arguments, "--capture-route-frames");
         const bool captureGraphics = !hasFlag(arguments, "--skip-graphics-capture");
         const bool normalOnlyGraphicsCapture = hasFlag(arguments, "--normal-only-graphics-capture");
         if (!captureGraphics && normalOnlyGraphicsCapture)
@@ -952,6 +958,8 @@ namespace
         }
         if (isolatedSave)
             childArguments.insert(childArguments.end(), { "--load-savegame", isolatedSave->string(), "--skip-menu" });
+        if (captureRouteNativeFrames && gameplayRoute.empty())
+            throw std::runtime_error("native route capture requires a capsule containing a gameplay route");
 
         ChildProcess child(executable, childArguments);
         Diagnostics::Command hello{ 1, Diagnostics::CommandType::Hello, std::move(replayManifest) };
@@ -1063,6 +1071,9 @@ namespace
             if (atmosphereScenario->mGameHour
                 && std::abs(actual["game-hour"].as<double>() - *atmosphereScenario->mGameHour) > 0.0001)
                 throw std::runtime_error("diagnostic child did not apply the requested game hour");
+            if (atmosphereScenario->mStartGameHour
+                && std::abs(actual["game-hour"].as<double>() - *atmosphereScenario->mStartGameHour) > 0.0001)
+                throw std::runtime_error("diagnostic child did not apply the requested starting game hour");
             if (atmosphereScenario->mCloudSeed
                 && actual["cloud-seed"].as<std::uint32_t>() != *atmosphereScenario->mCloudSeed)
                 throw std::runtime_error("diagnostic child did not apply the requested cloud seed");
@@ -1116,6 +1127,14 @@ namespace
                 routeFrames.size(), findOption(arguments, "--frames"), findOption(arguments, "--performance-samples"));
             requireSuccessfulResponse(Diagnostics::transact(
                 endpoint, { requestId++, Diagnostics::CommandType::LoadGameplayRoute, gameplayRoute }));
+            if (captureRouteNativeFrames)
+            {
+                const Diagnostics::Response capabilities
+                    = Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::InspectSession, {} });
+                requireSuccessfulResponse(capabilities);
+                if (payloadText(capabilities.mPayload).find("graphics@2") == std::string::npos)
+                    throw std::runtime_error("native route capture requires graphics@2");
+            }
             std::size_t completedFrames = 0;
             unsigned segmentIndex = 0;
             while (completedFrames < routePlan.mFrameCount)
@@ -1129,7 +1148,8 @@ namespace
                 if (captureRouteFrames || bypassRouteShadows || routeShadowCasters)
                 {
                     const unsigned routeOptions = (captureRouteFrames ? 0x1u : 0u) | (bypassRouteShadows ? 0x2u : 0u)
-                        | (routeShadowCasters == "terrain" ? 0x4u : 0u) | (routeShadowCasters == "objects" ? 0x8u : 0u);
+                        | (routeShadowCasters == "terrain" ? 0x4u : 0u) | (routeShadowCasters == "objects" ? 0x8u : 0u)
+                        | (captureRouteNativeFrames ? 0x10u : 0u);
                     runSegment.mPayload.push_back(static_cast<std::byte>(routeOptions));
                 }
                 const Diagnostics::Response performance

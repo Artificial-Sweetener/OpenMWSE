@@ -158,9 +158,9 @@ namespace MWRender
     }
 
     void PostProcessor::requestRenderFrameDiagnosticCapture(
-        const std::filesystem::path& outputPath, std::uint32_t frameCount)
+        const std::filesystem::path& outputPath, std::uint32_t frameCount, bool nativeResolution)
     {
-        mRenderFrameDiagnostics->requestCapture(outputPath, frameCount);
+        mRenderFrameDiagnostics->requestCapture(outputPath, frameCount, nativeResolution);
         Log(Debug::Info) << "Exact production-frame diagnostic sequence requested at " << outputPath;
     }
 

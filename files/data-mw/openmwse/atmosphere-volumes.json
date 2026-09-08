@@ -1,29 +1,15 @@
 {
   "Clear": {
-    "cloudDeckCoverage": 0.26,
+    "cloudDeckCoverage": 0.18,
     "cloudDensity": 0.72,
-    "cloudAltitude": 52000.0,
-    "cloudThickness": 200000.0,
-    "cloudDeckType": 0.04,
-    "cloudType": 0.92,
-    "cloudFeatureScale": 0.8,
-    "cloudVerticalDevelopment": 0.72,
-    "cloudAnvilStrength": 1.0,
-    "cloudDeckContinuity": 0.2,
-    "cloudConvectiveFrequency": 0.18,
-    "cloudConvectiveMaturity": 0.56,
-    "cloudStormOrganization": 0.04,
-    "cloudTowerTaper": 0.68,
-    "cloudBaseVariation": 0.52,
+    "cloudAltitude": 52493.438317500004,
+    "cloudThickness": 139982.50218,
     "cloudTerrainFollowing": 0.0,
     "cloudTerrainClearance": 16000.0,
     "lowCloudCoverage": 0.025,
     "lowCloudDensity": 0.45,
     "lowCloudAltitude": 6000.0,
     "lowCloudThickness": 6500.0,
-    "lowCloudType": 0.32,
-    "lowCloudFeatureScale": 0.85,
-    "lowCloudVerticalDevelopment": 0.24,
     "lowCloudEnvironmentInfluence": 1.0,
     "mistDensity": 0.04,
     "mistAltitude": 600.0,
@@ -32,33 +18,69 @@
     "fogDensity": 0.0,
     "fogAltitude": 0.0,
     "fogThickness": 4500.0,
-    "fogAnisotropy": 0.42
+    "fogAnisotropy": 0.42,
+    "cloudLayer": {
+      "profile": "fair-weather",
+      "physicalScale": 0.4,
+      "coverageAmount": 1,
+      "coverageMinimum": 0.15,
+      "typeMinimum": 0.15,
+      "typeAmount": 0.15,
+      "rainAmount": 0
+    },
+    "environmentalCloudLayer": {
+      "profile": "primary",
+      "physicalScale": 0.18,
+      "coverageAmount": 0.05,
+      "typeAmount": 0.4,
+      "typeMinimum": 0.15
+    },
+    "cloudScenarios": [
+      {
+        "family": "Cloudless",
+        "weight": 1
+      },
+      {
+        "family": "FairCumulus",
+        "weight": 15
+      },
+      {
+        "family": "AlmostClear",
+        "weight": 20
+      },
+      {
+        "family": "HighThin",
+        "weight": 15
+      },
+      {
+        "family": "AlmostClear",
+        "weight": 20
+      },
+      {
+        "family": "FairCumulus",
+        "weight": 15
+      },
+      {
+        "family": "AnvilRemnants",
+        "weight": 5
+      },
+      {
+        "family": "HighThin",
+        "weight": 9
+      }
+    ]
   },
   "Cloudy": {
-    "cloudDeckCoverage": 0.68,
-    "cloudDensity": 0.9,
-    "cloudAltitude": 36000.0,
-    "cloudThickness": 200000.0,
-    "cloudDeckType": 0.1,
-    "cloudType": 0.9,
-    "cloudFeatureScale": 0.95,
-    "cloudVerticalDevelopment": 0.72,
-    "cloudAnvilStrength": 1.0,
-    "cloudDeckContinuity": 0.45,
-    "cloudConvectiveFrequency": 0.34,
-    "cloudConvectiveMaturity": 0.72,
-    "cloudStormOrganization": 0.16,
-    "cloudTowerTaper": 0.7,
-    "cloudBaseVariation": 0.44,
+    "cloudDeckCoverage": 0.48,
+    "cloudDensity": 1,
+    "cloudAltitude": 52493.438317500004,
+    "cloudThickness": 174978.12772500003,
     "cloudTerrainFollowing": 0.2,
     "cloudTerrainClearance": 10000.0,
     "lowCloudCoverage": 0.14,
     "lowCloudDensity": 0.68,
     "lowCloudAltitude": 5000.0,
     "lowCloudThickness": 9500.0,
-    "lowCloudType": 0.3,
-    "lowCloudFeatureScale": 0.78,
-    "lowCloudVerticalDevelopment": 0.34,
     "lowCloudEnvironmentInfluence": 1.0,
     "mistDensity": 0.03,
     "mistAltitude": 800.0,
@@ -67,33 +89,58 @@
     "fogDensity": 0.0,
     "fogAltitude": 0.0,
     "fogThickness": 5000.0,
-    "fogAnisotropy": 0.44
+    "fogAnisotropy": 0.44,
+    "cloudLayer": {
+      "profile": "primary",
+      "physicalScale": 0.5,
+      "totalNoiseScale": 0.0004,
+      "coverageAmount": 0.3,
+      "coverageMinimum": 0.7,
+      "typeAmount": 0,
+      "typeMinimum": 1,
+      "rainAmount": 0,
+      "anvilDeformationLarge": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "gradientLarge": [
+        0.01,
+        0.06,
+        0.1,
+        0.95
+      ]
+    },
+    "environmentalCloudLayer": {
+      "profile": "primary",
+      "physicalScale": 0.18,
+      "coverageAmount": 0.28,
+      "typeAmount": 0.4,
+      "typeMinimum": 0.15
+    },
+    "cloudScenarios": [
+      "FairCumulus",
+      "ClusteredCumulus",
+      "BrokenStratocumulus",
+      "HighThin",
+      "LayeredDeck",
+      "BillowingDeck",
+      "RaggedLow",
+      "AnvilRemnants"
+    ]
   },
   "Foggy": {
     "cloudDeckCoverage": 0.76,
     "cloudDensity": 0.82,
-    "cloudAltitude": 18000.0,
-    "cloudThickness": 18000.0,
-    "cloudDeckType": 0.08,
-    "cloudType": 0.12,
-    "cloudFeatureScale": 1.65,
-    "cloudVerticalDevelopment": 0.2,
-    "cloudAnvilStrength": 0.0,
-    "cloudDeckContinuity": 0.88,
-    "cloudConvectiveFrequency": 0.06,
-    "cloudConvectiveMaturity": 0.12,
-    "cloudStormOrganization": 0.04,
-    "cloudTowerTaper": 0.74,
-    "cloudBaseVariation": 0.18,
+    "cloudAltitude": 24496.938,
+    "cloudThickness": 125984.252,
     "cloudTerrainFollowing": 0.75,
     "cloudTerrainClearance": 1500.0,
     "lowCloudCoverage": 0.52,
     "lowCloudDensity": 0.82,
     "lowCloudAltitude": 900.0,
     "lowCloudThickness": 7600.0,
-    "lowCloudType": 0.08,
-    "lowCloudFeatureScale": 1.15,
-    "lowCloudVerticalDevelopment": 0.14,
     "lowCloudEnvironmentInfluence": 1.0,
     "mistDensity": 0.06,
     "mistAltitude": 1200.0,
@@ -102,33 +149,45 @@
     "fogDensity": 0.78,
     "fogAltitude": 0.0,
     "fogThickness": 7200.0,
-    "fogAnisotropy": 0.52
+    "fogAnisotropy": 0.52,
+    "cloudLayer": {
+      "profile": "primary",
+      "physicalScale": 0.4,
+      "coverageAmount": 0.4,
+      "coverageMinimum": 0.7,
+      "typeAmount": 0,
+      "typeMinimum": 0,
+      "rainAmount": 0
+    },
+    "environmentalCloudLayer": {
+      "profile": "primary",
+      "physicalScale": 0.18,
+      "coverageAmount": 1.04,
+      "typeAmount": 0.4,
+      "typeMinimum": 0.15
+    },
+    "cloudScenarios": [
+      "LowStratus",
+      "Cloudless",
+      "BrokenStratocumulus",
+      "HighThin",
+      "LayeredDeck",
+      "LowStratus",
+      "RaggedLow",
+      "Cloudless"
+    ]
   },
   "Overcast": {
     "cloudDeckCoverage": 0.92,
     "cloudDensity": 1.05,
-    "cloudAltitude": 26000.0,
-    "cloudThickness": 22000.0,
-    "cloudDeckType": 0.12,
-    "cloudType": 0.18,
-    "cloudFeatureScale": 1.5,
-    "cloudVerticalDevelopment": 0.3,
-    "cloudAnvilStrength": 0.05,
-    "cloudDeckContinuity": 0.96,
-    "cloudConvectiveFrequency": 0.1,
-    "cloudConvectiveMaturity": 0.22,
-    "cloudStormOrganization": 0.16,
-    "cloudTowerTaper": 0.72,
-    "cloudBaseVariation": 0.14,
+    "cloudAltitude": 45494.3132085,
+    "cloudThickness": 244969.37881500003,
     "cloudTerrainFollowing": 0.45,
     "cloudTerrainClearance": 6000.0,
     "lowCloudCoverage": 0.24,
     "lowCloudDensity": 0.75,
     "lowCloudAltitude": 3800.0,
     "lowCloudThickness": 9800.0,
-    "lowCloudType": 0.12,
-    "lowCloudFeatureScale": 1.0,
-    "lowCloudVerticalDevelopment": 0.2,
     "lowCloudEnvironmentInfluence": 1.0,
     "mistDensity": 0.28,
     "mistAltitude": 900.0,
@@ -137,33 +196,45 @@
     "fogDensity": 0.02,
     "fogAltitude": 0.0,
     "fogThickness": 6200.0,
-    "fogAnisotropy": 0.46
+    "fogAnisotropy": 0.46,
+    "cloudLayer": {
+      "profile": "fair-weather",
+      "physicalScale": 0.7,
+      "coverageAmount": 6.28,
+      "coverageMinimum": 0.764,
+      "typeMinimum": 0,
+      "typeAmount": 0,
+      "rainAmount": 0.1
+    },
+    "environmentalCloudLayer": {
+      "profile": "primary",
+      "physicalScale": 0.18,
+      "coverageAmount": 0.48,
+      "typeAmount": 0.4,
+      "typeMinimum": 0.15
+    },
+    "cloudScenarios": [
+      "LayeredDeck",
+      "LayeredDeck",
+      "BrokenStratocumulus",
+      "LowStratus",
+      "RaggedLow",
+      "LayeredDeck",
+      "BrokenStratocumulus",
+      "LowStratus"
+    ]
   },
   "Rain": {
     "cloudDeckCoverage": 0.96,
     "cloudDensity": 1.12,
-    "cloudAltitude": 21000.0,
-    "cloudThickness": 60000.0,
-    "cloudDeckType": 0.16,
-    "cloudType": 0.24,
-    "cloudFeatureScale": 1.15,
-    "cloudVerticalDevelopment": 0.5,
-    "cloudAnvilStrength": 0.25,
-    "cloudDeckContinuity": 0.98,
-    "cloudConvectiveFrequency": 0.28,
-    "cloudConvectiveMaturity": 0.52,
-    "cloudStormOrganization": 0.58,
-    "cloudTowerTaper": 0.68,
-    "cloudBaseVariation": 0.18,
+    "cloudAltitude": 52493.438,
+    "cloudThickness": 227471.566,
     "cloudTerrainFollowing": 0.5,
     "cloudTerrainClearance": 5000.0,
     "lowCloudCoverage": 0.36,
     "lowCloudDensity": 0.95,
     "lowCloudAltitude": 2600.0,
     "lowCloudThickness": 11500.0,
-    "lowCloudType": 0.14,
-    "lowCloudFeatureScale": 0.92,
-    "lowCloudVerticalDevelopment": 0.24,
     "lowCloudEnvironmentInfluence": 1.0,
     "mistDensity": 0.1,
     "mistAltitude": 1000.0,
@@ -172,33 +243,45 @@
     "fogDensity": 0.04,
     "fogAltitude": 0.0,
     "fogThickness": 7000.0,
-    "fogAnisotropy": 0.5
+    "fogAnisotropy": 0.5,
+    "cloudLayer": {
+      "profile": "primary",
+      "physicalScale": 0.65,
+      "coverageAmount": 0.8,
+      "coverageMinimum": 0.7,
+      "typeAmount": 1,
+      "typeMinimum": 0.3,
+      "rainAmount": 0.65
+    },
+    "environmentalCloudLayer": {
+      "profile": "primary",
+      "physicalScale": 0.18,
+      "coverageAmount": 0.72,
+      "typeAmount": 0.4,
+      "typeMinimum": 0.15
+    },
+    "cloudScenarios": [
+      "LayeredDeck",
+      "BrokenStratocumulus",
+      "DevelopingConvection",
+      "ClusteredCumulus",
+      "RaggedLow",
+      "MatureConvection",
+      "LowStratus",
+      "AnvilRemnants"
+    ]
   },
   "Thunderstorm": {
     "cloudDeckCoverage": 0.94,
     "cloudDensity": 1.35,
-    "cloudAltitude": 25000.0,
-    "cloudThickness": 200000.0,
-    "cloudDeckType": 0.1,
-    "cloudType": 1.0,
-    "cloudFeatureScale": 1.0,
-    "cloudVerticalDevelopment": 1.0,
-    "cloudAnvilStrength": 1.0,
-    "cloudDeckContinuity": 0.94,
-    "cloudConvectiveFrequency": 0.72,
-    "cloudConvectiveMaturity": 1.0,
-    "cloudStormOrganization": 1.0,
-    "cloudTowerTaper": 0.72,
-    "cloudBaseVariation": 0.24,
+    "cloudAltitude": 59492.563,
+    "cloudThickness": 293963.255,
     "cloudTerrainFollowing": 0.4,
     "cloudTerrainClearance": 7000.0,
     "lowCloudCoverage": 0.2,
     "lowCloudDensity": 1.05,
     "lowCloudAltitude": 3200.0,
     "lowCloudThickness": 14000.0,
-    "lowCloudType": 0.34,
-    "lowCloudFeatureScale": 0.82,
-    "lowCloudVerticalDevelopment": 0.42,
     "lowCloudEnvironmentInfluence": 0.8,
     "mistDensity": 0.06,
     "mistAltitude": 1200.0,
@@ -207,33 +290,45 @@
     "fogDensity": 0.03,
     "fogAltitude": 200.0,
     "fogThickness": 8500.0,
-    "fogAnisotropy": 0.56
+    "fogAnisotropy": 0.56,
+    "cloudLayer": {
+      "profile": "primary",
+      "physicalScale": 0.8,
+      "coverageAmount": 1.5,
+      "coverageMinimum": 0.35,
+      "typeAmount": 1,
+      "typeMinimum": 0.85,
+      "rainAmount": 1
+    },
+    "environmentalCloudLayer": {
+      "profile": "primary",
+      "physicalScale": 0.18,
+      "coverageAmount": 0.4,
+      "typeAmount": 0.4,
+      "typeMinimum": 0.15
+    },
+    "cloudScenarios": [
+      "DevelopingConvection",
+      "MatureConvection",
+      "OrganizedConvection",
+      "MatureConvection",
+      "ClusteredCumulus",
+      "AnvilRemnants",
+      "DevelopingConvection",
+      "OrganizedConvection"
+    ]
   },
   "Ashstorm": {
     "cloudDeckCoverage": 0.82,
     "cloudDensity": 1.08,
-    "cloudAltitude": 30000.0,
-    "cloudThickness": 30000.0,
-    "cloudDeckType": 0.28,
-    "cloudType": 0.32,
-    "cloudFeatureScale": 1.1,
-    "cloudVerticalDevelopment": 0.48,
-    "cloudAnvilStrength": 0.1,
-    "cloudDeckContinuity": 0.82,
-    "cloudConvectiveFrequency": 0.14,
-    "cloudConvectiveMaturity": 0.34,
-    "cloudStormOrganization": 0.2,
-    "cloudTowerTaper": 0.7,
-    "cloudBaseVariation": 0.24,
+    "cloudAltitude": 45494.313,
+    "cloudThickness": 174978.128,
     "cloudTerrainFollowing": 0.25,
     "cloudTerrainClearance": 8000.0,
     "lowCloudCoverage": 0.0,
     "lowCloudDensity": 0.0,
     "lowCloudAltitude": 4000.0,
     "lowCloudThickness": 9000.0,
-    "lowCloudType": 0.2,
-    "lowCloudFeatureScale": 1.0,
-    "lowCloudVerticalDevelopment": 0.2,
     "lowCloudEnvironmentInfluence": 0.0,
     "mistDensity": 0.58,
     "mistAltitude": 1800.0,
@@ -242,33 +337,45 @@
     "fogDensity": 0.32,
     "fogAltitude": 600.0,
     "fogThickness": 9000.0,
-    "fogAnisotropy": 0.6
+    "fogAnisotropy": 0.6,
+    "cloudLayer": {
+      "profile": "primary",
+      "physicalScale": 0.5,
+      "coverageAmount": 1.5,
+      "coverageMinimum": 0.45,
+      "typeAmount": 1,
+      "typeMinimum": 0.3,
+      "rainAmount": 0
+    },
+    "environmentalCloudLayer": {
+      "profile": "primary",
+      "physicalScale": 0.18,
+      "coverageAmount": 0.0,
+      "typeAmount": 0.4,
+      "typeMinimum": 0.15
+    },
+    "cloudScenarios": [
+      "LayeredDeck",
+      "CellularSpecial",
+      "LayeredDeck",
+      "CellularSpecial",
+      "HighThin",
+      "RaggedLow",
+      "CellularSpecial",
+      "LayeredDeck"
+    ]
   },
   "Blight": {
     "cloudDeckCoverage": 0.76,
     "cloudDensity": 1.0,
-    "cloudAltitude": 34000.0,
-    "cloudThickness": 28000.0,
-    "cloudDeckType": 0.34,
-    "cloudType": 0.4,
-    "cloudFeatureScale": 1.0,
-    "cloudVerticalDevelopment": 0.58,
-    "cloudAnvilStrength": 0.18,
-    "cloudDeckContinuity": 0.72,
-    "cloudConvectiveFrequency": 0.24,
-    "cloudConvectiveMaturity": 0.46,
-    "cloudStormOrganization": 0.32,
-    "cloudTowerTaper": 0.68,
-    "cloudBaseVariation": 0.3,
+    "cloudAltitude": 45494.313,
+    "cloudThickness": 174978.128,
     "cloudTerrainFollowing": 0.3,
     "cloudTerrainClearance": 7000.0,
     "lowCloudCoverage": 0.0,
     "lowCloudDensity": 0.0,
     "lowCloudAltitude": 4000.0,
     "lowCloudThickness": 9000.0,
-    "lowCloudType": 0.2,
-    "lowCloudFeatureScale": 1.0,
-    "lowCloudVerticalDevelopment": 0.2,
     "lowCloudEnvironmentInfluence": 0.0,
     "mistDensity": 0.48,
     "mistAltitude": 1600.0,
@@ -277,33 +384,45 @@
     "fogDensity": 0.26,
     "fogAltitude": 500.0,
     "fogThickness": 8200.0,
-    "fogAnisotropy": 0.58
+    "fogAnisotropy": 0.58,
+    "cloudLayer": {
+      "profile": "primary",
+      "physicalScale": 0.5,
+      "coverageAmount": 1.5,
+      "coverageMinimum": 0.45,
+      "typeAmount": 1,
+      "typeMinimum": 0.3,
+      "rainAmount": 0
+    },
+    "environmentalCloudLayer": {
+      "profile": "primary",
+      "physicalScale": 0.18,
+      "coverageAmount": 0.0,
+      "typeAmount": 0.4,
+      "typeMinimum": 0.15
+    },
+    "cloudScenarios": [
+      "CellularSpecial",
+      "LayeredDeck",
+      "CellularSpecial",
+      "ClusteredCumulus",
+      "RaggedLow",
+      "CellularSpecial",
+      "LayeredDeck",
+      "AnvilRemnants"
+    ]
   },
   "Snow": {
     "cloudDeckCoverage": 0.88,
     "cloudDensity": 0.94,
-    "cloudAltitude": 22000.0,
-    "cloudThickness": 24000.0,
-    "cloudDeckType": 0.12,
-    "cloudType": 0.16,
-    "cloudFeatureScale": 1.4,
-    "cloudVerticalDevelopment": 0.3,
-    "cloudAnvilStrength": 0.04,
-    "cloudDeckContinuity": 0.92,
-    "cloudConvectiveFrequency": 0.08,
-    "cloudConvectiveMaturity": 0.2,
-    "cloudStormOrganization": 0.1,
-    "cloudTowerTaper": 0.72,
-    "cloudBaseVariation": 0.16,
+    "cloudAltitude": 45494.313,
+    "cloudThickness": 209973.753,
     "cloudTerrainFollowing": 0.55,
     "cloudTerrainClearance": 3500.0,
     "lowCloudCoverage": 0.28,
     "lowCloudDensity": 0.82,
     "lowCloudAltitude": 2200.0,
     "lowCloudThickness": 9200.0,
-    "lowCloudType": 0.1,
-    "lowCloudFeatureScale": 1.08,
-    "lowCloudVerticalDevelopment": 0.16,
     "lowCloudEnvironmentInfluence": 1.0,
     "mistDensity": 0.32,
     "mistAltitude": 900.0,
@@ -312,33 +431,45 @@
     "fogDensity": 0.14,
     "fogAltitude": 0.0,
     "fogThickness": 6500.0,
-    "fogAnisotropy": 0.46
+    "fogAnisotropy": 0.46,
+    "cloudLayer": {
+      "profile": "primary",
+      "physicalScale": 0.6,
+      "coverageAmount": 0.6,
+      "coverageMinimum": 0.65,
+      "typeAmount": 0.4,
+      "typeMinimum": 0,
+      "rainAmount": 0.3
+    },
+    "environmentalCloudLayer": {
+      "profile": "primary",
+      "physicalScale": 0.18,
+      "coverageAmount": 0.56,
+      "typeAmount": 0.4,
+      "typeMinimum": 0.15
+    },
+    "cloudScenarios": [
+      "LayeredDeck",
+      "BrokenStratocumulus",
+      "LowStratus",
+      "ClusteredCumulus",
+      "RaggedLow",
+      "HighThin",
+      "LayeredDeck",
+      "BrokenStratocumulus"
+    ]
   },
   "Blizzard": {
     "cloudDeckCoverage": 0.98,
     "cloudDensity": 1.15,
-    "cloudAltitude": 16000.0,
-    "cloudThickness": 30000.0,
-    "cloudDeckType": 0.18,
-    "cloudType": 0.28,
-    "cloudFeatureScale": 1.25,
-    "cloudVerticalDevelopment": 0.42,
-    "cloudAnvilStrength": 0.12,
-    "cloudDeckContinuity": 0.98,
-    "cloudConvectiveFrequency": 0.16,
-    "cloudConvectiveMaturity": 0.36,
-    "cloudStormOrganization": 0.28,
-    "cloudTowerTaper": 0.7,
-    "cloudBaseVariation": 0.16,
+    "cloudAltitude": 31496.063,
+    "cloudThickness": 209973.753,
     "cloudTerrainFollowing": 0.6,
     "cloudTerrainClearance": 2500.0,
     "lowCloudCoverage": 0.38,
     "lowCloudDensity": 0.98,
     "lowCloudAltitude": 1600.0,
     "lowCloudThickness": 11000.0,
-    "lowCloudType": 0.12,
-    "lowCloudFeatureScale": 0.95,
-    "lowCloudVerticalDevelopment": 0.2,
     "lowCloudEnvironmentInfluence": 1.0,
     "mistDensity": 0.65,
     "mistAltitude": 1400.0,
@@ -347,6 +478,219 @@
     "fogDensity": 0.42,
     "fogAltitude": 200.0,
     "fogThickness": 9500.0,
-    "fogAnisotropy": 0.58
+    "fogAnisotropy": 0.58,
+    "cloudLayer": {
+      "profile": "primary",
+      "physicalScale": 0.6,
+      "coverageAmount": 0.6,
+      "coverageMinimum": 0.75,
+      "typeAmount": 1,
+      "typeMinimum": 0.3,
+      "rainAmount": 0.5
+    },
+    "environmentalCloudLayer": {
+      "profile": "primary",
+      "physicalScale": 0.18,
+      "coverageAmount": 0.76,
+      "typeAmount": 0.4,
+      "typeMinimum": 0.15
+    },
+    "cloudScenarios": [
+      "LayeredDeck",
+      "LowStratus",
+      "DevelopingConvection",
+      "BrokenStratocumulus",
+      "RaggedLow",
+      "OrganizedConvection",
+      "LayeredDeck",
+      "LowStratus"
+    ]
+  },
+  "cloudScenarios": {
+    "Cloudless": {
+      "cloudless": true
+    },
+    "FairCumulus": {
+      "baseAltitudeMeters": 750,
+      "thicknessMeters": 2000,
+      "cloudLayer": {
+        "profile": "fair-weather",
+        "physicalScale": 0.4,
+        "coverageAmount": 1,
+        "coverageMinimum": 0.15,
+        "typeMinimum": 0.15,
+        "typeAmount": 0.15
+      }
+    },
+    "ClusteredCumulus": {
+      "baseAltitudeMeters": 750,
+      "thicknessMeters": 2500,
+      "cloudLayer": {
+        "profile": "fair-weather",
+        "physicalScale": 0.5,
+        "coverageAmount": 1.3,
+        "coverageMinimum": 0.2,
+        "typeMinimum": 0.35,
+        "typeAmount": 0.3
+      }
+    },
+    "AnvilRemnants": {
+      "baseAltitudeMeters": 600.0,
+      "thicknessMeters": 4000.0,
+      "cloudLayer": {
+        "profile": "secondary",
+        "coverageAmount": 1.5,
+        "coverageMinimum": 0.25,
+        "typeMinimum": 0.65,
+        "physicalScale": 0.8,
+        "rainAmount": 0
+      }
+    },
+    "BrokenStratocumulus": {
+      "baseAltitudeMeters": 850,
+      "thicknessMeters": 2250,
+      "cloudLayer": {
+        "profile": "fair-weather",
+        "physicalScale": 0.45,
+        "coverageAmount": 2,
+        "coverageMinimum": 0.3,
+        "typeMinimum": 0,
+        "typeAmount": 0.05
+      }
+    },
+    "LayeredDeck": {
+      "baseAltitudeMeters": 650,
+      "thicknessMeters": 3500,
+      "cloudLayer": {
+        "profile": "fair-weather",
+        "physicalScale": 0.7,
+        "coverageAmount": 6.28,
+        "coverageMinimum": 0.764,
+        "typeMinimum": 0,
+        "typeAmount": 0
+      }
+    },
+    "DevelopingConvection": {
+      "baseAltitudeMeters": 750,
+      "thicknessMeters": 3000,
+      "cloudLayer": {
+        "profile": "fair-weather",
+        "physicalScale": 0.6,
+        "coverageAmount": 1.3,
+        "coverageMinimum": 0.2,
+        "typeMinimum": 0.5,
+        "typeAmount": 0.2
+      }
+    },
+    "MatureConvection": {
+      "baseAltitudeMeters": 750,
+      "thicknessMeters": 4200,
+      "cloudLayer": {
+        "profile": "fair-weather",
+        "physicalScale": 0.8,
+        "coverageAmount": 1.5,
+        "coverageMinimum": 0.25,
+        "typeMinimum": 0.85,
+        "typeAmount": 0.1
+      }
+    },
+    "OrganizedConvection": {
+      "baseAltitudeMeters": 650,
+      "thicknessMeters": 4200,
+      "cloudLayer": {
+        "profile": "fair-weather",
+        "physicalScale": 0.8,
+        "coverageAmount": 2,
+        "coverageMinimum": 0.35,
+        "typeMinimum": 0.8,
+        "typeAmount": 0.2
+      }
+    },
+    "LowStratus": {
+      "baseAltitudeMeters": 350,
+      "thicknessMeters": 1800,
+      "cloudLayer": {
+        "profile": "fair-weather",
+        "physicalScale": 0.36,
+        "coverageAmount": 6.28,
+        "coverageMinimum": 0.764,
+        "typeMinimum": 0,
+        "typeAmount": 0
+      }
+    },
+    "RaggedLow": {
+      "baseAltitudeMeters": 400,
+      "thicknessMeters": 2000,
+      "cloudLayer": {
+        "profile": "fair-weather",
+        "physicalScale": 0.28,
+        "coverageAmount": 1.2,
+        "coverageMinimum": 0.15,
+        "typeMinimum": 0.25,
+        "typeAmount": 0.2
+      }
+    },
+    "CellularSpecial": {
+      "baseAltitudeMeters": 850,
+      "thicknessMeters": 2500,
+      "cloudLayer": {
+        "profile": "fair-weather",
+        "physicalScale": 0.4,
+        "coverageAmount": 1.7,
+        "coverageMinimum": 0.3,
+        "typeMinimum": 0.3,
+        "typeAmount": 0.2
+      }
+    },
+    "HighThin": {
+      "baseAltitudeMeters": 600.0,
+      "thicknessMeters": 4000.0,
+      "cloudLayer": {
+        "profile": "secondary",
+        "coverageAmount": 1.5,
+        "coverageMinimum": 0.25,
+        "physicalScale": 0.8,
+        "rainAmount": 0
+      }
+    },
+    "BillowingDeck": {
+      "baseAltitudeMeters": 750,
+      "thicknessMeters": 2500,
+      "cloudLayer": {
+        "profile": "primary",
+        "physicalScale": 0.5,
+        "totalNoiseScale": 0.0004,
+        "coverageAmount": 0.3,
+        "coverageMinimum": 0.7,
+        "typeAmount": 0,
+        "typeMinimum": 1,
+        "rainAmount": 0,
+        "anvilDeformationLarge": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "gradientLarge": [
+          0.01,
+          0.06,
+          0.1,
+          0.95
+        ]
+      }
+    },
+    "AlmostClear": {
+      "baseAltitudeMeters": 1000,
+      "thicknessMeters": 1750,
+      "cloudLayer": {
+        "profile": "fair-weather",
+        "physicalScale": 0.35,
+        "coverageAmount": 0.8,
+        "coverageMinimum": 0,
+        "typeAmount": 0.15,
+        "typeMinimum": 0.1,
+        "rainAmount": 0
+      }
+    }
   }
 }

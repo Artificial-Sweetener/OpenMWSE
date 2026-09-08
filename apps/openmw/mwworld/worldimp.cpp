@@ -1840,10 +1840,10 @@ namespace MWWorld
         mWeatherManager->changeWeather(region, id);
     }
 
-    void World::setDiagnosticWeatherState(
-        const ESM::RefId& current, const std::optional<ESM::RefId>& next, float transition)
+    void World::setDiagnosticWeatherState(const ESM::RefId& current, const std::optional<ESM::RefId>& next,
+        float transition, std::uint32_t cloudScenarioIdentity)
     {
-        mWeatherManager->setDiagnosticWeatherState(current, next, transition);
+        mWeatherManager->setDiagnosticWeatherState(current, next, transition, cloudScenarioIdentity);
     }
 
     void World::setDiagnosticWeatherEffects(bool precipitationEnabled, bool lightningEnabled)

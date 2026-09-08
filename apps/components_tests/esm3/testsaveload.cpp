@@ -14,6 +14,7 @@
 #include <components/esm3/loadweap.hpp>
 #include <components/esm3/player.hpp>
 #include <components/esm3/quickkeys.hpp>
+#include <components/esm3/weatherstate.hpp>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -467,6 +468,46 @@ namespace ESM
             QuickKeys result;
             saveAndLoadRecord(record, GetParam(), result);
             EXPECT_EQ(result.mKeys, record.mKeys);
+        }
+
+        /// Preserve stable cloud episode identities across the save-game weather-state boundary.
+        TEST_P(Esm3SaveLoadRecordTest, weatherCloudScenariosShouldNotChange)
+        {
+            WeatherState record;
+            record.mCurrentRegion = RefId::stringRefId("bitter coast region");
+            record.mTimePassed = 2.5f;
+            record.mFastForward = true;
+            record.mWeatherUpdateTime = 17.f;
+            record.mTransitionFactor = 0.35f;
+            record.mCurrentWeather = 1;
+            record.mNextWeather = 4;
+            record.mQueuedWeather = 0;
+            record.mCurrentCloudScenario = 0x12345678u;
+            record.mNextCloudScenario = 0x89abcdefu;
+            record.mQueuedCloudScenario = 0x10203040u;
+            record.mCloudScenarioSequence = 97u;
+            record.mRegions.emplace(
+                RefId::stringRefId("ascadian isles region"), RegionWeatherState{ 2, { 10, 20, 30, 40 } });
+
+            WeatherState result;
+            saveAndLoadRecord(record, GetParam(), result);
+
+            EXPECT_EQ(result.mCurrentRegion, record.mCurrentRegion);
+            EXPECT_EQ(result.mTimePassed, record.mTimePassed);
+            EXPECT_EQ(result.mFastForward, record.mFastForward);
+            EXPECT_EQ(result.mWeatherUpdateTime, record.mWeatherUpdateTime);
+            EXPECT_EQ(result.mTransitionFactor, record.mTransitionFactor);
+            EXPECT_EQ(result.mCurrentWeather, record.mCurrentWeather);
+            EXPECT_EQ(result.mNextWeather, record.mNextWeather);
+            EXPECT_EQ(result.mQueuedWeather, record.mQueuedWeather);
+            EXPECT_EQ(result.mCurrentCloudScenario, record.mCurrentCloudScenario);
+            EXPECT_EQ(result.mNextCloudScenario, record.mNextCloudScenario);
+            EXPECT_EQ(result.mQueuedCloudScenario, record.mQueuedCloudScenario);
+            EXPECT_EQ(result.mCloudScenarioSequence, record.mCloudScenarioSequence);
+            ASSERT_EQ(result.mRegions.size(), 1u);
+            EXPECT_EQ(result.mRegions.begin()->first, record.mRegions.begin()->first);
+            EXPECT_EQ(result.mRegions.begin()->second.mWeather, record.mRegions.begin()->second.mWeather);
+            EXPECT_EQ(result.mRegions.begin()->second.mChances, record.mRegions.begin()->second.mChances);
         }
 
         TEST_P(Esm3SaveLoadRecordTest, dialogueShouldNotChange)

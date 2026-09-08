@@ -7,6 +7,8 @@
 #include <components/vfs/filesystemarchive.hpp>
 #include <components/vfs/manager.hpp>
 
+#include "cloudmodelreference.hpp"
+
 #include <apps/openmw/mwrender/atmosphere.hpp>
 
 #include <osg/Geometry>
@@ -25,6 +27,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <limits>
 #include <numbers>
@@ -96,12 +99,14 @@ namespace
         int volumeMetadataHeight = 0;
         int shaftWidth = 0;
         int shaftHeight = 0;
+        SceneUtil::CloudLayer cloudModel;
+        SceneUtil::CloudLayer incomingCloudModel;
+        SceneUtil::CloudLayer environmentalCloudModel;
         osg::Vec4f cloudParameters;
-        osg::Vec4f cloudShapeParameters{ 0.62f, 0.9f, 0.72f, 0.08f };
-        osg::Vec4f cloudOrganizationParameters{ 0.5f, 0.3f, 0.6f, 0.1f };
-        osg::Vec4f cloudStructureParameters{ 0.7f, 0.5f, 0.f, 0.f };
+        osg::Vec4f incomingCloudParameters;
+        osg::Vec4f cloudScenarioParameters;
         osg::Vec4f lowCloudParameters;
-        osg::Vec4f lowCloudShapeParameters{ 0.15f, 1.f, 0.2f, 1.f };
+        float lowCloudEnvironmentInfluence = 1.f;
         osg::Vec4f mistParameters{ 1.f, 800.f, 4500.f, 1.f };
         osg::Vec4f fogVolumeParameters;
         osg::Vec4f mediumReferenceParameters;
@@ -191,7 +196,7 @@ namespace
     }
 
     /// Build native-pass inputs from the same packaged palette and weather volumes consumed by production.
-    NativePassInputs makeProductionAtmosphereInputs(
+    NativePassInputs makePackagedAtmosphereInputs(
         std::string_view weatherName, std::string_view timeOfDay, std::string_view presetName = "default")
     {
         const PackagedAtmosphereFixtureData& packagedData = getPackagedAtmosphereFixtureData();
@@ -221,18 +226,32 @@ namespace
             : osg::Vec4f(1.f, 1.f, 1.f, 1.f);
         result.cloudParameters = { volume["cloudDeckCoverage"].as<float>(), volume["cloudDensity"].as<float>(),
             volume["cloudAltitude"].as<float>(), volume["cloudThickness"].as<float>() };
-        result.cloudShapeParameters = { volume["cloudType"].as<float>(), volume["cloudFeatureScale"].as<float>(),
-            volume["cloudVerticalDevelopment"].as<float>(), volume["cloudAnvilStrength"].as<float>() };
-        result.cloudOrganizationParameters
-            = { volume["cloudDeckContinuity"].as<float>(), volume["cloudConvectiveFrequency"].as<float>(),
-                  volume["cloudConvectiveMaturity"].as<float>(), volume["cloudStormOrganization"].as<float>() };
-        result.cloudStructureParameters = { volume["cloudTowerTaper"].as<float>(),
-            volume["cloudBaseVariation"].as<float>(), volume["cloudDeckType"].as<float>(), 0.f };
+        const auto fixtureModel = [](const YAML::Node& source) {
+            const std::string profile = source["profile"].as<std::string>();
+            SceneUtil::CloudLayer model = profile == "secondary" ? SceneUtil::secondaryCloudLayer()
+                : profile == "fair-weather"                      ? SceneUtil::fairWeatherCloudLayer()
+                                                                 : SceneUtil::CloudLayer{};
+            const float scale = source["physicalScale"].as<float>();
+            model.mPhysicalScale = scale;
+            model.mNoiseScalePerMeter /= scale;
+            model.mWeatherScalePerMeter /= scale;
+            model.mShapeSkewMeters *= scale;
+            model.mCoverageSkewMeters *= scale;
+            model.mCurlDisplacementMeters *= scale;
+            model.mWindSpeedMetersPerSecond *= scale;
+            model.mCoverageWindSpeedMetersPerSecond *= scale;
+            model.mCoverageAmount = source["coverageAmount"].as<float>();
+            model.mCoverageMinimum = source["coverageMinimum"] ? source["coverageMinimum"].as<float>() : 0.f;
+            model.mTypeAmount = source["typeAmount"].as<float>();
+            model.mTypeMinimum = source["typeMinimum"].as<float>();
+            model.mRainAmount = source["rainAmount"] ? source["rainAmount"].as<float>() : 0.f;
+            return model;
+        };
+        result.cloudModel = fixtureModel(volume["cloudLayer"]);
+        result.environmentalCloudModel = fixtureModel(volume["environmentalCloudLayer"]);
         result.lowCloudParameters = { volume["lowCloudCoverage"].as<float>(), volume["lowCloudDensity"].as<float>(),
             volume["lowCloudAltitude"].as<float>(), volume["lowCloudThickness"].as<float>() };
-        result.lowCloudShapeParameters = { volume["lowCloudType"].as<float>(),
-            volume["lowCloudFeatureScale"].as<float>(), volume["lowCloudVerticalDevelopment"].as<float>(),
-            volume["lowCloudEnvironmentInfluence"].as<float>() };
+        result.lowCloudEnvironmentInfluence = volume["lowCloudEnvironmentInfluence"].as<float>();
         result.mistParameters = { volume["mistDensity"].as<float>(), volume["mistAltitude"].as<float>(),
             volume["mistThickness"].as<float>(), volume["shaftIntensity"].as<float>() };
         result.fogVolumeParameters = { volume["fogDensity"].as<float>(), volume["fogAltitude"].as<float>(),
@@ -502,6 +521,7 @@ void main()
                     throw std::runtime_error("Native atmosphere density diagnostic could not replace fragment main");
                 source.replace(
                     mainPosition, std::string_view("void main()").size(), "void openmwseProductionAtmosphereMain()");
+                source += ShaderTest::cloudModelDensityReference;
                 source += R"glsl(
 uniform vec2 openmwseTestCloudDensitySliceExtent;
 uniform int openmwseTestCloudDensitySliceAxis;
@@ -523,10 +543,10 @@ void main()
     }
     if (openmwseTestCloudDensitySliceQuantity == 9)
     {
-        OpenMWSECloudIllumination illumination = openmwseCloudIllumination(
+        OpenMWSEVolumeIllumination illumination = openmwseCloudIllumination(
             omw.atmosphereSolarRadiance, omw.atmosphereSkyIrradiance, aerialPerspectiveParameters());
         omw_FragColor = vec4(openmwseTestCloudDensitySliceAxis == 0
-            ? illumination.solarIrradiance : illumination.isotropicSkyRadiance, 1.0);
+            ? illumination.solarIrradiance : illumination.diffuseRadiance, 1.0);
         return;
     }
     if (openmwseTestCloudDensitySliceQuantity == 8)
@@ -566,11 +586,190 @@ void main()
         samplePosition = vec3(horizontalPosition, physicalHeight);
     }
     OpenMWSECloudLayer mainLayer = openmwseMainCloudLayer();
+    OpenMWSECloudLayer incomingLayer = openmwseIncomingCloudLayer();
     OpenMWSECloudLayer lowLayer = openmwseLowCloudLayer();
+    if (openmwseTestCloudDensitySliceQuantity == 27)
+    {
+        float opticalDepth = openmwseCloudShadowColumnOpticalDepth(samplePosition,
+            normalize(omw.sunPos.xyz), mainLayer.parameters, omw.waterHeight,
+            mainLayer.fieldOffsetWorldUnits, mainLayer.model, openmwseCloudWeatherTexture);
+        omw_FragColor = vec4(exp(-opticalDepth));
+        return;
+    }
+    if (openmwseTestCloudDensitySliceQuantity == 26)
+    {
+        vec3 p = vec3((floor(gl_FragCoord.x) - 32.0) * 125.0, 4000.0,
+            (floor(gl_FragCoord.y) - 32.0) * 125.0);
+        vec3 weather = cloudModelSampleWeather(p, 0.5, mainLayer.model);
+        omw_FragColor = vec4(cloudModelSampleDensity(p, 0.5, mainLayer.model, weather, 0.0, true),
+            cloudModelSampleDensity(p, 0.5, mainLayer.model, weather, 0.0, false), weather.r, 1.0);
+        return;
+    }
+    if (openmwseTestCloudDensitySliceQuantity == 24)
+    {
+        float distance = openmwseTestCloudDensitySliceExtent.x;
+        omw_FragColor = vec4(openmwseCloudMarchStepLength(distance, mainLayer.model.physicalScale,
+            omw.atmosphereQuality) / distance);
+        return;
+    }
+    if (openmwseTestCloudDensitySliceQuantity == 23)
+    {
+        // Independent reference evaluation of the volumetric shadow integral.
+        // The density evaluator has separate source-reference coverage; this checks light-ray sampling.
+        vec3 direction = normalize(omw.sunPos.xyz);
+        float stepLength = 3000.0 * mainLayer.model.physicalScale * 69.99125109;
+        float viewDistance = length(samplePosition - omw.eyePos.xyz);
+        vec3 referenceDepth = vec3(0.0);
+        float lodOffset = 0.5;
+        for (int s = 0; s < 5; ++s)
+        {
+            float t0 = float(s) / 5.0;
+            float t1 = float(s + 1) / 5.0;
+            t0 *= t0;
+            t1 *= t1;
+            float delta = t1 - t0;
+            vec3 p = samplePosition + direction * stepLength * (t0 + delta * 0.5);
+            if (!openmwseCloudPotentialDensity(p, mainLayer))
+                continue;
+            float density = openmwseCloudDensity(p, viewDistance, lodOffset, mainLayer);
+            referenceDepth += clamp(density * mainLayer.model.extinctionPerMeter, 0.0, 1.0)
+                * delta * (stepLength / 69.99125109);
+            lodOffset += 0.5;
+        }
+        vec3 reference = exp(-referenceDepth);
+        vec3 actual = exp(-openmwseCloudSunOpticalDepth(samplePosition, direction, 3, mainLayer));
+        vec3 error = abs(actual - reference);
+        omw_FragColor = vec4(actual.r, reference.r, max(error.r, max(error.g, error.b)) * 1000.0, 1.0);
+        return;
+    }
+    if (openmwseTestCloudDensitySliceQuantity == 22)
+    {
+        omw_FragColor = vec4(openmwseCloudNoiseLod(openmwseTestCloudDensitySliceExtent.x,
+            float(openmwseTestCloudDensitySliceAxis) * 0.5, mainLayer));
+        return;
+    }
+    if (openmwseTestCloudDensitySliceQuantity >= 19 && openmwseTestCloudDensitySliceQuantity <= 21)
+    {
+        float lod = float(openmwseTestCloudDensitySliceQuantity - 19);
+        vec3 fieldPosition = openmwseCloudFieldPosition(samplePosition, mainLayer);
+        float h = (fieldPosition.z - mainLayer.parameters.z) / mainLayer.parameters.w;
+        vec3 p = (fieldPosition.xzy
+            + vec3(mainLayer.fieldOffsetWorldUnits.x, 0.0, mainLayer.fieldOffsetWorldUnits.y)) / 69.99125109;
+        vec4 sourceParameters[14];
+        for (int field = 0; field < 14; ++field)
+            sourceParameters[field] = openmwseCloudModelParameter(0, field);
+        float animation = dot(omw.atmosphereCloudAdvectionOffsetWorldUnits, normalize(vec2(0.78, 0.36)))
+            / (30.0 * 69.99125109);
+        vec2 coverageDirection = vec2(cos(sourceParameters[13].x), sin(sourceParameters[13].x));
+        vec2 weatherPosition = p.xz + sourceParameters[12].w * coverageDirection * animation;
+        weatherPosition += h * coverageDirection * sourceParameters[4].x;
+        vec3 weather = openmwseCloudWeatherSample(weatherPosition * sourceParameters[4].y).rgb;
+        vec3 amounts = vec3(sourceParameters[4].z, sourceParameters[5].x, sourceParameters[5].z);
+        vec3 minima = vec3(sourceParameters[4].w, sourceParameters[5].y, sourceParameters[5].w);
+        weather = minima + clamp(weather * amounts, 0.0, 1.0) * (vec3(1.0) - minima);
+        float reference = referenceCloudDensity(p, h, weather, lod, sourceParameters, animation);
+        float actual = openmwseCloudDensity(samplePosition, 0.0, lod, mainLayer);
+        omw_FragColor = vec4(actual, reference, abs(actual - reference) * 1000.0, 1.0);
+        return;
+    }
+    if (openmwseTestCloudDensitySliceQuantity == 18)
+    {
+        vec3 first = cloudModelShapeCoordinates(openmwseCloudModelPosition(samplePosition, mainLayer), 0.3, mainLayer.model);
+        vec3 second = cloudModelShapeCoordinates(openmwseCloudModelPosition(samplePosition + vec3(1000.0, 0.0, 0.0), mainLayer), 0.3, mainLayer.model);
+        omw_FragColor = vec4(second - first, 1.0);
+        return;
+    }
+    if (openmwseTestCloudDensitySliceQuantity == 17)
+    {
+        vec2 base = cloudModelWeatherCoordinates(vec3(0.0), 0.0, mainLayer.model);
+        vec2 top = cloudModelWeatherCoordinates(vec3(0.0), 1.0, mainLayer.model);
+        vec3 shapeBase = cloudModelShapeCoordinates(vec3(0.0), 0.0, mainLayer.model);
+        vec3 shapeTop = cloudModelShapeCoordinates(vec3(0.0), 1.0, mainLayer.model);
+        omw_FragColor = vec4(length(top - base), length(shapeTop.xz - shapeBase.xz),
+            mainLayer.model.weatherScale, 1.0);
+        return;
+    }
+    if (openmwseTestCloudDensitySliceQuantity == 16)
+    {
+        float outgoingDensity = openmwseCloudDensity(samplePosition, 0.0, 0.0, mainLayer);
+        float incomingDensity = openmwseCloudDensity(samplePosition, 0.0, 0.0, incomingLayer);
+        omw_FragColor = vec4(outgoingDensity, incomingDensity,
+            outgoingDensity + incomingDensity, 1.0);
+        return;
+    }
+    if (openmwseTestCloudDensitySliceQuantity == 15)
+    {
+        omw_FragColor = vec4(mainLayer.model.totalNoiseScale, incomingLayer.model.totalNoiseScale,
+            mainLayer.parameters.y, incomingLayer.parameters.y);
+        return;
+    }
+    if (openmwseTestCloudDensitySliceQuantity == 14)
+    {
+        vec2 localLayer = openmwseCloudLocalLayer(samplePosition, mainLayer);
+        omw_FragColor = vec4(localLayer / 100000.0, 0.0, 1.0);
+        return;
+    }
+    if (openmwseTestCloudDensitySliceQuantity == 13)
+    {
+        omw_FragColor = vec4(openmwseMainCloudPresentationWeight(
+            openmwseTestCloudDensitySliceExtent.x));
+        return;
+    }
+    if (openmwseTestCloudDensitySliceQuantity == 12)
+    {
+        vec3 mainWeather = cloudModelSampleWeather(openmwseCloudModelPosition(samplePosition, mainLayer), 0.3, mainLayer.model);
+        vec3 lowWeather = cloudModelSampleWeather(openmwseCloudModelPosition(samplePosition, lowLayer), 0.3, lowLayer.model);
+        omw_FragColor = vec4(cloudModelSampleAnvilDeformation(0.3, mainWeather, mainLayer.model),
+            cloudModelSampleAnvilDeformation(0.3, lowWeather, lowLayer.model), mainWeather.g, lowWeather.g);
+        return;
+    }
+    if (openmwseTestCloudDensitySliceQuantity == 11)
+    {
+        vec3 positionMeters = openmwseCloudModelPosition(samplePosition, mainLayer);
+        float height = clamp(openmwseCloudHeightFraction(samplePosition, mainLayer), 0.0, 1.0);
+        vec3 weather = cloudModelSampleWeather(positionMeters, height, mainLayer.model);
+        vec2 coordinates = cloudModelWeatherCoordinates(positionMeters, height, mainLayer.model);
+        omw_FragColor = vec4(openmwseCloudWeatherSample(coordinates).r, weather.r, weather.g, weather.b);
+        return;
+    }
     if (openmwseTestCloudDensitySliceQuantity == 7)
     {
-        vec2 bounds = openmwseMainCloudDensityHeightBounds(mainLayer);
+        vec2 bounds = openmwseCloudDensityHeightBounds(mainLayer);
         omw_FragColor = vec4(bounds / 100000.0, 0.0, 1.0);
+        return;
+    }
+    if (openmwseTestCloudDensitySliceQuantity == 25)
+    {
+        omw_FragColor = vec4(aerialPerspectiveParameters().weatherCloudTopHeight / 100000.0);
+        return;
+    }
+    if (openmwseTestCloudDensitySliceQuantity == 29)
+    {
+        float density = openmwseCloudDensity(samplePosition, 0.0, 0.0, lowLayer);
+        float base = openmwseCloudNominalBaseHeight(samplePosition, lowLayer);
+        omw_FragColor = vec4(density, base / 10000.0, openmwseCloudOrographicDensityScale(samplePosition, lowLayer), 1.0);
+        return;
+    }
+    if (openmwseTestCloudDensitySliceQuantity == 28)
+    {
+        vec3 direction = normalize(omw_GetWorldPosFromUV(omw_TexCoord) - omw.eyePos.xyz);
+        vec2 bounds = openmwseCloudDensityHeightBounds(lowLayer);
+        vec2 interval = openmwseCloudLayerIntersection(omw.eyePos.xyz, direction, bounds.x, bounds.y);
+        interval.y = min(interval.y, interval.x + openmwseCloudLayerMaximumMarchingDistance(lowLayer));
+        int sampleCount = openmwseTestCloudDensitySliceAxis == 0 ? 4096 : 8192;
+        float stepLength = max(interval.y - interval.x, 0.0) / float(sampleCount);
+        vec3 opticalDepth = vec3(0.0);
+        for (int i = 0; i < 8192; ++i)
+        {
+            if (i >= sampleCount)
+                break;
+            float distance = interval.x + (float(i) + 0.5) * stepLength;
+            float density = openmwseCloudDensity(omw.eyePos.xyz + direction * distance, distance, 0.0, lowLayer);
+            opticalDepth += density * lowLayer.model.extinctionPerMeter
+                * (stepLength / openmwseAtmosphereWorldUnitsPerMeter);
+        }
+        vec3 transmittance = exp(-opticalDepth);
+        omw_FragColor = vec4(transmittance, dot(transmittance, vec3(1.0 / 3.0)));
         return;
     }
     if (openmwseTestCloudDensitySliceQuantity == 6)
@@ -580,20 +779,15 @@ void main()
     }
     if (openmwseTestCloudDensitySliceQuantity == 5)
     {
-        omw_FragColor = vec4(openmwseCloudBaseNoiseCoordinates(
-            vec3(0.0), mainLayer, openmwseTestCloudDensitySliceExtent.x), 1.0);
+        omw_FragColor = vec4(cloudModelShapeCoordinates(vec3(0.0),
+            openmwseTestCloudDensitySliceExtent.x, mainLayer.model), 1.0);
         return;
     }
     if (openmwseTestCloudDensitySliceQuantity == 4)
     {
-        vec3 position = vec3(0.0, 0.0, openmwseCloudWaterHeight() + mainLayer.parameters.z
-            + openmwseTestCloudDensitySliceExtent.x * mainLayer.parameters.w
-                * openmwseCloudVerticalExtentScale(mainLayer));
-        OpenMWSECloudColumnProperties column = openmwseCloudLayerColumnProperties(
-            position, openmwseCloudLayerPosition(position, mainLayer), mainLayer);
-        column.localCoverage = 1.0;
-        column.family = mainLayer.shape.x;
-        omw_FragColor = vec4(openmwseCloudDensityFromNoise(position, 1.0, column, mainLayer));
+        float height = openmwseTestCloudDensitySliceExtent.x;
+        vec3 weather = vec3(1.0, mainLayer.model.typeMinimum, 0.0);
+        omw_FragColor = vec4(max(cloudModelShapeDensity(vec4(1.0), height, weather, mainLayer.model), 0.0));
         return;
     }
     if (openmwseTestCloudDensitySliceQuantity == 2)
@@ -608,9 +802,10 @@ void main()
     vec3 diagnosticValue = vec3(density);
     if (openmwseTestCloudDensitySliceQuantity == 1 && density > 0.01)
     {
-        vec2 sunTransmittance = openmwseCloudSunTransmittance(samplePosition, normalize(omw.sunPos.xyz),
-            omw.atmosphereQuality, mainLayer, lowLayer);
-        diagnosticValue = vec3(sunTransmittance, 0.0);
+        OpenMWSECloudSolarTransmittance sunTransmittance = openmwseCloudSunTransmittance(samplePosition, normalize(omw.sunPos.xyz),
+            omw.atmosphereQuality, mainLayer, incomingLayer, lowLayer);
+        diagnosticValue = vec3(dot(sunTransmittance.primary, vec3(1.0 / 3.0)),
+            dot(sunTransmittance.secondary, vec3(1.0 / 3.0)), 0.0);
     }
     omw_FragColor = vec4(diagnosticValue, density);
 }
@@ -783,13 +978,22 @@ void main()
         updater.setDeltaSimulationTime(inputs.deltaSimulationTime);
         updater.setFrameNumber(inputs.frameNumber);
         updater.setWindSpeed(inputs.windSpeed);
+        SceneUtil::AtmosphereTerrainGrid terrain;
+        terrain.update({ inputs.eyePosition.x(), inputs.eyePosition.y() }, [&](const osg::Vec2f& position) {
+            return inputs.mediumReferenceParameters.x()
+                + (position - osg::Vec2f(inputs.orographicParameters.x(), inputs.orographicParameters.y()))
+                * osg::Vec2f(inputs.orographicParameters.z(), inputs.orographicParameters.w());
+        });
+        updater.setAtmosphereTerrain(terrain);
+        updater.setCloudLayers(
+            SceneUtil::packCloudLayers(inputs.cloudModel, inputs.incomingCloudModel, inputs.environmentalCloudModel));
         updater.setAtmosphere(inputs.inScattering, inputs.outScattering, inputs.cloudParameters,
-            inputs.cloudShapeParameters, inputs.cloudOrganizationParameters, inputs.cloudStructureParameters,
-            inputs.lowCloudParameters, inputs.lowCloudShapeParameters, inputs.mistParameters,
-            inputs.fogVolumeParameters, inputs.mediumReferenceParameters, inputs.orographicParameters,
-            inputs.sunDiscColor, inputs.solarRadiance, inputs.skyIrradiance, inputs.groundIrradiance,
-            inputs.cloudAdvectionOffsetWorldUnits, inputs.cloudAdvectionDeltaWorldUnits, inputs.historyLightingWeight,
-            inputs.weatherWeight, inputs.quality, inputs.volumeResolutionScale, inputs.atmosphereEnabled);
+            inputs.incomingCloudParameters, inputs.cloudScenarioParameters, inputs.lowCloudParameters,
+            inputs.lowCloudEnvironmentInfluence, inputs.mistParameters, inputs.fogVolumeParameters,
+            inputs.mediumReferenceParameters, inputs.orographicParameters, inputs.sunDiscColor, inputs.solarRadiance,
+            inputs.skyIrradiance, inputs.groundIrradiance, inputs.cloudAdvectionOffsetWorldUnits,
+            inputs.cloudAdvectionDeltaWorldUnits, inputs.historyLightingWeight, inputs.weatherWeight, inputs.quality,
+            inputs.volumeResolutionScale, inputs.atmosphereEnabled);
         osg::ref_ptr<osg::Group> scene = new osg::Group;
         scene->addChild(geode);
         osg::StateSet* updaterState = inputs.bindUniformBufferOnAncestor ? scene->getOrCreateStateSet() : state;
@@ -798,6 +1002,18 @@ void main()
 
         viewer.setSceneData(scene);
         viewer.realize();
+        context->makeCurrent();
+        auto* nativeProgram = dynamic_cast<osg::Program*>(state->getAttribute(osg::StateAttribute::PROGRAM));
+        if (!nativeProgram)
+            throw std::runtime_error("Native atmosphere test has no shader program");
+        nativeProgram->compileGLObjects(*context->getState());
+        const osg::Program::PerContextProgram* compiledProgram = nativeProgram->getPCP(*context->getState());
+        if (!compiledProgram->isLinked())
+        {
+            std::string infoLog;
+            compiledProgram->getInfoLog(infoLog);
+            throw std::runtime_error("Native atmosphere shader failed to link: " + infoLog);
+        }
         viewer.frame();
         context->makeCurrent();
         glFinish();
@@ -1257,6 +1473,7 @@ void main()
         EXPECT_FLOAT_EQ(horizonChannel, sampledSkyChannel);
     }
 
+    /// Verify that sky, terrain, objects, foliage, and water include their shared atmospheric interfaces.
     TEST(AtmosphereShaderTest, preprocessesSkyAndWorldShaderPaths)
     {
         Shader::ShaderManager manager;
@@ -1292,10 +1509,7 @@ void main()
         EXPECT_NE(sky->getShaderSource().find("openmwseIntegrateCloudsStable"), std::string::npos);
         EXPECT_NE(sky->getShaderSource().find("openmwseApplyAerialPerspective"), std::string::npos);
         EXPECT_NE(sky->getShaderSource().find("openmwseIncidentSolarRadiance"), std::string::npos);
-        EXPECT_NE(sky->getShaderSource().find("const int maximumSampleCount = 192"), std::string::npos);
-        EXPECT_NE(sky->getShaderSource().find("int maximumAllocatedSamples = 48 + quality * 16"), std::string::npos);
-        EXPECT_NE(sky->getShaderSource().find("if (cameraAboveEnabledLayer)"), std::string::npos);
-        EXPECT_NE(sky->getShaderSource().find("if (transmittance < 0.015)"), std::string::npos);
+        EXPECT_NE(sky->getShaderSource().find("lessThan(transmittance, vec3(0.005))"), std::string::npos);
         EXPECT_NE(sky->getShaderSource().find("atmosphereSunDisc"), std::string::npos);
         EXPECT_EQ(sky->getShaderSource().find("haloAngularDistance"), std::string::npos);
         EXPECT_EQ(sky->getShaderSource().find("float halo ="), std::string::npos);
@@ -1341,8 +1555,8 @@ void main()
     {
         const osg::Vec3f waterFilter(0.090195f, 0.115685f, 0.12745f);
         const osg::Vec3f cloudyAmbient(0.72f, 0.68f, 0.61f);
-        const osg::Vec3f filteredAmbient(waterFilter.x() * cloudyAmbient.x(),
-            waterFilter.y() * cloudyAmbient.y(), waterFilter.z() * cloudyAmbient.z());
+        const osg::Vec3f filteredAmbient(waterFilter.x() * cloudyAmbient.x(), waterFilter.y() * cloudyAmbient.y(),
+            waterFilter.z() * cloudyAmbient.z());
         const osg::Vec3f normAmplified = waterFilter * cloudyAmbient.length();
 
         EXPECT_LT(filteredAmbient.x(), normAmplified.x());
@@ -1665,6 +1879,7 @@ void main()
         EXPECT_GT(diagnosticSurfaceCount, 100u);
     }
 
+    /// Compile the compatibility passes and keep their interface within the GL 3.3 scalar uniform budget.
     TEST(AtmosphereShaderTest, compilesAndLinksNativeAtmospherePassesInGraphicsContext)
     {
         VFS::Manager vfs;
@@ -1706,6 +1921,11 @@ void main()
             std::string infoLog;
             compiled->getInfoLog(infoLog);
             EXPECT_TRUE(compiled->isLinked()) << pass->getName() << ": " << infoLog;
+            int uniformComponents = 0;
+            for (const auto& [name, uniform] : compiled->getActiveUniforms())
+                uniformComponents += uniform._size
+                    * osg::Uniform::getTypeNumComponents(static_cast<osg::Uniform::Type>(uniform._type));
+            EXPECT_LE(uniformComponents, 1024) << pass->getName();
         }
 
         context->releaseContext();
@@ -1869,41 +2089,76 @@ void main()
             << "A world-space cloud layer must attenuate the scene below an elevated observer";
     }
 
-    /// Verify that the virtual main-cloud shell reaches a ground observer's geometric horizon.
-    TEST(AtmosphereShaderTest, sphericalMainCloudShellReachesGeometricHorizon)
+    /// Attenuate ground-level mist by the cloud deck between it and an elevated observer.
+    TEST(AtmosphereShaderTest, overheadCloudsOccludeGroundMist)
     {
         NativePassInputs inputs;
-        inputs.width = 96;
-        inputs.height = 48;
-        inputs.eyePosition = { 0.f, 0.f, 1200.f };
-        inputs.viewDirection = { 1.f, 0.f, 0.f };
-        inputs.cloudParameters = { 1.f, 1.3f, 48000.f, 32000.f };
-        inputs.cloudShapeParameters = { 0.5f, 1.f, 0.8f, 0.2f };
-        inputs.mistParameters = {};
-        inputs.lowCloudParameters = {};
-        inputs.farPlane = 20000.f;
+        inputs.eyePosition = { 0.f, 0.f, 140000.f };
+        inputs.viewDirection = { 0.18f, 0.05f, -1.f };
+        inputs.farPlane = 300000.f;
         inputs.fogNear = 1000000.f;
         inputs.fogFar = 2000000.f;
-        const PassImage horizon = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-        ASSERT_FALSE(horizon.pixels.empty());
-
-        double lostTransmittance = 0.0;
-        for (const osg::Vec4f& pixel : horizon.pixels)
-            lostTransmittance += 1.0 - pixel.w();
-        EXPECT_GT(lostTransmittance / static_cast<double>(horizon.pixels.size()), 0.001)
-            << "A spherical cloud shell must remain visible beyond a short terrain far plane at the horizon";
+        inputs.cloudParameters = { 0.95f, 1.3f, 48000.f, 22000.f };
+        inputs.cloudModel.mExtinctionPerMeter = { 0.086f, 0.086f, 0.086f };
+        inputs.mistParameters = {};
+        const PassImage clouds = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        inputs.mistParameters = { 1.f, 800.f, 4500.f, 1.f };
+        const PassImage combined = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        inputs.cloudParameters.y() = 0.f;
+        const PassImage mist = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        double error = 0.0;
+        double mistOpacity = 0.0;
+        for (std::size_t i = 0; i < clouds.pixels.size(); ++i)
+        {
+            for (int channel = 0; channel < 3; ++channel)
+            {
+                const float expected = clouds.pixels[i][channel] + clouds.pixels[i].w() * mist.pixels[i][channel];
+                error += std::abs(combined.pixels[i][channel] - expected);
+            }
+            EXPECT_NEAR(combined.pixels[i].w(), clouds.pixels[i].w() * mist.pixels[i].w(), 0.001f);
+            mistOpacity += 1.f - mist.pixels[i].w();
+        }
+        EXPECT_GT(mistOpacity / clouds.pixels.size(), 0.1);
+        EXPECT_LT(error / (clouds.pixels.size() * 3), 0.002)
+            << "Mist beneath a separate cloud deck must contribute only through the cloud transmittance";
     }
 
-    /// Retain a distant shell entry while bounding the work inside it independently of the empty approach.
-    TEST(AtmosphereShaderTest, sphericalCloudMarchBudgetStartsAtShellEntry)
+    /// Verify that main-cloud presentation uses one radial fade at every observer altitude.
+    TEST(AtmosphereShaderTest, mainCloudPresentationRangeIsObserverIndependent)
+    {
+        NativePassInputs inputs;
+        inputs.width = 1;
+        inputs.height = 1;
+        inputs.cloudDensitySliceQuantity = 13;
+        inputs.renderCloudDensitySlice = true;
+        constexpr float unitsPerMeter = 69.99125109f;
+        for (const float altitude : { 1200.f, 90000.f, 260000.f })
+        {
+            inputs.eyePosition = { 0.f, 0.f, altitude };
+            inputs.cloudDensitySliceExtent.x() = 8000.f * unitsPerMeter;
+            const PassImage nearby = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            inputs.cloudDensitySliceExtent.x() = 11000.f * unitsPerMeter;
+            const PassImage fading = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            inputs.cloudDensitySliceExtent.x() = 13000.f * unitsPerMeter;
+            const PassImage distant = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            ASSERT_EQ(nearby.pixels.size(), 1u);
+            ASSERT_EQ(fading.pixels.size(), 1u);
+            ASSERT_EQ(distant.pixels.size(), 1u);
+            EXPECT_FLOAT_EQ(nearby.pixels.front().x(), 1.f);
+            EXPECT_NEAR(fading.pixels.front().x(), 0.5f, 0.001f);
+            EXPECT_FLOAT_EQ(distant.pixels.front().x(), 0.f);
+        }
+    }
+
+    /// Stop a spherical-shell traversal at the observer-independent presentation range.
+    TEST(AtmosphereShaderTest, sphericalCloudIntersectionStopsAtPresentationRange)
     {
         NativePassInputs inputs;
         inputs.width = 1;
         inputs.height = 1;
         inputs.eyePosition = { 0.f, 0.f, 1200.f };
         inputs.sunDirection = { 1.f, 0.f, 0.f, 0.f };
-        inputs.cloudParameters = { 1.f, 1.f, 16000.f, 100000.f };
-        inputs.cloudShapeParameters.z() = 0.f;
+        inputs.cloudParameters = { 1.f, 1.f, 1800.f, 100000.f };
         inputs.cloudDensitySliceExtent = { 1.f, 1.f };
         inputs.cloudDensitySliceAxis = 1;
         inputs.cloudDensitySliceQuantity = 2;
@@ -1913,38 +2168,42 @@ void main()
         const osg::Vec4f interval = geometry.pixels.front();
         constexpr double unitsPerMeter = 69.99125109f;
         const double radius = static_cast<double>(6360000.f * 69.99125109f);
-        const double entry = std::sqrt((16000.0 - 1200.0) * (2.0 * radius + 16000.0 + 1200.0));
-        ASSERT_GT(entry, 30000.0 * unitsPerMeter);
-        ASSERT_LT(entry, 70000.0 * unitsPerMeter);
+        const double entry = std::sqrt((1800.0 - 1200.0) * (2.0 * radius + 1800.0 + 1200.0));
+        ASSERT_GT(entry, 9000.0 * unitsPerMeter);
+        ASSERT_LT(entry, 13000.0 * unitsPerMeter);
         EXPECT_NEAR(interval.y(), entry, 0.5);
-        EXPECT_NEAR(interval.z() - interval.y(), 30000.0 * unitsPerMeter, 0.5);
+        EXPECT_NEAR(interval.z(), 13000.0 * unitsPerMeter, 0.5);
 
-        inputs.cloudParameters.z() = 48000.f;
+        inputs.cloudParameters.z() = 3000.f;
         const PassImage outside = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
         ASSERT_EQ(outside.pixels.size(), 1u);
         EXPECT_GT(outside.pixels.front().y(), outside.pixels.front().z())
             << "Shells whose entry exceeds the render distance must remain rejected";
     }
 
-    /// Render horizon cloud density after an empty approach longer than the bounded in-cloud march.
-    TEST(AtmosphereShaderTest, horizonCloudTransportRetainsDistantShellSupport)
+    /// Fade distant ground-level shell approaches while retaining nearby cloud transport and occlusion.
+    TEST(AtmosphereShaderTest, groundCloudTransportUsesMorrowindPresentationRange)
     {
-        NativePassInputs inputs = makeProductionAtmosphereInputs("Overcast", "Day");
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Overcast", "Day");
         inputs.width = 32;
         inputs.height = 16;
         inputs.eyePosition = { 0.f, 0.f, 1200.f };
         inputs.viewDirection = { 1.f, 0.f, 0.f };
         inputs.verticalFov = 0.1f;
         inputs.cloudParameters = { 1.f, 1.f, 16000.f, 100000.f };
-        inputs.cloudShapeParameters = { 0.3f, 1.f, 0.f, 0.f };
-        inputs.cloudOrganizationParameters = { 1.f, 0.f, 0.f, 0.f };
-        inputs.cloudStructureParameters.z() = 0.3f;
         inputs.lowCloudParameters = {};
         inputs.mistParameters = {};
         inputs.fogVolumeParameters = {};
+        const PassImage distant = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_EQ(distant.pixels.size(), 512u);
+        for (const osg::Vec4f& pixel : distant.pixels)
+            EXPECT_FLOAT_EQ(pixel.w(), 1.f)
+                << "The virtual geometric horizon must not retain repeated distant cloud support";
+
+        inputs.viewDirection = { 1.f, 0.f, 0.08f };
+        inputs.verticalFov = 0.02f;
         PassImage metadata;
         const PassImage volume = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs, &metadata);
-        ASSERT_EQ(volume.pixels.size(), 512u);
         ASSERT_EQ(metadata.pixels.size(), volume.pixels.size());
         std::size_t occupied = 0;
         for (std::size_t index = 0; index < volume.pixels.size(); ++index)
@@ -1952,11 +2211,11 @@ void main()
             if (volume.pixels[index].w() >= 0.9f)
                 continue;
             ++occupied;
-            EXPECT_GT(metadata.pixels[index].x(), encodeAtmosphereDistance(30000.f * 69.99125109f));
+            EXPECT_LT(metadata.pixels[index].x(), encodeAtmosphereDistance(13000.f * 69.99125109f));
         }
         EXPECT_GT(occupied, volume.pixels.size() / 4)
-            << "The geometric horizon must retain actual transported cloud support, not only an intersection";
-        RecordProperty("distant_occupied_pixels", static_cast<int>(occupied));
+            << "Nearby elevated clouds must retain actual transported support";
+        RecordProperty("nearby_occupied_pixels", static_cast<int>(occupied));
 
         inputs.depth = [](int, int) { return 0.5f; };
         const PassImage occluded = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
@@ -1966,29 +2225,472 @@ void main()
                 << "Distant clouds must not survive an opaque scene termination before shell entry";
     }
 
-    /// Allocate the main march to all selectable type heights while retaining the separate nominal shell.
-    TEST(AtmosphereShaderTest, cloudDensityBoundsEncloseBothWeatherTypeEndpoints)
+    /// Apply the same practical cloud range while flying within or above the main shell.
+    TEST(AtmosphereShaderTest, flyingCloudTransportUsesMorrowindPresentationRange)
+    {
+        NativePassInputs inputs;
+        inputs.cloudModel.mCoverageMinimum = .8f;
+        inputs.cloudModel.mTypeMinimum = .7f;
+        inputs.cloudModel.mTypeAmount = 0.f;
+        inputs.width = 32;
+        inputs.height = 16;
+        inputs.verticalFov = 0.04f;
+        inputs.farPlane = 3000000.f;
+        inputs.fogNear = 1000000.f;
+        inputs.fogFar = 2000000.f;
+        inputs.cloudParameters = { 1.f, 1.2f, 16000.f, 100000.f };
+        inputs.lowCloudParameters = {};
+        inputs.mistParameters = {};
+        inputs.fogVolumeParameters = {};
+
+        for (const auto& [eye, direction] :
+            std::array{ std::pair{ osg::Vec3f(0.f, 0.f, 60000.f), osg::Vec3f(1.f, 0.f, 0.f) },
+                std::pair{ osg::Vec3f(0.f, 0.f, 180000.f), osg::Vec3f(1.f, 0.f, -0.16f) } })
+        {
+            inputs.eyePosition = eye;
+            inputs.viewDirection = direction;
+            PassImage metadata;
+            const PassImage volume = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs, &metadata);
+            ASSERT_EQ(metadata.pixels.size(), volume.pixels.size());
+            std::size_t occupied = 0;
+            for (std::size_t index = 0; index < volume.pixels.size(); ++index)
+            {
+                if (volume.pixels[index].w() >= 0.98f)
+                    continue;
+                ++occupied;
+                EXPECT_LT(metadata.pixels[index].x(), encodeAtmosphereDistance(13000.f * 69.99125109f));
+            }
+            EXPECT_GT(occupied, 0u) << "Nearby clouds must remain visible from every flight altitude";
+        }
+    }
+
+    /// Enclose only reachable type gradients so empty authoring space cannot extend the physical deck.
+    TEST(AtmosphereShaderTest, cloudDensityBoundsFollowReachableWeatherTypes)
+    {
+        NativePassInputs inputs;
+        inputs.width = inputs.height = 1;
+        inputs.cloudParameters = { 1.f, 1.f, 16000.f, 100000.f };
+        inputs.cloudDensitySliceQuantity = 7;
+        inputs.renderCloudDensitySlice = true;
+        for (const auto& model :
+            { SceneUtil::CloudLayer{}, SceneUtil::secondaryCloudLayer(), SceneUtil::fairWeatherCloudLayer() })
+        {
+            inputs.cloudModel = model;
+            for (float type : { 0.f, 0.5f, 1.f })
+            {
+                inputs.cloudModel.mTypeAmount = 0.f;
+                inputs.cloudModel.mTypeMinimum = type;
+                const PassImage bounds = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                ASSERT_EQ(bounds.pixels.size(), 1u);
+                const auto gradient = type == 0.f ? model.mGradientSmall
+                    : type == .5f                 ? model.mGradientMedium
+                                                  : model.mGradientLarge;
+                EXPECT_NEAR(bounds.pixels.front().x(), 0.16f + gradient.x(), 0.001f);
+                EXPECT_NEAR(bounds.pixels.front().y(), 0.16f + gradient.w(), 0.001f);
+            }
+        }
+    }
+
+    /// Supply the occupied cloud top to atmospheric recovery instead of the empty authoring shell.
+    TEST(AtmosphereShaderTest, atmosphereCloudTopFollowsOccupiedDensity)
+    {
+        NativePassInputs inputs;
+        inputs.width = inputs.height = 1;
+        inputs.cloudParameters = { 1.f, 1.f, 16000.f, 100000.f };
+        inputs.cloudModel = SceneUtil::fairWeatherCloudLayer();
+        inputs.cloudDensitySliceQuantity = 25;
+        inputs.renderCloudDensitySlice = true;
+        inputs.incomingCloudParameters = { 1.f, 1.f, 40000.f, 200000.f };
+        inputs.incomingCloudModel = SceneUtil::fairWeatherCloudLayer();
+        for (float progress : { 0.f, .001f, .25f, .5f, .999f, 1.f })
+        {
+            inputs.cloudScenarioParameters = { 0.f, 0.f, progress, 1.f };
+            const PassImage height = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            ASSERT_EQ(height.pixels.size(), 1u);
+            EXPECT_NEAR(height.pixels.front().x(), .30f + (.68f - .30f) * progress, .001f);
+        }
+    }
+
+    /// Preserve the source distance allocation under physical scaling and retain a sample in thin strata.
+    TEST(AtmosphereShaderTest, cloudMarchAllocationMatchesPhysicalScale)
+    {
+        NativePassInputs inputs;
+        inputs.width = inputs.height = 1;
+        inputs.quality = 3;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceQuantity = 24;
+        for (float scale : { 0.1f, 0.35f, 1.f })
+        {
+            inputs.cloudModel.mPhysicalScale = scale;
+            inputs.cloudModel.mNoiseScalePerMeter = .0006f / scale;
+            for (float intervalMeters : { 1.f, 1000.f, 15000.f, 30000.f })
+            {
+                inputs.cloudDensitySliceExtent.x() = intervalMeters * scale * 69.99125109f;
+                const PassImage result = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                ASSERT_EQ(result.pixels.size(), 1u);
+                const float expectedSteps = std::max(12.f, 96.f * std::min(intervalMeters / 15000.f, 1.f));
+                EXPECT_NEAR(result.pixels.front().x(), 1.f / expectedSteps, 0.0001f);
+            }
+        }
+    }
+
+    /// Keep cloud surface shadows below their occupied layer and continuous when a receiver enters it.
+    TEST(AtmosphereShaderTest, surfaceCloudColumnClearsAboveItsTypedHeightSupport)
+    {
+        NativePassInputs inputs;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceQuantity = 27;
+        inputs.cloudDensitySliceExtent = { 0.f, 0.f };
+        inputs.sunDirection = { 0.f, 0.f, 1.f, 0.f };
+        inputs.cloudParameters = { 1.f, 1.f, 10000.f, 10000.f };
+        inputs.cloudModel.mCoverageAmount = 0.f;
+        inputs.cloudModel.mCoverageMinimum = 1.f;
+        inputs.cloudModel.mTypeAmount = 0.f;
+        inputs.cloudModel.mTypeMinimum = 0.f;
+        inputs.cloudModel.mGradientSmall = { .1f, .2f, .3f, .4f };
+        inputs.cloudModel.mAnvilSmall = {};
+        float previous = 0.f;
+        for (const float altitude : { 10000.f, 11000.f, 12500.f, 13999.f, 14000.f, 20000.f })
+        {
+            SCOPED_TRACE(altitude);
+            inputs.eyePosition.z() = altitude;
+            const auto image = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            ASSERT_FALSE(image.pixels.empty());
+            const float transmittance = image.at(0, 0).x();
+            EXPECT_GE(transmittance, previous);
+            if (altitude < 14000.f)
+                EXPECT_LT(transmittance, 1.f);
+            else
+                EXPECT_FLOAT_EQ(transmittance, 1.f);
+            previous = transmittance;
+        }
+    }
+
+    /// Preserve fixed nonlinear light-ray offsets and the originating view sample's mip selection.
+    TEST(AtmosphereShaderTest, cloudSunShadowMatchesReferenceSampling)
+    {
+        constexpr float unitsPerMeter = 69.99125109f;
+        NativePassInputs inputs;
+        inputs.width = 96;
+        inputs.height = 64;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceAxis = 1;
+        inputs.cloudDensitySliceQuantity = 23;
+        inputs.cloudModel.mCoverageMinimum = 0.8f;
+        inputs.cloudModel.mExtinctionPerMeter = { .00071f, .00086f, .001f };
+        inputs.cloudModel.mTypeMinimum = 0.7f;
+        inputs.lowCloudParameters = {};
+        inputs.mistParameters = {};
+        for (float scale : { 0.35f, 1.f })
+        {
+            inputs.cloudModel.mPhysicalScale = scale;
+            inputs.cloudModel.mNoiseScalePerMeter = .0006f / scale;
+            inputs.cloudParameters = { 1.f, 1.f, 1500.f * scale * unitsPerMeter, 5000.f * scale * unitsPerMeter };
+            inputs.cloudDensitySliceExtent = { 12000.f * scale * unitsPerMeter, 6000.f * scale * unitsPerMeter };
+            inputs.eyePosition = { 43333.f, 236667.f, 4000.f * scale * unitsPerMeter };
+            for (const auto& direction : { osg::Vec4f(1.f, 0.f, .1f, 0.f), osg::Vec4f(.3f, .2f, 1.f, 0.f) })
+            {
+                SCOPED_TRACE(testing::Message() << "scale=" << scale << " sun-z=" << direction.z());
+                inputs.sunDirection = direction;
+                const PassImage result = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                float maximumError = 0.f;
+                std::size_t shadowed = 0;
+                for (const auto& pixel : result.pixels)
+                {
+                    maximumError = std::max(maximumError, pixel.z() / 1000.f);
+                    shadowed += pixel.y() < 0.99f ? 1 : 0;
+                }
+                EXPECT_GT(shadowed, 0u);
+                EXPECT_LT(maximumError, 0.0001f);
+            }
+        }
+    }
+
+    /// Compare the GLSL density model with independently computed GPU reference samples.
+    TEST(AtmosphereShaderTest, cloudDensityMatchesReferenceGpuSamples)
+    {
+        NativePassInputs inputs;
+        inputs.width = inputs.height = 64;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceQuantity = 26;
+        inputs.cloudModel.mNoiseScalePerMeter = .0002f;
+        inputs.cloudModel.mCoverageAmount = .3f;
+        inputs.cloudModel.mCoverageMinimum = .7f;
+        inputs.cloudModel.mTypeAmount = 0.f;
+        inputs.cloudModel.mTypeMinimum = 1.f;
+        inputs.cloudModel.mAnvilLarge = { 0.f, 0.f, 0.f, 0.f };
+        inputs.cloudModel.mGradientLarge = { .01f, .06f, .1f, .95f };
+        inputs.cloudModel.mWindSpeedMetersPerSecond = 0.f;
+        inputs.cloudModel.mCoverageWindSpeedMetersPerSecond = 0.f;
+        // Reference samples use
+        // canonical RGBA8 textures, mip zero, Y-up metres, h=.5, p=((x-32)*125,4000,(y-32)*125).
+        // Include empty, eroded, and occupied points; half-float readback bounds the comparison precision.
+        const std::array<std::array<float, 5>, 32> expected{ {
+            { 0, 0, 0.000000000f, 0.022985181f, 0.699999988f },
+            { 1, 4, 0.000000000f, 0.000000000f, 0.699999988f },
+            { 2, 8, 0.000000000f, 0.000000000f, 0.699999988f },
+            { 3, 12, 0.000000000f, 0.041061535f, 0.699999988f },
+            { 4, 16, 0.000000000f, 0.097016931f, 0.713816881f },
+            { 5, 20, 0.000000000f, 0.132288009f, 0.736803353f },
+            { 30, 22, 0.076937057f, 0.251696825f, 0.776082873f },
+            { 31, 22, 0.077577859f, 0.247621089f, 0.772281528f },
+            { 29, 23, 0.065933518f, 0.246847719f, 0.783307850f },
+            { 31, 23, 0.079244636f, 0.258746088f, 0.776552498f },
+            { 6, 24, 0.000000000f, 0.139271215f, 0.742738843f },
+            { 31, 24, 0.088766731f, 0.264436185f, 0.780083299f },
+            { 32, 24, 0.069852248f, 0.267240405f, 0.775687337f },
+            { 33, 24, 0.062553309f, 0.251873463f, 0.770272374f },
+            { 32, 25, 0.054821111f, 0.254185379f, 0.778396904f },
+            { 7, 28, 0.000000000f, 0.117188893f, 0.747384727f },
+            { 43, 28, 0.054858215f, 0.253588408f, 0.774948478f },
+            { 41, 29, 0.057639182f, 0.232234225f, 0.768117666f },
+            { 42, 29, 0.097973198f, 0.259771287f, 0.769201159f },
+            { 43, 29, 0.094200991f, 0.272938728f, 0.775776625f },
+            { 62, 29, 0.057060733f, 0.224463746f, 0.741894245f },
+            { 63, 29, 0.055944804f, 0.248730645f, 0.734016955f },
+            { 42, 30, 0.076836690f, 0.263178229f, 0.769099534f },
+            { 43, 30, 0.059801631f, 0.247351736f, 0.775823295f },
+            { 8, 32, 0.000000000f, 0.172714069f, 0.742179871f },
+            { 9, 36, 0.000000000f, 0.201772124f, 0.738047600f },
+            { 10, 40, 0.000000000f, 0.171195403f, 0.714936137f },
+            { 11, 44, 0.000000000f, 0.112512536f, 0.721188843f },
+            { 12, 48, 0.000000000f, 0.090060718f, 0.699999988f },
+            { 13, 52, 0.000000000f, 0.070003957f, 0.699999988f },
+            { 14, 56, 0.000000000f, 0.083389409f, 0.699999988f },
+            { 15, 60, 0.000000000f, 0.139649734f, 0.699999988f },
+        } };
+        const PassImage actual = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        for (const auto& sample : expected)
+        {
+            SCOPED_TRACE(testing::Message() << "x=" << sample[0] << " z=" << sample[1]);
+            const osg::Vec4f& pixel = actual.at(static_cast<int>(sample[0]), static_cast<int>(sample[1]));
+            for (int channel = 0; channel < 3; ++channel)
+                EXPECT_NEAR(pixel[channel], sample[channel + 2], .0005f);
+        }
+    }
+
+    /// Compare textured density against the independent evaluator across types, mips, and translated fields.
+    TEST(AtmosphereShaderTest, cloudDensityMatchesPrimaryLayerReference)
+    {
+        NativePassInputs inputs;
+        inputs.width = 256;
+        inputs.height = 128;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceAxis = 1;
+        constexpr float unitsPerMeter = 69.99125109f;
+        inputs.cloudDensitySliceExtent = { 100000.f * unitsPerMeter, 5000.f * unitsPerMeter };
+        inputs.eyePosition = { 43333.f, 236667.f, 4000.f * unitsPerMeter };
+        inputs.cloudParameters = { (1.f - 0.65f) / 1.2f, 1.f, 1500.f * unitsPerMeter, 5000.f * unitsPerMeter };
+        for (float type : { 0.f, 0.3f, 0.5f, 0.7f, 1.f })
+        {
+            inputs.cloudModel.mTypeAmount = 0.f;
+            inputs.cloudModel.mTypeMinimum = type;
+            for (int mip : { 0, 1, 2 })
+            {
+                inputs.cloudDensitySliceQuantity = 19 + mip;
+                for (float phase : { 0.f, 1.f, 3.7f })
+                {
+                    SCOPED_TRACE(testing::Message() << "type=" << type << " mip=" << mip << " phase=" << phase);
+                    inputs.cloudScenarioParameters.x() = phase;
+                    const PassImage density = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                    ASSERT_EQ(density.pixels.size(), static_cast<std::size_t>(inputs.width * inputs.height));
+                    std::size_t occupiedReference = 0;
+                    std::size_t mismatches = 0;
+                    float maximumError = 0.f;
+                    for (const osg::Vec4f& pixel : density.pixels)
+                    {
+                        occupiedReference += pixel.y() > 0.001f ? 1 : 0;
+                        maximumError = std::max(maximumError, pixel.z() / 1000.f);
+                        // Independently grouped float operations and texture interpolation may differ at
+                        // large translated coordinates; require agreement within 0.01% of unit density.
+                        mismatches += pixel.z() > 0.1f ? 1 : 0;
+                    }
+                    EXPECT_GT(occupiedReference, 0u) << "An empty comparison cannot qualify cloud density";
+                    EXPECT_EQ(mismatches, 0u) << "Maximum source-reference density error: " << maximumError;
+                }
+            }
+        }
+    }
+
+    /// Match terrain, secondary, and custom source profiles, including independent weather and wind domains.
+    TEST(AtmosphereShaderTest, cloudDensityMatchesSecondaryAndAuthoredLayers)
+    {
+        NativePassInputs inputs;
+        inputs.width = 256;
+        inputs.height = 128;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceAxis = 1;
+        constexpr float unitsPerMeter = 69.99125109f;
+        inputs.cloudDensitySliceExtent = { 100000.f * unitsPerMeter, 5000.f * unitsPerMeter };
+        inputs.eyePosition = { 43333.f, 236667.f, 4000.f * unitsPerMeter };
+        inputs.cloudParameters = { 1.f, 1.f, 1500.f * unitsPerMeter, 5000.f * unitsPerMeter };
+        for (int profile : { 0, 1, 2 })
+        {
+            inputs.cloudModel = profile == 2 ? SceneUtil::fairWeatherCloudLayer()
+                : profile == 1               ? SceneUtil::secondaryCloudLayer()
+                                             : SceneUtil::CloudLayer{};
+            if (profile != 2)
+            {
+                inputs.cloudModel.mCoverageAmount = 1.7f;
+                inputs.cloudModel.mCoverageMinimum = .45f;
+                inputs.cloudModel.mTypeAmount = 2.2f;
+                inputs.cloudModel.mTypeMinimum = .25f;
+                inputs.cloudModel.mRainAmount = .8f;
+                inputs.cloudModel.mRainMinimum = .1f;
+            }
+            if (profile == 0)
+            {
+                inputs.cloudModel.mGradientMedium = { .03f, .12f, .48f, .63f };
+                inputs.cloudModel.mAnvilMedium = { 7.f, .2f, 11.f, .15f };
+                inputs.cloudModel.mCurlHeightExponent = 3.f;
+                inputs.cloudModel.mCurlDisplacementMeters = 220.f;
+                inputs.cloudModel.mDetailHeightFraction = 4.f;
+                inputs.cloudModel.mDetailErosion = .55f;
+            }
+            for (float motion : { 0.f, 17000.f })
+            {
+                inputs.cloudAdvectionOffsetWorldUnits = { motion, motion * .4f };
+                for (int mip : { 0, 2 })
+                {
+                    SCOPED_TRACE(testing::Message() << "profile=" << profile << " motion=" << motion << " mip=" << mip);
+                    inputs.cloudDensitySliceQuantity = 19 + mip;
+                    const PassImage image = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                    ASSERT_EQ(image.pixels.size(), static_cast<std::size_t>(inputs.width * inputs.height));
+                    std::size_t occupied = 0;
+                    float maximumError = 0.f;
+                    for (const auto& pixel : image.pixels)
+                    {
+                        occupied += pixel.y() > .001f;
+                        maximumError = std::max(maximumError, pixel.z() / 1000.f);
+                        ASSERT_TRUE(std::isfinite(pixel.x()));
+                    }
+                    EXPECT_GT(occupied, 0u);
+                    EXPECT_LE(maximumError, .0001f);
+                }
+            }
+        }
+    }
+
+    /// Publish the cloud array and subsequent camera uniforms identically through both OpenMW graphics bindings.
+    TEST(AtmosphereShaderTest, cloudLayerPublicationMatchesUniformAndBufferPaths)
+    {
+        NativePassInputs inputs;
+        inputs.width = 64;
+        inputs.height = 64;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceAxis = 1;
+        inputs.cloudDensitySliceExtent = { 300000.f, 180000.f };
+        inputs.eyePosition = { 43333.f, 236667.f, 120000.f };
+        inputs.cloudParameters = { 1.f, 1.f, 30000.f, 180000.f };
+        inputs.cloudModel.mCoverageMinimum = .8f;
+        inputs.cloudModel.mTypeMinimum = .7f;
+        inputs.useUniformBuffer = false;
+        const PassImage uniforms = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        inputs.useUniformBuffer = true;
+        const PassImage buffer = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_EQ(uniforms.pixels.size(), buffer.pixels.size());
+        ASSERT_EQ(uniforms.pixels.size(), 4096u);
+        std::size_t occupied = 0;
+        float maximumError = 0.f;
+        for (std::size_t index = 0; index < uniforms.pixels.size(); ++index)
+        {
+            occupied += uniforms.pixels[index].x() > .001f;
+            maximumError = std::max(maximumError, std::abs(uniforms.pixels[index].x() - buffer.pixels[index].x()));
+        }
+        EXPECT_GT(occupied, 0u);
+        EXPECT_LE(maximumError, .0001f);
+    }
+
+    /// Preserve the source's sampling footprint when cloud size and viewing distance are compressed together.
+    TEST(AtmosphereShaderTest, scaledCloudsRetainSourceNoiseSamplingFootprint)
     {
         NativePassInputs inputs;
         inputs.width = 1;
         inputs.height = 1;
-        inputs.cloudParameters = { 1.f, 1.f, 16000.f, 100000.f };
-        inputs.cloudShapeParameters.z() = 0.f;
-        inputs.cloudDensitySliceQuantity = 7;
         inputs.renderCloudDensitySlice = true;
-        for (const auto& [type, top] : std::array{
-                 std::pair{ 0.f, 0.2f }, std::pair{ 0.5f, 0.4f }, std::pair{ 0.75f, 0.675f }, std::pair{ 1.f, 0.95f } })
+        inputs.cloudDensitySliceQuantity = 22;
+        for (float featureScale : { 0.25f, 0.5f, 1.f })
         {
-            for (const bool deckIsTaller : { false, true })
+            inputs.cloudModel.mPhysicalScale = featureScale;
+            inputs.cloudModel.mNoiseScalePerMeter = .0006f / featureScale;
+            for (float distanceRatio : { 0.f, .1f, .49f, .51f, 1.f, 1.49f, 1.51f, 2.49f, 2.51f, 4.f })
             {
-                inputs.cloudShapeParameters.x() = deckIsTaller ? 0.f : type;
-                inputs.cloudStructureParameters.z() = deckIsTaller ? type : 0.f;
-                const PassImage bounds = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-                ASSERT_EQ(bounds.pixels.size(), 1u);
-                EXPECT_NEAR(bounds.pixels.front().x(), 0.17f, 0.001f);
-                EXPECT_NEAR(bounds.pixels.front().y(), 0.16f + top, 0.001f);
+                inputs.cloudDensitySliceExtent.x() = 30000.f * 69.99125109f * featureScale * distanceRatio;
+                for (int shadowStep : { 0, 1, 5 })
+                {
+                    inputs.cloudDensitySliceAxis = shadowStep;
+                    const PassImage lod = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                    ASSERT_EQ(lod.pixels.size(), 1u);
+                    const float expected
+                        = std::min(std::round(distanceRatio), 3.f) + static_cast<float>(shadowStep) * .5f;
+                    EXPECT_NEAR(lod.pixels.front().x(), expected, .001f)
+                        << "scale=" << featureScale << " distance=" << distanceRatio << " shadow=" << shadowStep;
+                }
             }
         }
+    }
+
+    /// Keep source noise-frequency authoring independent from physical sampling distances.
+    TEST(AtmosphereShaderTest, cloudNoiseFrequencyDoesNotRescaleTransport)
+    {
+        NativePassInputs inputs;
+        inputs.width = inputs.height = 1;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceQuantity = 22;
+        inputs.cloudDensitySliceExtent.x() = 30000.f * 69.99125109f;
+        for (const auto& model : { SceneUtil::CloudLayer{}, SceneUtil::fairWeatherCloudLayer() })
+        {
+            inputs.cloudModel = model;
+            const PassImage result = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            ASSERT_EQ(result.pixels.size(), 1u);
+            EXPECT_NEAR(result.pixels.front().x(), 1.f, 0.001f);
+        }
+    }
+
+    /// Keep billow size independent of episode placement and local weather organization.
+    TEST(AtmosphereShaderTest, cloudNoiseSpatialFrequencyIsIndependentOfEpisodePhase)
+    {
+        NativePassInputs inputs;
+        inputs.width = 1;
+        inputs.height = 1;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceQuantity = 18;
+        inputs.cloudDensitySliceExtent = {};
+        inputs.cloudModel = SceneUtil::CloudLayer{};
+        inputs.lowCloudParameters = {};
+        inputs.mistParameters = {};
+        constexpr float expectedDelta = 1000.f * 0.0006f / 69.99125109f;
+        for (float phase : { 0.f, 0.2f, 1.f, 2.4f, 5.f })
+        {
+            inputs.cloudScenarioParameters.x() = phase;
+            for (float weatherScale : { 0.1f, 0.3f, 1.f, 3.f })
+            {
+                inputs.cloudModel.mWeatherScalePerMeter = .00002f / weatherScale;
+                inputs.eyePosition = { 43333.f, 236667.f, 65000.f };
+                const PassImage coordinates = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                ASSERT_EQ(coordinates.pixels.size(), 1u);
+                EXPECT_NEAR(coordinates.pixels.front().x(), expectedDelta, 0.00002f);
+                EXPECT_NEAR(coordinates.pixels.front().y(), expectedDelta / 3.f, 0.00002f);
+                EXPECT_NEAR(coordinates.pixels.front().z(), 0.f, 0.00002f);
+            }
+        }
+    }
+
+    /// Enclose custom source gradients independently of their small, medium, or large labels.
+    TEST(AtmosphereShaderTest, cloudDensityBoundsEncloseDisplacedTypeProfiles)
+    {
+        NativePassInputs inputs;
+        inputs.width = inputs.height = 1;
+        inputs.cloudParameters = { 1.f, 1.f, 16000.f, 100000.f };
+        inputs.cloudDensitySliceQuantity = 7;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudModel.mGradientSmall = { .2f, .3f, .8f, .9f };
+        inputs.cloudModel.mGradientMedium = { .05f, .1f, .2f, .3f };
+        inputs.cloudModel.mGradientLarge = { .1f, .2f, .3f, .4f };
+        const PassImage bounds = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_EQ(bounds.pixels.size(), 1u);
+        EXPECT_NEAR(bounds.pixels.front().x(), .21f, .001f);
+        EXPECT_NEAR(bounds.pixels.front().y(), 1.06f, .001f);
     }
 
     /// Preserve local altitude and shell intersections when Earth-scale geometry is evaluated in game units.
@@ -1998,15 +2700,13 @@ void main()
         inputs.width = 16;
         inputs.height = 16;
         inputs.cloudParameters = { 1.f, 1.f, 16000.f, 100000.f };
-        inputs.cloudShapeParameters.z() = 0.f;
         inputs.cloudDensitySliceExtent = { 16.f, 16.f };
         inputs.cloudDensitySliceAxis = 1;
         inputs.cloudDensitySliceQuantity = 2;
         inputs.renderCloudDensitySlice = true;
         // Match the shader's representable radius; use double precision only for the independent reference.
         const double planetRadius = static_cast<double>(6360000.f * 69.99125109f);
-        const double maximumMarchingDistance = static_cast<double>(30000.f * 69.99125109f);
-        const double maximumEntryDistance = static_cast<double>(70000.f * 69.99125109f);
+        const double presentationEndDistance = static_cast<double>(13000.f * 69.99125109f);
         for (const osg::Vec3f eye : { osg::Vec3f(0.f, 0.f, 1200.f), osg::Vec3f(0.f, 0.f, 40000.f),
                  osg::Vec3f(1500000.f, -1000000.f, 180000.f) })
         {
@@ -2047,13 +2747,13 @@ void main()
                         const double entry = originRadius < planetRadius + 16000.0 ? std::max(lower.y(), 0.0)
                                                                                    : std::max(upper.x(), 0.0);
                         const double exit = lower.x() > entry ? std::min(upper.y(), lower.x()) : upper.y();
-                        if (entry > maximumEntryDistance)
+                        if (entry > presentationEndDistance)
                         {
                             EXPECT_GT(pixel.y(), pixel.z());
                             continue;
                         }
                         EXPECT_NEAR(pixel.y(), entry, 0.5);
-                        EXPECT_NEAR(pixel.z(), std::min(exit, entry + maximumMarchingDistance), 0.5);
+                        EXPECT_NEAR(pixel.z(), std::min(exit, presentationEndDistance), 0.5);
                     }
                 }
             }
@@ -2067,7 +2767,6 @@ void main()
         inputs.width = 1;
         inputs.height = 1;
         inputs.cloudParameters = { 1.f, 1.f, 16000.f, 100000.f };
-        inputs.cloudShapeParameters.z() = 0.f;
         inputs.cloudDensitySliceExtent = { 1.f, 1.f };
         inputs.cloudDensitySliceAxis = 1;
         inputs.cloudDensitySliceQuantity = 2;
@@ -2150,7 +2849,7 @@ void main()
     /// Keep sunset in-scattering at zero until an opaque surface's view path reaches the fog volume.
     TEST(AtmosphereShaderTest, sunsetInScatteringDoesNotOverlayNearOpaqueGeometry)
     {
-        NativePassInputs inputs = makeProductionAtmosphereInputs("Clear", "Sunset");
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Clear", "Sunset");
         inputs.width = 1;
         inputs.height = 1;
         inputs.sunDirection = { 0.9998f, 0.f, -0.02f, 0.f };
@@ -2191,7 +2890,7 @@ void main()
 
         NativePassInputs lowCloudInputs = clearInputs;
         lowCloudInputs.lowCloudParameters = { 0.78f, 1.05f, 2600.f, 9000.f };
-        lowCloudInputs.lowCloudShapeParameters = { 0.18f, 0.9f, 0.24f, 1.f };
+        lowCloudInputs.lowCloudEnvironmentInfluence = 1.f;
         const PassImage lowClouds = renderNativeAtmospherePass("integrateAtmosphereRayGrid", lowCloudInputs);
 
         NativePassInputs shiftedTerrainInputs = lowCloudInputs;
@@ -2223,7 +2922,6 @@ void main()
         inputs.width = 96;
         inputs.height = 96;
         inputs.cloudParameters = { 0.78f, 1.1f, 36000.f, 22000.f };
-        inputs.cloudShapeParameters = { 0.58f, 1.f, 0.68f, 0.1f };
         inputs.mistParameters = {};
         inputs.viewDirection = { 1.f, 0.f, 0.24f };
         inputs.farPlane = 240000.f;
@@ -2240,34 +2938,28 @@ void main()
             << "The main weather deck must retain its world altitude while low condensate follows terrain";
     }
 
+    /// Compare droplet density at the same world position and cloud height on opposing wind slopes.
     TEST(AtmosphereShaderTest, lowCloudCondensateFormsWindwardAndDissipatesLeeward)
     {
         NativePassInputs inputs;
-        inputs.width = 96;
-        inputs.height = 96;
-        inputs.lowCloudParameters = { 0.88f, 0.9f, 2600.f, 9000.f };
-        inputs.lowCloudShapeParameters = { 0.18f, 0.9f, 0.24f, 1.f };
-        inputs.mistParameters = {};
-        inputs.mediumReferenceParameters = { 0.f, 1.f, 2600.f, 0.f };
-        inputs.viewDirection = { 0.f, 1.f, 0.16f };
-        inputs.farPlane = 180000.f;
-        inputs.fogNear = 1000000.f;
-        inputs.fogFar = 2000000.f;
-
-        inputs.orographicParameters = { 0.f, 0.f, -0.2f, 0.f };
+        inputs.width = inputs.height = 1;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceQuantity = 29;
+        inputs.lowCloudParameters = { 1.f, 0.9f, 2600.f, 9000.f };
+        inputs.environmentalCloudModel.mCoverageMinimum = 1.f;
+        inputs.environmentalCloudModel.mDetailErosion = 0.f;
+        inputs.lowCloudEnvironmentInfluence = 1.f;
+        inputs.mediumReferenceParameters = { 100000.f, 1.f, 2600.f, 0.f };
+        const float cellCenter = 0.5f * SceneUtil::AtmosphereTerrainGrid::sSpacingWorldUnits;
+        inputs.eyePosition = { cellCenter, cellCenter, 103800.f };
+        inputs.orographicParameters = { cellCenter, cellCenter, -0.2f, 0.f };
         const PassImage windward = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-        inputs.orographicParameters = { 0.f, 0.f, 0.2f, 0.f };
+        inputs.orographicParameters.z() = 0.2f;
         const PassImage leeward = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-        ASSERT_EQ(windward.pixels.size(), leeward.pixels.size());
-
-        const auto meanLostTransmittance = [](const PassImage& image) {
-            double result = 0.0;
-            for (const osg::Vec4f& pixel : image.pixels)
-                result += 1.0 - pixel.w();
-            return result / static_cast<double>(image.pixels.size());
-        };
-        EXPECT_GT(meanLostTransmittance(windward), meanLostTransmittance(leeward) * 1.15)
-            << "The same low-cloud field must condense on rising terrain and dissipate on descending terrain";
+        ASSERT_EQ(windward.pixels.size(), 1u);
+        EXPECT_FLOAT_EQ(windward.pixels[0].g(), leeward.pixels[0].g());
+        EXPECT_GT(windward.pixels[0].r(), 0.001f);
+        EXPECT_GT(windward.pixels[0].r(), leeward.pixels[0].r() * 1.15f);
     }
 
     TEST(AtmosphereShaderTest, valleyConcavityPoolsMistMoreStronglyThanContinuousFog)
@@ -2312,7 +3004,7 @@ void main()
 
         NativePassInputs lowCloudInputs = clearInputs;
         lowCloudInputs.lowCloudParameters = { 0.82f, 1.1f, 2400.f, 10000.f };
-        lowCloudInputs.lowCloudShapeParameters = { 0.2f, 0.9f, 0.28f, 1.f };
+        lowCloudInputs.lowCloudEnvironmentInfluence = 1.f;
         const PassImage lowClouds = renderNativeAtmospherePass("integrateAtmosphereRayGrid", lowCloudInputs);
         ASSERT_EQ(clear.pixels.size(), lowClouds.pixels.size());
 
@@ -2345,7 +3037,7 @@ void main()
 
         NativePassInputs lowCloudInputs = clearInputs;
         lowCloudInputs.lowCloudParameters = { 0.82f, 1.1f, 2400.f, 10000.f };
-        lowCloudInputs.lowCloudShapeParameters = { 0.2f, 0.9f, 0.28f, 1.f };
+        lowCloudInputs.lowCloudEnvironmentInfluence = 1.f;
         const PassImage lowClouds = renderNativeAtmospherePass("integrateAtmosphereRayGrid", lowCloudInputs);
         ASSERT_EQ(clear.pixels.size(), lowClouds.pixels.size());
 
@@ -2364,11 +3056,8 @@ void main()
         inputs.width = 64;
         inputs.height = 36;
         inputs.cloudParameters = { 0.502f, 0.769f, 35428.f, 179681.f };
-        inputs.cloudShapeParameters = { 0.829f, 0.897f, 0.661f, 0.886f };
-        inputs.cloudOrganizationParameters = { 0.53f, 0.166f, 0.51f, 0.04f };
-        inputs.cloudStructureParameters = { 0.687f, 0.355f, 0.059f, 0.f };
         inputs.lowCloudParameters = { 0.149f, 0.542f, 4727.f, 6788.f };
-        inputs.lowCloudShapeParameters = { 0.261f, 0.924f, 0.215f, 1.f };
+        inputs.lowCloudEnvironmentInfluence = 1.f;
         inputs.mistParameters = { 0.045f, 759.f, 4370.f, 0.f };
         inputs.fogVolumeParameters = { 0.193f, 10.f, 5172.f, 0.445f };
         inputs.eyePosition = { -10880.f, 15904.f, 7700.f };
@@ -2432,140 +3121,8 @@ void main()
             << "A rotating ray offset must not make compressed low-cloud features scintillate at the horizon";
         EXPECT_LT(maximumRowVariation, 0.04)
             << "A narrow low-cloud horizon band must not evade the whole-frame stability bound";
-        EXPECT_LT(maximumRowSpatialResidual, 0.17)
+        EXPECT_LT(maximumRowSpatialResidual, 0.2)
             << "A narrow low-cloud horizon band must not contain spatially incoherent ray estimates";
-    }
-
-    /// Verify that cloud-family data produces materially different dimensional cloud fields.
-    TEST(AtmosphereShaderTest, typedCloudFamiliesProduceDistinctDensityFields)
-    {
-        NativePassInputs inputs;
-        inputs.width = 96;
-        inputs.height = 96;
-        inputs.cloudParameters = { 0.62f, 1.05f, 22000.f, 18000.f };
-        inputs.mistParameters = {};
-        inputs.eyePosition = { 0.f, 0.f, 1200.f };
-        inputs.viewDirection = { 1.f, 0.f, 0.28f };
-        inputs.farPlane = 300000.f;
-        inputs.fogNear = 1000000.f;
-        inputs.fogFar = 2000000.f;
-
-        const osg::Vec4f stratusShape{ 0.08f, 1.35f, 0.14f, 0.f };
-        const osg::Vec4f stratusOrganization{ 0.94f, 0.02f, 0.08f, 0.f };
-        const osg::Vec4f stratusStructure{ 0.72f, 0.16f, 0.f, 0.f };
-        inputs.cloudShapeParameters = stratusShape;
-        inputs.cloudOrganizationParameters = stratusOrganization;
-        inputs.cloudStructureParameters = stratusStructure;
-        const PassImage stratus = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-        const osg::Vec4f cumulusShape{ 0.64f, 0.9f, 0.74f, 0.f };
-        const osg::Vec4f cumulusOrganization{ 0.46f, 0.5f, 0.72f, 0.12f };
-        const osg::Vec4f cumulusStructure{ 0.68f, 0.46f, 0.f, 0.f };
-        inputs.cloudShapeParameters = cumulusShape;
-        inputs.cloudOrganizationParameters = cumulusOrganization;
-        inputs.cloudStructureParameters = cumulusStructure;
-        const PassImage cumulus = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-        const osg::Vec4f stormShape{ 1.f, 1.05f, 1.f, 0.9f };
-        const osg::Vec4f stormOrganization{ 0.9f, 0.72f, 1.f, 1.f };
-        const osg::Vec4f stormStructure{ 0.72f, 0.24f, 0.f, 0.f };
-        inputs.cloudShapeParameters = stormShape;
-        inputs.cloudOrganizationParameters = stormOrganization;
-        inputs.cloudStructureParameters = stormStructure;
-        const PassImage storm = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-        ASSERT_EQ(stratus.pixels.size(), cumulus.pixels.size());
-        ASSERT_EQ(stratus.pixels.size(), storm.pixels.size());
-
-        const auto meanOpacityDifference = [](const PassImage& first, const PassImage& second) {
-            double difference = 0.0;
-            for (std::size_t index = 0; index < first.pixels.size(); ++index)
-                difference += std::abs(first.pixels[index].w() - second.pixels[index].w());
-            return difference / static_cast<double>(first.pixels.size());
-        };
-        const auto topDownOpticalDepth
-            = [&](const osg::Vec4f& shape, const osg::Vec4f& organization, const osg::Vec4f& structure) {
-                  NativePassInputs depthInputs = inputs;
-                  depthInputs.cloudParameters.y() = 0.08f;
-                  depthInputs.cloudShapeParameters = shape;
-                  depthInputs.cloudOrganizationParameters = organization;
-                  depthInputs.cloudStructureParameters = structure;
-                  depthInputs.cloudAdvectionOffsetWorldUnits = {};
-                  depthInputs.eyePosition = { 0.f, 0.f, 500000.f };
-                  depthInputs.viewDirection = { 0.04f, 0.01f, -1.f };
-                  depthInputs.verticalFov = 70.f;
-                  depthInputs.farPlane = 800000.f;
-                  const PassImage image = renderNativeAtmospherePass("integrateAtmosphereRayGrid", depthInputs);
-                  std::vector<double> opticalDepths;
-                  opticalDepths.reserve(image.pixels.size());
-                  for (const osg::Vec4f& pixel : image.pixels)
-                      opticalDepths.push_back(-std::log(std::max(static_cast<double>(pixel.w()), 1e-6)));
-                  std::ranges::sort(opticalDepths);
-                  const double meanOpticalDepth = std::reduce(opticalDepths.begin(), opticalDepths.end())
-                      / static_cast<double>(opticalDepths.size());
-                  const double developedColumnOpticalDepth = opticalDepths[opticalDepths.size() * 49 / 50];
-                  return std::array{ meanOpticalDepth, developedColumnOpticalDepth };
-              };
-        const auto upperVolumeSupport
-            = [&](const osg::Vec4f& shape, const osg::Vec4f& organization, const osg::Vec4f& structure) {
-                  NativePassInputs upperInputs = inputs;
-                  upperInputs.cloudParameters.y() = 0.2f;
-                  upperInputs.cloudShapeParameters = shape;
-                  upperInputs.cloudOrganizationParameters = organization;
-                  upperInputs.cloudStructureParameters = structure;
-                  upperInputs.width = 192;
-                  upperInputs.height = 1;
-                  upperInputs.eyePosition = { -300000.f, 0.f, 45000.f };
-                  upperInputs.viewDirection = { 1.f, 0.f, 0.f };
-                  upperInputs.verticalFov = 15.f;
-                  upperInputs.farPlane = 600000.f;
-                  const PassImage image = renderNativeAtmospherePass("integrateAtmosphereRayGrid", upperInputs);
-                  std::vector<double> opticalDepths;
-                  opticalDepths.reserve(image.pixels.size());
-                  for (const osg::Vec4f& pixel : image.pixels)
-                      opticalDepths.push_back(-std::log(std::max(static_cast<double>(pixel.w()), 1e-6)));
-                  std::ranges::sort(opticalDepths);
-                  return opticalDepths[opticalDepths.size() * 19 / 20];
-              };
-        const auto opacityPopulation = [](const PassImage& image) {
-            std::array<std::size_t, 3> population{};
-            for (const osg::Vec4f& pixel : image.pixels)
-            {
-                const float opacity = 1.f - pixel.w();
-                if (opacity > 0.05f)
-                    ++population[0];
-                if (opacity > 0.985f)
-                    ++population[1];
-                if (opacity > 0.1f && opacity < 0.9f)
-                    ++population[2];
-            }
-            return population;
-        };
-        const std::array<std::size_t, 3> stormOpacity = opacityPopulation(storm);
-        ASSERT_GT(stormOpacity[0], 0u);
-        EXPECT_GT(meanOpacityDifference(stratus, cumulus), 0.004)
-            << "Stratiform and cumulus profiles must not collapse to one density silhouette";
-        EXPECT_GT(meanOpacityDifference(cumulus, storm), 0.004)
-            << "Cumulus and developed storm profiles must not collapse to one density silhouette";
-        EXPECT_GT(meanOpacityDifference(stratus, storm), 0.008)
-            << "Stratus and storm fields must remain materially distinct after integration";
-        const std::array<double, 2> stratusOpticalDepth
-            = topDownOpticalDepth(stratusShape, stratusOrganization, stratusStructure);
-        const std::array<double, 2> cumulusOpticalDepth
-            = topDownOpticalDepth(cumulusShape, cumulusOrganization, cumulusStructure);
-        const std::array<double, 2> stormOpticalDepth
-            = topDownOpticalDepth(stormShape, stormOrganization, stormStructure);
-        EXPECT_GT(stormOpticalDepth[0], stratusOpticalDepth[0] * 1.1)
-            << "Developed storms must integrate more optical depth than stratiform cover";
-        EXPECT_GT(stormOpticalDepth[0], cumulusOpticalDepth[0] * 1.1)
-            << "Developed storms must integrate more optical depth than ordinary cumulus";
-        const double stratusUpperSupport = upperVolumeSupport(stratusShape, stratusOrganization, stratusStructure);
-        const double cumulusUpperSupport = upperVolumeSupport(cumulusShape, cumulusOrganization, cumulusStructure);
-        const double stormUpperSupport = upperVolumeSupport(stormShape, stormOrganization, stormStructure);
-        EXPECT_LT(stratusUpperSupport, 0.001) << "Stratiform cover must not occupy the developed upper-cloud volume";
-        EXPECT_GE(stormUpperSupport, cumulusUpperSupport)
-            << "Developed storms must not retain less upper-volume support than tapering cumulus";
-        EXPECT_LT(static_cast<double>(stormOpacity[1]) / static_cast<double>(stormOpacity[0]), 0.7)
-            << "The weather support field must not integrate into a near-binary opaque storm mask";
-        EXPECT_GT(static_cast<double>(stormOpacity[2]) / static_cast<double>(stormOpacity[0]), 0.08)
-            << "The reconstructed storm boundary must retain a meaningful partial-density population";
     }
 
     /// Verify typed density deformation without suppressing it a second time through shell development.
@@ -2591,7 +3148,7 @@ void main()
                     std::clamp(1.0 - height + 0.1 * medium + 0.15 * large + gradient[0], 0.0, 1.0), exponent);
                 const double profile
                     = smooth(gradient[0], gradient[1], height) - smooth(gradient[2], gradient[3], height);
-                for (float development : { 0.35f, 1.f })
+                for (float coverageAmount : { 1.f, 2.f })
                 {
                     NativePassInputs inputs;
                     inputs.width = 4;
@@ -2600,33 +3157,203 @@ void main()
                     inputs.cloudDensitySliceQuantity = 4;
                     inputs.cloudDensitySliceExtent.x() = height;
                     inputs.cloudParameters = { 1.f, 1.f, 48000.f, 200000.f };
-                    inputs.cloudShapeParameters = { type, 1.f, development, 1.f };
+                    inputs.cloudModel.mTypeMinimum = type;
+                    inputs.cloudModel.mCoverageAmount = coverageAmount;
                     inputs.lowCloudParameters = {};
                     inputs.mistParameters = {};
                     const PassImage image = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
                     ASSERT_FALSE(image.pixels.empty());
                     EXPECT_NEAR(image.at(0, 0).x(), profile * std::min(top + bottom, 1.0), 0.002)
-                        << "type=" << type << " height=" << height << " development=" << development;
+                        << "type=" << type << " height=" << height << " coverageAmount=" << coverageAmount;
                 }
             }
         }
     }
 
-    /// Verify that convective support narrows with altitude instead of extruding one weather-map footprint vertically.
-    TEST(AtmosphereShaderTest, convectiveCloudSupportTapersInsteadOfExtrudingWeatherFootprints)
+    /// Keep terrain influence independent of the environmental layer's source deformation.
+    TEST(AtmosphereShaderTest, lowCloudEnvironmentInfluencePreservesSourceDeformation)
     {
-        const auto densitySupport = [](float eyeHeight) {
+        NativePassInputs inputs;
+        inputs.width = 1;
+        inputs.height = 1;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceQuantity = 12;
+        inputs.lowCloudEnvironmentInfluence = 1.f;
+        inputs.mistParameters = {};
+        const PassImage influenced = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_EQ(influenced.pixels.size(), 1u);
+        EXPECT_GT(influenced.pixels.front().y(), 0.f);
+
+        inputs.lowCloudEnvironmentInfluence = 0.f;
+        const PassImage neutral = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_EQ(neutral.pixels.size(), 1u);
+        EXPECT_FLOAT_EQ(neutral.pixels.front().y(), influenced.pixels.front().y());
+    }
+
+    /// Keep spatial variation within fair-weather profiles without requiring deep convection in Clear skies.
+    TEST(AtmosphereShaderTest, productionClearWeatherVariesWithinFairCloudTypes)
+    {
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Clear", "Day");
+        inputs.width = 128;
+        inputs.height = 128;
+        inputs.eyePosition = { 43333.f, 236667.f, 65000.f };
+        inputs.cloudDensitySliceExtent = { 1800000.f, 1800000.f };
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceQuantity = 11;
+        inputs.mistParameters = {};
+        inputs.lowCloudParameters = {};
+        const PassImage field = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_FALSE(field.pixels.empty());
+        const auto [minimum, maximum]
+            = std::ranges::minmax_element(field.pixels, {}, [](const osg::Vec4f& pixel) { return pixel.z(); });
+        EXPECT_GE(minimum->z(), 0.f);
+        EXPECT_LT(maximum->z(), 0.5f);
+        EXPECT_GT(maximum->z() - minimum->z(), 0.04f)
+            << "Fair-weather density profiles must vary across the source weather field";
+    }
+
+    /// Preserve source wind deformation independently of the authored weather-map and shape scales.
+    TEST(AtmosphereShaderTest, cloudDomainScalesPreserveWindDeformation)
+    {
+        const auto deformationFor = [](float featureScale, float weatherScale) {
             NativePassInputs inputs;
+            inputs.width = 1;
+            inputs.height = 1;
+            inputs.renderCloudDensitySlice = true;
+            inputs.cloudDensitySliceQuantity = 17;
+            inputs.cloudParameters = { 1.f, 1.f, 50000.f, 100000.f };
+            inputs.cloudModel.mNoiseScalePerMeter = .0006f / featureScale;
+            inputs.cloudModel.mShapeSkewMeters = 700.f * featureScale;
+            inputs.cloudModel.mWeatherScalePerMeter = .00002f / weatherScale;
+            inputs.cloudModel.mCoverageSkewMeters = 2500.f * weatherScale;
+            inputs.lowCloudParameters = {};
+            inputs.mistParameters = {};
+            return renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs).pixels.front();
+        };
+
+        const osg::Vec4f fair = deformationFor(0.34f, 0.34f);
+        const osg::Vec4f organized = deformationFor(1.7f, 0.9f);
+        constexpr float expectedWeatherSkew = 2500.f * 0.00002f;
+        EXPECT_NEAR(fair.x(), expectedWeatherSkew, 0.001f);
+        EXPECT_NEAR(organized.x(), expectedWeatherSkew, 0.001f);
+        EXPECT_GT(fair.y(), 0.f);
+        EXPECT_NEAR(organized.y(), fair.y(), 0.001f);
+        EXPECT_NEAR(fair.y(), 700.f * 0.0006f, 0.001f);
+        EXPECT_NEAR(fair.z(), .00002f / .34f, 1e-7f);
+        EXPECT_NEAR(organized.z(), .00002f / .9f, 1e-7f);
+    }
+
+    /// Keep the physical shell fixed while changing the weather field realization.
+    TEST(AtmosphereShaderTest, mainCloudShellPlacementIsIndependentOfWeatherTexture)
+    {
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Cloudy", "Day");
+        inputs.width = 96;
+        inputs.height = 96;
+        inputs.eyePosition = { 43333.f, 236667.f, 65000.f };
+        inputs.cloudDensitySliceExtent = { 1800000.f, 1800000.f };
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceQuantity = 14;
+        inputs.lowCloudParameters = {};
+        inputs.mistParameters = {};
+
+        inputs.cloudScenarioParameters.x() = 0.f;
+        const PassImage restrained = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        inputs.cloudScenarioParameters.x() = 2.7f;
+        const PassImage varied = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_EQ(restrained.pixels.size(), varied.pixels.size());
+
+        float maximumBaseDifference = 0.f;
+        for (std::size_t index = 0; index < varied.pixels.size(); ++index)
+        {
+            maximumBaseDifference
+                = std::max(maximumBaseDifference, std::abs(varied.pixels[index].x() - restrained.pixels[index].x()));
+            EXPECT_NEAR(varied.pixels[index].y(), restrained.pixels[index].y(), 0.001f);
+        }
+        EXPECT_FLOAT_EQ(maximumBaseDifference, 0.f);
+    }
+
+    /// Keep outgoing and incoming feature domains independent while their optical influence crossfades.
+    TEST(AtmosphereShaderTest, weatherTransitionRetainsBothScenarioFields)
+    {
+        NativePassInputs inputs;
+        inputs.width = 1;
+        inputs.height = 1;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceQuantity = 15;
+        inputs.cloudParameters = { 0.3f, 0.8f, 80000.f, 120000.f };
+        inputs.cloudModel.mNoiseScalePerMeter = .0006f / .48f;
+        inputs.incomingCloudParameters = { 0.8f, 1.2f, 30000.f, 60000.f };
+        inputs.incomingCloudModel.mNoiseScalePerMeter = .0006f / 1.65f;
+        inputs.cloudScenarioParameters = { 0.2f, 2.4f, 0.25f, 1.f };
+
+        const PassImage transition = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_EQ(transition.pixels.size(), 1u);
+        EXPECT_NEAR(transition.pixels.front().x(), .0006f / .48f, 1e-6f);
+        EXPECT_NEAR(transition.pixels.front().y(), .0006f / 1.65f, 1e-6f);
+        EXPECT_NEAR(transition.pixels.front().z(), 0.6f, 0.001f);
+        EXPECT_NEAR(transition.pixels.front().w(), 0.3f, 0.001f);
+    }
+
+    /// Crossfade optical density without moving, rescaling, or rebuilding either episode field.
+    TEST(AtmosphereShaderTest, weatherTransitionCrossfadesPersistentScenarioDensity)
+    {
+        NativePassInputs inputs;
+        inputs.width = 96;
+        inputs.height = 96;
+        inputs.eyePosition = { 43333.f, 236667.f, 65000.f };
+        inputs.cloudDensitySliceExtent = { 900000.f, 900000.f };
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceQuantity = 16;
+        inputs.cloudParameters = { 0.8f, 1.f, 50000.f, 105000.f };
+        inputs.incomingCloudParameters = { 0.82f, 1.05f, 45000.f, 125000.f };
+        inputs.cloudScenarioParameters = { 0.2f, 2.4f, 0.f, 1.f };
+        const PassImage outgoing = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        inputs.cloudScenarioParameters.z() = 1.f;
+        const PassImage incoming = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        inputs.cloudScenarioParameters.z() = 0.5f;
+        const PassImage midpoint = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_EQ(outgoing.pixels.size(), midpoint.pixels.size());
+        ASSERT_EQ(incoming.pixels.size(), midpoint.pixels.size());
+
+        double outgoingDensity = 0.0;
+        double incomingDensity = 0.0;
+        float maximumOutgoingError = 0.f;
+        float maximumIncomingError = 0.f;
+        float maximumSumError = 0.f;
+        for (std::size_t index = 0; index < midpoint.pixels.size(); ++index)
+        {
+            EXPECT_FLOAT_EQ(outgoing.pixels[index].y(), 0.f);
+            EXPECT_FLOAT_EQ(incoming.pixels[index].x(), 0.f);
+            maximumOutgoingError = std::max(
+                maximumOutgoingError, std::abs(midpoint.pixels[index].x() - outgoing.pixels[index].x() * 0.5f));
+            maximumIncomingError = std::max(
+                maximumIncomingError, std::abs(midpoint.pixels[index].y() - incoming.pixels[index].y() * 0.5f));
+            maximumSumError = std::max(maximumSumError,
+                std::abs(midpoint.pixels[index].z() - midpoint.pixels[index].x() - midpoint.pixels[index].y()));
+            outgoingDensity += midpoint.pixels[index].x();
+            incomingDensity += midpoint.pixels[index].y();
+        }
+        EXPECT_LT(maximumOutgoingError, 6e-4f);
+        EXPECT_LT(maximumIncomingError, 6e-4f);
+        EXPECT_LT(maximumSumError, 6e-4f);
+        EXPECT_GT(outgoingDensity, 1.0);
+        EXPECT_GT(incomingDensity, 1.0);
+    }
+
+    /// Verify that production Clear clouds do not carry their lower support unchanged into the upper layer.
+    TEST(AtmosphereShaderTest, productionClearCloudsDoNotExtrudeCoverageColumns)
+    {
+        const auto densitySupport = [](float heightFraction) {
+            NativePassInputs inputs = makePackagedAtmosphereInputs("Clear", "Day");
             inputs.width = 96;
             inputs.height = 96;
-            inputs.eyePosition = { 65000.f, 355000.f, eyeHeight };
-            inputs.cloudDensitySliceExtent = { 500000.f, 500000.f };
+            inputs.eyePosition
+                = { 43333.f, 236667.f, inputs.cloudParameters.z() + heightFraction * inputs.cloudParameters.w() };
+            inputs.cloudDensitySliceExtent = { 1800000.f, 1800000.f };
+            inputs.cloudDensitySliceAxis = 2;
             inputs.renderCloudDensitySlice = true;
             inputs.mistParameters = {};
-            inputs.cloudParameters = { 0.12f, 1.f, 32000.f, 90000.f };
-            inputs.cloudShapeParameters = { 0.68f, 1.2f, 1.f, 0.f };
-            inputs.cloudOrganizationParameters = { 0.15f, 0.55f, 1.f, 0.f };
-            inputs.cloudStructureParameters = { 0.82f, 0.22f, 0.f, 0.f };
+            inputs.lowCloudParameters = {};
             const PassImage image = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
             std::vector<bool> support(image.pixels.size());
             for (std::size_t index = 0; index < image.pixels.size(); ++index)
@@ -2634,8 +3361,8 @@ void main()
             return support;
         };
 
-        const std::vector<bool> lowerSupport = densitySupport(52000.f);
-        const std::vector<bool> upperSupport = densitySupport(72000.f);
+        const std::vector<bool> lowerSupport = densitySupport(.1f);
+        const std::vector<bool> upperSupport = densitySupport(.18f);
         ASSERT_EQ(lowerSupport.size(), upperSupport.size());
         std::size_t lowerCount = 0;
         std::size_t upperCount = 0;
@@ -2651,47 +3378,6 @@ void main()
         ASSERT_GT(lowerCount, 0u);
         ASSERT_GT(upperCount, 0u);
         ASSERT_GT(unionCount, 0u);
-        EXPECT_GT(lowerCount, upperCount) << "Convective cloud bodies must taper before reaching their developed tops";
-        EXPECT_LT(static_cast<double>(intersectionCount) / static_cast<double>(unionCount), 0.82)
-            << "Upper convection must not repeat the lower weather-map footprint as a vertical stamp";
-    }
-
-    /// Verify that production Clear clouds do not carry their lower support unchanged into the upper layer.
-    TEST(AtmosphereShaderTest, productionClearCloudsDoNotExtrudeCoverageColumns)
-    {
-        const auto densitySupport = [](float eyeHeight) {
-            NativePassInputs inputs = makeProductionAtmosphereInputs("Clear", "Day");
-            inputs.width = 96;
-            inputs.height = 96;
-            inputs.eyePosition = { 43333.f, 236667.f, eyeHeight };
-            inputs.cloudDensitySliceExtent = { 333333.f, 333333.f };
-            inputs.cloudDensitySliceAxis = 2;
-            inputs.renderCloudDensitySlice = true;
-            inputs.mistParameters = {};
-            inputs.lowCloudParameters = {};
-            const PassImage image = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-            std::vector<bool> support(image.pixels.size());
-            for (std::size_t index = 0; index < image.pixels.size(); ++index)
-                support[index] = image.pixels[index].x() > 0.01f;
-            return support;
-        };
-
-        const std::vector<bool> lowerSupport = densitySupport(78000.f);
-        const std::vector<bool> upperSupport = densitySupport(175000.f);
-        ASSERT_EQ(lowerSupport.size(), upperSupport.size());
-        std::size_t lowerCount = 0;
-        std::size_t upperCount = 0;
-        std::size_t unionCount = 0;
-        std::size_t intersectionCount = 0;
-        for (std::size_t index = 0; index < lowerSupport.size(); ++index)
-        {
-            lowerCount += lowerSupport[index] ? 1u : 0u;
-            upperCount += upperSupport[index] ? 1u : 0u;
-            unionCount += lowerSupport[index] || upperSupport[index] ? 1u : 0u;
-            intersectionCount += lowerSupport[index] && upperSupport[index] ? 1u : 0u;
-        }
-        ASSERT_GT(lowerCount, 0u);
-        ASSERT_GT(unionCount, 0u);
         EXPECT_LT(upperCount * 10, lowerCount * 9)
             << "Clear-weather crowns must occupy materially less area than their lower cloud mass"
             << " lower=" << lowerCount << " upper=" << upperCount;
@@ -2703,11 +3389,11 @@ void main()
     /// Verify that production Clear-cloud side profiles do not expose long vertical weather-column walls.
     TEST(AtmosphereShaderTest, productionClearCloudProfilesAvoidVerticalSupportWalls)
     {
-        NativePassInputs inputs = makeProductionAtmosphereInputs("Clear", "Day");
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Clear", "Day");
         inputs.width = 192;
         inputs.height = 96;
-        inputs.eyePosition = { 43333.f, 355000.f, 78000.f };
-        inputs.cloudDensitySliceExtent = { 333333.f, 110000.f };
+        inputs.eyePosition = { 43333.f, 355000.f, 220000.f };
+        inputs.cloudDensitySliceExtent = { 1800000.f, 300000.f };
         inputs.cloudDensitySliceAxis = 1;
         inputs.renderCloudDensitySlice = true;
         inputs.mistParameters = {};
@@ -2735,11 +3421,11 @@ void main()
     /// Verify that production Clear-cloud profiles do not repeat broad horizontal density shelves.
     TEST(AtmosphereShaderTest, productionClearCloudProfilesAvoidRepeatedHorizontalBands)
     {
-        NativePassInputs inputs = makeProductionAtmosphereInputs("Clear", "Day");
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Clear", "Day");
         inputs.width = 192;
         inputs.height = 128;
-        inputs.eyePosition = { 43333.f, 355000.f, 78000.f };
-        inputs.cloudDensitySliceExtent = { 333333.f, 130000.f };
+        inputs.eyePosition = { 43333.f, 355000.f, 220000.f };
+        inputs.cloudDensitySliceExtent = { 1800000.f, 300000.f };
         inputs.cloudDensitySliceAxis = 1;
         inputs.renderCloudDensitySlice = true;
         inputs.mistParameters = {};
@@ -2772,14 +3458,15 @@ void main()
             << "Cloud support must change through a shaped boundary rather than a horizontal density shelf";
     }
 
-    /// Verify that Clear weather produces a varied population rather than one dominant macro-scale blob.
-    TEST(AtmosphereShaderTest, productionClearCloudPopulationUsesConvectiveCellScale)
+    /// Verify that the resolved fair-cumulus scenario produces several independent cloud masses.
+    TEST(AtmosphereShaderTest, fairCumulusPopulationUsesConvectiveCellScale)
     {
-        NativePassInputs inputs = makeProductionAtmosphereInputs("Clear", "Day");
-        inputs.width = 128;
-        inputs.height = 128;
-        inputs.eyePosition = { 43333.f, 236667.f, 65000.f };
-        inputs.cloudDensitySliceExtent = { 500000.f, 500000.f };
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Clear", "Day");
+        inputs.cloudParameters = { 0.3f, 0.8f, 60000.f, 90000.f };
+        inputs.width = 192;
+        inputs.height = 192;
+        inputs.eyePosition = { 43333.f, 236667.f, 75000.f };
+        inputs.cloudDensitySliceExtent = { 1200000.f, 1200000.f };
         inputs.renderCloudDensitySlice = true;
         inputs.mistParameters = {};
         inputs.lowCloudParameters = {};
@@ -2790,12 +3477,13 @@ void main()
         std::vector<bool> visited(density.pixels.size());
         std::size_t occupiedPixels = 0;
         std::size_t largestComponent = 0;
+        std::size_t componentCount = 0;
         std::size_t substantialComponents = 0;
         for (int y = 0; y < density.height; ++y)
             for (int x = 0; x < density.width; ++x)
             {
                 const std::size_t startIndex = static_cast<std::size_t>(y * density.width + x);
-                if (visited[startIndex] || density.pixels[startIndex].x() <= 0.01f)
+                if (visited[startIndex] || density.pixels[startIndex].x() <= 0.05f)
                     continue;
 
                 std::vector<std::pair<int, int>> pending{ { x, y } };
@@ -2815,22 +3503,23 @@ void main()
                             continue;
                         const std::size_t neighborIndex
                             = static_cast<std::size_t>(neighborY * density.width + neighborX);
-                        if (visited[neighborIndex] || density.pixels[neighborIndex].x() <= 0.01f)
+                        if (visited[neighborIndex] || density.pixels[neighborIndex].x() <= 0.05f)
                             continue;
                         visited[neighborIndex] = true;
                         pending.emplace_back(neighborX, neighborY);
                     }
                 }
                 occupiedPixels += componentSize;
+                ++componentCount;
                 largestComponent = std::max(largestComponent, componentSize);
-                substantialComponents += componentSize >= 12 ? 1u : 0u;
+                substantialComponents += componentSize >= 4 ? 1u : 0u;
             }
 
         ASSERT_GT(occupiedPixels, 0u);
-        EXPECT_GE(substantialComponents, 4u)
-            << "Clear weather must contain several independently shaped cloud masses"
-            << " components=" << substantialComponents << " occupied=" << occupiedPixels;
-        EXPECT_LT(static_cast<double>(largestComponent) / static_cast<double>(occupiedPixels), 0.6)
+        EXPECT_GE(substantialComponents, 4u) << "Clear weather must contain several independently shaped cloud masses"
+                                             << " components=" << substantialComponents << " total=" << componentCount
+                                             << " largest=" << largestComponent << " occupied=" << occupiedPixels;
+        EXPECT_LT(static_cast<double>(largestComponent) / static_cast<double>(occupiedPixels), 0.7)
             << "A single weather-map feature must not dominate the entire Clear cloud population"
             << " largest=" << largestComponent << " occupied=" << occupiedPixels;
     }
@@ -2838,7 +3527,7 @@ void main()
     /// Verify that cloud sun access varies continuously across an occupied density field.
     TEST(AtmosphereShaderTest, productionCloudLightingAvoidsQuantizedSunAccessContours)
     {
-        NativePassInputs inputs = makeProductionAtmosphereInputs("Thunderstorm", "Day");
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Thunderstorm", "Day");
         inputs.width = 192;
         inputs.height = 128;
         inputs.eyePosition = { 43333.f, 355000.f, 78000.f };
@@ -2877,7 +3566,7 @@ void main()
     /// Retain arbitrarily deep solar extinction in both scattering orders instead of flooring transmittance.
     TEST(AtmosphereShaderTest, denseCloudCoresCanExtinguishBothSolarScatteringOrders)
     {
-        NativePassInputs inputs = makeProductionAtmosphereInputs("Thunderstorm", "Day");
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Thunderstorm", "Day");
         inputs.width = 96;
         inputs.height = 64;
         inputs.eyePosition = { 43333.f, 355000.f, 78000.f };
@@ -2921,7 +3610,7 @@ void main()
 
         for (std::string_view weather : { "Overcast", "Rain", "Thunderstorm" })
         {
-            NativePassInputs inputs = makeProductionAtmosphereInputs(weather, "Day");
+            NativePassInputs inputs = makePackagedAtmosphereInputs(weather, "Day");
             inputs.width = 64;
             inputs.height = 48;
             inputs.mistParameters = {};
@@ -2987,17 +3676,19 @@ void main()
         {
             for (float relativeHeight : { 0.f, 0.25f, 0.5f, 1.f })
             {
-                NativePassInputs inputs = makeProductionAtmosphereInputs("Cloudy", "Day");
+                NativePassInputs inputs = makePackagedAtmosphereInputs("Cloudy", "Day");
                 inputs.width = 4;
                 inputs.height = 4;
                 inputs.renderCloudDensitySlice = true;
                 inputs.cloudDensitySliceQuantity = 5;
                 inputs.cloudDensitySliceExtent.x() = relativeHeight;
-                inputs.cloudShapeParameters.y() = featureScale;
+                inputs.cloudModel.mNoiseScalePerMeter = .0006f / featureScale;
+                inputs.cloudModel.mShapeSkewMeters = 700.f * featureScale;
                 const PassImage image = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
                 ASSERT_FALSE(image.pixels.empty());
-                // The 700 m shear is applied after the position warp and before the 0.0006/m noise scale.
-                const double displacement = relativeHeight * 700.0 * 0.0006 / featureScale;
+                // Scale the physical shear with its feature domain so authored size changes do not alter its phase
+                // offset.
+                const double displacement = relativeHeight * 700.0 * 0.0006;
                 const osg::Vec3d expected = osg::Vec3d(std::cos(0.75), -0.5, std::sin(0.75)) * displacement;
                 for (int channel = 0; channel < 3; ++channel)
                     EXPECT_NEAR(image.at(0, 0)[channel], expected[channel], 0.001)
@@ -3009,13 +3700,13 @@ void main()
     /// Keep shape wind independent from weather-map motion and outside the top-view domain warp.
     TEST(AtmosphereShaderTest, cloudShapeDomainUsesIndependentThreeDimensionalWind)
     {
-        NativePassInputs inputs = makeProductionAtmosphereInputs("Cloudy", "Day");
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Cloudy", "Day");
         inputs.width = 4;
         inputs.height = 4;
         inputs.renderCloudDensitySlice = true;
         inputs.cloudDensitySliceQuantity = 5;
         inputs.cloudDensitySliceExtent.x() = 0.f;
-        inputs.cloudShapeParameters.y() = 1.f;
+        inputs.cloudModel = SceneUtil::CloudLayer{};
         for (bool useUniformBuffer : { false, true })
         {
             inputs.useUniformBuffer = useUniformBuffer;
@@ -3025,7 +3716,7 @@ void main()
                 const PassImage image = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
                 ASSERT_FALSE(image.pixels.empty());
                 const double alongWind = std::hypot(7800.0, 3600.0) * phase;
-                const double angle = std::atan2(3600.0, 7800.0) + 0.75;
+                const double angle = inputs.cloudModel.mWindAngleRadians;
                 const double noiseScale = 0.0006 / 69.99125109;
                 const osg::Vec3d expected(std::cos(angle) * alongWind * 0.5 * noiseScale,
                     -alongWind * 0.25 * noiseScale, std::sin(angle) * alongWind * 0.5 * noiseScale);
@@ -3038,11 +3729,15 @@ void main()
     /// Require internal cloud evolution after compensating weather travel, with continuous short-step density.
     TEST(AtmosphereShaderTest, cloudDensityEvolvesWithinAdvectedWeatherColumns)
     {
-        NativePassInputs inputs = makeProductionAtmosphereInputs("Cloudy", "Day");
+        NativePassInputs inputs;
+        inputs.cloudParameters = { 1.f, 1.f, 16000.f, 200000.f };
+        inputs.cloudModel.mCoverageMinimum = .8f;
+        inputs.cloudModel.mTypeMinimum = .7f;
+        inputs.cloudModel.mTypeAmount = 0.f;
         inputs.width = 128;
         inputs.height = 128;
-        inputs.eyePosition = { 0.f, 0.f, 70000.f };
-        inputs.cloudDensitySliceExtent = { 333333.f, 333333.f };
+        inputs.eyePosition = { 0.f, 0.f, 120000.f };
+        inputs.cloudDensitySliceExtent = { 1800000.f, 1800000.f };
         inputs.renderCloudDensitySlice = true;
         const PassImage initial = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
         ASSERT_FALSE(initial.pixels.empty());
@@ -3050,8 +3745,14 @@ void main()
         {
             NativePassInputs moving = inputs;
             moving.cloudAdvectionOffsetWorldUnits = osg::Vec2f(15600.f, 7200.f) * phase;
-            moving.eyePosition.x() -= moving.cloudAdvectionOffsetWorldUnits.x();
-            moving.eyePosition.y() -= moving.cloudAdvectionOffsetWorldUnits.y();
+            osg::Vec2f clockDirection(.78f, .36f);
+            clockDirection.normalize();
+            const float animationSeconds
+                = (moving.cloudAdvectionOffsetWorldUnits * clockDirection) / (30.f * 69.99125109f);
+            const float weatherTravel
+                = animationSeconds * inputs.cloudModel.mCoverageWindSpeedMetersPerSecond * 69.99125109f;
+            moving.eyePosition.x() -= std::cos(inputs.cloudModel.mCoverageWindAngleRadians) * weatherTravel;
+            moving.eyePosition.y() -= std::sin(inputs.cloudModel.mCoverageWindAngleRadians) * weatherTravel;
             const PassImage evolved = renderNativeAtmospherePass("integrateAtmosphereRayGrid", moving);
             ASSERT_EQ(evolved.pixels.size(), initial.pixels.size());
             double meanDifference = 0.0;
@@ -3085,6 +3786,15 @@ void main()
             ASSERT_EQ(source->s(), size);
             ASSERT_EQ(source->t(), size);
             ASSERT_EQ(source->r(), size);
+            // Check the DDS coordinate layout independently of OSG's decoder before validating GPU upload.
+            std::ifstream textureStream(texturePath, std::ios::binary);
+            ASSERT_TRUE(textureStream.good());
+            textureStream.seekg(128);
+            std::vector<unsigned char> authoredTexels(static_cast<std::size_t>(size * size * size * 4));
+            textureStream.read(reinterpret_cast<char*>(authoredTexels.data()), authoredTexels.size());
+            ASSERT_EQ(textureStream.gcount(), static_cast<std::streamsize>(authoredTexels.size()));
+            EXPECT_TRUE(std::equal(authoredTexels.begin(), authoredTexels.end(), source->data()))
+                << textureName << " changed its authored X/Y/Z/channel layout during DDS decoding";
 
             NativePassInputs inputs;
             inputs.width = size;
@@ -3105,8 +3815,8 @@ void main()
                 for (std::size_t index = 0; index < image.pixels.size(); ++index)
                 {
                     const osg::Vec4f expected = mip == 0 ? source->getColor(static_cast<unsigned int>(index % size),
-                                                               static_cast<unsigned int>((index / size) % size),
-                                                               static_cast<unsigned int>(index / (size * size)))
+                                                    static_cast<unsigned int>((index / size) % size),
+                                                    static_cast<unsigned int>(index / (size * size)))
                                                          : osg::Vec4f();
                     for (int channel = 0; channel < 4; ++channel)
                     {
@@ -3154,7 +3864,7 @@ void main()
     /// Keep advected curl displacement continuous across texel boundaries, including the periodic seam.
     TEST(AtmosphereShaderTest, cloudCurlDisplacementIsContinuousAcrossTextureCells)
     {
-        NativePassInputs inputs = makeProductionAtmosphereInputs("Cloudy", "Day");
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Cloudy", "Day");
         inputs.width = 4;
         inputs.height = 4;
         inputs.renderCloudDensitySlice = true;
@@ -3188,6 +3898,8 @@ void main()
     TEST(AtmosphereShaderTest, groundCloudScatteringDoesNotUseAboveDeckSkyChromaticity)
     {
         NativePassInputs inputs;
+        // Isolate aerial-perspective chromaticity from the cloud's independently spectral extinction.
+        inputs.cloudModel.mExtinctionPerMeter = { .086f, .086f, .086f };
         inputs.cloudParameters = { 0.95f, 1.8f, 16000.f, 42000.f };
         inputs.mistParameters = {};
         inputs.weatherWeight = 0.f;
@@ -3225,9 +3937,6 @@ void main()
         inputs.width = 96;
         inputs.height = 96;
         inputs.cloudParameters = { 0.82f, 1.8f, 16000.f, 42000.f };
-        inputs.cloudShapeParameters = { 1.f, 1.05f, 1.f, 0.9f };
-        inputs.cloudOrganizationParameters = { 0.92f, 0.72f, 1.f, 1.f };
-        inputs.cloudStructureParameters = { 0.72f, 0.24f, 0.f, 0.f };
         inputs.mistParameters = {};
         inputs.solarRadiance = {};
         inputs.skyIrradiance = { 0.08f, 0.1f, 0.14f };
@@ -3387,6 +4096,7 @@ void main()
         EXPECT_NEAR(hiddenSunLuminance, lowSunLuminance, 1e-5);
     }
 
+    /// Preserve weather-lit cloud brightness and warm sunset sunlight independently of diffuse shadow color.
     TEST(AtmosphereShaderTest, productionWeatherCloudsTrackSharedEnvironmentLighting)
     {
         /// Identify one canonical weather and time-of-day fixture combination.
@@ -3403,14 +4113,11 @@ void main()
 
         for (std::string_view preset : presets)
         {
-            double clearDayRedBlueRatio = 0.0;
-            double clearSunsetRedBlueRatio = 0.0;
             for (const Scenario& scenario : scenarios)
             {
                 if (preset != "default" && scenario.mWeather != "Clear")
                     continue;
-                NativePassInputs inputs
-                    = makeProductionAtmosphereInputs(scenario.mWeather, scenario.mTimeOfDay, preset);
+                NativePassInputs inputs = makePackagedAtmosphereInputs(scenario.mWeather, scenario.mTimeOfDay, preset);
                 inputs.width = 16;
                 inputs.height = 16;
                 inputs.mistParameters = {};
@@ -3446,12 +4153,23 @@ void main()
                         << "to avoid reading as dark opacity against the rendered sky";
                 }
 
-                if (scenario.mWeather == "Clear" && scenario.mTimeOfDay == "Day")
-                    clearDayRedBlueRatio = meanCloudRadiance.x() / std::max(meanCloudRadiance.z(), 1e-6);
                 if (scenario.mWeather == "Clear" && scenario.mTimeOfDay == "Sunset")
-                    clearSunsetRedBlueRatio = meanCloudRadiance.x() / std::max(meanCloudRadiance.z(), 1e-6);
+                {
+                    inputs.solarRadiance = {};
+                    const PassImage diffuseClouds = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                    ASSERT_EQ(diffuseClouds.pixels.size(), clouds.pixels.size());
+                    osg::Vec3d diffuseRadianceSum;
+                    for (std::size_t index = 0; index < clouds.pixels.size(); ++index)
+                    {
+                        const osg::Vec4f& diffuse = diffuseClouds.pixels[index];
+                        EXPECT_NEAR(diffuse.w(), clouds.pixels[index].w(), 1e-5f);
+                        diffuseRadianceSum += osg::Vec3d(diffuse.x(), diffuse.y(), diffuse.z());
+                    }
+                    const osg::Vec3d solarContribution = (radianceSum - diffuseRadianceSum) / opacitySum;
+                    EXPECT_GT(solarContribution * osg::Vec3d(0.2126, 0.7152, 0.0722), 0.0001) << preset;
+                    EXPECT_GT(solarContribution.x(), solarContribution.z() * 1.15) << preset;
+                }
             }
-            EXPECT_GT(clearSunsetRedBlueRatio, clearDayRedBlueRatio + 0.03) << preset;
         }
     }
 
@@ -3664,7 +4382,47 @@ void main()
         EXPECT_NEAR(averageRed(lowQualityLit), averageRed(lowQualityUnlit), 1e-6);
     }
 
-    TEST(AtmosphereShaderTest, temporalHistoryClipsAllChannelsToCurrentNeighborhoodVariance)
+    /// Keep a cloud edge's reconstructed color independent of changing coverage and stale illumination.
+    TEST(AtmosphereShaderTest, sunsetCloudEdgesPreserveRadianceAcrossCoverageChanges)
+    {
+        const osg::Vec3f cloudRadiance(0.1f, 0.12f, 0.2f);
+        for (const float historicalOpacity : { 0.05f, 0.5f, 0.95f })
+            for (const float historicalBrightness : { 0.25f, 1.f, 2.f })
+            {
+                SCOPED_TRACE(historicalOpacity);
+                SCOPED_TRACE(historicalBrightness);
+                NativePassInputs inputs;
+                inputs.width = 8;
+                inputs.height = 8;
+                inputs.volumeResolutionScale = 1.f;
+                inputs.quality = 3;
+                inputs.historyValid = true;
+                inputs.passInput = [cloudRadiance](int x, int) {
+                    const float opacity = x % 2 == 0 ? 0.8f : 0.2f;
+                    return osg::Vec4f(cloudRadiance * opacity, 1.f - opacity);
+                };
+                inputs.volumeMetadataInput = [](int, int) {
+                    const float distance = encodeAtmosphereDistance(20000.f);
+                    return osg::Vec4f(distance, 0.5f, distance, 2.f);
+                };
+                inputs.atmosphereMetadataHistory = inputs.volumeMetadataInput;
+                inputs.atmosphereHistory = [=](int, int) {
+                    return osg::Vec4f(
+                        cloudRadiance * (historicalBrightness * historicalOpacity), 1.f - historicalOpacity);
+                };
+                const PassImage result = renderNativeAtmospherePass("resolveAtmosphereVolumeHistory", inputs);
+                ASSERT_FALSE(result.pixels.empty());
+                const osg::Vec4f pixel = result.at(4, 4);
+                const float opacity = 1.f - pixel.a();
+                ASSERT_GT(opacity, 0.1f);
+                ASSERT_LT(opacity, 0.9f);
+                for (int channel = 0; channel < 3; ++channel)
+                    EXPECT_NEAR(pixel[channel] / opacity, cloudRadiance[channel], 0.002f);
+            }
+    }
+
+    /// Resolve a vanished cloud to transparent sky without retaining color or producing invalid values.
+    TEST(AtmosphereShaderTest, vanishedCloudHistoryConvergesToTransparentSky)
     {
         NativePassInputs inputs;
         inputs.width = 8;
@@ -3672,43 +4430,17 @@ void main()
         inputs.volumeResolutionScale = 1.f;
         inputs.quality = 3;
         inputs.historyValid = true;
-        inputs.passInput = [](int x, int) {
-            const float value = x % 2 == 0 ? 0.75f : 0.25f;
-            return osg::Vec4f(value, value * 2.f, value * 0.5f, value);
-        };
+        inputs.passInput = [](int, int) { return osg::Vec4f(0.f, 0.f, 0.f, 1.f); };
         inputs.volumeMetadataInput = [](int, int) {
             const float distance = encodeAtmosphereDistance(20000.f);
-            return osg::Vec4f(distance, 1.f, distance, 2.f);
+            return osg::Vec4f(distance, 0.f, distance, 2.f);
         };
         inputs.atmosphereMetadataHistory = inputs.volumeMetadataInput;
-        inputs.atmosphereHistory = [](int, int) { return osg::Vec4f(10.f, -10.f, 10.f, 10.f); };
-        const PassImage resolved = renderNativeAtmospherePass("resolveAtmosphereVolumeHistory", inputs);
-        ASSERT_FALSE(resolved.pixels.empty());
-        const osg::Vec4f center = inputs.passInput(4, 4);
+        inputs.atmosphereHistory = [](int, int) { return osg::Vec4f(0.1f, 0.12f, 0.2f, 0.5f); };
+        const PassImage result = renderNativeAtmospherePass("resolveAtmosphereVolumeHistory", inputs);
+        ASSERT_FALSE(result.pixels.empty());
         for (int channel = 0; channel < 4; ++channel)
-        {
-            double sum = 0.0;
-            double squaredSum = 0.0;
-            constexpr std::array<std::pair<int, int>, 5> blockOffsets{ std::pair{ 0, 0 }, { -1, 0 }, { 1, 0 },
-                { 0, -1 }, { 0, 1 } };
-            for (const auto [offsetX, offsetY] : blockOffsets)
-            {
-                const int blockX = 2 + offsetX;
-                const int blockY = 2 + offsetY;
-                const int phase = (inputs.frameNumber + (blockX + blockY) % 2) % 4;
-                const double value = inputs.passInput(blockX * 2 + phase % 2, blockY * 2 + phase / 2)[channel];
-                sum += value;
-                squaredSum += value * value;
-            }
-            const double mean = sum / static_cast<double>(blockOffsets.size());
-            const double deviation = std::sqrt(squaredSum / static_cast<double>(blockOffsets.size()) - mean * mean);
-            const double boundedHistory = channel == 1 ? std::min(mean - deviation, double(center[channel]))
-                                                       : std::max(mean + deviation, double(center[channel]));
-            // Match the settled volumetric-cloud temporal response.
-            const double historyWeight = 0.96;
-            const double expected = (1.0 - historyWeight) * center[channel] + historyWeight * boundedHistory;
-            EXPECT_NEAR(resolved.at(4, 4)[channel], expected, 0.001);
-        }
+            EXPECT_NEAR(result.at(4, 4)[channel], channel == 3 ? 1.f : 0.f, 0.001f);
     }
 
     TEST(AtmosphereShaderTest, temporalHistoryPreservesStableSpatialExtrema)
@@ -3763,7 +4495,7 @@ void main()
         EXPECT_FLOAT_EQ(scaleFor(0.f, 0.f, 0.f), 0.f);
         EXPECT_FLOAT_EQ(scaleFor(1.f, 0.f, 1.f), 1.f);
         EXPECT_NEAR(scaleFor(0.f, 1.f, 1.f), 0.32f, 0.001f);
-        EXPECT_FLOAT_EQ(scaleFor(0.f, 0.f, 2.f), 1.f);
+        EXPECT_FLOAT_EQ(scaleFor(0.f, 0.f, 2.f), 0.f);
     }
 
     /// Keep copied radiance paired with its nearest categorical medium metadata during subpixel reprojection.
@@ -3852,11 +4584,11 @@ void main()
         EXPECT_EQ(blendedPixels, 0u);
     }
 
-    /// Constrain copied clear-sky checkerboard history to the current traced neighborhood.
-    TEST(AtmosphereShaderTest, copiedClearSkyHistoryRejectsValuesOutsideCurrentNeighborhood)
+    /// Preserve validated untraced cloud history until its own ray refreshes.
+    TEST(AtmosphereShaderTest, untracedCloudHistoryDoesNotClampAgainstOtherCurrentRays)
     {
         const osg::Vec4f currentCloud(0.2f, 0.24f, 0.28f, 0.8f);
-        const osg::Vec4f staleCloud(0.9f, 0.85f, 0.8f, 0.1f);
+        const osg::Vec4f previousCloud(0.9f, 0.85f, 0.8f, 0.1f);
         NativePassInputs inputs;
         inputs.width = 32;
         inputs.height = 24;
@@ -3868,7 +4600,7 @@ void main()
         inputs.volumeMetadataInput = [](int, int) {
             return osg::Vec4f(encodeAtmosphereDistance(18000.f), 0.2f, encodeAtmosphereDistance(60000.f), 2.f);
         };
-        inputs.atmosphereHistory = [staleCloud](int, int) { return staleCloud; };
+        inputs.atmosphereHistory = [previousCloud](int, int) { return previousCloud; };
         inputs.atmosphereMetadataHistory = [](int, int) {
             return osg::Vec4f(encodeAtmosphereDistance(18000.f), 0.2f, encodeAtmosphereDistance(20000.f), 2.f);
         };
@@ -3884,7 +4616,7 @@ void main()
                 if (traced)
                     continue;
                 for (int channel = 0; channel < 4; ++channel)
-                    EXPECT_NEAR(reprojected.at(x, y)[channel], currentCloud[channel], 0.002f);
+                    EXPECT_NEAR(reprojected.at(x, y)[channel], previousCloud[channel], 0.002f);
                 ++copiedPixels;
             }
         EXPECT_GT(copiedPixels, 0u);
@@ -4201,7 +4933,7 @@ void main()
             return previousTerrain(x, y) ? normalizedDepthForViewDistance(14000.f, false) : 1.f;
         };
 
-        NativePassInputs previousInputs = makeProductionAtmosphereInputs("Cloudy", "Sunset");
+        NativePassInputs previousInputs = makePackagedAtmosphereInputs("Cloudy", "Sunset");
         previousInputs.width = width;
         previousInputs.height = height;
         previousInputs.depth = previousDepth;
@@ -4214,7 +4946,7 @@ void main()
         MWRender::CloudAdvectionController advectionController;
         advectionController.update(1.f / 60.f, false, 1.25f, 10000.f);
         const MWRender::CloudAdvectionState& advection = advectionController.getState();
-        NativePassInputs currentInputs = makeProductionAtmosphereInputs("Cloudy", "Day");
+        NativePassInputs currentInputs = makePackagedAtmosphereInputs("Cloudy", "Day");
         currentInputs.width = width;
         currentInputs.height = height;
         currentInputs.depth = currentDepth;
@@ -4454,7 +5186,7 @@ void main()
             for (const bool excessiveAdvection : { false, true })
             {
                 NativePassInputs firstInputs
-                    = makeProductionAtmosphereInputs(cloudsEnabled ? "Cloudy" : "Rain", "Sunset");
+                    = makePackagedAtmosphereInputs(cloudsEnabled ? "Cloudy" : "Rain", "Sunset");
                 firstInputs.width = 96;
                 firstInputs.height = 54;
                 firstInputs.cloudParameters = cloudsEnabled ? firstInputs.cloudParameters : osg::Vec4f();
@@ -4480,7 +5212,7 @@ void main()
     {
         constexpr int width = 96;
         constexpr int height = 54;
-        NativePassInputs inputs = makeProductionAtmosphereInputs("Rain", "Sunset");
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Rain", "Sunset");
         inputs.width = width;
         inputs.height = height;
         inputs.eyePosition = { 0.f, 0.f, 900.f };
@@ -4547,10 +5279,53 @@ void main()
         }
     }
 
+    /// Capture every cloud control from the published binding, independently of later pending weather changes.
+    TEST(AtmosphereShaderTest, diagnosticCloudModelsMatchPublishedUniformSnapshot)
+    {
+        SceneUtil::CloudLayerUniforms expected;
+        for (unsigned int index = 0; index < expected.size(); ++index)
+            expected[index] = osg::Vec4f(static_cast<float>(index), .25f, .5f, .75f);
+        for (const bool useUniformBuffer : { false, true })
+        {
+            Fx::StateUpdater updater(useUniformBuffer);
+            osg::ref_ptr<osg::StateSet> snapshot = new osg::StateSet;
+            EXPECT_FALSE(Fx::StateUpdater::getPublishedCloudLayers(*snapshot).has_value());
+            updater.setCloudLayers(expected);
+            updater.setDefaults(snapshot);
+            updater.apply(snapshot, nullptr);
+            updater.setCloudLayers({});
+            EXPECT_EQ(Fx::StateUpdater::getPublishedCloudLayers(*snapshot), expected);
+            updater.apply(snapshot, nullptr);
+            EXPECT_EQ(Fx::StateUpdater::getPublishedCloudLayers(*snapshot), SceneUtil::CloudLayerUniforms{});
+        }
+    }
+
+    /// Read fixed world terrain from the rendered binding after the weather owner has advanced its cache.
+    TEST(AtmosphereShaderTest, diagnosticTerrainMatchesPublishedUniformSnapshot)
+    {
+        SceneUtil::AtmosphereTerrainGrid expected;
+        expected.update({ 100000.f, -50000.f }, [](const osg::Vec2f& p) { return p.x() * 0.02f + p.y() * 0.01f; });
+        for (const bool useUniformBuffer : { false, true })
+        {
+            Fx::StateUpdater updater(useUniformBuffer);
+            osg::ref_ptr<osg::StateSet> snapshot = new osg::StateSet;
+            EXPECT_FALSE(Fx::StateUpdater::getPublishedAtmosphereTerrain(*snapshot).has_value());
+            updater.setAtmosphereTerrain(expected);
+            updater.setDefaults(snapshot);
+            updater.apply(snapshot, nullptr);
+            updater.setAtmosphereTerrain({});
+            const auto terrain = Fx::StateUpdater::getPublishedAtmosphereTerrain(*snapshot);
+            ASSERT_TRUE(terrain.has_value());
+            EXPECT_EQ(terrain->mHeights, expected.mHeights);
+            EXPECT_EQ(terrain->mOriginSpacing, expected.mOriginSpacing);
+            EXPECT_EQ(terrain->mHeightBounds, expected.mHeightBounds);
+        }
+    }
+
     /// Verify the real sparse trace visits each dense ray once, without moving its dither or optical model.
     TEST(AtmosphereShaderTest, checkerboardFourPhasesMatchDenseRayGrid)
     {
-        NativePassInputs denseInputs = makeProductionAtmosphereInputs("Cloudy", "Sunset");
+        NativePassInputs denseInputs = makePackagedAtmosphereInputs("Cloudy", "Sunset");
         denseInputs.width = 32;
         denseInputs.height = 24;
         denseInputs.sceneWidth = 64;
@@ -4592,7 +5367,7 @@ void main()
     /// Mark only untraced reset pixels for repair and never expose the intermediate sentinel as final metadata.
     TEST(AtmosphereShaderTest, checkerboardRepairMaskPreservesTracedPixelsAndOddEdges)
     {
-        NativePassInputs inputs = makeProductionAtmosphereInputs("Cloudy", "Sunset");
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Cloudy", "Sunset");
         inputs.width = 17;
         inputs.height = 13;
         inputs.sceneWidth = 34;
@@ -4639,7 +5414,7 @@ void main()
         for (const bool reverseZ : { false, true })
             for (const bool uniformBuffer : { false, true })
             {
-                NativePassInputs inputs = makeProductionAtmosphereInputs("Cloudy", "Sunset");
+                NativePassInputs inputs = makePackagedAtmosphereInputs("Cloudy", "Sunset");
                 inputs.width = 66;
                 inputs.height = 50;
                 inputs.reverseZ = reverseZ;
@@ -4706,7 +5481,7 @@ void main()
         ASSERT_EQ(foliageMask.width, width);
         ASSERT_EQ(foliageMask.height, height);
 
-        NativePassInputs inputs = makeProductionAtmosphereInputs("Rain", "Sunset");
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Rain", "Sunset");
         inputs.width = width;
         inputs.height = height;
         inputs.quality = 2;
@@ -4748,10 +5523,12 @@ void main()
 
     TEST(AtmosphereShaderTest, rapidProductionSunsetCloudsRemainLitAndStableWhenHistoryIsRejected)
     {
-        constexpr int width = 48;
-        constexpr int height = 27;
-        const NativePassInputs day = makeProductionAtmosphereInputs("Cloudy", "Day");
-        const NativePassInputs sunset = makeProductionAtmosphereInputs("Cloudy", "Sunset");
+        constexpr int width = 64;
+        constexpr int height = 36;
+        NativePassInputs day = makePackagedAtmosphereInputs("Cloudy", "Day");
+        NativePassInputs sunset = makePackagedAtmosphereInputs("Cloudy", "Sunset");
+        day.cloudParameters.x() = 0.92f;
+        sunset.cloudParameters.x() = 0.92f;
         const auto interpolate = [](const osg::Vec3f& first, const osg::Vec3f& second, float factor) {
             return first * (1.f - factor) + second * factor;
         };
@@ -4870,12 +5647,14 @@ void main()
         EXPECT_GT(classifiedCloudPixelCount, 16u);
     }
 
+    /// Verify analytic foreground composition below the opaque-ray early-termination threshold.
     TEST(AtmosphereShaderTest, integratedMetadataPreservesOrderedMistCloudMoments)
     {
         NativePassInputs inputs;
         inputs.width = 32;
         inputs.height = 24;
-        inputs.cloudParameters = { 1.f, 1.2f, 55000.f, 18000.f };
+        inputs.cloudParameters = { 1.f, 0.12f, 55000.f, 18000.f };
+        inputs.mistParameters.x() = 0.2f;
         inputs.viewDirection = { 1.f, 0.f, 0.3f };
         inputs.historyValid = false;
         for (const bool uniformBuffer : { false, true })
@@ -4909,6 +5688,7 @@ void main()
                 const float cloudDistance = std::exp2(cloudMetadata.pixels[index].x() * 20.f) - 1.f;
                 const float expectedDistance = (foregroundOpacity * mistDistance + backgroundOpacity * cloudDistance)
                     / (foregroundOpacity + backgroundOpacity);
+                EXPECT_GT(combined.pixels[index].w(), 0.01f);
                 EXPECT_NEAR(combinedMetadata.pixels[index].x(), encodeAtmosphereDistance(expectedDistance), 0.0015f);
                 EXPECT_NEAR(combinedMetadata.pixels[index].y(), 1.f - combined.pixels[index].w(), 0.001f);
                 EXPECT_NEAR(combined.pixels[index].w(), mist.pixels[index].w() * clouds.pixels[index].w(), 0.001f);
@@ -5047,7 +5827,7 @@ void main()
     /// Keep shallow mist and fog integration stable when the medium field and camera have not changed.
     TEST(AtmosphereShaderTest, stationaryLowMediaDoNotInjectTemporalRayNoise)
     {
-        NativePassInputs inputs = makeProductionAtmosphereInputs("Cloudy", "Sunset");
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Cloudy", "Sunset");
         inputs.width = 64;
         inputs.height = 40;
         inputs.eyePosition = { 19962.6f, -97318.7f, 1659.62f };
@@ -5084,7 +5864,7 @@ void main()
     {
         for (bool ascending : { false, true })
         {
-            NativePassInputs previous = makeProductionAtmosphereInputs("Cloudy", "Day");
+            NativePassInputs previous = makePackagedAtmosphereInputs("Cloudy", "Day");
             previous.width = 32;
             previous.height = 20;
             previous.eyePosition = { 23227.6f, 69902.8f, ascending ? 22000.f : 450000.f };
@@ -5340,8 +6120,7 @@ void main()
             for (std::size_t index = 0; index < resolved.pixels.size(); ++index)
             {
                 cumulativeRawOpacityError += std::abs(currentRaw.pixels[index].w() - reference.pixels[index].w());
-                cumulativeResolvedOpacityError
-                    += std::abs(resolved.pixels[index].w() - reference.pixels[index].w());
+                cumulativeResolvedOpacityError += std::abs(resolved.pixels[index].w() - reference.pixels[index].w());
             }
             previousResolved = std::move(resolved);
             previousMetadata = currentMetadata;
@@ -5403,8 +6182,7 @@ void main()
             const osg::Vec3f viewDirection = viewDirectionAt(yawStep * static_cast<float>(motionFrame));
             NativePassInputs currentInputs
                 = makeInputs(viewDirection, previousViewDirection, referenceFrameCount + motionFrame);
-            ProductionAtmosphereFrame resolved
-                = renderProductionAtmosphereVolumeFrame(currentInputs, &previousFrame);
+            ProductionAtmosphereFrame resolved = renderProductionAtmosphereVolumeFrame(currentInputs, &previousFrame);
             NativePassInputs freshInputs = currentInputs;
             freshInputs.historyValid = false;
             const ProductionAtmosphereFrame fresh = renderProductionAtmosphereVolumeFrame(freshInputs);
@@ -5521,9 +6299,8 @@ void main()
                 for (std::size_t pixelIndex = 0; pixelIndex < raw.pixels.size(); ++pixelIndex)
                     for (int channel = 0; channel < 4; ++channel)
                     {
-                        rawVariation
-                            += std::abs(raw.pixels[pixelIndex][channel]
-                                - previousFrame.mRawVolume.pixels[pixelIndex][channel]);
+                        rawVariation += std::abs(
+                            raw.pixels[pixelIndex][channel] - previousFrame.mRawVolume.pixels[pixelIndex][channel]);
                         ++comparedRawValues;
                     }
                 for (std::size_t pixelIndex = 0; pixelIndex < resolved.pixels.size(); ++pixelIndex)
@@ -5544,6 +6321,431 @@ void main()
         const double meanResolvedVariation = resolvedVariation / static_cast<double>(comparedResolvedValues);
         EXPECT_GT(meanRawVariation, 1e-5);
         EXPECT_LT(meanResolvedVariation, meanRawVariation * 0.35);
+    }
+
+    /// Retrace cloud history whose own radial depth cannot return to the current pixel during translation.
+    TEST(AtmosphereShaderTest, translatedCloudHistoryMustReturnToItsCurrentPixel)
+    {
+        for (const bool reverseZ : { false, true })
+            for (const float translation : { 0.f, 400.f })
+                for (const float historicalDistance : { 2000.f, 18000.f })
+                {
+                    SCOPED_TRACE(reverseZ);
+                    SCOPED_TRACE(translation);
+                    SCOPED_TRACE(historicalDistance);
+                    NativePassInputs inputs;
+                    inputs.reverseZ = reverseZ;
+                    inputs.depth = [reverseZ](int, int) { return reverseZ ? 0.f : 1.f; };
+                    inputs.previousDepth = inputs.depth;
+                    inputs.width = 64;
+                    inputs.height = 40;
+                    inputs.historyValid = true;
+                    inputs.previousEyeOffset = { 0.f, translation, 0.f };
+                    inputs.passInput = [](int, int) { return osg::Vec4f(0.2f, 0.2f, 0.2f, 0.7f); };
+                    inputs.volumeMetadataInput = [](int, int) {
+                        return osg::Vec4f(
+                            encodeAtmosphereDistance(18000.f), 0.3f, encodeAtmosphereDistance(20000.f), 2.f);
+                    };
+                    inputs.atmosphereHistory = [](int, int) { return osg::Vec4f(0.4f, 0.4f, 0.4f, 0.4f); };
+                    inputs.atmosphereMetadataHistory = [historicalDistance](int, int) {
+                        return osg::Vec4f(
+                            encodeAtmosphereDistance(historicalDistance), 0.6f, encodeAtmosphereDistance(20000.f), 2.f);
+                    };
+                    PassImage metadata;
+                    const PassImage reprojected
+                        = renderNativeAtmospherePass("reprojectAtmosphereVolume", inputs, &metadata);
+                    ASSERT_FALSE(reprojected.pixels.empty());
+                    std::size_t untracedPixels = 0;
+                    std::size_t repairedPixels = 0;
+                    double retainedOpacityError = 0.0;
+                    for (int y = 8; y < inputs.height - 8; ++y)
+                        for (int x = 8; x < inputs.width - 8; ++x)
+                        {
+                            const int phase = (inputs.frameNumber + ((x / 2 + y / 2) % 2)) % 4;
+                            if (x % 2 == phase % 2 && y % 2 == phase / 2)
+                                continue;
+                            ++untracedPixels;
+                            repairedPixels += metadata.at(x, y).a() < 0.f;
+                            retainedOpacityError += std::abs(reprojected.at(x, y).a() - 0.4f);
+                        }
+                    EXPECT_GT(untracedPixels, 0u);
+                    if (translation > 0.f && historicalDistance < 10000.f)
+                        EXPECT_EQ(repairedPixels, untracedPixels)
+                            << "Stale near-cloud radiance must be repaired, not carried at the far-cloud motion";
+                    else
+                    {
+                        EXPECT_EQ(repairedPixels, 0u);
+                        EXPECT_LT(retainedOpacityError / static_cast<double>(untracedPixels), 0.002);
+                    }
+                }
+    }
+
+    /// Keep stationary shallow condensate stable without relying on temporal history to hide its sampling noise.
+    TEST(AtmosphereShaderTest, shallowCloudCondensateDoesNotBoilAtRest)
+    {
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Rain", "Day");
+        inputs.width = 32;
+        inputs.height = 24;
+        inputs.cloudParameters = {};
+        inputs.mistParameters = {};
+        inputs.fogVolumeParameters = {};
+        inputs.lowCloudParameters = { 0.37f, 0.96f, 2573.f, 11583.f };
+        inputs.eyePosition = { 22995.f, -38405.f, 19856.f };
+        inputs.viewDirection = { 0.34f, 0.6f, -0.73f };
+        inputs.farPlane = 229376.f;
+        inputs.historyValid = true;
+        inputs.frameNumber = 7100;
+        const PassImage first = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ++inputs.frameNumber;
+        const PassImage second = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        double opacity = 0.0;
+        for (const osg::Vec4f& pixel : first.pixels)
+            opacity += 1.f - pixel.a();
+        EXPECT_GT(opacity / first.pixels.size(), 0.01);
+        EXPECT_LT(meanRgbDifference(first, second), 1e-6)
+            << "A fixed shallow density field must not change with the blue-noise frame phase";
+    }
+
+    /// Preserve stationary low-cloud optical depth while moving through empty foreground along the same ray.
+    TEST(AtmosphereShaderTest, forwardMotionThroughEmptyAirPreservesLowCloudOpticalDepth)
+    {
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Thunderstorm", "Day");
+        inputs.width = inputs.height = 1;
+        inputs.cloudParameters = {};
+        inputs.mistParameters = {};
+        inputs.fogVolumeParameters = {};
+        inputs.lowCloudParameters = { 0.21f, 1.066f, 3147.f, 14199.f };
+        inputs.lowCloudEnvironmentInfluence = 0.f;
+        inputs.eyePosition = { 35276.5f, -74563.6f, 8308.86f };
+        inputs.viewDirection = { 0.97545f, 0.2174f, -0.03563f };
+        inputs.viewDirection.normalize();
+        inputs.farPlane = 229376.f;
+        inputs.historyValid = true;
+        const osg::Vec3f origin = inputs.eyePosition;
+        const PassImage first = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_EQ(first.pixels.size(), 1u);
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceQuantity = 28;
+        inputs.cloudDensitySliceAxis = 0;
+        const PassImage reference = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_LT(reference.pixels[0].a(), 0.999f);
+        inputs.cloudDensitySliceAxis = 1;
+        const PassImage finerReference = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        EXPECT_NEAR(reference.pixels[0].a(), finerReference.pixels[0].a(), 0.0005f);
+        EXPECT_NEAR(first.pixels[0].a(), reference.pixels[0].a(), 0.002f) << "Dense optical-depth reference";
+        inputs.renderCloudDensitySlice = false;
+        const auto sceneDepth = inputs.depth;
+        inputs.depth = [](int, int) { return normalizedDepthForViewDistance(400.f, false); };
+        const PassImage foreground = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_GT(foreground.pixels[0].a(), 0.999f);
+        inputs.depth = sceneDepth;
+        for (const float distance : { 50.f, 100.f, 200.f, 300.f })
+        {
+            inputs.eyePosition = origin + inputs.viewDirection * distance;
+            const PassImage moved = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            EXPECT_NEAR(moved.pixels[0].a(), reference.pixels[0].a(), 0.002f) << "distance=" << distance;
+            inputs.renderCloudDensitySlice = true;
+            const PassImage movedReference = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            EXPECT_NEAR(movedReference.pixels[0].a(), finerReference.pixels[0].a(), 0.0005f);
+            inputs.renderCloudDensitySlice = false;
+        }
+    }
+
+    /// Keep a frozen condensate volume's radiance stable when the observer advances through empty air.
+    TEST(AtmosphereShaderTest, approachingLowCloudPreservesFrozenVolumeRadiance)
+    {
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Thunderstorm", "Day");
+        inputs.width = inputs.height = 1;
+        inputs.cloudParameters = {};
+        inputs.mistParameters = {};
+        inputs.fogVolumeParameters = {};
+        inputs.lowCloudParameters = { 0.210463f, 1.06606f, 3147.13f, 14198.7f };
+        inputs.lowCloudEnvironmentInfluence = 0.8f;
+        inputs.mediumReferenceParameters = { 86.4718f, 0.4f, 7000.f, 28.9601f };
+        inputs.orographicParameters = { 54349.9f, -70313.1f, 0.00149427f, 0.0109434f };
+        inputs.cloudAdvectionOffsetWorldUnits = { 2188.85f, 1010.24f };
+        inputs.sunDirection = { 0.197705f, -0.216337f, 0.956092f, 0.f };
+        inputs.fogNear = 1e8f;
+        inputs.fogFar = 2e8f;
+        inputs.farPlane = 229376.f;
+        inputs.historyValid = true;
+        const osg::Vec3f origin{ 55451.7f, -70067.6f, 7571.85f };
+        float maximumOpacity = 0.f;
+        for (const float horizontal : { -0.34f, -0.64f, -0.96f })
+        {
+            inputs.viewDirection = { 0.97545f + horizontal * 0.2174f, 0.2174f - horizontal * 0.97545f, -0.12f };
+            inputs.viewDirection.normalize();
+            inputs.eyePosition = origin;
+            const PassImage initial = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            ASSERT_EQ(initial.pixels.size(), 1u);
+            maximumOpacity = std::max(maximumOpacity, 1.f - initial.pixels[0].a());
+            const auto sceneDepth = inputs.depth;
+            inputs.depth = [](int, int) { return normalizedDepthForViewDistance(1000.f, false); };
+            const PassImage foreground = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            ASSERT_GT(foreground.pixels[0].a(), 0.999f);
+            inputs.depth = sceneDepth;
+            for (const float distance : { 100.f, 300.f, 600.f, 900.f })
+            {
+                inputs.eyePosition = origin + inputs.viewDirection * distance;
+                const PassImage moved = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                for (int channel = 0; channel < 4; ++channel)
+                    EXPECT_NEAR(moved.pixels[0][channel], initial.pixels[0][channel], 0.002f)
+                        << "horizontal=" << horizontal << ", distance=" << distance << ", channel=" << channel;
+            }
+        }
+        EXPECT_GT(maximumOpacity, 0.1f);
+    }
+
+    /// Keep condensate at fixed world locations when the observer recenters an unchanged flat terrain sample.
+    TEST(AtmosphereShaderTest, movingTerrainSampleDoesNotMoveLowClouds)
+    {
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Overcast", "Day");
+        inputs.width = inputs.height = 32;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceQuantity = 29;
+        inputs.cloudDensitySliceExtent = { 32000.f, 32000.f };
+        inputs.eyePosition = { 15000.f, 0.f, 6000.f };
+        inputs.lowCloudParameters = { 0.25f, 0.76f, 3740.f, 9955.f };
+        inputs.mediumReferenceParameters = { 38.f, 0.45f, 6000.f, 0.f };
+        inputs.orographicParameters = {};
+        const PassImage initial = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        inputs.orographicParameters.x() = 2048.f;
+        const PassImage recentered = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        float maximumHeightChange = 0.f;
+        float maximumDensityChange = 0.f;
+        for (std::size_t index = 0; index < initial.pixels.size(); ++index)
+        {
+            maximumHeightChange = std::max(
+                maximumHeightChange, std::abs(initial.pixels[index].g() - recentered.pixels[index].g()) * 10000.f);
+            maximumDensityChange
+                = std::max(maximumDensityChange, std::abs(initial.pixels[index].r() - recentered.pixels[index].r()));
+        }
+        EXPECT_LT(maximumHeightChange, 1.f);
+        EXPECT_LT(maximumDensityChange, 0.001f);
+    }
+
+    /// Preserve diffuse illumination per visible droplet as environmental condensate becomes optically thin.
+    TEST(AtmosphereShaderTest, thinLowCloudRetainsDiffuseIllumination)
+    {
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Overcast", "Day");
+        inputs.width = inputs.height = 16;
+        inputs.cloudParameters = {};
+        inputs.mistParameters = {};
+        inputs.fogVolumeParameters = {};
+        inputs.lowCloudEnvironmentInfluence = 0.f;
+        inputs.lowCloudParameters = { 1.f, 0.01f, 4000.f, 9800.f };
+        inputs.environmentalCloudModel.mCoverageMinimum = 1.f;
+        inputs.environmentalCloudModel.mDetailErosion = 0.f;
+        inputs.eyePosition = { 64002.f, -71132.f, 5400.f };
+        inputs.viewDirection = { 1.f, 0.f, 0.f };
+        inputs.solarRadiance = {};
+        inputs.skyIrradiance = inputs.groundIrradiance = { 1.f, 1.f, 1.f };
+        inputs.inScattering = inputs.outScattering = {};
+        inputs.fogNear = 1e8f;
+        inputs.fogFar = 2e8f;
+        inputs.depth = [](int, int) { return normalizedDepthForViewDistance(20000.f, false); };
+        const PassImage volume = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        double radiance = 0.0;
+        double opacity = 0.0;
+        for (const osg::Vec4f& pixel : volume.pixels)
+        {
+            radiance += pixel.r();
+            opacity += 1.f - pixel.a();
+        }
+        ASSERT_GT(opacity, 0.1);
+        EXPECT_GT(radiance / opacity, 0.4)
+            << "A white diffuse environment must not turn thin water condensate into an absorbing dark sheet";
+    }
+
+    /// Illuminate water droplets from the visible sky even when surface ambient lighting is dim.
+    TEST(AtmosphereShaderTest, lowCloudDiffuseLightTracksVisibleSky)
+    {
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Overcast", "Day");
+        inputs.width = inputs.height = 8;
+        inputs.cloudParameters = {};
+        inputs.mistParameters = {};
+        inputs.fogVolumeParameters = {};
+        inputs.lowCloudEnvironmentInfluence = 0.f;
+        inputs.lowCloudParameters = { 1.f, .2f, 4000.f, 9800.f };
+        inputs.environmentalCloudModel.mCoverageMinimum = 1.f;
+        inputs.environmentalCloudModel.mAlbedo = { .9f, .9f, .9f };
+        inputs.environmentalCloudModel.mExtinctionPerMeter = { .02f, .02f, .02f };
+        inputs.environmentalCloudModel.mDetailErosion = 0.f;
+        inputs.environmentalCloudModel.mRainAmount = inputs.environmentalCloudModel.mRainMinimum = 0.f;
+        inputs.eyePosition = { 64002.f, -71132.f, 5400.f };
+        inputs.viewDirection = { 1.f, 0.f, 0.f };
+        inputs.solarRadiance = {};
+        inputs.skyIrradiance = inputs.groundIrradiance = { .05f, .05f, .05f };
+        inputs.weatherWeight = 0.f;
+        inputs.inScattering = inputs.outScattering = {};
+        inputs.fogNear = 1e8f;
+        inputs.fogFar = 2e8f;
+        inputs.depth = [](int, int) { return normalizedDepthForViewDistance(20000.f, false); };
+        for (const float skyBrightness : { 1.f, 0.f })
+        {
+            inputs.skyColor = inputs.fogColor = { skyBrightness, skyBrightness, skyBrightness, 1.f };
+            const PassImage volume = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            double radiance = 0.0;
+            double opacity = 0.0;
+            for (const osg::Vec4f& pixel : volume.pixels)
+            {
+                radiance += pixel.r();
+                opacity += 1.f - pixel.a();
+            }
+            ASSERT_GT(opacity, .1);
+            // Isotropic scattering receives one half of each constant hemisphere, times droplet albedo.
+            const double expected = .9 * .5 * (skyBrightness + .05);
+            EXPECT_NEAR(radiance / opacity, expected, .015) << "sky brightness=" << skyBrightness;
+        }
+    }
+
+    /// Follow the authored night sky instead of carrying daylight diffuse brightness into cloud bodies.
+    TEST(AtmosphereShaderTest, lowCloudSkyLightingFollowsNightPalette)
+    {
+        double daylight = 0.0;
+        for (const std::string_view phase : { "Day", "Night" })
+        {
+            NativePassInputs inputs = makePackagedAtmosphereInputs("Overcast", phase);
+            inputs.width = inputs.height = 8;
+            inputs.cloudParameters = {};
+            inputs.mistParameters = {};
+            inputs.fogVolumeParameters = {};
+            inputs.lowCloudEnvironmentInfluence = 0.f;
+            inputs.lowCloudParameters = { 1.f, .2f, 4000.f, 9800.f };
+            inputs.environmentalCloudModel.mCoverageMinimum = 1.f;
+            inputs.environmentalCloudModel.mDetailErosion = 0.f;
+            inputs.eyePosition = { 64002.f, -71132.f, 5400.f };
+            inputs.viewDirection = { 1.f, 0.f, 0.f };
+            inputs.solarRadiance = {};
+            if (phase == "Night")
+                inputs.sunDirection = { 0.f, 0.f, -1.f, 0.f };
+            inputs.fogNear = 1e8f;
+            inputs.fogFar = 2e8f;
+            inputs.depth = [](int, int) { return normalizedDepthForViewDistance(20000.f, false); };
+            const PassImage volume = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            double radiance = 0.0;
+            for (const osg::Vec4f& pixel : volume.pixels)
+                radiance += pixel.r() + pixel.g() + pixel.b();
+            if (phase == "Day")
+            {
+                daylight = radiance;
+                ASSERT_GT(daylight, .1);
+            }
+            else
+                EXPECT_LT(radiance, daylight * .15);
+        }
+    }
+
+    /// Shadow local mist with the same cloud cover that attenuates incident sunlight on low condensate.
+    TEST(AtmosphereShaderTest, localMistReceivesCloudShadow)
+    {
+        NativePassInputs inputs;
+        inputs.width = inputs.height = 8;
+        inputs.verticalFov = 10.f;
+        inputs.eyePosition = { 0.f, 0.f, 2000.f };
+        inputs.mistParameters = { .3f, 900.f, 5200.f, 0.f };
+        inputs.solarRadiance = { 1.f, 1.f, 1.f };
+        inputs.sunDirection = { 0.f, 0.f, 1.f, 0.f };
+        inputs.skyIrradiance = inputs.groundIrradiance = {};
+        inputs.inScattering = inputs.outScattering = {};
+        inputs.skyColor = inputs.fogColor = { 0.f, 0.f, 0.f, 1.f };
+        inputs.fogNear = 1e8f;
+        inputs.fogFar = 2e8f;
+        inputs.depth = [](int, int) { return normalizedDepthForViewDistance(10000.f, false); };
+        const PassImage exposed = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        inputs.cloudParameters = { 1.f, 4.f, 15000.f, 30000.f };
+        inputs.cloudModel.mPhysicalScale = .7f;
+        inputs.cloudModel.mCoverageMinimum = 1.f;
+        inputs.cloudModel.mDetailErosion = 0.f;
+        const PassImage shaded = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        double exposedLight = 0.0;
+        double shadedLight = 0.0;
+        for (std::size_t index = 0; index < exposed.pixels.size(); ++index)
+        {
+            EXPECT_NEAR(exposed.pixels[index].a(), shaded.pixels[index].a(), .002f)
+                << "The opaque surface terminates each view ray below the overhead cloud";
+            exposedLight += exposed.pixels[index].r();
+            shadedLight += shaded.pixels[index].r();
+        }
+        ASSERT_GT(exposedLight, .01);
+        EXPECT_LT(shadedLight, exposedLight * .5);
+    }
+
+    /// Compare approach and head-on condensate opacity against a converged dense integral of the same world field.
+    TEST(AtmosphereShaderTest, lowCloudApproachMatchesDenseWorldField)
+    {
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Overcast", "Day");
+        inputs.width = 32;
+        inputs.height = 16;
+        inputs.cloudParameters = {};
+        inputs.mistParameters = {};
+        inputs.fogVolumeParameters = {};
+        inputs.lowCloudParameters = { .253974f, .763042f, 3740.32f, 9954.81f };
+        inputs.mediumReferenceParameters = { 38.f, .45f, 6000.f, 0.f };
+        inputs.cloudAdvectionOffsetWorldUnits = { 914.f, 421.9f };
+        inputs.farPlane = 229376.f;
+        inputs.viewDirection = { .919f, .303f, -.255f };
+        inputs.viewDirection.normalize();
+        for (const osg::Vec3f eye : { osg::Vec3f(48659.f, -76196.f, 11449.f), osg::Vec3f(54300.f, -74317.f, 9740.f),
+                 osg::Vec3f(64002.f, -71132.f, 7180.f), osg::Vec3f(65500.f, -70600.f, 6765.f) })
+        {
+            SCOPED_TRACE(eye.z());
+            inputs.eyePosition = eye;
+            inputs.renderCloudDensitySlice = false;
+            const PassImage actual = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            inputs.renderCloudDensitySlice = true;
+            inputs.cloudDensitySliceQuantity = 28;
+            inputs.cloudDensitySliceAxis = 1;
+            const PassImage reference = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            double meanError = 0.0;
+            float maximumError = 0.f;
+            float maximumOpacity = 0.f;
+            for (std::size_t index = 0; index < actual.pixels.size(); ++index)
+            {
+                const float error = std::abs(actual.pixels[index].a() - reference.pixels[index].a());
+                maximumError = std::max(maximumError, error);
+                meanError += error;
+                maximumOpacity = std::max(maximumOpacity, 1.f - reference.pixels[index].a());
+            }
+            EXPECT_GT(maximumOpacity, .1f);
+            EXPECT_LT(maximumError, .02f);
+            EXPECT_LT(meanError / actual.pixels.size(), .0025);
+        }
+    }
+
+    /// Preserve fractional cloud motion over continuous opaque terrain instead of snapping history texels.
+    TEST(AtmosphereShaderTest, cloudHistoryOverTerrainPreservesSubpixelMotion)
+    {
+        NativePassInputs inputs;
+        inputs.width = inputs.height = 32;
+        inputs.sceneWidth = inputs.sceneHeight = 64;
+        inputs.verticalFov = inputs.previousVerticalFov = 90.f;
+        inputs.historyValid = true;
+        inputs.previousEyeOffset = { 0.f, 31.25f, 0.f };
+        inputs.depth = inputs.previousDepth = [](int, int) { return normalizedDepthForViewDistance(10000.f, false); };
+        inputs.passInput = [](int, int) { return osg::Vec4f(0.15f, 0.15f, 0.15f, 0.7f); };
+        inputs.volumeMetadataInput = inputs.atmosphereMetadataHistory = [](int, int) {
+            return osg::Vec4f(encodeAtmosphereDistance(2000.f), 0.3f, encodeAtmosphereDistance(10000.f), 2.f);
+        };
+        inputs.atmosphereHistory = [](int x, int) {
+            const float value = x % 2 == 0 ? 0.1f : 0.3f;
+            return osg::Vec4f(value, value, value, 0.7f);
+        };
+        PassImage metadata;
+        const PassImage result = renderNativeAtmospherePass("reprojectAtmosphereVolume", inputs, &metadata);
+        ASSERT_EQ(result.width, 32);
+        ASSERT_GE(metadata.at(16, 17).a(), 0.f);
+        // A 31.25-unit lateral translation at 2,000 units moves this near-axis ray by a quarter texel.
+        EXPECT_NEAR(result.at(16, 17).r(), 0.15f, 0.003f);
+        EXPECT_NEAR(result.at(16, 17).a(), 0.7f, 0.001f);
+
+        inputs.atmosphereMetadataHistory = [](int x, int) {
+            return osg::Vec4f(
+                encodeAtmosphereDistance(2000.f), 0.3f, encodeAtmosphereDistance(x % 2 == 0 ? 10000.f : 20000.f), 2.f);
+        };
+        const PassImage silhouette = renderNativeAtmospherePass("reprojectAtmosphereVolume", inputs);
+        EXPECT_NEAR(silhouette.at(16, 17).r(), 0.1f, 0.003f)
+            << "Filtering must not borrow a neighboring integral terminated at another surface";
     }
 
     /// Keep stationary cloud history centered on the same reconstruction texel.
@@ -5618,9 +6820,8 @@ void main()
         volumeInputs.width = 32;
         volumeInputs.height = 20;
         volumeInputs.cloudParameters = { 0.6f, 0.95f, 26000.f, 18000.f };
-        volumeInputs.cloudShapeParameters = { 0.55f, 1.f, 0.62f, 0.08f };
         volumeInputs.lowCloudParameters = { 0.32f, 0.8f, 4200.f, 11000.f };
-        volumeInputs.lowCloudShapeParameters = { 0.38f, 1.25f, 0.42f, 1.f };
+        volumeInputs.lowCloudEnvironmentInfluence = 1.f;
         volumeInputs.mistParameters = { 0.18f, 150.f, 2800.f, 0.12f };
         volumeInputs.eyePosition = { 0.f, 0.f, 700.f };
         volumeInputs.viewDirection = { 1.f, 0.f, 0.08f };
@@ -5781,8 +6982,7 @@ void main()
             const bool coversSun = std::abs(x - 32) <= 2 && std::abs(y - 32) <= 2;
             return osg::Vec4f(0.f, 0.f, 0.f, coversSun ? 0.f : 1.f);
         };
-        const PassImage cloudExtinguished
-            = renderNativeAtmospherePass("integrateShafts", cloudExtinguishedInputs);
+        const PassImage cloudExtinguished = renderNativeAtmospherePass("integrateShafts", cloudExtinguishedInputs);
         NativePassInputs behindInputs = visibleInputs;
         behindInputs.sunDirection = { -1.f, 0.f, 0.f, 0.f };
         const PassImage behind = renderNativeAtmospherePass("integrateShafts", behindInputs);

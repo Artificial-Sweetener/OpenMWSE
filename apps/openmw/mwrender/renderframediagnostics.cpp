@@ -17,20 +17,21 @@
 
 namespace MWRender
 {
-    void RenderFrameDiagnostics::requestCapture(std::filesystem::path outputPath, std::uint32_t frameCount)
+    void RenderFrameDiagnostics::requestCapture(
+        std::filesystem::path outputPath, std::uint32_t frameCount, bool nativeResolution)
     {
         if (frameCount == 0 || frameCount > 600)
             throw std::invalid_argument("render frame diagnostic count must be within [1, 600]");
 
         std::lock_guard lock(mMutex);
-        if (mOutputPath || mWriting)
+        if (mOutputPath)
             throw std::logic_error("render frame diagnostic capture is already in progress");
+        mWriter = std::make_unique<RenderDiagnosticBundleWriter>(outputPath);
         mOutputPath = std::move(outputPath);
+        mNativeResolution = nativeResolution;
         mRequestedFrameCount = frameCount;
         mCapturedFrameCount = 0;
         mLastFrameNumber.reset();
-        mImages.clear();
-        mImages.reserve(frameCount * 4);
     }
 
     bool RenderFrameDiagnostics::captureRequested() const
@@ -42,7 +43,7 @@ namespace MWRender
     bool RenderFrameDiagnostics::captureInProgress() const
     {
         std::lock_guard lock(mMutex);
-        return mOutputPath.has_value() || mWriting;
+        return mOutputPath.has_value();
     }
 
     void RenderFrameDiagnostics::captureFrame(
@@ -60,7 +61,10 @@ namespace MWRender
 
         try
         {
-            constexpr unsigned maximumCaptureDimension = 1024;
+            if (mNativeResolution
+                && (width <= 0 || height <= 0 || static_cast<std::uint64_t>(width) * height > 64u * 1024u * 1024u))
+                throw std::runtime_error("native-resolution frame capture exceeds the 64-million-pixel frame budget");
+            const unsigned maximumCaptureDimension = mNativeResolution ? 0 : 1024;
             std::ostringstream name;
             name << "route-frame-" << std::setw(4) << std::setfill('0') << frameOrdinal << "-osg-" << frameNumber;
             RenderDiagnosticCapture capture(renderInfo);
@@ -75,32 +79,18 @@ namespace MWRender
                 shadowMap.mName = shadowName.str();
             }
 
-            std::optional<std::filesystem::path> completedPath;
-            std::vector<RenderDiagnosticImage> completedImages;
+            std::lock_guard lock(mMutex);
+            if (!mOutputPath)
+                return;
+            mWriter->append(std::span<const RenderDiagnosticImage>(&image, 1));
+            mWriter->append(shadowMaps.mImages);
+            ++mCapturedFrameCount;
+            if (mCapturedFrameCount == mRequestedFrameCount)
             {
-                std::lock_guard lock(mMutex);
-                if (!mOutputPath)
-                    return;
-                mImages.emplace_back(std::move(image));
-                mImages.insert(mImages.end(), std::make_move_iterator(shadowMaps.mImages.begin()),
-                    std::make_move_iterator(shadowMaps.mImages.end()));
-                ++mCapturedFrameCount;
-                if (mCapturedFrameCount == mRequestedFrameCount)
-                {
-                    completedPath = std::move(mOutputPath);
-                    mOutputPath.reset();
-                    completedImages = std::move(mImages);
-                    mWriting = true;
-                }
-            }
-
-            if (completedPath)
-            {
-                std::filesystem::create_directories(completedPath->parent_path());
-                writeRenderDiagnosticBundle(*completedPath, frameNumber, completedImages);
-                Log(Debug::Info) << "Captured exact render-frame sequence to " << *completedPath;
-                std::lock_guard lock(mMutex);
-                mWriting = false;
+                mWriter->finish(frameNumber);
+                Log(Debug::Info) << "Captured exact render-frame sequence to " << *mOutputPath;
+                mWriter.reset();
+                mOutputPath.reset();
                 mRequestedFrameCount = 0;
                 mCapturedFrameCount = 0;
                 mLastFrameNumber.reset();
@@ -114,8 +104,7 @@ namespace MWRender
             mRequestedFrameCount = 0;
             mCapturedFrameCount = 0;
             mLastFrameNumber.reset();
-            mWriting = false;
-            mImages.clear();
+            mWriter.reset();
         }
     }
 }

@@ -4,17 +4,18 @@
 
 namespace
 {
+    /// Preserve locked civil time alongside steady and transitioning weather controls.
     TEST(DiagnosticAtmosphereScenario, RoundTripsSteadyAndTransitioningWeather)
     {
         const Diagnostics::AtmosphereScenario steady{ Diagnostics::DiagnosticWeatherState{ "Clear", std::nullopt, 0.f },
             18.25, Diagnostics::DiagnosticAtmosphereMedia{ true, false, false, false }, false, 927u,
             Diagnostics::DiagnosticWeatherEffects{ false, false },
-            Diagnostics::DiagnosticEnvironmentState{ { { "wetland", 0.8f } }, 128.f }, 0.85f };
+            Diagnostics::DiagnosticEnvironmentState{ { { "wetland", 0.8f } }, 128.f }, 0.85f, std::nullopt };
         EXPECT_EQ(Diagnostics::deserializeAtmosphereScenario(Diagnostics::serializeAtmosphereScenario(steady)), steady);
 
         const Diagnostics::AtmosphereScenario transitioning{ Diagnostics::DiagnosticWeatherState{
                                                                  "Cloudy", "Thunderstorm", 0.625f },
-            6.5, std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt };
+            6.5, std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt };
         EXPECT_EQ(Diagnostics::deserializeAtmosphereScenario(Diagnostics::serializeAtmosphereScenario(transitioning)),
             transitioning);
     }
@@ -49,6 +50,22 @@ namespace
             std::invalid_argument);
         EXPECT_THROW(Diagnostics::deserializeAtmosphereScenario("version: 6\nrecent-precipitation: 1.1\n"),
             std::invalid_argument);
+    }
+
+    /// Preserve an advancing start time and reject ambiguous, unsupported, and invalid clock controls.
+    TEST(DiagnosticAtmosphereScenario, RoundTripsAdvancingTimeWithStrictValidation)
+    {
+        const auto scenario = Diagnostics::deserializeAtmosphereScenario("version: 7\nstart-game-hour: 19.5\n");
+        EXPECT_FALSE(scenario.empty());
+        EXPECT_FALSE(scenario.mGameHour);
+        ASSERT_TRUE(scenario.mStartGameHour);
+        EXPECT_DOUBLE_EQ(*scenario.mStartGameHour, 19.5);
+        EXPECT_EQ(
+            Diagnostics::deserializeAtmosphereScenario(Diagnostics::serializeAtmosphereScenario(scenario)), scenario);
+        for (const char* text : { "version: 6\nstart-game-hour: 19.5\n",
+                 "version: 7\nstart-game-hour: 19.5\ngame-hour: 20\n", "version: 7\nstart-game-hour: -1\n",
+                 "version: 7\nstart-game-hour: 24\n", "version: 7\nstart-game-hour: .nan\n" })
+            EXPECT_THROW(Diagnostics::deserializeAtmosphereScenario(text), std::invalid_argument);
     }
 
     TEST(DiagnosticAtmosphereScenario, RequiresAtLeastOneOverride)

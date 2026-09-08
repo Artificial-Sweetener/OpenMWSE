@@ -15,6 +15,10 @@ namespace ESM
         constexpr NAME currentWeatherRecord = "CWTH";
         constexpr NAME nextWeatherRecord = "NWTH";
         constexpr NAME queuedWeatherRecord = "QWTH";
+        constexpr NAME currentCloudScenarioRecord = "CCSC";
+        constexpr NAME nextCloudScenarioRecord = "NCSC";
+        constexpr NAME queuedCloudScenarioRecord = "QCSC";
+        constexpr NAME cloudScenarioSequenceRecord = "CSQN";
         constexpr NAME regionNameRecord = "RGNN";
         constexpr NAME regionWeatherRecord = "RGNW";
         constexpr NAME regionChanceRecord = "RGNC";
@@ -33,6 +37,10 @@ namespace ESM
         esm.getHNT(mCurrentWeather, currentWeatherRecord);
         esm.getHNT(mNextWeather, nextWeatherRecord);
         esm.getHNT(mQueuedWeather, queuedWeatherRecord);
+        esm.getHNOT(mCurrentCloudScenario, currentCloudScenarioRecord);
+        esm.getHNOT(mNextCloudScenario, nextCloudScenarioRecord);
+        esm.getHNOT(mQueuedCloudScenario, queuedCloudScenarioRecord);
+        esm.getHNOT(mCloudScenarioSequence, cloudScenarioSequenceRecord);
 
         while (esm.isNextSub(regionNameRecord))
         {
@@ -60,6 +68,10 @@ namespace ESM
         esm.writeHNT(currentWeatherRecord, mCurrentWeather);
         esm.writeHNT(nextWeatherRecord, mNextWeather);
         esm.writeHNT(queuedWeatherRecord, mQueuedWeather);
+        esm.writeHNT(currentCloudScenarioRecord, mCurrentCloudScenario);
+        esm.writeHNT(nextCloudScenarioRecord, mNextCloudScenario);
+        esm.writeHNT(queuedCloudScenarioRecord, mQueuedCloudScenario);
+        esm.writeHNT(cloudScenarioSequenceRecord, mCloudScenarioSequence);
 
         auto it = mRegions.begin();
         for (; it != mRegions.end(); ++it)

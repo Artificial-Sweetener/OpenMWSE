@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Generate the deterministic density, weather, curl, and sampling textures used by OpenMWSE clouds."""
+"""Generate cloud noise resources and OpenMW's temporal sampling tile.
+
+The offline scalar evaluator uses Python binary64 arithmetic, so its hash realization is
+independent of GPU floating-point contraction and transcendental implementations.
+The Perlin gradient hash is credited to Brian Sharpe, GPU-Noise-Lib; see
+files/data/licenses/GPU-Noise-Lib.txt for the original permissive notice.
+"""
 
 from __future__ import annotations
 
@@ -16,26 +22,11 @@ from pathlib import Path
 
 BASE_TEXTURE_SIZE = 64
 DETAIL_TEXTURE_SIZE = 32
-WEATHER_TEXTURE_SIZE = 256
+WEATHER_TEXTURE_SIZE = 1024
 CURL_TEXTURE_SIZE = 128
 BLUE_NOISE_TEXTURE_SIZE = 128
 CLOUD_VOLUME_MIP_COUNT = 6
 RANDOM_SEED = 0x4F4D5753
-
-def hash_u32(x: int, y: int, z: int, seed: int = RANDOM_SEED) -> int:
-    """Return a stable 32-bit integer hash for a periodic lattice coordinate."""
-    value = (x * 0x8DA6B343) ^ (y * 0xD8163841) ^ (z * 0xCB1AB31F) ^ seed
-    value ^= value >> 16
-    value = (value * 0x7FEB352D) & 0xFFFFFFFF
-    value ^= value >> 15
-    value = (value * 0x846CA68B) & 0xFFFFFFFF
-    return value ^ (value >> 16)
-
-
-def hash_unit(x: int, y: int, z: int, channel: int = 0) -> float:
-    """Map a lattice coordinate and channel to a deterministic unit interval."""
-    return hash_u32(x, y, z, RANDOM_SEED + channel * 0x9E3779B9) / 0xFFFFFFFF
-
 
 def lerp(first: float, second: float, amount: float) -> float:
     """Interpolate between two scalar values."""
@@ -110,7 +101,7 @@ def gradient_noise(
 
 
 def periodic_worley_distance(
-    x: float, y: float, z: float, frequency: int, seed: float = 0.0
+    x: float, y: float, z: float, frequency: float, seed: float = 0.0
 ) -> float:
     """Evaluate the clamped nearest squared Voronoi distance."""
     scaled_x = x * frequency + 0.5
@@ -128,9 +119,9 @@ def periodic_worley_distance(
         grid_x: float, grid_y: float, grid_z: float
     ) -> tuple[float, float, float]:
         """Return the periodic Voronoi feature-point offset."""
-        grid_x %= frequency
-        grid_y %= frequency
-        grid_z %= frequency
+        grid_x = math.fmod(grid_x, frequency)
+        grid_y = math.fmod(grid_y, frequency)
+        grid_z = math.fmod(grid_z, frequency)
         hashes = (
             grid_x * 127.1 + grid_y * 311.7 + grid_z * 74.7,
             grid_x * 269.5 + grid_y * 183.3 + grid_z * 246.1,
@@ -205,24 +196,16 @@ def dilate_perlin_worley(perlin: float, worley: float, blend: float) -> float:
     return min(max(combined * dilation, 0.0), 1.0)
 
 
-def rank_values(values: list[float]) -> list[float]:
-    """Convert a scalar field to a deterministic uniform-rank field while preserving topology."""
-    ranks = [0.0] * len(values)
-    for rank, value_index in enumerate(sorted(range(len(values)), key=values.__getitem__)):
-        ranks[value_index] = rank / max(len(values) - 1, 1)
-    return ranks
-
-
 def generate_base_slice(arguments: tuple[int, int]) -> bytes:
     """Generate one deterministic z slice of the Perlin-Worley base volume."""
     z_index, size = arguments
     voxels = bytearray(size * size * 4)
     index = 0
-    z = (z_index + 0.5) / size
+    z = z_index / size
     for y_index in range(size):
-        y = (y_index + 0.5) / size
+        y = y_index / size
         for x_index in range(size):
-            x = (x_index + 0.5) / size
+            x = x_index / size
             distances = {
                 frequency: periodic_worley_distance(x, y, z, frequency)
                 for frequency in (6, 12, 24, 48, 96)
@@ -269,14 +252,14 @@ def generate_detail_voxels(size: int = DETAIL_TEXTURE_SIZE) -> bytes:
     voxels = bytearray(size * size * size * 4)
     index = 0
     for z_index in range(size):
-        z = (z_index + 0.5) / size
+        z = z_index / size
         for y_index in range(size):
-            y = (y_index + 0.5) / size
+            y = y_index / size
             for x_index in range(size):
-                x = (x_index + 0.5) / size
+                x = x_index / size
                 distances = {
                     frequency: periodic_worley_distance(x, y, z, frequency)
-                    for frequency in (5, 8, 10, 16, 20, 32, 40)
+                    for frequency in (5, 7.5, 10, 15, 20, 30, 40)
                 }
                 values = (
                     remap(
@@ -288,7 +271,7 @@ def generate_detail_voxels(size: int = DETAIL_TEXTURE_SIZE) -> bytes:
                     ),
                     remap(
                         periodic_worley_fbm_from_distances(
-                            distances[8], distances[16], distances[32]
+                            distances[7.5], distances[15], distances[30]
                         ),
                         -1.0,
                         1.0,
@@ -308,51 +291,31 @@ def generate_detail_voxels(size: int = DETAIL_TEXTURE_SIZE) -> bytes:
     return bytes(voxels)
 
 
-def generate_weather_texels(size: int = WEATHER_TEXTURE_SIZE) -> bytes:
-    """Generate coverage, cloud-type, optical-depth, and base-height fields."""
-    weather_values: list[tuple[float, float, float, float]] = []
-    for y_index in range(size):
-        y = (y_index + 0.5) / size
-        for x_index in range(size):
-            x = (x_index + 0.5) / size
-            coverage_perlin = periodic_perlin_fbm(x, y, 0.0, 9, 7)
-            coverage_worley = periodic_worley_two_octaves(
-                periodic_worley_distance(x, y, 0.0, 9, 1.0),
-                periodic_worley_distance(x, y, 0.0, 18, 1.0),
-            )
-            coverage_difference = periodic_perlin_fbm(x, y, 200.0, 9, 7)
-            coverage = dilate_perlin_worley(
-                remap(coverage_perlin, 1.0, 1.25),
-                remap(coverage_worley, 0.65, 0.9),
-                1.0,
-            )
-            coverage -= remap(coverage_difference, 1.0, 1.4)
-            base_height = (
-                gradient_noise(x, y, 0.419, 4) * 0.55
-                + gradient_noise(x, y, 0.419, 8) * 0.3
-                + gradient_noise(x, y, 0.419, 16) * 0.15
-            )
-            cloud_type = periodic_perlin_fbm(x, y, 500.0, 9, 7)
-            optical_depth = periodic_perlin_fbm(x, y, 100.0, 6, 7)
-            weather_values.append((
-                coverage,
-                remap(cloud_type, 0.85, 1.9),
-                remap(optical_depth, 0.5, 1.3),
-                remap(base_height, 0.3, 0.7),
-            ))
-
-    texels = bytearray(size * size * 4)
-    index = 0
-    for coverage, cloud_type, optical_depth, base_height in weather_values:
-        for value in (
-            coverage,
-            cloud_type,
-            optical_depth,
-            base_height,
-        ):
-            texels[index] = round(min(max(value, 0.0), 1.0) * 255.0)
-            index += 1
+def generate_weather_row(arguments: tuple[int, int]) -> bytes:
+    """Evaluate one row of the source coverage, type, rain, and constant-alpha weather map."""
+    y_index, size = arguments
+    y = y_index / size
+    texels = bytearray(size * 4)
+    for x_index in range(size):
+        x = x_index / size
+        perlin_coverage = remap(periodic_perlin_fbm(x, y, 0.0, 9, 7), 1.0, 1.25)
+        worley_coverage = remap(periodic_worley_two_octaves(
+            periodic_worley_distance(x, y, 0.0, 9, 1.0),
+            periodic_worley_distance(x, y, 0.0, 18, 1.0)), 0.65, 0.9)
+        subtractive_coverage = remap(periodic_perlin_fbm(x, y, 200.0, 9, 7), 1.0, 1.4)
+        coverage = dilate_perlin_worley(perlin_coverage, worley_coverage, 1.0) - subtractive_coverage
+        cloud_type = remap(periodic_perlin_fbm(x, y, 500.0, 9, 7), 0.85, 1.9)
+        rain = remap(periodic_perlin_fbm(x, y, 100.0, 6, 7), 0.5, 1.3)
+        for channel, value in enumerate((coverage, cloud_type, rain, 1.0)):
+            texels[x_index * 4 + channel] = round(min(max(value, 0.0), 1.0) * 255.0)
     return bytes(texels)
+
+
+def generate_weather_texels(size: int = WEATHER_TEXTURE_SIZE) -> bytes:
+    """Generate the source-sized weather map in deterministic row order."""
+    arguments = [(row, size) for row in range(size)]
+    with concurrent.futures.ProcessPoolExecutor(max_workers=min(os.cpu_count() or 1, 16)) as executor:
+        return b"".join(executor.map(generate_weather_row, arguments))
 
 
 def perlin_five_octaves(x: float, y: float, z: float) -> float:

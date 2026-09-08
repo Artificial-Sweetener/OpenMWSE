@@ -8,9 +8,18 @@ set(DDIRRELATIVE resources/shaders)
 
 set(SHADER_FILES
     lib/atmosphere/aerial_perspective.glsl
+    lib/atmosphere/cloud_model.h.glsl
+    lib/atmosphere/cloud_model_vertex.glsl
+    lib/atmosphere/cloud_model_fragment.glsl
+    lib/atmosphere/cloud_field.h.glsl
+    lib/atmosphere/cloud_model.glsl
+    lib/atmosphere/cloud_model_density.glsl
     lib/atmosphere/cloud_field.glsl
     lib/atmosphere/cloud_shadow.glsl
+    lib/atmosphere/cloud_shadow_column.glsl
+    lib/atmosphere/cloud_shadow_column.h.glsl
     lib/atmosphere/clouds.glsl
+    lib/atmosphere/participating_media.glsl
     lib/atmosphere/diagnostics.glsl
     lib/atmosphere/uniforms.glsl
     lib/atmosphere/units.glsl

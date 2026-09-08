@@ -96,7 +96,7 @@ Diagnostics::Capsule OMW::Engine::createDiagnosticCapsule(unsigned frameNumber)
     manifest << "capsule-version: " << Diagnostics::capsuleVersion << '\n'
              << "build: " << quoteDiagnosticYaml(Version::getOpenmwVersionDescription()) << '\n'
              << "frame: " << frameNumber << '\n'
-             << "providers: [core@2, graphics@1, gameplay@8, performance@14]\n"
+             << "providers: [core@2, graphics@2, gameplay@8, performance@14]\n"
              << "content:\n";
     for (const std::string& content : mContentFiles)
     {
@@ -257,7 +257,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << '\n'
                            << "performance-capture: " << (mDiagnosticCollection->active() ? "collecting" : "idle")
                            << '\n'
-                           << "providers: [core@2, graphics@1, gameplay@8, performance@14]\n";
+                           << "providers: [core@2, graphics@2, gameplay@8, performance@14]\n";
                     response.mPayload = diagnosticBytes(output.str());
                     break;
 
@@ -310,10 +310,12 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                         ? std::to_integer<unsigned char>(command.mPayload.back())
                         : 0;
                     const bool captureRenderedFrames = (routeOptions & 0x1u) != 0;
+                    const bool nativeResolution = (routeOptions & 0x10u) != 0;
                     const bool bypassShadows = (routeOptions & 0x2u) != 0;
                     const bool terrainCastersOnly = (routeOptions & 0x4u) != 0;
                     const bool objectCastersOnly = (routeOptions & 0x8u) != 0;
-                    if (!mDiagnosticChild || !mDiagnosticGameplayRoute
+                    if ((routeOptions & ~0x1fu) != 0 || (nativeResolution && !captureRenderedFrames)
+                        || !mDiagnosticChild || !mDiagnosticGameplayRoute
                         || (command.mPayload.size() != sizeof(std::uint32_t)
                             && command.mPayload.size() != sizeof(std::uint32_t) + 1)
                         || (bypassShadows && (terrainCastersOnly || objectCastersOnly))
@@ -336,7 +338,8 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                     {
                         const std::filesystem::path outputPath = mDiagnosticArtifactRoot
                             / ("route-frames-" + std::to_string(command.mRequestId) + ".omwdiag");
-                        mWorld->getPostProcessor()->requestRenderFrameDiagnosticCapture(outputPath, count);
+                        mWorld->getPostProcessor()->requestRenderFrameDiagnosticCapture(
+                            outputPath, count, nativeResolution);
                     }
                     if (bypassShadows)
                     {
@@ -419,21 +422,25 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << atmosphere.mSunDiscColor.w() << "]\n"
                            << "  cloud-field-offset-world-units: [" << atmosphere.mCloudFieldOffsetWorldUnits.x()
                            << ", " << atmosphere.mCloudFieldOffsetWorldUnits.y() << "]\n"
+                           << "  cloud-model-version: 2\n"
                            << "  main-cloud: [" << volumes.mCloudDeckCoverage << ", " << volumes.mCloudDensity << ", "
-                           << volumes.mCloudBaseAltitudeWorldUnits << ", " << volumes.mCloudThicknessWorldUnits << ", "
-                           << volumes.mCloudType << ", " << volumes.mCloudFeatureScale << ", "
-                           << volumes.mCloudVerticalDevelopment << ", " << volumes.mCloudAnvilStrength << "]\n"
-                           << "  cloud-deck-type: " << volumes.mCloudDeckType << "\n"
-                           << "  cloud-organization: [" << volumes.mCloudDeckContinuity << ", "
-                           << volumes.mCloudConvectiveFrequency << ", " << volumes.mCloudConvectiveMaturity << ", "
-                           << volumes.mCloudStormOrganization << "]\n"
-                           << "  cloud-structure: [" << volumes.mCloudTowerTaper << ", " << volumes.mCloudBaseVariation
+                           << volumes.mCloudBaseAltitudeWorldUnits << ", " << volumes.mCloudThicknessWorldUnits << "]\n"
+                           << "  cloud-layer:\n"
+                           << "    coverage: [" << volumes.mCloudLayer.mCoverageAmount << ", "
+                           << volumes.mCloudLayer.mCoverageMinimum << "]\n"
+                           << "    type: [" << volumes.mCloudLayer.mTypeAmount << ", "
+                           << volumes.mCloudLayer.mTypeMinimum << "]\n"
+                           << "    rain: [" << volumes.mCloudLayer.mRainAmount << ", "
+                           << volumes.mCloudLayer.mRainMinimum << "]\n"
+                           << "    noise-scale-per-meter: " << volumes.mCloudLayer.mNoiseScalePerMeter << "\n"
+                           << "    weather-scale-per-meter: " << volumes.mCloudLayer.mWeatherScalePerMeter << "\n"
+                           << "    detail: [" << volumes.mCloudLayer.mDetailScale << ", "
+                           << volumes.mCloudLayer.mDetailHeightFraction << ", " << volumes.mCloudLayer.mDetailErosion
                            << "]\n"
+                           << "  cloud-scenario-identity: " << volumes.mCloudScenarioIdentity << "\n"
                            << "  low-cloud: [" << volumes.mLowCloudCoverage << ", " << volumes.mLowCloudDensity << ", "
                            << volumes.mLowCloudBaseAltitudeWorldUnits << ", " << volumes.mLowCloudThicknessWorldUnits
-                           << ", " << volumes.mLowCloudType << ", " << volumes.mLowCloudFeatureScale << ", "
-                           << volumes.mLowCloudVerticalDevelopment << ", " << volumes.mLowCloudEnvironmentInfluence
-                           << "]\n"
+                           << ", " << volumes.mLowCloudEnvironmentInfluence << "]\n"
                            << "  mist: [" << volumes.mMistDensity << ", " << volumes.mMistBaseAltitudeWorldUnits << ", "
                            << volumes.mMistThicknessWorldUnits << "]\n"
                            << "  fog: [" << volumes.mFogDensity << ", " << volumes.mFogBaseAltitudeWorldUnits << ", "
@@ -547,13 +554,15 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                         scenario = Diagnostics::deserializeAtmosphereScenario(diagnosticText(command.mPayload));
                         if (scenario.mGameHour)
                             mWorld->setDiagnosticGameHour(*scenario.mGameHour);
+                        if (scenario.mStartGameHour)
+                            mWorld->setDiagnosticGameHour(*scenario.mStartGameHour);
                         if (scenario.mWeather)
                         {
                             const std::optional<ESM::RefId> next = scenario.mWeather->mNext
                                 ? std::optional<ESM::RefId>(ESM::RefId::deserializeText(*scenario.mWeather->mNext))
                                 : std::nullopt;
                             mWorld->setDiagnosticWeatherState(ESM::RefId::deserializeText(scenario.mWeather->mCurrent),
-                                next, scenario.mWeather->mTransition);
+                                next, scenario.mWeather->mTransition, scenario.mCloudSeed.value_or(0));
                         }
                         if (scenario.mEnvironment)
                         {
@@ -574,8 +583,6 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                             { media.mMainClouds, media.mLowClouds, media.mMist, media.mFog });
                         mWorld->getRenderingManager()->setAtmosphereDiagnosticDistanceFogEnabled(
                             scenario.mDistanceFog.value_or(true));
-                        mWorld->getRenderingManager()->setAtmosphereDiagnosticCloudSeed(
-                            scenario.mCloudSeed.value_or(0));
                     }
                     catch (const std::exception& error)
                     {

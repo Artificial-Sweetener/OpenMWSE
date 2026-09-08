@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 #include <osg/Vec2d>
 #include <osg/Vec2f>
@@ -10,6 +11,7 @@
 #include <osg/Vec4f>
 
 #include <components/sceneutil/cloudadvection.hpp>
+#include <components/sceneutil/cloudlayer.hpp>
 
 namespace MWRender
 {
@@ -30,26 +32,13 @@ namespace MWRender
         float mCloudDensity = 0.f;
         float mCloudBaseAltitudeWorldUnits = 55000.f;
         float mCloudThicknessWorldUnits = 18000.f;
-        float mCloudDeckType = 0.35f;
-        float mCloudType = 0.5f;
-        float mCloudFeatureScale = 1.f;
-        float mCloudVerticalDevelopment = 0.5f;
-        float mCloudAnvilStrength = 0.f;
-        float mCloudDeckContinuity = 0.5f;
-        float mCloudConvectiveFrequency = 0.f;
-        float mCloudConvectiveMaturity = 0.f;
-        float mCloudStormOrganization = 0.f;
-        float mCloudTowerTaper = 0.7f;
-        float mCloudBaseVariation = 0.5f;
+        std::uint32_t mCloudScenarioIdentity = 0;
         float mCloudTerrainFollowing = 0.f;
         float mCloudTerrainClearanceWorldUnits = 0.f;
         float mLowCloudCoverage = 0.f;
         float mLowCloudDensity = 0.f;
         float mLowCloudBaseAltitudeWorldUnits = 4000.f;
         float mLowCloudThicknessWorldUnits = 8000.f;
-        float mLowCloudType = 0.15f;
-        float mLowCloudFeatureScale = 1.f;
-        float mLowCloudVerticalDevelopment = 0.2f;
         float mLowCloudEnvironmentInfluence = 1.f;
         float mTerrainReferenceHeightWorldUnits = 0.f;
         osg::Vec2f mTerrainSampleCenterWorldUnits;
@@ -63,7 +52,23 @@ namespace MWRender
         float mFogBaseAltitudeWorldUnits = 0.f;
         float mFogThicknessWorldUnits = 6000.f;
         float mFogAnisotropy = 0.45f;
+        SceneUtil::CloudLayer mCloudLayer;
+        SceneUtil::CloudLayer mEnvironmentalCloudLayer;
     };
+
+    /// Convert a persistent episode identity to a deterministic procedural-field phase in radians.
+    inline float getCloudScenarioFieldPhase(std::uint32_t identity)
+    {
+        constexpr float fullTurn = 6.28318530718f;
+        if (identity == 0)
+            return 0.f;
+        identity ^= identity >> 16u;
+        identity *= 0x7feb352du;
+        identity ^= identity >> 15u;
+        identity *= 0x846ca68bu;
+        identity ^= identity >> 16u;
+        return static_cast<float>(identity >> 8u) * (fullTurn / 16777216.f);
+    }
 
     /// Carries the shared scene-linear light sources consumed by every atmospheric and surface-lighting path.
     struct AtmosphereLightingState
@@ -243,6 +248,10 @@ namespace MWRender
         float mWeatherWeight = 0.f;
         bool mEnabled = false;
         AtmosphereVolumeState mVolumes;
+        /// Retain both endpoint fields while an authoritative weather transition is active.
+        AtmosphereVolumeState mOutgoingCloudVolumes;
+        AtmosphereVolumeState mIncomingCloudVolumes;
+        float mCloudScenarioTransition = 0.f;
         AtmosphereSuspendedMediumState mSuspendedMedium;
         AtmosphereLightingState mLighting;
         osg::Vec4f mSunDiscColor{ 1.f, 1.f, 1.f, 0.f };

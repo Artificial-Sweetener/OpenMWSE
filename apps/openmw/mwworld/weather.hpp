@@ -1,6 +1,8 @@
 #ifndef GAME_MWWORLD_WEATHER_H
 #define GAME_MWWORLD_WEATHER_H
 
+#include <components/sceneutil/atmosphereterraingrid.hpp>
+
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -333,8 +335,8 @@ namespace MWWorld
         void playerTeleported(const ESM::RefId& playerRegion, bool isExterior);
 
         /// Set an exact isolated diagnostic weather state without changing persistent regional probabilities.
-        void setDiagnosticWeatherState(
-            const ESM::RefId& current, const std::optional<ESM::RefId>& next, float transition);
+        void setDiagnosticWeatherState(const ESM::RefId& current, const std::optional<ESM::RefId>& next,
+            float transition, std::uint32_t cloudScenarioIdentity = 0);
 
         /// Select weather-side visual effects for an isolated diagnostic scenario.
         void setDiagnosticWeatherEffects(bool precipitationEnabled, bool lightningEnabled);
@@ -345,14 +347,13 @@ namespace MWWorld
         /// Replace classified environment evidence for the lifetime of an isolated diagnostic child.
         void setDiagnosticEnvironmentState(AtmosphereEnvironmentState environment);
 
-        /** Advance weather transitions and publish their canonical scene-linear atmosphere lighting state.
-         *
+        /** Advance weather transitions and publish scene-linear atmosphere lighting and fixed world terrain samples.
+ *
          * @param duration Unscaled frame interval in seconds.
-         * @param paused Whether simulation-owned weather
-         * state must remain fixed.
-         * @param time Current game time used to evaluate weather color cycles.
-
-         * * @param isExterior Whether exterior weather and atmosphere rendering are active.
+         * @param paused Whether simulation-owned weather state must remain fixed.
+         * @param time Current game
+         * time used to evaluate weather color cycles.
+         * @param isExterior Whether exterior weather and atmosphere rendering are active.
          */
         void update(float duration, bool paused, const TimeStamp& time, bool isExterior);
 
@@ -431,6 +432,8 @@ namespace MWWorld
         std::unique_ptr<AtmospherePalette> mAtmospherePalette;
         AtmosphereEnvironmentState mCurrentEnvironment;
         std::optional<AtmosphereEnvironmentState> mDiagnosticEnvironment;
+        SceneUtil::AtmosphereTerrainGrid mCloudTerrain;
+        ESM::RefId mCloudTerrainWorldspace;
         AtmosphereEnvironmentState mCachedOrography;
         ESM::RefId mCachedOrographyWorldspace;
         bool mOrographyCacheValid = false;
@@ -455,6 +458,13 @@ namespace MWWorld
         int mCurrentWeather;
         int mNextWeather;
         int mQueuedWeather;
+        /// Persist the realized cloud episodes and monotonic selector independently of frame updates.
+        std::uint32_t mCurrentCloudScenario = 0;
+        std::uint32_t mNextCloudScenario = 0;
+        std::uint32_t mQueuedCloudScenario = 0;
+        std::uint32_t mCloudScenarioSequence = 0;
+        /// Cache the latest game hour for meteorological episode selection at weather boundaries.
+        float mCloudScenarioHour = 12.f;
         bool mDiagnosticWeatherLocked = false;
         bool mDiagnosticPrecipitationEnabled = true;
         bool mDiagnosticLightningEnabled = true;
@@ -476,6 +486,9 @@ namespace MWWorld
         bool updateWeatherRegion(const ESM::RefId& playerRegion);
         void updateWeatherTransitions(const float elapsedRealSeconds);
         void forceWeather(const int weatherID);
+
+        /// Create a persistent episode identity conditioned by the weather trajectory.
+        std::uint32_t createCloudScenarioIdentity(int weatherID, int originWeatherID);
 
         bool inTransition() const;
         void addWeatherTransition(const int weatherID);

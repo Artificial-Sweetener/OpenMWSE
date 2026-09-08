@@ -738,8 +738,8 @@ namespace MWWorld
         return nullptr;
     }
 
-    void WeatherManager::setDiagnosticWeatherState(
-        const ESM::RefId& current, const std::optional<ESM::RefId>& next, float transition)
+    void WeatherManager::setDiagnosticWeatherState(const ESM::RefId& current, const std::optional<ESM::RefId>& next,
+        float transition, std::uint32_t cloudScenarioIdentity)
     {
         const auto findWeatherIndex = [&](const ESM::RefId& id) {
             const auto found = std::find_if(mWeatherSettings.begin(), mWeatherSettings.end(),
@@ -756,8 +756,13 @@ namespace MWWorld
 
         mCurrentWeather = findWeatherIndex(current);
         mNextWeather = next ? findWeatherIndex(*next) : invalidWeatherID;
+        mCurrentCloudScenario = cloudScenarioIdentity;
+        mNextCloudScenario = next ? cloudScenarioIdentity + 1u : 0u;
+        if (next && mNextCloudScenario == 0)
+            mNextCloudScenario = 1u;
         mTransitionFactor = next ? 1.f - transition : 0.f;
         mQueuedWeather = invalidWeatherID;
+        mQueuedCloudScenario = 0;
         mFastForward = false;
         mTimePassed = 0.f;
         mWeatherUpdateTime = mHoursBetweenWeatherChanges;
@@ -891,6 +896,7 @@ namespace MWWorld
 
     void WeatherManager::update(float duration, bool paused, const TimeStamp& time, bool isExterior)
     {
+        mCloudScenarioHour = time.getHour();
         MWWorld::ConstPtr player = MWMechanics::getPlayer();
 
         if (!mDiagnosticWeatherLocked && (!paused || mFastForward))
@@ -912,6 +918,20 @@ namespace MWWorld
 
         if (isExterior)
         {
+            const ESM::RefId worldspace = player.getCell()->getCell()->getWorldSpace();
+            const osg::Vec3f playerPosition = player.getRefData().getPosition().asVec3();
+            const osg::Vec2f horizontalPosition(playerPosition.x(), playerPosition.y());
+            const auto sampleCloudTerrain = [&](const osg::Vec2f& position) {
+                if (mDiagnosticEnvironment)
+                    return mDiagnosticEnvironment->mTerrainHeightWorldUnits
+                        + (position - mDiagnosticEnvironment->mTerrainSampleCenterWorldUnits)
+                        * mDiagnosticEnvironment->mTerrainGradient;
+                return mRendering.getTerrainHeightAt({ position.x(), position.y(), 0.f }, worldspace);
+            };
+            mCloudTerrain.update(horizontalPosition, sampleCloudTerrain,
+                worldspace != mCloudTerrainWorldspace || mDiagnosticEnvironment.has_value());
+            mCloudTerrainWorldspace = worldspace;
+            mRendering.setAtmosphereTerrain(mCloudTerrain);
             if (mDiagnosticEnvironment)
             {
                 mCurrentEnvironment = *mDiagnosticEnvironment;
@@ -1215,6 +1235,10 @@ namespace MWWorld
         state.mCurrentWeather = mCurrentWeather;
         state.mNextWeather = mNextWeather;
         state.mQueuedWeather = mQueuedWeather;
+        state.mCurrentCloudScenario = mCurrentCloudScenario;
+        state.mNextCloudScenario = mNextCloudScenario;
+        state.mQueuedCloudScenario = mQueuedCloudScenario;
+        state.mCloudScenarioSequence = mCloudScenarioSequence;
 
         auto it = mRegions.begin();
         for (; it != mRegions.end(); ++it)
@@ -1242,6 +1266,16 @@ namespace MWWorld
             mCurrentWeather = state.mCurrentWeather;
             mNextWeather = state.mNextWeather;
             mQueuedWeather = state.mQueuedWeather;
+            mCurrentCloudScenario = state.mCurrentCloudScenario;
+            mNextCloudScenario = state.mNextCloudScenario;
+            mQueuedCloudScenario = state.mQueuedCloudScenario;
+            mCloudScenarioSequence = state.mCloudScenarioSequence;
+            if (mCurrentCloudScenario == 0)
+                mCurrentCloudScenario = createCloudScenarioIdentity(mCurrentWeather, invalidWeatherID);
+            if (mNextWeather != invalidWeatherID && mNextCloudScenario == 0)
+                mNextCloudScenario = createCloudScenarioIdentity(mNextWeather, mCurrentWeather);
+            if (mQueuedWeather != invalidWeatherID && mQueuedCloudScenario == 0)
+                mQueuedCloudScenario = createCloudScenarioIdentity(mQueuedWeather, mNextWeather);
 
             mRegions.clear();
             importRegions();
@@ -1352,6 +1386,9 @@ namespace MWWorld
                 mCurrentWeather = mNextWeather;
                 mNextWeather = mQueuedWeather;
                 mQueuedWeather = invalidWeatherID;
+                mCurrentCloudScenario = mNextCloudScenario;
+                mNextCloudScenario = mQueuedCloudScenario;
+                mQueuedCloudScenario = 0;
 
                 // We may have begun processing the queued transition, so we need to apply the remaining time towards
                 // it.
@@ -1372,14 +1409,18 @@ namespace MWWorld
             if (mQueuedWeather != invalidWeatherID)
             {
                 mCurrentWeather = mQueuedWeather;
+                mCurrentCloudScenario = mQueuedCloudScenario;
             }
             else if (mNextWeather != invalidWeatherID)
             {
                 mCurrentWeather = mNextWeather;
+                mCurrentCloudScenario = mNextCloudScenario;
             }
 
             mNextWeather = invalidWeatherID;
             mQueuedWeather = invalidWeatherID;
+            mNextCloudScenario = 0;
+            mQueuedCloudScenario = 0;
             mFastForward = false;
         }
     }
@@ -1387,9 +1428,24 @@ namespace MWWorld
     inline void WeatherManager::forceWeather(const int weatherID)
     {
         mTransitionFactor = 0.0f;
+        const int originWeatherID = mCurrentWeather;
         mCurrentWeather = weatherID;
         mNextWeather = invalidWeatherID;
         mQueuedWeather = invalidWeatherID;
+        mCurrentCloudScenario = createCloudScenarioIdentity(weatherID, originWeatherID);
+        mNextCloudScenario = 0;
+        mQueuedCloudScenario = 0;
+    }
+
+    std::uint32_t WeatherManager::createCloudScenarioIdentity(int weatherID, int originWeatherID)
+    {
+        const std::string_view originWeather
+            = originWeatherID >= 0 && static_cast<std::size_t>(originWeatherID) < mWeatherSettings.size()
+            ? std::string_view(mWeatherSettings[originWeatherID].mName)
+            : std::string_view();
+        return mAtmospherePalette->createCloudScenarioIdentity(mWeatherSettings[weatherID].mName, originWeather,
+            ++mCloudScenarioSequence, mCondensateFormation.getRecentPrecipitation(), mCloudScenarioHour, mSunriseTime,
+            mCurrentEnvironment);
     }
 
     inline bool WeatherManager::inTransition() const
@@ -1407,11 +1463,13 @@ namespace MWWorld
         if (!inTransition() && (weatherID != mCurrentWeather))
         {
             mNextWeather = weatherID;
+            mNextCloudScenario = createCloudScenarioIdentity(weatherID, mCurrentWeather);
             mTransitionFactor = 1.0f;
         }
         else if (inTransition() && (weatherID != mNextWeather))
         {
             mQueuedWeather = weatherID;
+            mQueuedCloudScenario = createCloudScenarioIdentity(weatherID, mNextWeather);
         }
     }
 
@@ -1453,8 +1511,8 @@ namespace MWWorld
         const std::string_view nextWeather
             = inTransition() ? std::string_view(mWeatherSettings[mNextWeather].mName) : std::string_view();
         const float weatherTransition = inTransition() ? 1.f - mTransitionFactor : 0.f;
-        mResult.mAtmosphere
-            = mAtmospherePalette->getState(mWeatherSettings[mCurrentWeather].mName, nextWeather, weatherTransition);
+        mResult.mAtmosphere = mAtmospherePalette->getState(mWeatherSettings[mCurrentWeather].mName, nextWeather,
+            weatherTransition, mCurrentCloudScenario, mNextCloudScenario);
         mResult.mAtmosphere.mLighting
             = MWRender::makeAtmosphereLightingState(mResult.mSunColor, mResult.mAmbientColor, mResult.mFogColor);
     }

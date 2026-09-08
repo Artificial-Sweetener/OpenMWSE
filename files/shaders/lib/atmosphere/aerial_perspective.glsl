@@ -98,6 +98,14 @@ float openmwseAtmosphereMiePhase(float cosineAngle)
     return 0.0795775 * (1.0 - anisotropySquared) / pow(denominator, 1.5);
 }
 
+/// Give the horizon glow a smooth crest while preserving the vertical energy of its authored falloff.
+float openmwseAtmosphereHorizonGlow(float verticalDirection, float falloff)
+{
+    const float halfSqrtPi = 0.886226925;
+    float scaledHeight = verticalDirection * falloff * halfSqrtPi;
+    return exp(-scaledHeight * scaledHeight);
+}
+
 /// Evaluate low-sun single and bounded multiple scattering from canonical atmosphere illumination.
 vec3 openmwseLowSunScattering(vec3 worldDirection, float sunCosine, float solarElevation,
     float opticalDistance, OpenMWSEAerialPerspectiveParameters parameters)
@@ -116,7 +124,7 @@ vec3 openmwseLowSunScattering(vec3 worldDirection, float sunCosine, float solarE
         * (1.0 - smoothstep(radians(-5.0), radians(-2.0), solarElevation));
     float illuminatedAtmosphere = max(civilTwilight, max(0.55 * nauticalTwilight, 0.2 * astronomicalTwilight));
 
-    float horizonDensity = exp(-6.5 * abs(worldDirection.z));
+    float horizonDensity = openmwseAtmosphereHorizonGlow(worldDirection.z, 6.5);
     float viewDepth = 1.0 + 2.4 * horizonDensity;
     float molecularPhase = openmwseRayleighPhase(sunCosine);
     float aerosolPhase = openmwseAtmosphereMiePhase(sunCosine);
@@ -207,7 +215,7 @@ float openmwseFogVisibility(float opticalDistance, OpenMWSEAerialPerspectivePara
     return mix(linearVisibility, exponentialVisibility, step(0.5, parameters.exponentialFog));
 }
 
-/// Evaluate directional scene-linear in-scattering from canonical weather and solar state.
+/// Evaluate MGE-derived in-scattering with cool upper twilight, a warm horizon, and bounded diffuse highlights.
 vec3 openmwseAtmosphereScatteredLight(vec3 worldDirection, float opticalDistance, float visibility,
     vec3 baseColor, OpenMWSEAerialPerspectiveParameters parameters)
 {
@@ -229,16 +237,26 @@ vec3 openmwseAtmosphereScatteredLight(vec3 worldDirection, float opticalDistance
     vec3 integratedAttenuation
         = (vec3(1.0) - exp(-opticalDistance * attenuation)) / max(attenuation, vec3(1e-4));
 
-    vec3 scatteredColor = vec3(0.125 * forwardScatter)
-        + mix(parameters.skyColor, vec3(0.371, 0.637, 1.108), 0.44) * diffuseScatter;
+    vec3 diffuseSkyColor = mix(parameters.skyColor, vec3(0.371, 0.637, 1.108), 0.44);
+    vec3 scatteredColor = vec3(0.125 * forwardScatter) + diffuseSkyColor * diffuseScatter;
     scatteredColor *= integratedAttenuation * (1.17 * atmosphereDepth + 0.89) * altitudeBrightness;
     if (sunHeight < 0.34)
     {
+        // Long horizontal paths redden the horizon; upper twilight retains the diffuse sky chromaticity.
+        // Preserve the integrated MGE brightness and zero-distance limit while recovering that color.
+        const vec3 luminanceWeights = vec3(0.2126, 0.7152, 0.0722);
+        float upperElevation = max(worldDirection.z, 0.0);
+        float upperSkyWeight = (1.0 - exp(-20.0 * upperElevation * upperElevation))
+            * (1.0 - smoothstep(0.08, 0.34, sunHeight));
+        vec3 diffuseChromaticity = diffuseSkyColor / max(dot(diffuseSkyColor, luminanceWeights), 1e-4);
+        scatteredColor = mix(scatteredColor,
+            diffuseChromaticity * dot(scatteredColor, luminanceWeights), upperSkyWeight);
+
         float solarElevation = asin(clamp(sunHeight, -1.0, 1.0));
         float relativeAirMass = openmwseSolarRelativeAirMass(solarElevation);
         vec3 longPathTransmittance = exp(-relativeAirMass * vec3(0.018, 0.041, 0.095));
-        float twilight = smoothstep(-0.3, -0.015, sunHeight) * (1.0 - smoothstep(0.06, 0.34, sunHeight));
-        float horizonBand = exp(-7.5 * abs(worldDirection.z));
+        float twilight = smoothstep(-0.18, 0.02, sunHeight) * (1.0 - smoothstep(0.06, 0.34, sunHeight));
+        float horizonBand = openmwseAtmosphereHorizonGlow(worldDirection.z, 7.5);
         float solarAfterglow = pow(clamp(0.5 + 0.5 * sunCosine, 0.0, 1.0), 3.0);
         float antiSolarArch = pow(clamp(0.5 - 0.5 * sunCosine, 0.0, 1.0), 2.0);
         vec3 sunsetRadiance
@@ -253,6 +271,10 @@ vec3 openmwseAtmosphereScatteredLight(vec3 worldDirection, float opticalDistance
                 worldDirection, sunCosine, solarElevation, opticalDistance, parameters) * physicalLowSunWeight;
     }
 
+    // Roll bright channels smoothly into scene-color headroom instead of clipping the additive glow.
+    // Dim haze keeps its MGE response, and the solar disc retains its separate radiometric range.
+    vec3 excess = max(scatteredColor - vec3(0.8), vec3(0.0));
+    scatteredColor = min(scatteredColor, vec3(0.8)) + 0.2 * excess / (vec3(0.2) + excess);
     return mix(baseColor * (1.0 - visibility), scatteredColor, parameters.weatherWeight);
 }
 

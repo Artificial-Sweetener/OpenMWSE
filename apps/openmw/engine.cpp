@@ -1265,6 +1265,8 @@ void OMW::Engine::applyDiagnosticGameplayRoute()
 {
     if (!mDiagnosticGameplayRoute || !mDiagnosticGameplayRoute->replaying())
         return;
+    // Recorded camera input owns this frame; idle vanity mode must not replace it during a long route.
+    mInputManager->resetIdleTime();
     const Diagnostics::GameplayRouteFrame& frame = mDiagnosticGameplayRoute->replayFrame();
     MWWorld::Ptr player = mWorld->getPlayerPtr();
     MWWorld::CellStore& cell = mWorld->getWorldModel().getCell(ESM::RefId::deserializeText(frame.mCell));

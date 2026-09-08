@@ -1,10 +1,11 @@
 #ifndef OPENMW_MWRENDER_RENDERFRAMEDIAGNOSTICS_H
 #define OPENMW_MWRENDER_RENDERFRAMEDIAGNOSTICS_H
 
-#include "renderdiagnosticimage.hpp"
+#include "renderdiagnosticbundle.hpp"
 
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <vector>
@@ -20,8 +21,8 @@ namespace MWRender
     class RenderFrameDiagnostics
     {
     public:
-        /// Schedule the requested number of rendered frames into one versioned diagnostic bundle.
-        void requestCapture(std::filesystem::path outputPath, std::uint32_t frameCount);
+        /// Stream a bounded frame sequence at native resolution or 1024-pixel preview resolution.
+        void requestCapture(std::filesystem::path outputPath, std::uint32_t frameCount, bool nativeResolution);
 
         /// Report whether the render thread should capture the current frame.
         bool captureRequested() const;
@@ -38,8 +39,8 @@ namespace MWRender
         std::optional<std::uint64_t> mLastFrameNumber;
         std::uint32_t mRequestedFrameCount = 0;
         std::uint32_t mCapturedFrameCount = 0;
-        bool mWriting = false;
-        std::vector<RenderDiagnosticImage> mImages;
+        bool mNativeResolution = false;
+        std::unique_ptr<RenderDiagnosticBundleWriter> mWriter;
     };
 }
 

@@ -9,7 +9,7 @@
 
 namespace Diagnostics
 {
-    inline constexpr unsigned atmosphereScenarioVersion = 6;
+    inline constexpr unsigned atmosphereScenarioVersion = 7;
 
     /// Defines one exact steady or transitioning weather state for an isolated diagnostic run.
     struct DiagnosticWeatherState
@@ -65,12 +65,14 @@ namespace Diagnostics
         std::optional<DiagnosticWeatherEffects> mWeatherEffects;
         std::optional<DiagnosticEnvironmentState> mEnvironment;
         std::optional<float> mRecentPrecipitation;
+        /// Set civil time once, then retain the save's normal time progression.
+        std::optional<double> mStartGameHour;
 
         /// Return whether this scenario changes any save-derived atmosphere input.
         bool empty() const noexcept
         {
             return !mWeather && !mGameHour && !mMedia && !mDistanceFog && !mCloudSeed && !mWeatherEffects
-                && !mEnvironment && !mRecentPrecipitation;
+                && !mEnvironment && !mRecentPrecipitation && !mStartGameHour;
         }
 
         /// Compare every deterministic atmosphere input.

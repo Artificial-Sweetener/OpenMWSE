@@ -1,3 +1,7 @@
+#ifdef GL_ARB_shader_texture_lod
+#extension GL_ARB_shader_texture_lod : enable
+#endif
+
 #ifndef OPENMW_COMPATIBILITY_ATMOSPHERE_GLSL
 #define OPENMW_COMPATIBILITY_ATMOSPHERE_GLSL
 
@@ -14,23 +18,12 @@ vec4 openmwseCloudParameters()
     return atmosphere.cloudParameters;
 }
 
-/// Expose canonical weather-specific cloud morphology to the shared cloud implementation.
-vec4 openmwseCloudShapeParameters()
-{
-    return atmosphere.cloudShapeParameters;
-}
 
-/// Expose independently controlled deck and convective organization.
-vec4 openmwseCloudOrganizationParameters()
-{
-    return atmosphere.cloudOrganizationParameters;
-}
+/// Expose incoming coverage and physical dimensions to compatibility paths.
+vec4 openmwseIncomingCloudParameters() { return atmosphere.incomingCloudParameters; }
 
-/// Expose independently controlled tower taper and base variation.
-vec4 openmwseCloudStructureParameters()
-{
-    return atmosphere.cloudStructureParameters;
-}
+/// Expose stable field phases and the optical crossfade weight.
+vec4 openmwseCloudScenarioParameters() { return atmosphere.cloudScenarioParameters; }
 
 /// Expose the independently placeable low-cloud layer to the shared implementation.
 vec4 openmwseLowCloudParameters()
@@ -39,9 +32,9 @@ vec4 openmwseLowCloudParameters()
 }
 
 /// Expose weather and environment morphology for the low-cloud layer.
-vec4 openmwseLowCloudShapeParameters()
+float openmwseLowCloudEnvironmentInfluence()
 {
-    return atmosphere.lowCloudShapeParameters;
+    return atmosphere.lowCloudEnvironmentInfluence;
 }
 
 /// Expose local terrain height and terrain-following controls to shared cloud height calculations.
@@ -55,6 +48,13 @@ vec4 openmwseCloudOrographicParameters()
 {
     return atmosphere.orographicParameters;
 }
+
+/// Read one packed world-terrain sample without depending on the observer's local plane.
+vec4 openmwseCloudTerrainHeights(int index) { return atmosphere.terrainHeights[index]; }
+/// Locate the fixed lattice samples in world units.
+vec4 openmwseCloudTerrainOriginSpacing() { return atmosphere.terrainOriginSpacing; }
+/// Enclose the cloud formation terrain field.
+vec2 openmwseCloudTerrainHeightBounds() { return atmosphere.terrainHeightBounds; }
 
 /// Expose the exterior water datum to shared cloud height calculations.
 float openmwseCloudWaterHeight()
@@ -77,22 +77,24 @@ vec2 openmwseCloudAdvectionOffsetWorldUnits()
     return atmosphere.cloudAdvectionOffsetWorldUnits;
 }
 
-/// Share the primary view's independently moving cloud tissue with reflected cloud transport.
-vec3 openmwseCloudShapeAdvectionOffsetWorldUnits()
-{
-    return atmosphere.cloudShapeAdvectionOffsetWorldUnits;
-}
-
 /// Sample the canonical tileable multi-channel cloud shape volume.
 vec4 openmwseCloudNoiseSample(vec3 coordinates, float lodBias)
 {
-    return texture3D(openmwseCloudNoiseTexture, coordinates);
+    #if __VERSION__ >= 130 || defined(GL_ARB_shader_texture_lod)
+    return texture3DLod(openmwseCloudNoiseTexture, coordinates, lodBias);
+#else
+    return texture3D(openmwseCloudNoiseTexture, coordinates, lodBias);
+#endif
 }
 
 /// Sample the independent high-frequency cloud erosion volume.
 vec4 openmwseCloudDetailNoiseSample(vec3 coordinates, float lodBias)
 {
-    return texture3D(openmwseCloudDetailNoiseTexture, coordinates);
+    #if __VERSION__ >= 130 || defined(GL_ARB_shader_texture_lod)
+    return texture3DLod(openmwseCloudDetailNoiseTexture, coordinates, lodBias);
+#else
+    return texture3D(openmwseCloudDetailNoiseTexture, coordinates, lodBias);
+#endif
 }
 
 /// Sample the encoded curl field for base-weighted detail distortion.
@@ -107,6 +109,13 @@ vec4 openmwseCloudWeatherSample(vec2 coordinates)
     return texture2D(openmwseCloudWeatherTexture, coordinates);
 }
 
+/// Read one source cloud-layer parameter from the shared graphics publication.
+vec4 openmwseCloudModelParameter(int layer, int field)
+{
+    return atmosphere.cloudLayers[layer * 14 + field];
+}
+
+@link "lib/atmosphere/cloud_model_fragment.glsl"
 #include "lib/atmosphere/clouds.glsl"
 
 /// Transform a view-space ray into the reflected or main-view world-space convention.
@@ -146,7 +155,7 @@ OpenMWSEAerialPerspectiveParameters openmwseAerialPerspectiveParameters()
 #endif
     parameters.referenceHeight = waterHeight;
     parameters.observerHeight = atmosphereEyePosition().z;
-    parameters.weatherCloudTopHeight = openmwseCloudLayerHeightBounds(openmwseMainCloudLayer()).y;
+    parameters.weatherCloudTopHeight = openmwseWeatherCloudTopHeight();
     parameters.weatherCloudCoverage = atmosphere.cloudParameters.x;
     return parameters;
 }

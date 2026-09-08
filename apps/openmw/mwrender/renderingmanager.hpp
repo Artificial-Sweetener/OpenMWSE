@@ -61,6 +61,7 @@ namespace Fallback
 
 namespace SceneUtil
 {
+    struct AtmosphereTerrainGrid;
     class ShadowManager;
     class WorkQueue;
     class LightManager;
@@ -246,8 +247,6 @@ namespace MWRender
         /// Select distance-atmosphere fog for an isolated diagnostic without changing volumetric media.
         void setAtmosphereDiagnosticDistanceFogEnabled(bool enabled);
 
-        /// Select a deterministic procedural cloud-field phase for an isolated diagnostic scenario.
-        void setAtmosphereDiagnosticCloudSeed(std::uint32_t seed);
 
         /// Return the atmosphere values actually applied during the latest rendered frame.
         const AtmosphereDiagnosticState& getAtmosphereDiagnosticState() const { return mAtmosphereDiagnosticState; }
@@ -280,6 +279,9 @@ namespace MWRender
         void setViewDistance(float distance, bool delay = false);
 
         float getTerrainHeightAt(const osg::Vec3f& pos, ESM::RefId worldspace);
+
+        /// Publish the weather owner's world terrain cache to native and reflected cloud passes.
+        void setAtmosphereTerrain(const SceneUtil::AtmosphereTerrainGrid& terrain);
 
         // camera stuff
         Camera* getCamera() { return mCamera.get(); }
@@ -398,7 +400,6 @@ namespace MWRender
         AtmosphereDiagnosticMedia mAtmosphereDiagnosticMedia;
         AtmosphereDiagnosticState mAtmosphereDiagnosticState;
         bool mAtmosphereDiagnosticDistanceFogEnabled = true;
-        osg::Vec2f mAtmosphereDiagnosticCloudFieldOffset;
 
         osg::Vec4f mAmbientColor;
         float mNightEyeFactor;

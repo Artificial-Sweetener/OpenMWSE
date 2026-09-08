@@ -227,8 +227,9 @@ namespace MWRender
         /// Report whether the production multi-frame diagnostic capture still owns transient render state.
         bool atmosphereDiagnosticCaptureInProgress() const;
 
-        /// Request exact final-composite captures for the next bounded sequence of production frames.
-        void requestRenderFrameDiagnosticCapture(const std::filesystem::path& outputPath, std::uint32_t frameCount);
+        /// Capture production composites at preview or native resolution in streamed bundles.
+        void requestRenderFrameDiagnosticCapture(
+            const std::filesystem::path& outputPath, std::uint32_t frameCount, bool nativeResolution);
 
         /// Report whether an exact final-composite sequence is being captured or serialized.
         bool renderFrameDiagnosticCaptureInProgress() const;

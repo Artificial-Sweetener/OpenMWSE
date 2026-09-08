@@ -3,6 +3,7 @@ if (NOT DEFINED OPENMW_RESOURCES_ROOT)
 endif()
 
 set(BUILTIN_DATA_FILES
+    licenses/GPU-Noise-Lib.txt
     textures/openmwse/atmosphere_cloud_noise.dds
     textures/openmwse/atmosphere_cloud_detail.dds
     textures/openmwse/atmosphere_cloud_curl.dds
@@ -56,6 +57,7 @@ set(BUILTIN_DATA_FILES
     fonts/MysticCards.ttf
     fonts/MysticCards.omwfont
     fonts/MysticCardsFontLicense.txt
+
 
     # Default animation blending config
     animations/animation-config.yaml
@@ -278,6 +280,8 @@ endforeach (f)
 
 copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/clouds.glsl" "${OPENMW_RESOURCES_ROOT}"
     "resources/vfs/shaders/lib/atmosphere/clouds.glsl")
+copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/participating_media.glsl" "${OPENMW_RESOURCES_ROOT}"
+    "resources/vfs/shaders/lib/atmosphere/participating_media.glsl")
 copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/cloud_field.glsl" "${OPENMW_RESOURCES_ROOT}"
     "resources/vfs/shaders/lib/atmosphere/cloud_field.glsl")
 copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/aerial_perspective.glsl" "${OPENMW_RESOURCES_ROOT}"
@@ -286,3 +290,20 @@ copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/units.
     "resources/vfs/shaders/lib/atmosphere/units.glsl")
 copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/util/dither.glsl" "${OPENMW_RESOURCES_ROOT}"
     "resources/vfs/shaders/lib/util/dither.glsl")
+
+copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/cloud_model.glsl" "${OPENMW_RESOURCES_ROOT}"
+    "resources/vfs/shaders/lib/atmosphere/cloud_model.glsl")
+
+copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/cloud_model_density.glsl" "${OPENMW_RESOURCES_ROOT}"
+    "resources/vfs/shaders/lib/atmosphere/cloud_model_density.glsl")
+
+copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/cloud_model.h.glsl" "${OPENMW_RESOURCES_ROOT}"
+    "resources/vfs/shaders/lib/atmosphere/cloud_model.h.glsl")
+
+copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/cloud_field.h.glsl" "${OPENMW_RESOURCES_ROOT}"
+    "resources/vfs/shaders/lib/atmosphere/cloud_field.h.glsl")
+
+copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/cloud_shadow_column.glsl" "${OPENMW_RESOURCES_ROOT}"
+    "resources/vfs/shaders/lib/atmosphere/cloud_shadow_column.glsl")
+copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/cloud_shadow_column.h.glsl" "${OPENMW_RESOURCES_ROOT}"
+    "resources/vfs/shaders/lib/atmosphere/cloud_shadow_column.h.glsl")

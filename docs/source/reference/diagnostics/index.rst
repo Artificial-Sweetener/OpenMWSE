@@ -80,7 +80,11 @@ baseline and candidate repetition.
 Add ``--capture-route-frames`` when diagnosing temporal rendering defects. The controller stores the exact final composite for
 every executed route frame together with frame-matched shadow-map depth and projection metadata in bounded, versioned
 ``route-frames-*.omwdiag`` bundles inside the artifact directory. The capture uses the isolated graphics context and leaves the
-normal game profile untouched.
+normal game profile untouched. Preview frames are limited to 1024 pixels on their longest edge.
+Use ``--capture-route-native-frames`` for pixel-scale temporal defects. Native captures preserve the rendering resolution
+by streaming each frame directly to a partial bundle and publishing the completed sequence. Each frame is limited to
+64 million RGBA pixels; only the current frame and its shadow attachments are retained in memory.
+Use ``--skip-graphics-capture`` to omit full attachment captures at route checkpoints.
 Use ``--bypass-route-shadows`` with the same replay to produce a frame-aligned conventional-shadow comparison; shadow rendering
 is restored before boundary graphics evidence is captured.
 
@@ -100,8 +104,13 @@ Atmosphere captures can replace save-derived weather and game hour without chang
 ``--weather <name>`` locks one steady weather. ``--weather-from <name> --weather-to <name>
 --weather-transition <progress>`` locks an exact transition, where progress is within ``[0, 1]`` from the first weather to the
 second. ``--game-hour <hour>`` locks civil game time within ``[0, 24)`` while simulation time and cloud advection continue.
-``--cloud-seed <integer>`` selects a deterministic world-space phase shared by visible clouds and their surface shadows;
-seed zero preserves the production field phase.
+``--start-game-hour <hour>`` sets civil time once and then advances it at the save's time scale.
+Use it with a route to reproduce evolving dawn or sunset history; it is mutually exclusive with ``--game-hour``.
+The version-7 atmosphere scenario preserves this advancing-time control, and earlier scenarios retain their locked-time semantics.
+``--cloud-seed <integer>`` selects a deterministic weather-episode identity, including its authored cloud family,
+bounded variation, and field phase. Seed zero selects the authored baseline without episode realization.
+Visible clouds, reflections, and surface-shadow placement consume the same identity; the seed does not change
+the simulation clock or add a separate wind displacement.
 ``--recent-precipitation <weight>`` sets the condensate controller's bounded recent-rain memory within ``[0, 1]``. It is useful
 for paired dry and post-rain mist captures because it changes mist formation without inventing a different current weather,
 fog policy, or lighting path.
@@ -128,6 +137,14 @@ profile.
 
 ``--disable-distance-fog`` independently removes exponential or linear view-path aerial perspective for cloud-shape diagnosis.
 It does not disable volumetric fog, mist, or cloud media unless their corresponding controls are also supplied.
+
+The ``atmosphere-cloud-terrain-v1`` attachment records the rendered world terrain cache. Its first RGBA texel
+contains the world origin XY, lattice spacing, and side length; the second contains minimum height, maximum height, and side length.
+Subsequent texels contain four scalar heights each in row-major order, with unused trailing channels set to zero.
+
+Atmosphere bundles include ``atmosphere-cloud-models-v2``, a 14 by 3 RGBA attachment containing the published
+outgoing, incoming, and environmental model controls in ``SceneUtil::packCloudLayer`` order. It records the actual
+post-processing uniform snapshot, including gradients, deformation, noise scale, and optical coefficients.
 
 Every isolated run writes its final ``gameplay.yaml`` evidence. Use ``--skip-graphics-capture`` for state or
 performance-only runs that do not need production attachments. Use ``--normal-only-graphics-capture`` for deterministic
@@ -187,8 +204,9 @@ The versioned providers expose these evidence domains:
 
 * ``core@2`` records the effective video, camera, atmosphere, and complete shadow configuration used by the captured engine
   instance so replay evidence can attest to rendering-setting parity.
-* ``graphics@1`` captures scene color and depth, resolved atmospheric volumes and metadata, shafts, and the final composite over
-  normal and diagnostic-isolation stages.
+* ``graphics@2`` captures scene color and depth, resolved atmospheric volumes and metadata, shafts, and the final composite over
+  normal and diagnostic-isolation stages. It also supports native-resolution route composites;
+  ``graphics@1`` supports 1024-pixel route previews.
 * ``gameplay@8`` records the cell, camera position and angles, first-person and underwater state, current and next weather,
   weather-transition progress, game hour, game and simulation clocks, state, continuous terrain-derived environment traits,
   sparse terrain sample center, local gradient, valley depth,
@@ -267,6 +285,10 @@ the viewer's potentially newer frame stamp. Block (x,y) selects index (phase + (
 The optional ``atmosphere-volume-metadata-reprojected`` attachment exposes the half-resolution reconstruction
 decision before fresh-ray repair. Its alpha is negative only where an untraced pixel lacks usable history;
 the repair pass integrates those rays and writes final metadata with the usual nonnegative medium identifiers.
+The production comparison tool enforces numeric parity for these phase-dependent attachments when both
+captures use the same recorded phase. When phases differ, it validates their dimensions and finite values,
+records the phase mismatch, and continues to enforce parity on the resolved radiance, resolved metadata,
+scene depth, and final composite attachments.
 
 The fixed-step scheduler controls simulation and rendering clocks after loading the real save. Readiness and graphics-completion
 barriers prevent capture races. A disconnected controller cancels pending work, and controller destruction terminates and reaps

@@ -2,6 +2,7 @@
 #define OPENMW_ESM_WEATHERSTATE_H
 
 #include <components/esm/refid.hpp>
+#include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
@@ -27,6 +28,11 @@ namespace ESM
         int32_t mCurrentWeather;
         int32_t mNextWeather;
         int32_t mQueuedWeather;
+        /// Preserve realized cloud episodes and the next deterministic selection sequence in saves.
+        std::uint32_t mCurrentCloudScenario = 0;
+        std::uint32_t mNextCloudScenario = 0;
+        std::uint32_t mQueuedCloudScenario = 0;
+        std::uint32_t mCloudScenarioSequence = 0;
         std::map<ESM::RefId, RegionWeatherState> mRegions;
 
         void load(ESMReader& esm);

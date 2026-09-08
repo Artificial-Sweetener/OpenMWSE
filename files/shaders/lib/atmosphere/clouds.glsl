@@ -1,17 +1,29 @@
 #ifndef OPENMWSE_ATMOSPHERE_CLOUDS_GLSL
 #define OPENMWSE_ATMOSPHERE_CLOUDS_GLSL
 
-#include "cloud_field.glsl"
+#include "cloud_field.h.glsl"
+#include "cloud_model_density.glsl"
+#include "cloud_shadow_column.h.glsl"
+#include "participating_media.glsl"
+
+/// Read a complete cloud layer from the common CPU publication without deriving morphology in the shader.
+CloudModelLayer openmwseReadCloudModel(int layerIndex)
+{
+    vec4 parameters[14];
+    for (int field = 0; field < 14; ++field)
+        parameters[field] = openmwseCloudModelParameter(layerIndex, field);
+    return cloudModelDecodeLayer(parameters,
+        openmwseCloudAnimationSeconds(openmwseCloudAdvectionOffsetWorldUnits()));
+}
 
 /// Describe one independently placeable cloud stratum consumed by the shared density and transport path.
 struct OpenMWSECloudLayer
 {
     vec4 parameters;
-    vec4 shape;
-    vec4 organization;
-    vec4 structure;
+    CloudModelLayer model;
     vec2 fieldOffsetWorldUnits;
     float terrainCoupling;
+    float terrainInfluence;
 };
 
 // Use an Earth-scale 6360 km cloud datum. Only the main cloud shell and its optical paths
@@ -26,22 +38,37 @@ const float openmwseCloudSecondaryExtinctionScale = 0.1;
 const float openmwseCloudQuadratureOffsetLow = 0.2113248654;
 const float openmwseCloudQuadratureOffsetHigh = 0.7886751346;
 
-// Share one distance scale between density mips and the near-detail marching allowance.
+// Resolve thin condensate optics within the main deck's broader source sampling allocation.
+const int openmwseCondensateTransportSubdivisions = 8;
+
+// Scale density mip distances with the explicit physical scale.
 const float openmwseCloudNoiseLodDistance = 30000.0 * openmwseAtmosphereWorldUnitsPerMeter;
 
-/// Return the main weather-cloud stratum.
+/// Return the outgoing episode's independently authored cloud model and Morrowind placement.
 OpenMWSECloudLayer openmwseMainCloudLayer()
 {
-    return OpenMWSECloudLayer(openmwseCloudParameters(), openmwseCloudShapeParameters(),
-        openmwseCloudOrganizationParameters(), openmwseCloudStructureParameters(), vec2(0.0), 0.0);
+    vec4 parameters = openmwseCloudParameters();
+    vec4 scenario = openmwseCloudScenarioParameters();
+    parameters.y *= 1.0 - clamp(scenario.z, 0.0, 1.0);
+    return OpenMWSECloudLayer(parameters, openmwseReadCloudModel(0),
+        openmwseCloudEpisodeOffset(scenario.x), 0.0, 0.0);
 }
 
-/// Return the low environmental-cloud stratum with an independent deterministic field phase.
+/// Keep the incoming episode's density model and field phase independent throughout its optical crossfade.
+OpenMWSECloudLayer openmwseIncomingCloudLayer()
+{
+    vec4 parameters = openmwseIncomingCloudParameters();
+    vec4 scenario = openmwseCloudScenarioParameters();
+    parameters.y *= clamp(scenario.z, 0.0, 1.0) * step(0.5, scenario.w);
+    return OpenMWSECloudLayer(parameters, openmwseReadCloudModel(1),
+        openmwseCloudEpisodeOffset(scenario.y), 0.0, 0.0);
+}
+
+/// Place the environmental cloud layer against OpenMW's local terrain model.
 OpenMWSECloudLayer openmwseLowCloudLayer()
 {
-    return OpenMWSECloudLayer(
-        openmwseLowCloudParameters(), openmwseLowCloudShapeParameters(), vec4(0.72, 0.08, 0.16, 0.0),
-        vec4(0.72, 0.42, 0.0, 0.0), vec2(137000.0, -91000.0), 1.0);
+    return OpenMWSECloudLayer(openmwseLowCloudParameters(), openmwseReadCloudModel(2),
+        vec2(137000.0, -91000.0), 1.0, openmwseLowCloudEnvironmentInfluence());
 }
 
 /// Return the fixed virtual-planet center for OpenMW's world-space tangent frame.
@@ -69,10 +96,11 @@ vec3 openmwseCloudFieldPosition(vec3 worldPosition, OpenMWSECloudLayer layer)
     return worldPosition;
 }
 
-/// Return whether one cloud stratum can contribute visible density.
+/// Skip optical layers with no authored coverage or no density contribution.
 bool openmwseCloudLayerEnabled(OpenMWSECloudLayer layer)
 {
-    return layer.parameters.x > 0.001 && layer.parameters.y > 0.001;
+    return (layer.model.coverageAmount > 0.0 || layer.model.coverageMinimum > 0.0)
+        && layer.parameters.y > 0.001;
 }
 
 /// Return the local influence of the sparsely sampled terrain model without projecting it across the whole world.
@@ -92,14 +120,41 @@ float openmwseCloudTerrainHeight(vec2 worldPosition)
     return mediumReference.x + dot(localOffset, orography.zw);
 }
 
+/// Read a height from the packed world lattice.
+float openmwseCloudTerrainNode(ivec2 coordinate)
+{
+    int index = coordinate.y * int(openmwseCloudTerrainOriginSpacing().w) + coordinate.x;
+    vec4 heights = openmwseCloudTerrainHeights(index / 4);
+    return max(heights[index - (index / 4) * 4], openmwseCloudWaterHeight());
+}
+
+/// Interpolate cloud-forming elevation and its continuous gradient at a fixed world position.
+vec3 openmwseCloudFormationTerrain(vec2 worldPosition)
+{
+    vec4 grid = openmwseCloudTerrainOriginSpacing();
+    vec2 coordinate = clamp((worldPosition - grid.xy) / grid.z, vec2(0.0), vec2(grid.w - 1.0));
+    ivec2 cell = ivec2(min(floor(coordinate), vec2(grid.w - 2.0)));
+    vec2 fraction = coordinate - vec2(cell);
+    vec2 weight = fraction * fraction * (3.0 - 2.0 * fraction);
+    vec2 derivative = 6.0 * fraction * (1.0 - fraction) / grid.z;
+    float a = openmwseCloudTerrainNode(cell);
+    float b = openmwseCloudTerrainNode(cell + ivec2(1, 0));
+    float c = openmwseCloudTerrainNode(cell + ivec2(0, 1));
+    float d = openmwseCloudTerrainNode(cell + ivec2(1, 1));
+    return vec3(mix(mix(a, b, weight.x), mix(c, d, weight.x), weight.y),
+        mix(b - a, d - c, weight.y) * derivative.x,
+        mix(c - a, d - b, weight.x) * derivative.y);
+}
+
 /// Return a cloud base that follows local terrain only for the low environmental stratum.
 float openmwseCloudNominalBaseHeight(vec3 worldPosition, OpenMWSECloudLayer layer)
 {
     float fixedBaseHeight = openmwseCloudWaterHeight() + layer.parameters.z;
     vec4 mediumReference = openmwseCloudMediumReferenceParameters();
-    float terrainInfluence = layer.terrainCoupling * layer.shape.w * mediumReference.y
-        * openmwseCloudTerrainInfluence(worldPosition.xy);
-    float terrainBaseHeight = openmwseCloudTerrainHeight(worldPosition.xy) + mediumReference.z;
+    if (layer.terrainCoupling <= 0.0)
+        return fixedBaseHeight;
+    float terrainInfluence = layer.terrainInfluence * mediumReference.y;
+    float terrainBaseHeight = openmwseCloudFormationTerrain(worldPosition.xy).x + mediumReference.z;
     return mix(fixedBaseHeight, terrainBaseHeight, clamp(terrainInfluence, 0.0, 1.0));
 }
 
@@ -108,219 +163,81 @@ float openmwseCloudOrographicDensityScale(vec3 worldPosition, OpenMWSECloudLayer
 {
     if (layer.terrainCoupling <= 0.0)
         return 1.0;
-    vec2 terrainGradient = openmwseCloudOrographicParameters().zw;
+    vec2 terrainGradient = openmwseCloudFormationTerrain(worldPosition.xy).yz;
     vec2 cloudMotionDirection = normalize(vec2(-0.78, -0.36));
     float slopeAlongWind = dot(terrainGradient, cloudMotionDirection);
     float windwardFormation = smoothstep(0.025, 0.22, slopeAlongWind);
     float leewardDissipation = smoothstep(0.025, 0.22, -slopeAlongWind);
     float response = 1.0 + windwardFormation * 0.85 - leewardDissipation * 0.7;
-    float influence = layer.shape.w * openmwseCloudMediumReferenceParameters().y
-        * openmwseCloudTerrainInfluence(worldPosition.xy);
+    float influence = layer.terrainInfluence * openmwseCloudMediumReferenceParameters().y;
     return mix(1.0, response, clamp(influence, 0.0, 1.0));
 }
 
-/// Return an advected and independently phased position for one cloud stratum.
-vec3 openmwseCloudLayerPosition(vec3 worldPosition, OpenMWSECloudLayer layer)
-{
-    vec3 advectedPosition = openmwseCloudAdvectedPosition(worldPosition);
-    advectedPosition.xy += layer.fieldOffsetWorldUnits;
-    return advectedPosition;
-}
-
-/// Expand the configurable main shell only as convection matures while retaining the authored low-cloud thickness.
-float openmwseCloudVerticalExtentScale(OpenMWSECloudLayer layer)
-{
-    if (layer.terrainCoupling > 0.0)
-        return 1.0;
-    float matureDevelopment = clamp(layer.shape.z * layer.organization.z, 0.0, 1.0);
-    return mix(1.0, openmwseCloudMaximumThicknessScale, matureDevelopment);
-}
-
-/// Return the height-skewed coverage-map position for the main layer.
-vec2 openmwseCloudColumnPosition(
-    vec3 worldPosition, vec3 advectedPosition, OpenMWSECloudLayer layer)
-{
-    float nominalThickness = max(layer.parameters.w, 1.0) * openmwseCloudVerticalExtentScale(layer);
-    float envelopeHeight = clamp((worldPosition.z - openmwseCloudNominalBaseHeight(worldPosition, layer))
-            / nominalThickness,
-        0.0, 1.0);
-    float coverageSkewWorldUnits = 2500.0 * openmwseAtmosphereWorldUnitsPerMeter;
-    float formationScale = mix(openmwseCloudLowFormationScale, 1.0,
-        1.0 - clamp(layer.terrainCoupling, 0.0, 1.0));
-    vec2 coverageWindDirection = layer.terrainCoupling <= 0.0
-        ? vec2(1.0, 0.0) : normalize(vec2(-0.85, 0.53));
-    return advectedPosition.xy + coverageWindDirection * coverageSkewWorldUnits
-        * formationScale * envelopeHeight;
-}
-
-/// Return the physically calibrated horizontal formation scale for one cloud stratum.
-float openmwseCloudFormationScale(OpenMWSECloudLayer layer)
-{
-    return mix(openmwseCloudLowFormationScale, 1.0,
-        1.0 - clamp(layer.terrainCoupling, 0.0, 1.0));
-}
-
-/// Preserve the feature-to-step relationship when a stratum compresses the formation domain.
+/// Scale the occupied-ray budget independently of authored noise frequencies.
 float openmwseCloudLayerMaximumMarchingDistance(OpenMWSECloudLayer layer)
 {
-    return openmwseCloudMaximumMarchingDistance * openmwseCloudFormationScale(layer);
+    return openmwseCloudMaximumMarchingDistance * min(1.0, layer.model.physicalScale);
 }
 
-/// Evaluate one layer's weather field with the same physical scale used by its density samples.
-OpenMWSECloudColumnProperties openmwseCloudLayerColumnProperties(
-    vec3 worldPosition, vec3 advectedPosition, OpenMWSECloudLayer layer)
-{
-    return openmwseCloudColumnPropertiesForScale(
-        openmwseCloudColumnPosition(worldPosition, advectedPosition, layer), layer.parameters,
-        layer.shape, layer.organization, layer.structure, openmwseCloudFormationScale(layer));
-}
-
-/// Return continuous small, medium, and large cloud-type weights from one weather column.
-vec3 openmwseCloudTypeWeights(float cloudType)
-{
-    cloudType = clamp(cloudType, 0.0, 1.0);
-    return vec3(1.0 - clamp(cloudType * 2.0, 0.0, 1.0),
-        max(1.0 - abs(cloudType - 0.5) * 2.0, 0.0),
-        clamp((cloudType - 0.5) * 2.0, 0.0, 1.0));
-}
-
-/// Return the black-white-white-black height gradient for one cloud column.
-vec4 openmwseCloudTypeHeightGradient(float cloudType)
-{
-    vec3 typeWeights = openmwseCloudTypeWeights(cloudType);
-    vec4 smallGradient = vec4(0.01, 0.1, 0.11, 0.2);
-    vec4 mediumGradient = vec4(0.01, 0.08, 0.3, 0.4);
-    vec4 largeGradient = vec4(0.01, 0.06, 0.75, 0.95);
-    return smallGradient * typeWeights.x + mediumGradient * typeWeights.y + largeGradient * typeWeights.z;
-}
-
-/// Evaluate the type-specific vertical density support used before coverage erosion.
-float openmwseCloudTypeHeightDensity(float relativeHeight, float cloudType)
-{
-    vec4 gradient = openmwseCloudTypeHeightGradient(cloudType);
-    return smoothstep(gradient.x, gradient.y, relativeHeight)
-        - smoothstep(gradient.z, gradient.w, relativeHeight);
-}
-
-/// Deform column support into a laterally spreading top without constructing a separate anvil volume.
-float openmwseCloudAnvilDeformation(
-    float relativeHeight, float cloudType, float requestedStrength)
-{
-    vec3 typeWeights = openmwseCloudTypeWeights(cloudType);
-    float activeStrength = clamp(requestedStrength, 0.0, 1.0);
-    vec4 mediumDeformation = vec4(15.0, 0.1, 15.0, 0.1);
-    vec4 largeDeformation = vec4(5.0, 0.25, 5.0, 0.15);
-    vec4 deformation = mediumDeformation * typeWeights.y + largeDeformation * typeWeights.z;
-    vec4 gradient = openmwseCloudTypeHeightGradient(cloudType);
-    float top = pow(clamp(relativeHeight + deformation.y + (1.0 - gradient.w), 0.0, 1.0), deformation.x);
-    float bottom = pow(clamp((1.0 - relativeHeight) + deformation.w + gradient.x, 0.0, 1.0), deformation.z);
-    return mix(1.0, clamp(top + bottom, 0.0, 1.0), activeStrength);
-}
-
-/// Return conservative world-space bounds for one cloud stratum.
+/// Enclose the authored layer shell and the environmental terrain displacement.
 vec2 openmwseCloudLayerHeightBounds(OpenMWSECloudLayer layer)
 {
-    float fixedBaseHeight = openmwseCloudWaterHeight() + layer.parameters.z;
-    float nominalThickness = max(layer.parameters.w, 1.0) * openmwseCloudVerticalExtentScale(layer);
-    if (layer.terrainCoupling <= 0.0)
-        return vec2(fixedBaseHeight, fixedBaseHeight + nominalThickness);
-
-    vec4 mediumReference = openmwseCloudMediumReferenceParameters();
-    float terrainWeight = layer.terrainCoupling * layer.shape.w * mediumReference.y;
-    float terrainBaseHeight = mediumReference.x + mediumReference.z;
-    float nominalBaseHeight = mix(fixedBaseHeight, terrainBaseHeight, clamp(terrainWeight, 0.0, 1.0));
-    float terrainExcursion = length(openmwseCloudOrographicParameters().zw) * 20480.0
-        * clamp(terrainWeight, 0.0, 1.0);
-    float maximumBaseVariation = mix(0.08, 0.28, clamp(layer.structure.y, 0.0, 1.0));
-    float layerThickness = nominalThickness * openmwseCloudMaximumThicknessScale;
-    return vec2(nominalBaseHeight - nominalThickness * maximumBaseVariation - terrainExcursion,
-        nominalBaseHeight + layerThickness + nominalThickness * maximumBaseVariation + terrainExcursion);
+    float base = openmwseCloudWaterHeight() + layer.parameters.z;
+    float weight = layer.terrainCoupling * layer.terrainInfluence
+        * openmwseCloudMediumReferenceParameters().y;
+    vec2 terrainBounds = max(openmwseCloudTerrainHeightBounds(), vec2(openmwseCloudWaterHeight()))
+        + openmwseCloudMediumReferenceParameters().z;
+    return vec2(min(base, mix(base, terrainBounds.x, clamp(weight, 0.0, 1.0))),
+        max(base, mix(base, terrainBounds.y, clamp(weight, 0.0, 1.0))) + layer.parameters.w);
 }
 
-/// Bound main-cloud density by the tallest weather-selectable type without changing the nominal atmosphere shell.
-vec2 openmwseMainCloudDensityHeightBounds(OpenMWSECloudLayer layer)
+/// Enclose the piecewise-linear gradients reachable through the authored weather-type remap.
+vec2 openmwseCloudDensityHeightBounds(OpenMWSECloudLayer layer)
 {
-    vec2 nominalBounds = openmwseCloudLayerHeightBounds(layer);
-    float maximumType = clamp(max(layer.shape.x, layer.structure.z), 0.0, 1.0);
-    vec4 gradient = openmwseCloudTypeHeightGradient(maximumType);
-    return nominalBounds.x + (nominalBounds.y - nominalBounds.x) * gradient.xw;
+    float minimumType = layer.model.typeMinimum;
+    float maximumType = minimumType + min(layer.model.typeAmount, 1.0) * (1.0 - minimumType);
+    vec4 first = cloudModelHeightGradient(vec3(0.0, minimumType, 0.0), layer.model);
+    vec4 last = cloudModelHeightGradient(vec3(0.0, maximumType, 0.0), layer.model);
+    vec4 middle = cloudModelHeightGradient(vec3(0.0, clamp(0.5, minimumType, maximumType), 0.0), layer.model);
+    float lower = min(first.x, min(middle.x, last.x));
+    float upper = max(first.w, max(middle.w, last.w));
+    vec2 bounds = openmwseCloudLayerHeightBounds(layer);
+    return bounds + layer.parameters.w * vec2(lower, upper - 1.0);
 }
 
-/// Warp the fixed low-frequency domain before adding independent shape advection and height-dependent shear.
-vec3 openmwseCloudBaseNoiseCoordinates(
-    vec3 worldPosition, OpenMWSECloudLayer layer, float relativeHeight)
+/// Transition the reachable deck top with the weather owner while retaining separate density geometry.
+float openmwseWeatherCloudTopHeight()
 {
-    float featureScale = max(layer.shape.y, 0.25) * openmwseCloudFormationScale(layer);
-    vec3 noisePosition = layer.terrainCoupling > 0.0
-        ? openmwseCloudLayerPosition(worldPosition, layer) : worldPosition;
-    vec3 modelPosition = noisePosition.xzy;
-    if (layer.terrainCoupling > 0.0)
-    {
-        float densityCoordinateThickness
-            = max(layer.parameters.w * openmwseCloudMaximumThicknessScale, 1.0);
-        modelPosition.y = relativeHeight * densityCoordinateThickness;
-    }
-    modelPosition.y += modelPosition.x / 3.0 + modelPosition.z / 7.0;
-    if (layer.terrainCoupling <= 0.0)
-        modelPosition += openmwseCloudShapeAdvectionOffsetWorldUnits().xzy;
-    vec3 shapeWindDirection = vec3(cos(0.75), -0.5, sin(0.75));
-    modelPosition += shapeWindDirection * relativeHeight
-        * (700.0 * openmwseAtmosphereWorldUnitsPerMeter) * openmwseCloudFormationScale(layer);
-    return modelPosition * (openmwseCloudReferenceShapeNoiseScale / featureScale);
+    OpenMWSECloudLayer outgoing = openmwseMainCloudLayer();
+    OpenMWSECloudLayer incoming = openmwseIncomingCloudLayer();
+    outgoing.parameters.y = openmwseCloudParameters().y;
+    incoming.parameters.y = openmwseIncomingCloudParameters().y;
+    float outgoingTop = openmwseCloudLayerEnabled(outgoing)
+        ? openmwseCloudDensityHeightBounds(outgoing).y : openmwseCloudWaterHeight();
+    float incomingTop = openmwseCloudLayerEnabled(incoming)
+        ? openmwseCloudDensityHeightBounds(incoming).y : openmwseCloudWaterHeight();
+    vec4 scenario = openmwseCloudScenarioParameters();
+    return mix(outgoingTop, incomingTop, clamp(scenario.z, 0.0, 1.0) * step(0.5, scenario.w));
 }
 
-/// Advect fine cloud tissue independently of coverage, with curl sampled in the source's fixed domain.
-vec3 openmwseCloudDetailNoiseCoordinates(vec3 worldPosition, OpenMWSECloudLayer layer,
-    float relativeHeight, float distortionAmount)
-{
-    float formationScale = openmwseCloudFormationScale(layer);
-    float featureScale = max(layer.shape.y, 0.25) * formationScale;
-    vec3 noisePosition = layer.terrainCoupling > 0.0
-        ? openmwseCloudLayerPosition(worldPosition, layer) : worldPosition;
-    vec3 modelPosition = noisePosition.xzy;
-    if (layer.terrainCoupling > 0.0)
-    {
-        float densityCoordinateThickness
-            = max(layer.parameters.w * openmwseCloudMaximumThicknessScale, 1.0);
-        modelPosition.y = relativeHeight * densityCoordinateThickness;
-    }
-    else
-        modelPosition += openmwseCloudShapeAdvectionOffsetWorldUnits().xzy;
-    vec3 shapeWindDirection = vec3(cos(0.75), -0.5, sin(0.75));
-    modelPosition += shapeWindDirection * relativeHeight
-        * (700.0 * openmwseAtmosphereWorldUnitsPerMeter) * formationScale;
-    vec2 curlCoordinates = noisePosition.xy
-        * (0.3 * openmwseCloudReferenceShapeNoiseScale / featureScale);
-    vec3 curl = openmwseCloudCurlNoiseSample(curlCoordinates) * 2.0 - 1.0;
-    float curlHeightWeight = pow(clamp(1.0 - relativeHeight, 0.0, 1.0), 5.0);
-    modelPosition += vec3(curl.x, curl.z, curl.y)
-        * (500.0 * openmwseAtmosphereWorldUnitsPerMeter) * formationScale
-        * curlHeightWeight * distortionAmount;
-    return modelPosition * (openmwseCloudReferenceShapeNoiseScale / featureScale);
-}
-
-/// Return the locally varied base and conservative height of the coherent dimensional profile.
-vec2 openmwseCloudLocalLayerFromProperties(
-    vec3 worldPosition, OpenMWSECloudColumnProperties columnProperties, OpenMWSECloudLayer layer)
-{
-    float nominalBaseHeight = openmwseCloudNominalBaseHeight(worldPosition, layer);
-    float nominalThickness = max(layer.parameters.w, 1.0) * openmwseCloudVerticalExtentScale(layer);
-    if (layer.terrainCoupling <= 0.0)
-        return vec2(nominalBaseHeight, nominalThickness);
-
-    float baseVariation = mix(0.08, 0.28, clamp(layer.structure.y, 0.0, 1.0));
-    float localBaseHeight
-        = nominalBaseHeight + (columnProperties.baseVariation * 2.0 - 1.0) * nominalThickness * baseVariation;
-    return vec2(localBaseHeight, nominalThickness * openmwseCloudMaximumThicknessScale);
-}
-
-/// Return the locally varied cloud base height and thickness for a world-space column.
+/// Return physical shell placement independently of the weather map and density model.
 vec2 openmwseCloudLocalLayer(vec3 worldPosition, OpenMWSECloudLayer layer)
 {
-    worldPosition = openmwseCloudFieldPosition(worldPosition, layer);
-    vec3 advectedPosition = openmwseCloudLayerPosition(worldPosition, layer);
-    return openmwseCloudLocalLayerFromProperties(
-        worldPosition, openmwseCloudLayerColumnProperties(worldPosition, advectedPosition, layer), layer);
+    return vec2(openmwseCloudNominalBaseHeight(worldPosition, layer), max(layer.parameters.w, 1.0));
+}
+
+/// Convert OpenMW's world-space field into the fixed Y-up metre domain once at the model boundary.
+vec3 openmwseCloudModelPosition(vec3 fieldPosition, OpenMWSECloudLayer layer)
+{
+    fieldPosition.xy += layer.fieldOffsetWorldUnits;
+    return fieldPosition.xzy / openmwseAtmosphereWorldUnitsPerMeter;
+}
+
+/// Compute the density model's normalized height within its independently placed shell.
+float openmwseCloudHeightFraction(vec3 fieldPosition, OpenMWSECloudLayer layer)
+{
+    vec2 placement = openmwseCloudLocalLayer(fieldPosition, layer);
+    return (fieldPosition.z - placement.x) / placement.y;
 }
 
 /// Return the forward ray interval intersecting the conservative cloud-height bounds.
@@ -376,94 +293,29 @@ vec2 openmwseMainCloudLayerIntersection(
     {
         intervalEnd = min(intervalEnd, inner.x);
     }
-    if (intervalStart > openmwseCloudMaximumEntryDistance)
+    if (intervalStart > openmwseCloudPresentationFadeEndDistance)
         return vec2(1.0, 0.0);
-    return vec2(intervalStart, min(intervalEnd, intervalStart + openmwseCloudMaximumMarchingDistance));
+    return vec2(intervalStart, min(intervalEnd, openmwseCloudPresentationFadeEndDistance));
 }
 
-/// Apply one type profile, coverage remap, and anvil deformation to base noise.
-float openmwseCloudDensityComponent(float cloudNoise, float relativeHeight, float cloudType,
-    float localCoverage, float anvilStrength)
+/// Fade main-cloud density over Morrowind's practical radial range at every observer altitude.
+float openmwseMainCloudPresentationWeight(float distanceFromEye)
 {
-    if (localCoverage <= 0.001)
-        return 0.0;
-    float heightDensity = openmwseCloudTypeHeightDensity(relativeHeight, cloudType);
-    float anvilDeformation = openmwseCloudAnvilDeformation(
-        relativeHeight, cloudType, anvilStrength);
-    float coverage = clamp(localCoverage, 0.0, 1.0);
-    float shapedDensity = cloudNoise * heightDensity;
-    shapedDensity = openmwseCloudRemapUnclamped(shapedDensity, 1.0 - coverage, 1.0) * coverage;
-    shapedDensity *= anvilDeformation;
-    return max(shapedDensity, 0.0);
+    return 1.0 - smoothstep(
+        openmwseCloudPresentationFadeStartDistance,
+        openmwseCloudPresentationFadeEndDistance,
+        distanceFromEye);
 }
 
-/// Erode one independently sampled density component with height-dilated Worley detail.
-float openmwseCloudDetailedDensityComponent(float coarseDensity, vec4 detailNoise,
-    float relativeHeight, float detailAmount)
-{
-    if (coarseDensity <= 0.001 || detailAmount <= 0.01)
-        return coarseDensity;
-    float detailFbm = dot(detailNoise.rgb, vec3(0.625, 0.25, 0.125));
-    float heightErosion = mix(1.0 - detailFbm, detailFbm,
-        clamp(relativeHeight * 10.0, 0.0, 1.0));
-    float detailedDensity = max(openmwseCloudRemapUnclamped(
-        coarseDensity, heightErosion * 0.3, 1.0), 0.0);
-    return mix(coarseDensity, detailedDensity, detailAmount);
-}
-
-/// Return whether one component can contain density before sampling either 3D noise volume.
-bool openmwseCloudDensityComponentPotential(float relativeHeight, float cloudType,
-    float localCoverage, float anvilStrength)
-{
-    vec4 gradient = openmwseCloudTypeHeightGradient(cloudType);
-    float deformedCoverage = localCoverage * openmwseCloudAnvilDeformation(
-        relativeHeight, cloudType, anvilStrength);
-    return deformedCoverage > 0.05 && relativeHeight > gradient.x && relativeHeight < gradient.w;
-}
-
-/// Return the weather presentation's strength for typed anvil deformation.
-float openmwseCloudAnvilStrength(OpenMWSECloudLayer layer)
-{
-    return clamp(layer.shape.w, 0.0, 1.0);
-}
-
-/// Evaluate one coherent weather, type, and density field for a cloud stratum.
-float openmwseCloudDensityFromNoise(
-    vec3 worldPosition, float cloudNoise,
-    OpenMWSECloudColumnProperties columnProperties, OpenMWSECloudLayer layer)
-{
-    vec2 localLayer = openmwseCloudLocalLayerFromProperties(worldPosition, columnProperties, layer);
-    if (worldPosition.z < localLayer.x || worldPosition.z > localLayer.x + localLayer.y)
-        return 0.0;
-    float relativeHeight
-        = clamp((worldPosition.z - localLayer.x) / max(localLayer.y, 1.0), 0.0, 1.0);
-    float anvilStrength = openmwseCloudAnvilStrength(layer);
-    float coverage = columnProperties.localCoverage;
-    return openmwseCloudDensityComponent(cloudNoise, relativeHeight,
-        columnProperties.family, coverage, anvilStrength)
-        * max(layer.parameters.y, 0.0)
-        * openmwseCloudOrographicDensityScale(worldPosition, layer);
-}
-
-/// Reject a cloud sample from weather and height data before paying for three-dimensional noise.
+/// Use the source weather and typed-height rejection before requesting three-dimensional noise samples.
 bool openmwseCloudPotentialDensity(vec3 worldPosition, OpenMWSECloudLayer layer)
 {
-    worldPosition = openmwseCloudFieldPosition(worldPosition, layer);
-    vec2 layerHeightBounds = openmwseCloudLayerHeightBounds(layer);
-    if (worldPosition.z < layerHeightBounds.x || worldPosition.z > layerHeightBounds.y)
+    vec3 fieldPosition = openmwseCloudFieldPosition(worldPosition, layer);
+    float heightFraction = openmwseCloudHeightFraction(fieldPosition, layer);
+    if (heightFraction < 0.0 || heightFraction > 1.0)
         return false;
-    vec3 advectedPosition = openmwseCloudLayerPosition(worldPosition, layer);
-    OpenMWSECloudColumnProperties columnProperties
-        = openmwseCloudLayerColumnProperties(worldPosition, advectedPosition, layer);
-    vec2 localLayer = openmwseCloudLocalLayerFromProperties(worldPosition, columnProperties, layer);
-    if (worldPosition.z < localLayer.x || worldPosition.z > localLayer.x + localLayer.y)
-        return false;
-    float relativeHeight
-        = clamp((worldPosition.z - localLayer.x) / max(localLayer.y, 1.0), 0.0, 1.0);
-    float anvilStrength = openmwseCloudAnvilStrength(layer);
-    float coverage = columnProperties.localCoverage;
-    return openmwseCloudDensityComponentPotential(relativeHeight, columnProperties.family,
-        coverage, anvilStrength);
+    vec3 weather = cloudModelSampleWeather(openmwseCloudModelPosition(fieldPosition, layer), heightFraction, layer.model);
+    return cloudModelValidDensity(heightFraction, weather, layer.model);
 }
 
 /// Carry density and independently authored precipitation optics from one cloud sample.
@@ -473,60 +325,28 @@ struct OpenMWSECloudDensitySample
     float precipitation;
 };
 
-/// Select a continuous noise mip from distance, optical-path bias, and the layer's physical feature scale.
-float openmwseCloudNoiseLod(
-    float distanceFromEye, float additionalLodBias, OpenMWSECloudLayer layer)
+/// Retain the nearest view mip before adding the independent light-ray mip offset.
+float openmwseCloudNoiseLod(float distanceFromEye, float additionalLodBias, OpenMWSECloudLayer layer)
 {
-    // Rounding this value produces hard radial mip shells that are visible at Morrowind's
-    // compressed cloud scale. Preserve its distance schedule while blending adjacent mip levels. A
-    // reduced formation scale raises spatial frequency by its reciprocal, so compensate by selecting
-    // the equivalent coarser mip instead of undersampling low-cloud detail into coherent march bands.
-    float distanceLod = max(distanceFromEye, 0.0) / openmwseCloudNoiseLodDistance;
-    float formationLodBias = max(-log2(max(openmwseCloudFormationScale(layer), 0.001)), 0.0);
-    return clamp(distanceLod + additionalLodBias + formationLodBias, 0.0, 3.0);
+    float featureScale = layer.model.physicalScale;
+    float viewLod = floor(max(distanceFromEye, 0.0) / (openmwseCloudNoiseLodDistance * featureScale) + 0.5);
+    return clamp(viewLod, 0.0, 3.0) + additionalLodBias;
 }
 
-/// Evaluate density at a distance-selected mip shared by view and secondary optical paths.
+/// Evaluate the source density model while keeping placement, environmental influence, and optical weight outside it.
 OpenMWSECloudDensitySample openmwseCloudDensitySample(vec3 worldPosition, float distanceFromEye,
     float additionalLodBias, OpenMWSECloudLayer layer)
 {
-    worldPosition = openmwseCloudFieldPosition(worldPosition, layer);
-    vec2 layerHeightBounds = openmwseCloudLayerHeightBounds(layer);
-    if (worldPosition.z < layerHeightBounds.x || worldPosition.z > layerHeightBounds.y)
+    vec3 fieldPosition = openmwseCloudFieldPosition(worldPosition, layer);
+    float heightFraction = openmwseCloudHeightFraction(fieldPosition, layer);
+    if (heightFraction < 0.0 || heightFraction > 1.0)
         return OpenMWSECloudDensitySample(0.0, 0.0);
-    float noiseLod = openmwseCloudNoiseLod(distanceFromEye, additionalLodBias, layer);
-    vec3 advectedPosition = openmwseCloudLayerPosition(worldPosition, layer);
-    OpenMWSECloudColumnProperties columnProperties
-        = openmwseCloudLayerColumnProperties(worldPosition, advectedPosition, layer);
-    if (columnProperties.localCoverage <= 0.001)
-        return OpenMWSECloudDensitySample(0.0, 0.0);
-    vec2 localHeightRange = openmwseCloudLocalLayerFromProperties(worldPosition, columnProperties, layer);
-    if (worldPosition.z < localHeightRange.x || worldPosition.z > localHeightRange.x + localHeightRange.y)
-        return OpenMWSECloudDensitySample(0.0, 0.0);
-    float relativeHeight
-        = clamp((worldPosition.z - localHeightRange.x) / max(localHeightRange.y, 1.0), 0.0, 1.0);
-    float anvilStrength = openmwseCloudAnvilStrength(layer);
-    float coverage = columnProperties.localCoverage;
-    bool densityPotential = openmwseCloudDensityComponentPotential(relativeHeight,
-        columnProperties.family, coverage, anvilStrength);
-    if (!densityPotential)
-        return OpenMWSECloudDensitySample(0.0, 0.0);
-    vec3 baseCoordinates
-        = openmwseCloudBaseNoiseCoordinates(worldPosition, layer, relativeHeight);
-    vec4 baseNoise = openmwseCloudNoiseSample(baseCoordinates, noiseLod);
-    float density = openmwseCloudDensityComponent(openmwseCloudBaseFromNoise(baseNoise),
-        relativeHeight, columnProperties.family, coverage, anvilStrength);
-    if (density > 0.001)
-    {
-        vec3 detailCoordinates = openmwseCloudDetailNoiseCoordinates(
-            worldPosition, layer, relativeHeight, 1.0) * 4.0;
-        vec4 detailNoise = openmwseCloudDetailNoiseSample(detailCoordinates, noiseLod);
-        density = openmwseCloudDetailedDensityComponent(
-            density, detailNoise, relativeHeight, 1.0);
-    }
-    density *= max(layer.parameters.y, 0.0)
-        * openmwseCloudOrographicDensityScale(worldPosition, layer);
-    return OpenMWSECloudDensitySample(density, columnProperties.precipitation);
+    vec3 positionMeters = openmwseCloudModelPosition(fieldPosition, layer);
+    vec3 weather = cloudModelSampleWeather(positionMeters, heightFraction, layer.model);
+    float density = cloudModelSampleDensity(positionMeters, heightFraction, layer.model, weather,
+        openmwseCloudNoiseLod(distanceFromEye, additionalLodBias, layer), true);
+    density *= max(layer.parameters.y, 0.0) * openmwseCloudOrographicDensityScale(fieldPosition, layer);
+    return OpenMWSECloudDensitySample(density, weather.b);
 }
 
 /// Evaluate only cloud density for shadow, occupancy, and compatibility callers.
@@ -537,36 +357,45 @@ float openmwseCloudDensity(vec3 worldPosition, float distanceFromEye,
         worldPosition, distanceFromEye, additionalLodBias, layer).density;
 }
 
-/// Evaluate cloud density from only the stable low-frequency field.
+/// Integrate density and density-weighted precipitation with two-point Gauss quadrature.
+OpenMWSECloudDensitySample openmwseCloudSegmentDensity(vec3 origin, vec3 direction,
+    float startDistance, float segmentLength, OpenMWSECloudLayer layer)
+{
+    float nearDistance = startDistance + segmentLength * openmwseCloudQuadratureOffsetLow;
+    float farDistance = startDistance + segmentLength * openmwseCloudQuadratureOffsetHigh;
+    OpenMWSECloudDensitySample nearSample = openmwseCloudDensitySample(
+        origin + direction * nearDistance, nearDistance, 0.0, layer);
+    OpenMWSECloudDensitySample farSample = openmwseCloudDensitySample(
+        origin + direction * farDistance, farDistance, 0.0, layer);
+    float densitySum = nearSample.density + farSample.density;
+    float rainDensity = nearSample.density * nearSample.precipitation
+        + farSample.density * farSample.precipitation;
+    return OpenMWSECloudDensitySample(0.5 * densitySum, rainDensity / max(densitySum, 0.0001));
+}
+
+/// Evaluate the sampleDetail=false path for stable temporal occupancy classification.
 float openmwseCloudBroadDensity(vec3 worldPosition, OpenMWSECloudLayer layer)
 {
-    worldPosition = openmwseCloudFieldPosition(worldPosition, layer);
-    vec2 layerHeightBounds = openmwseCloudLayerHeightBounds(layer);
-    if (worldPosition.z < layerHeightBounds.x || worldPosition.z > layerHeightBounds.y)
+    vec3 fieldPosition = openmwseCloudFieldPosition(worldPosition, layer);
+    float heightFraction = openmwseCloudHeightFraction(fieldPosition, layer);
+    if (heightFraction < 0.0 || heightFraction > 1.0)
         return 0.0;
-    vec3 advectedPosition = openmwseCloudLayerPosition(worldPosition, layer);
-    OpenMWSECloudColumnProperties columnProperties
-        = openmwseCloudLayerColumnProperties(worldPosition, advectedPosition, layer);
-    if (columnProperties.localCoverage <= 0.001)
-        return 0.0;
-    vec2 localHeightRange = openmwseCloudLocalLayerFromProperties(worldPosition, columnProperties, layer);
-    if (worldPosition.z < localHeightRange.x || worldPosition.z > localHeightRange.x + localHeightRange.y)
-        return 0.0;
-    float relativeHeight
-        = clamp((worldPosition.z - localHeightRange.x) / max(localHeightRange.y, 1.0), 0.0, 1.0);
-    vec3 baseCoordinates
-        = openmwseCloudBaseNoiseCoordinates(worldPosition, layer, relativeHeight);
-    float cloudNoise = openmwseCloudBaseFromNoise(openmwseCloudNoiseSample(baseCoordinates, 0.0));
-    return openmwseCloudDensityFromNoise(worldPosition, cloudNoise, columnProperties, layer);
+    vec3 positionMeters = openmwseCloudModelPosition(fieldPosition, layer);
+    vec3 weather = cloudModelSampleWeather(positionMeters, heightFraction, layer.model);
+    return cloudModelSampleDensity(positionMeters, heightFraction, layer.model, weather, 0.0, false)
+        * max(layer.parameters.y, 0.0) * openmwseCloudOrographicDensityScale(fieldPosition, layer);
 }
 
 /// Evaluate stable broad density from every enabled stratum for temporal classification.
 float openmwseCloudBroadDensity(vec3 worldPosition)
 {
     OpenMWSECloudLayer mainLayer = openmwseMainCloudLayer();
+    OpenMWSECloudLayer incomingLayer = openmwseIncomingCloudLayer();
     OpenMWSECloudLayer lowLayer = openmwseLowCloudLayer();
     float density = openmwseCloudLayerEnabled(mainLayer)
         ? openmwseCloudBroadDensity(worldPosition, mainLayer) : 0.0;
+    if (openmwseCloudLayerEnabled(incomingLayer))
+        density += openmwseCloudBroadDensity(worldPosition, incomingLayer);
     if (openmwseCloudLayerEnabled(lowLayer))
         density += openmwseCloudBroadDensity(worldPosition, lowLayer);
     return density;
@@ -574,11 +403,14 @@ float openmwseCloudBroadDensity(vec3 worldPosition)
 
 /// Evaluate stable low-frequency occupancy for the cloud strata active in one integration.
 float openmwseCloudBroadDensityForLayers(vec3 worldPosition, bool mainLayerEnabled,
-    bool lowLayerEnabled, OpenMWSECloudLayer mainLayer, OpenMWSECloudLayer lowLayer)
+    bool incomingLayerEnabled, bool lowLayerEnabled, OpenMWSECloudLayer mainLayer,
+    OpenMWSECloudLayer incomingLayer, OpenMWSECloudLayer lowLayer)
 {
     float density = 0.0;
     if (mainLayerEnabled)
         density += openmwseCloudBroadDensity(worldPosition, mainLayer);
+    if (incomingLayerEnabled)
+        density += openmwseCloudBroadDensity(worldPosition, incomingLayer);
     if (lowLayerEnabled)
         density += openmwseCloudBroadDensity(worldPosition, lowLayer);
     return density;
@@ -598,27 +430,19 @@ float openmwseCloudDualLobePhase(float cosineAngle)
         openmwseCloudMiePhase(cosineAngle, -0.5), 0.2);
 }
 
-/// Integrate one stratum's optical depth toward the sun with nonlinear full-density samples.
-float openmwseCloudSunOpticalDepth(vec3 samplePosition, vec3 sunDirection, int quality,
+/// Integrate fixed nonlinear sun-ray samples, scaled with the layer's explicit physical scale.
+vec3 openmwseCloudSunOpticalDepth(vec3 samplePosition, vec3 sunDirection, int quality,
     OpenMWSECloudLayer layer)
 {
     if (!openmwseCloudLayerEnabled(layer))
-        return 0.0;
-    vec2 layerHeightBounds = openmwseCloudLayerHeightBounds(layer);
-    vec2 lightInterval = layer.terrainCoupling > 0.0
-        ? openmwseCloudLayerIntersection(
-            samplePosition, sunDirection, layerHeightBounds.x, layerHeightBounds.y)
-        : openmwseMainCloudLayerIntersection(
-            samplePosition, sunDirection, layerHeightBounds.x, layerHeightBounds.y);
-    if (lightInterval.y <= lightInterval.x)
-        return 0.0;
-    float lightPathLength = min(lightInterval.y - lightInterval.x,
-        3000.0 * openmwseAtmosphereWorldUnitsPerMeter);
-    if (lightPathLength <= 1.0)
-        return 0.0;
+        return vec3(0.0);
+    float lightPathLength = 3000.0 * layer.model.physicalScale
+        * openmwseAtmosphereWorldUnitsPerMeter;
+    float distanceFromEye = length(samplePosition - openmwseCloudEyePosition());
 
     int shadowSampleCount = quality >= 2 ? 5 : quality >= 1 ? 4 : 3;
-    float densityIntegral = 0.0;
+    vec3 opticalDepth = vec3(0.0);
+    float shadowLodBias = 0.5;
     const int maximumShadowSampleCount = 5;
     for (int sampleIndex = 0; sampleIndex < maximumShadowSampleCount; ++sampleIndex)
     {
@@ -630,37 +454,72 @@ float openmwseCloudSunOpticalDepth(vec3 samplePosition, vec3 sunDirection, int q
         intervalEnd *= intervalEnd;
         float intervalFraction = intervalEnd - intervalStart;
         float sampleFraction = intervalStart + intervalFraction * 0.5;
-        float sampleDistance = lightInterval.x + lightPathLength * sampleFraction;
+        // Keep the source offsets fixed even when later samples leave the layer. Renormalizing the
+        // lattice to the shell exit changes self-shadowing as a cloud surface crosses the light ray.
+        float sampleDistance = lightPathLength * sampleFraction;
         vec3 shadowPosition = samplePosition + sunDirection * sampleDistance;
-        float distanceFromEye = length(shadowPosition - openmwseCloudEyePosition());
-        float shadowLodBias = 0.5 + float(sampleIndex) * 0.5;
+        if (!openmwseCloudPotentialDensity(shadowPosition, layer))
+            continue;
         float shadowDensity = openmwseCloudDensity(
             shadowPosition, distanceFromEye, shadowLodBias, layer);
-        densityIntegral += shadowDensity * lightPathLength * intervalFraction;
+        opticalDepth += clamp(shadowDensity * layer.model.extinctionPerMeter, 0.0, 1.0)
+            * (lightPathLength * intervalFraction / openmwseAtmosphereWorldUnitsPerMeter);
+        shadowLodBias += 0.5;
     }
-    return densityIntegral * (0.086 / openmwseAtmosphereWorldUnitsPerMeter);
+    return opticalDepth;
 }
 
-/// Return first- and second-order solar transmittance without losing deep optical depths to underflow.
-vec2 openmwseCloudSunTransmittance(vec3 samplePosition, vec3 sunDirection, int quality,
-    OpenMWSECloudLayer mainLayer, OpenMWSECloudLayer lowLayer)
+/// Retain independent RGB solar attenuation for both scattering orders.
+struct OpenMWSECloudSolarTransmittance
 {
-    float opticalDepth = openmwseCloudSunOpticalDepth(
+    vec3 primary;
+    vec3 secondary;
+};
+
+/// Return source spectral solar attenuation for the first and reduced-extinction scattering orders.
+OpenMWSECloudSolarTransmittance openmwseCloudSunTransmittance(vec3 samplePosition, vec3 sunDirection, int quality,
+    OpenMWSECloudLayer mainLayer, OpenMWSECloudLayer incomingLayer, OpenMWSECloudLayer lowLayer)
+{
+    vec3 opticalDepth = openmwseCloudSunOpticalDepth(
         samplePosition, sunDirection, quality, mainLayer);
     opticalDepth += openmwseCloudSunOpticalDepth(
+        samplePosition, sunDirection, quality, incomingLayer);
+    opticalDepth += openmwseCloudSunOpticalDepth(
         samplePosition, sunDirection, quality, lowLayer);
-    return exp(-opticalDepth * vec2(1.0, openmwseCloudSecondaryExtinctionScale));
+    return OpenMWSECloudSolarTransmittance(exp(-opticalDepth),
+        exp(-opticalDepth * openmwseCloudSecondaryExtinctionScale));
 }
 
-/// Carry direct irradiance and isotropic sky radiance into the cloud scattering integral.
-struct OpenMWSECloudIllumination
+/// Evaluate the shared broad shadow column at the cloud stratum's physical local placement.
+float openmwsePlacedCloudColumnOpticalDepth(vec3 position, vec3 sunDirection, OpenMWSECloudLayer layer)
+{
+    if (!openmwseCloudLayerEnabled(layer))
+        return 0.0;
+    vec4 parameters = layer.parameters;
+    parameters.z = openmwseCloudNominalBaseHeight(position, layer) - openmwseCloudWaterHeight();
+    return openmwseCloudShadowColumnOpticalDepth(position, sunDirection, parameters,
+        openmwseCloudWaterHeight(), layer.fieldOffsetWorldUnits, layer.model, openmwseCloudWeatherTexture);
+}
+
+/// Light broad mist and fog with the same weather-column shadow approximation used by scene surfaces.
+float openmwseLocalMediaSunTransmittance(vec3 position, vec3 sunDirection,
+    OpenMWSECloudLayer mainLayer, OpenMWSECloudLayer incomingLayer, OpenMWSECloudLayer lowLayer)
+{
+    float opticalDepth = openmwsePlacedCloudColumnOpticalDepth(position, sunDirection, mainLayer);
+    opticalDepth += openmwsePlacedCloudColumnOpticalDepth(position, sunDirection, incomingLayer);
+    opticalDepth += openmwsePlacedCloudColumnOpticalDepth(position, sunDirection, lowLayer);
+    return exp(-opticalDepth);
+}
+
+/// Carry direct irradiance and angle-integrated diffuse radiance into participating-media transport.
+struct OpenMWSEVolumeIllumination
 {
     vec3 solarIrradiance;
-    vec3 isotropicSkyRadiance;
+    vec3 diffuseRadiance;
 };
 
 /// Convert canonical surface-light units to normalized-phase cloud lighting above the weather deck.
-OpenMWSECloudIllumination openmwseCloudIllumination(vec3 solarRadiance, vec3 skyIrradiance,
+OpenMWSEVolumeIllumination openmwseCloudIllumination(vec3 solarRadiance, vec3 skyIrradiance,
     OpenMWSEAerialPerspectiveParameters atmosphere)
 {
     atmosphere.observerHeight = atmosphere.weatherCloudTopHeight + 9000.0;
@@ -672,8 +531,36 @@ OpenMWSECloudIllumination openmwseCloudIllumination(vec3 solarRadiance, vec3 sky
     // The normalized phase consumes irradiance; the sky LUT includes the isotropic angular integral.
     const float lambertRadianceToIrradiance = 3.14159265;
     const float hemisphereIsotropicWeight = 0.5; // 2*pi steradians times 1/(4*pi).
-    return OpenMWSECloudIllumination(incidentSolarRadiance * lambertRadianceToIrradiance,
+    return OpenMWSEVolumeIllumination(incidentSolarRadiance * lambertRadianceToIrradiance,
         skyRadianceMean * hemisphereIsotropicWeight);
+}
+
+/// Average the rendered upper hemisphere with Gaussian elevation quadrature and four fixed azimuths.
+vec3 openmwseLocalSkyRadiance(OpenMWSEAerialPerspectiveParameters atmosphere)
+{
+    vec3 radiance = vec3(0.0);
+    for (int elevation = 0; elevation < 2; ++elevation)
+    {
+        float cosineZenith = elevation == 0 ? openmwseCloudQuadratureOffsetLow : openmwseCloudQuadratureOffsetHigh;
+        float horizontalLength = sqrt(1.0 - cosineZenith * cosineZenith);
+        vec2 azimuth = vec2(1.0, 0.0);
+        for (int direction = 0; direction < 4; ++direction)
+        {
+            radiance += openmwseAtmosphereSkyRadiance(vec3(azimuth * horizontalLength, cosineZenith), atmosphere);
+            azimuth = vec2(-azimuth.y, azimuth.x);
+        }
+    }
+    return radiance * 0.125;
+}
+
+/// Illuminate nearby participating media from the visible sky and ground at their physical altitude.
+OpenMWSEVolumeIllumination openmwseLocalVolumeIllumination(vec3 solarRadiance,
+    vec3 groundIrradiance, float altitude, OpenMWSEAerialPerspectiveParameters atmosphere)
+{
+    atmosphere.observerHeight = altitude;
+    return OpenMWSEVolumeIllumination(
+        3.14159265 * openmwseIncidentSolarRadiance(solarRadiance, atmosphere),
+        0.5 * (groundIrradiance + openmwseLocalSkyRadiance(atmosphere)));
 }
 
 /// Apply the canonical bounded aerial perspective to one cloud stratum's accumulated radiance.
@@ -692,38 +579,55 @@ vec3 openmwseCloudAtmosphericContribution(vec3 scatteredLight, float opacity,
     return atmosphericRadiance * opacity;
 }
 
-/// Integrate cloud radiance, transmittance and the visible-opacity-weighted distance in world units.
+/// Preserve distance-based step allocation at the selected physical feature scale.
+float openmwseCloudMarchStepLength(float intervalLength, float physicalScale, int quality)
+{
+    float allocationDistance = 15000.0 * physicalScale
+        * openmwseAtmosphereWorldUnitsPerMeter;
+    float maximumSteps = float(48 + quality * 16);
+    // OpenMW also has terrain condensate much thinner than the kilometre-scale shell. Retain
+    // one eighth of the quality budget in short intersections so jitter cannot alternate empty/full coverage.
+    return min(intervalLength / (maximumSteps * 0.125), max(intervalLength, allocationDistance) / maximumSteps);
+}
+
+/// Interleave cloud and local-medium transport along the ray, retaining visible-opacity-weighted world distances.
 vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float maximumDistance, int quality,
     vec3 solarRadiance, vec3 skyIrradiance, vec3 groundIrradiance, vec3 atmosphericTarget,
     OpenMWSEAerialPerspectiveParameters atmosphere, float rayDither, bool quadratureSampling,
-    bool useAtmosphericTarget, out float visibleDistanceSum)
+    bool useAtmosphericTarget, OpenMWSELocalMedia localMedia,
+    out float visibleDistanceSum, out float visibleCloudOpacity)
 {
     visibleDistanceSum = 0.0;
+    visibleCloudOpacity = 0.0;
     OpenMWSECloudLayer mainLayer = openmwseMainCloudLayer();
+    OpenMWSECloudLayer incomingLayer = openmwseIncomingCloudLayer();
     OpenMWSECloudLayer lowLayer = openmwseLowCloudLayer();
-    bool mainLayerEnabled = openmwseCloudLayerEnabled(mainLayer);
+    bool outgoingLayerEnabled = openmwseCloudLayerEnabled(mainLayer);
+    bool incomingLayerEnabled = openmwseCloudLayerEnabled(incomingLayer);
+    bool mainLayerEnabled = outgoingLayerEnabled || incomingLayerEnabled;
     bool lowLayerEnabled = openmwseCloudLayerEnabled(lowLayer);
     if (!mainLayerEnabled && !lowLayerEnabled)
-        return vec4(0.0, 0.0, 0.0, 1.0);
+        return openmwseIntegrateLocalMedia(localMedia, maximumDistance, worldDirection, atmosphere, visibleDistanceSum);
 
     vec2 mainInterval = vec2(1.0, 0.0);
     vec2 lowInterval = vec2(1.0, 0.0);
-    bool cameraAboveEnabledLayer = false;
     if (mainLayerEnabled)
     {
-        vec2 mainHeightBounds = openmwseCloudLayerHeightBounds(mainLayer);
-        cameraAboveEnabledLayer
-            = openmwseCloudVirtualAltitude(rayOrigin) > mainHeightBounds.y;
-        mainHeightBounds = openmwseMainCloudDensityHeightBounds(mainLayer);
+        vec2 mainDensityBounds = outgoingLayerEnabled
+            ? openmwseCloudDensityHeightBounds(mainLayer) : openmwseCloudDensityHeightBounds(incomingLayer);
+        if (incomingLayerEnabled && outgoingLayerEnabled)
+        {
+            vec2 incomingDensityBounds = openmwseCloudDensityHeightBounds(incomingLayer);
+            mainDensityBounds = vec2(min(mainDensityBounds.x, incomingDensityBounds.x),
+                max(mainDensityBounds.y, incomingDensityBounds.y));
+        }
         mainInterval = openmwseMainCloudLayerIntersection(
-            rayOrigin, worldDirection, mainHeightBounds.x, mainHeightBounds.y);
+            rayOrigin, worldDirection, mainDensityBounds.x, mainDensityBounds.y);
         mainInterval.y = min(mainInterval.y, maximumDistance);
     }
     if (lowLayerEnabled)
     {
-        vec2 lowHeightBounds = openmwseCloudLayerHeightBounds(lowLayer);
-        cameraAboveEnabledLayer
-            = cameraAboveEnabledLayer || rayOrigin.z > lowHeightBounds.y;
+        vec2 lowHeightBounds = openmwseCloudDensityHeightBounds(lowLayer);
         lowInterval = openmwseCloudLayerIntersection(
             rayOrigin, worldDirection, lowHeightBounds.x, lowHeightBounds.y);
         lowInterval.y = min(lowInterval.y, maximumDistance);
@@ -733,7 +637,7 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
     bool mainIntervalValid = mainInterval.y > mainInterval.x;
     bool lowIntervalValid = lowInterval.y > lowInterval.x;
     if (!mainIntervalValid && !lowIntervalValid)
-        return vec4(0.0, 0.0, 0.0, 1.0);
+        return openmwseIntegrateLocalMedia(localMedia, maximumDistance, worldDirection, atmosphere, visibleDistanceSum);
 
     vec2 firstInterval = mainIntervalValid ? mainInterval : lowInterval;
     vec2 secondInterval = vec2(1.0, 0.0);
@@ -750,58 +654,30 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
             separatedIntervals = true;
     }
 
-    const int maximumSampleCount = 192;
-    int maximumAllocatedSamples = 48 + quality * 16;
-    if (cameraAboveEnabledLayer)
-    {
-        float distantLayerWeight = smoothstep(
-            openmwseCloudNoiseLodDistance * 0.5, openmwseCloudNoiseLodDistance, firstInterval.x);
-        maximumAllocatedSamples = int(ceil(float(maximumAllocatedSamples) * mix(2.0, 1.0, distantLayerWeight)));
-    }
-    if (maximumAllocatedSamples > maximumSampleCount)
-        maximumAllocatedSamples = maximumSampleCount;
+    // Quality three permits 96 steps per stratum; reserve the split-boundary segments as well.
+    const int maximumSampleCount = 96 * (1 + openmwseCondensateTransportSubdivisions) + 4;
     float firstIntervalLength = min(firstInterval.y - firstInterval.x, openmwseCloudMaximumMarchingDistance);
     float secondIntervalLength = separatedIntervals
         ? min(secondInterval.y - secondInterval.x, openmwseCloudMaximumMarchingDistance - firstIntervalLength) : 0.0;
     float traversedIntervalLength = firstIntervalLength + secondIntervalLength;
-    float firstReferenceThickness = firstIntervalIsMain
-        ? max(mainLayer.parameters.w, 1.0) : max(lowLayer.parameters.w, 1.0);
+    float mainPhysicalScale = min(outgoingLayerEnabled ? mainLayer.model.physicalScale : 1e20,
+        incomingLayerEnabled ? incomingLayer.model.physicalScale : 1e20);
+    float firstPhysicalScale = firstIntervalIsMain ? mainPhysicalScale : lowLayer.model.physicalScale;
     if (!separatedIntervals && mainIntervalValid && lowIntervalValid)
-        firstReferenceThickness = max(firstReferenceThickness,
-            firstIntervalIsMain ? lowLayer.parameters.w : mainLayer.parameters.w);
-    float firstStepAllocation = quadratureSampling
-        ? clamp(firstIntervalLength / (firstReferenceThickness * 3.0), 0.15, 1.0)
-        : clamp(firstIntervalLength / (firstReferenceThickness * 1.25), 0.25, 1.0);
-    float firstDesiredSampleCount
-        = max(8.0, float(maximumAllocatedSamples) * firstStepAllocation);
-    float secondDesiredSampleCount = 0.0;
-    if (separatedIntervals)
-    {
-        float secondReferenceThickness = firstIntervalIsMain
-            ? max(lowLayer.parameters.w, 1.0) : max(mainLayer.parameters.w, 1.0);
-        float secondStepAllocation = quadratureSampling
-            ? clamp(secondIntervalLength / (secondReferenceThickness * 3.0), 0.15, 1.0)
-            : clamp(secondIntervalLength / (secondReferenceThickness * 1.25), 0.25, 1.0);
-        secondDesiredSampleCount
-            = max(8.0, float(maximumAllocatedSamples) * secondStepAllocation);
-        // Leave room for the two clipped final segments after continuous allocations are rounded up.
-        float sampleBudgetScale = min(1.0,
-            float(maximumSampleCount - 2) / (firstDesiredSampleCount + secondDesiredSampleCount));
-        firstDesiredSampleCount = max(8.0, firstDesiredSampleCount * sampleBudgetScale);
-        secondDesiredSampleCount = max(8.0, secondDesiredSampleCount * sampleBudgetScale);
-    }
-    int firstFineSampleCount = int(ceil(firstDesiredSampleCount));
-    int secondFineSampleCount = int(ceil(secondDesiredSampleCount));
-    int fineSampleCount = firstFineSampleCount + secondFineSampleCount;
-    // A single marching step for the whole cloud shell is insufficient. Independently elevated strata need
-    // the same allocation per interval; sharing the deep deck's step size undersamples a thin low layer.
-    // Keep the step length continuous as view-ray intersection length changes. Dividing by the
-    // rounded loop count creates screen-space contour bands whenever that count crosses an integer.
-    float firstFineStepLength = firstIntervalLength / firstDesiredSampleCount;
+        firstPhysicalScale = min(mainPhysicalScale, lowLayer.model.physicalScale);
+    float firstFineStepLength = openmwseCloudMarchStepLength(firstIntervalLength, firstPhysicalScale, quality);
     float secondFineStepLength = separatedIntervals
-        ? secondIntervalLength / secondDesiredSampleCount : firstFineStepLength;
+        ? openmwseCloudMarchStepLength(secondIntervalLength,
+            firstIntervalIsMain ? lowLayer.model.physicalScale : mainPhysicalScale, quality)
+        : firstFineStepLength;
+    // Independent strata retain the source allocation without spending samples in the empty gap.
+    // Continuous lengths prevent allocation-rounding contours as a ray crosses the layer horizon.
     float distanceAlongCloudIntervals = 0.0;
-    float transmittance = 1.0;
+    vec3 transmittance = vec3(1.0);
+    float localCursor = 0.0;
+    vec3 localScatteredLight = vec3(0.0);
+    float localOpacity = 0.0;
+    float localDistanceSum = 0.0;
     vec3 mainScatteredLight = vec3(0.0);
     vec3 lowScatteredLight = vec3(0.0);
     float mainOpacity = 0.0;
@@ -813,14 +689,16 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
     // Both conventions must place the forward-scattering peak on view rays directed toward the sun.
     float primaryPhase = openmwseCloudDualLobePhase(dot(worldDirection, sunDirection));
     float secondaryPhase = mix(0.07957747, primaryPhase, 0.2);
-    OpenMWSECloudIllumination illumination = openmwseCloudIllumination(solarRadiance, skyIrradiance, atmosphere);
+    OpenMWSEVolumeIllumination illumination = openmwseCloudIllumination(solarRadiance, skyIrradiance, atmosphere);
+    // Nearby condensate receives both sky and ground hemispheres at its own altitude.
+    // Its illumination cannot inherit the observer's altitude or the main deck's above-cloud recovery.
+    OpenMWSEVolumeIllumination lowIllumination = openmwseLocalVolumeIllumination(solarRadiance,
+        groundIrradiance, openmwseCloudWaterHeight() + lowLayer.parameters.z + lowLayer.parameters.w * 0.5, atmosphere);
     // Incident light is evaluated above the deck, but the cloud-to-eye path belongs to the real observer.
     vec3 viewSkyRadiance = openmwseAtmosphereSkyRadiance(worldDirection, atmosphere);
 
     for (int sampleIndex = 0; sampleIndex < maximumSampleCount; ++sampleIndex)
     {
-        if (quadratureSampling && sampleIndex >= fineSampleCount)
-            break;
         if (distanceAlongCloudIntervals >= traversedIntervalLength)
             break;
         bool sampleSecondInterval = separatedIntervals && distanceAlongCloudIntervals >= firstIntervalLength;
@@ -839,68 +717,100 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
         float fineStepLength = sampleSecondInterval ? secondFineStepLength : firstFineStepLength;
         float segmentLength = min(fineStepLength, remainingIntervalLength);
         float distanceAlongRay = activeInterval.x + intervalPathOffset;
+        // Beer-powder albedo and sunlight must resolve the same shallow features as extinction.
+        // Averaging fine density into a coarse lighting segment makes radiance change with its boundaries.
+        if (lowIntervalValid && distanceAlongRay < lowInterval.y)
+        {
+            if (distanceAlongRay < lowInterval.x)
+                segmentLength = min(segmentLength, lowInterval.x - distanceAlongRay);
+            else
+                segmentLength = min(min(fineStepLength / float(openmwseCondensateTransportSubdivisions), remainingIntervalLength),
+                    lowInterval.y - distanceAlongRay);
+        }
         // Keep one ray-coherent abscissa through the march, matching the blue-noise integration.
         // The caller rotates this offset continuously between checkerboard refreshes.
-        float sampleOffset = quadratureSampling ? 0.5 : rayDither;
+        // Shallow condensate resolves density and lighting on the same finer transport segments.
+        // Keep those samples deterministic wherever the ray intersects its occupied height envelope.
+        bool sampleQuadrature = quadratureSampling || (lowIntervalValid
+            && distanceAlongRay < lowInterval.y && distanceAlongRay + segmentLength > lowInterval.x);
+        float sampleOffset = sampleQuadrature ? 0.5 : rayDither;
         float sampleDistance = distanceAlongRay + segmentLength * sampleOffset;
         vec3 samplePosition = rayOrigin + worldDirection * sampleDistance;
-        if (!quadratureSampling)
+        openmwseAdvanceLocalMedia(localMedia, sampleDistance, localCursor, transmittance,
+            localScatteredLight, localOpacity, localDistanceSum);
+        if (!sampleQuadrature)
         {
             bool fullySampleLowInterval
                 = lowLayerEnabled && !activeIntervalIsMain && (!mainIntervalValid || separatedIntervals);
             // A terrain-following low stratum can enter and leave its local height envelope inside one
             // conservative interval. Do not skip the next valid segment from one empty point estimate.
             bool potentialDensity = fullySampleLowInterval
-                || (mainLayerEnabled && openmwseCloudPotentialDensity(samplePosition, mainLayer));
+                || (outgoingLayerEnabled && openmwseCloudPotentialDensity(samplePosition, mainLayer));
+            potentialDensity = potentialDensity || (incomingLayerEnabled
+                && openmwseCloudPotentialDensity(samplePosition, incomingLayer));
             potentialDensity = potentialDensity || (!fullySampleLowInterval && lowLayerEnabled
                 && openmwseCloudPotentialDensity(samplePosition, lowLayer));
             if (!potentialDensity)
             {
                 const float emptySpaceStepCount = 2.0;
                 float skipLength = min(fineStepLength * emptySpaceStepCount, remainingIntervalLength);
+                if (lowIntervalValid && distanceAlongRay < lowInterval.x)
+                    skipLength = min(skipLength, lowInterval.x - distanceAlongRay);
                 distanceAlongCloudIntervals += skipLength;
                 continue;
             }
         }
         float mainDensity = 0.0;
+        float outgoingDensityForHeight = 0.0;
+        float incomingDensityForHeight = 0.0;
         float lowDensity = 0.0;
-        float mainPrecipitation = 0.0;
+        float outgoingPrecipitation = 0.0;
+        float incomingPrecipitation = 0.0;
         float lowPrecipitation = 0.0;
-        if (quadratureSampling)
+        if (sampleQuadrature)
         {
-            float firstDistance = distanceAlongRay + segmentLength * openmwseCloudQuadratureOffsetLow;
-            float secondDistance = distanceAlongRay + segmentLength * openmwseCloudQuadratureOffsetHigh;
-            if (mainLayerEnabled)
+            if (outgoingLayerEnabled)
             {
-                OpenMWSECloudDensitySample firstSample = openmwseCloudDensitySample(
-                    rayOrigin + worldDirection * firstDistance, firstDistance, 0.0, mainLayer);
-                OpenMWSECloudDensitySample secondSample = openmwseCloudDensitySample(
-                    rayOrigin + worldDirection * secondDistance, secondDistance, 0.0, mainLayer);
-                mainDensity = 0.5 * (firstSample.density + secondSample.density);
-                mainPrecipitation = (firstSample.density * firstSample.precipitation
-                    + secondSample.density * secondSample.precipitation)
-                    / max(firstSample.density + secondSample.density, 0.0001);
+                OpenMWSECloudDensitySample sample = openmwseCloudSegmentDensity(
+                    rayOrigin, worldDirection, distanceAlongRay, segmentLength, mainLayer);
+                mainDensity = sample.density;
+                outgoingDensityForHeight = mainDensity;
+                outgoingPrecipitation = sample.precipitation;
+            }
+            if (incomingLayerEnabled)
+            {
+                OpenMWSECloudDensitySample sample = openmwseCloudSegmentDensity(
+                    rayOrigin, worldDirection, distanceAlongRay, segmentLength, incomingLayer);
+                float incomingDensity = sample.density;
+                incomingPrecipitation = sample.precipitation;
+                incomingDensityForHeight = incomingDensity;
+                mainDensity += incomingDensity;
             }
             if (lowLayerEnabled)
             {
-                OpenMWSECloudDensitySample firstSample = openmwseCloudDensitySample(
-                    rayOrigin + worldDirection * firstDistance, firstDistance, 0.0, lowLayer);
-                OpenMWSECloudDensitySample secondSample = openmwseCloudDensitySample(
-                    rayOrigin + worldDirection * secondDistance, secondDistance, 0.0, lowLayer);
-                lowDensity = 0.5 * (firstSample.density + secondSample.density);
-                lowPrecipitation = (firstSample.density * firstSample.precipitation
-                    + secondSample.density * secondSample.precipitation)
-                    / max(firstSample.density + secondSample.density, 0.0001);
+                OpenMWSECloudDensitySample sample = openmwseCloudSegmentDensity(
+                    rayOrigin, worldDirection, distanceAlongRay, segmentLength, lowLayer);
+                lowDensity = sample.density;
+                lowPrecipitation = sample.precipitation;
             }
         }
         else
         {
-            if (mainLayerEnabled)
+            if (outgoingLayerEnabled)
             {
                 OpenMWSECloudDensitySample sample = openmwseCloudDensitySample(
                     samplePosition, sampleDistance, 0.0, mainLayer);
                 mainDensity = sample.density;
-                mainPrecipitation = sample.precipitation;
+                outgoingDensityForHeight = mainDensity;
+                outgoingPrecipitation = sample.precipitation;
+            }
+            if (incomingLayerEnabled)
+            {
+                OpenMWSECloudDensitySample sample = openmwseCloudDensitySample(
+                    samplePosition, sampleDistance, 0.0, incomingLayer);
+                incomingPrecipitation = sample.precipitation;
+                incomingDensityForHeight = sample.density;
+                mainDensity += sample.density;
             }
             if (lowLayerEnabled)
             {
@@ -910,78 +820,97 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
                 lowPrecipitation = sample.precipitation;
             }
         }
+        float mainPresentationWeight = openmwseMainCloudPresentationWeight(sampleDistance);
+        mainDensity *= mainPresentationWeight;
+        outgoingDensityForHeight *= mainPresentationWeight;
+        incomingDensityForHeight *= mainPresentationWeight;
         float density = mainDensity + lowDensity;
-        if (density > 0.001)
+        vec3 mainExtinction = outgoingDensityForHeight * mainLayer.model.extinctionPerMeter
+            + incomingDensityForHeight * incomingLayer.model.extinctionPerMeter;
+        vec3 lowExtinction = lowDensity * lowLayer.model.extinctionPerMeter;
+        vec3 combinedExtinction = mainExtinction + lowExtinction;
+        vec3 extinction = clamp(combinedExtinction, 0.0, 1.0)
+            * (segmentLength / openmwseAtmosphereWorldUnitsPerMeter);
+        // Reject negligible optical depth, not density: long segments of thin condensate remain visible.
+        if (any(greaterThan(extinction, vec3(1e-6))))
         {
             float relativeHeight = 0.0;
-            if (mainDensity > 0.001)
+            if (mainDensity > 0.0)
             {
-                vec2 mainHeightRange = openmwseCloudLocalLayer(samplePosition, mainLayer);
                 float mainFieldHeight = openmwseCloudVirtualAltitude(samplePosition);
-                relativeHeight += mainDensity
-                    * clamp((mainFieldHeight - mainHeightRange.x) / mainHeightRange.y, 0.0, 1.0);
+                if (outgoingDensityForHeight > 0.0)
+                {
+                    vec2 mainHeightRange = openmwseCloudLocalLayer(samplePosition, mainLayer);
+                    relativeHeight += outgoingDensityForHeight
+                        * clamp((mainFieldHeight - mainHeightRange.x) / mainHeightRange.y, 0.0, 1.0);
+                }
+                if (incomingDensityForHeight > 0.0)
+                {
+                    vec2 incomingHeightRange = openmwseCloudLocalLayer(samplePosition, incomingLayer);
+                    relativeHeight += incomingDensityForHeight
+                        * clamp((mainFieldHeight - incomingHeightRange.x) / incomingHeightRange.y, 0.0, 1.0);
+                }
             }
-            if (lowDensity > 0.001)
+            if (lowDensity > 0.0)
             {
                 vec2 lowHeightRange = openmwseCloudLocalLayer(samplePosition, lowLayer);
                 relativeHeight += lowDensity
                     * clamp((samplePosition.z - lowHeightRange.x) / lowHeightRange.y, 0.0, 1.0);
             }
             relativeHeight /= density;
-            vec2 sunTransmittance = openmwseCloudSunTransmittance(
-                samplePosition, sunDirection, quality, mainLayer, lowLayer);
-            float extinctionCoefficient
-                = density * (0.086 / openmwseAtmosphereWorldUnitsPerMeter);
-            float extinction = extinctionCoefficient * segmentLength;
-            float sampleOpacity = 1.0 - exp(-extinction);
-            float precipitation = (mainDensity * mainPrecipitation + lowDensity * lowPrecipitation)
-                / max(density, 0.0001);
-            // Match the density-dependent beer-powder response so tenuous edges do not scatter like
-            // fully developed bodies. Weather precipitation remains a bounded absorption modifier while
-            // physical density and optical path length retain ownership of cloud darkness.
-            float densityAlbedo = sqrt(clamp(density * 0.9 * 20.0, 0.0, 1.0));
-            float cloudAlbedo = densityAlbedo
-                * mix(1.0, 0.58, clamp(precipitation, 0.0, 1.0));
+            OpenMWSECloudSolarTransmittance sunTransmittance = openmwseCloudSunTransmittance(
+                samplePosition, sunDirection, quality, mainLayer, incomingLayer, lowLayer);
+            vec3 sampleTransmittance = exp(-extinction);
+            vec3 cloudAlbedo = clamp(
+                cloudModelSampleAlbedo(outgoingDensityForHeight, outgoingPrecipitation, mainLayer.model)
+                    + cloudModelSampleAlbedo(incomingDensityForHeight, incomingPrecipitation, incomingLayer.model),
+                0.0, 1.0);
+            // Extinction already accounts for droplet concentration. Applying the source's density-driven
+            // powder response to thin condensate would make its single-scattering albedo approach black.
+            vec3 lowAlbedo = lowLayer.model.albedo * (1.0 - lowPrecipitation);
             float topEnvironmentAccess = clamp(0.75 + relativeHeight, 0.0, 1.0);
             // Use height-weighted skylight instead of replacing the cloud underside with the
             // brighter ground-irradiance term. Retain a bounded canonical ground bounce near the base.
-            vec3 environmentLight = illumination.isotropicSkyRadiance * topEnvironmentAccess;
+            vec3 environmentLight = illumination.diffuseRadiance * topEnvironmentAccess;
             environmentLight += groundIrradiance * (1.0 - topEnvironmentAccess) * 0.25;
             vec3 primaryLight
-                = environmentLight + illumination.solarIrradiance * (sunTransmittance.x * primaryPhase);
+                = environmentLight + illumination.solarIrradiance * (sunTransmittance.primary * primaryPhase);
 
             // The second scattering order retains the first-order scattering coefficient, reduces
             // extinction by 0.1, and broadens the phase toward isotropic response. Integrate that order
             // analytically over this segment instead of reusing first-order opacity: thick exposed cloud
             // bodies then receive the characteristic soft interior fill without another shadow march.
             vec3 secondaryLight = illumination.solarIrradiance
-                * (sunTransmittance.y * secondaryPhase);
-            float secondaryIntegratedOpacity
-                = (1.0 - exp(-extinction * openmwseCloudSecondaryExtinctionScale))
-                    / openmwseCloudSecondaryExtinctionScale;
-            vec3 primarySampleLight = cloudAlbedo * primaryLight;
-            vec3 secondarySampleLight = cloudAlbedo * secondaryLight;
-            float contribution = transmittance * sampleOpacity;
-            float secondaryContribution = transmittance * secondaryIntegratedOpacity;
-            float mainContribution = contribution * mainDensity / density;
-            float lowContribution = contribution * lowDensity / density;
-            float mainSecondaryContribution = secondaryContribution * mainDensity / density;
-            float lowSecondaryContribution = secondaryContribution * lowDensity / density;
-            mainScatteredLight += mainContribution * primarySampleLight
-                + mainSecondaryContribution * secondarySampleLight;
-            lowScatteredLight += lowContribution * primarySampleLight
-                + lowSecondaryContribution * secondarySampleLight;
+                * (sunTransmittance.secondary * secondaryPhase);
+            vec3 primaryContribution = transmittance * (vec3(1.0) - sampleTransmittance);
+            vec3 secondaryContribution = transmittance
+                * (vec3(1.0) - exp(-extinction * openmwseCloudSecondaryExtinctionScale))
+                / openmwseCloudSecondaryExtinctionScale;
+            vec3 radiance = cloudAlbedo
+                * (primaryContribution * primaryLight + secondaryContribution * secondaryLight);
+            vec3 mainFraction = mainExtinction / max(combinedExtinction, vec3(1e-7));
+            vec3 lowFraction = lowExtinction / max(combinedExtinction, vec3(1e-7));
+            float mainContribution = dot(primaryContribution * mainFraction, vec3(1.0 / 3.0));
+            float lowContribution = dot(primaryContribution * lowFraction, vec3(1.0 / 3.0));
+            mainScatteredLight += radiance * mainFraction;
+            vec3 lowPrimaryLight = lowIllumination.diffuseRadiance
+                + lowIllumination.solarIrradiance * (sunTransmittance.primary * primaryPhase);
+            vec3 lowSecondaryLight = lowIllumination.solarIrradiance * (sunTransmittance.secondary * secondaryPhase);
+            lowScatteredLight += lowAlbedo * lowFraction
+                * (primaryContribution * lowPrimaryLight + secondaryContribution * lowSecondaryLight);
             mainOpacity += mainContribution;
             lowOpacity += lowContribution;
             mainRepresentativeDistanceSum += mainContribution * sampleDistance;
             lowRepresentativeDistanceSum += lowContribution * sampleDistance;
-            transmittance *= 1.0 - sampleOpacity;
-            if (transmittance < 0.015)
+            transmittance *= sampleTransmittance;
+            if (all(lessThan(transmittance, vec3(0.005))))
                 break;
         }
         distanceAlongCloudIntervals += segmentLength;
     }
 
+    openmwseAdvanceLocalMedia(localMedia, maximumDistance, localCursor, transmittance,
+        localScatteredLight, localOpacity, localDistanceSum);
     vec3 cloudAtmosphericTarget = useAtmosphericTarget ? atmosphericTarget : viewSkyRadiance;
     const float mainCloudOpticalDistanceScale = 1.0;
     vec2 mainCloudOpticalLimits = useAtmosphericTarget ? vec2(0.72, 1.27296568) : vec2(0.88, 2.12026354);
@@ -992,19 +921,22 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
         mainCloudOpticalDistanceLimit, atmosphere);
     scatteredLight += openmwseCloudAtmosphericContribution(lowScatteredLight, lowOpacity,
         lowRepresentativeDistanceSum, cloudAtmosphericTarget, worldDirection, 1.0, 1e20, atmosphere);
-    visibleDistanceSum = mainRepresentativeDistanceSum + lowRepresentativeDistanceSum;
-    return vec4(scatteredLight, transmittance);
+    scatteredLight += openmwseLocalMediaRadiance(
+        localScatteredLight, localOpacity, localDistanceSum, worldDirection, atmosphere);
+    visibleCloudOpacity = mainOpacity + lowOpacity;
+    visibleDistanceSum = mainRepresentativeDistanceSum + lowRepresentativeDistanceSum + localDistanceSum;
+    return vec4(scatteredLight, dot(transmittance, vec3(1.0 / 3.0)));
 }
 
-/// Return the native cloud integral and its opacity-weighted distance for simultaneous history metadata output.
+/// Return the ordered native atmosphere integral and visible cloud contribution for history metadata.
 vec4 openmwseIntegrateClouds(vec3 rayOrigin, vec3 worldDirection, float maximumDistance, int quality,
     vec3 solarRadiance, vec3 skyIrradiance, vec3 groundIrradiance,
     OpenMWSEAerialPerspectiveParameters atmosphere, float rayDither, bool quadratureSampling,
-    out float visibleDistanceSum)
+    OpenMWSELocalMedia localMedia, out float visibleDistanceSum, out float visibleCloudOpacity)
 {
     return openmwseIntegrateCloudsInternal(rayOrigin, worldDirection, maximumDistance, quality, solarRadiance,
         skyIrradiance, groundIrradiance, vec3(0.0), atmosphere, rayDither,
-        quadratureSampling, false, visibleDistanceSum);
+        quadratureSampling, false, localMedia, visibleDistanceSum, visibleCloudOpacity);
 }
 
 /// Integrate deterministic reflected clouds without frame-dependent sampling noise.
@@ -1013,8 +945,13 @@ vec4 openmwseIntegrateCloudsStable(vec3 rayOrigin, vec3 worldDirection, float ma
     OpenMWSEAerialPerspectiveParameters atmosphere)
 {
     float visibleDistanceSum;
+    float visibleCloudOpacity;
+    OpenMWSELocalMedia localMedia;
+    localMedia.count = 0;
+    localMedia.startDistance = 0.0;
+    localMedia.stepLength = 1.0;
     return openmwseIntegrateCloudsInternal(rayOrigin, worldDirection, maximumDistance, quality, solarRadiance,
-        skyIrradiance, groundIrradiance, atmosphericTarget, atmosphere, 0.5, true, true, visibleDistanceSum);
+        skyIrradiance, groundIrradiance, atmosphericTarget, atmosphere, 0.5, true, true, localMedia, visibleDistanceSum, visibleCloudOpacity);
 }
 
 #endif

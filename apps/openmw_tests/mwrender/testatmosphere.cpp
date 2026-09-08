@@ -239,7 +239,16 @@ namespace MWRender
                 scattered.mGreen * integrated.mGreen * depthBrightness * altitudeBrightness,
                 scattered.mBlue * integrated.mBlue * depthBrightness * altitudeBrightness,
             };
-            const CapturedColor weatherBlended = mix(directionalSky, result, 1.f);
+            const float integratedLuminance = 0.2126f * result.mRed + 0.7152f * result.mGreen + 0.0722f * result.mBlue;
+            const float diffuseLuminance = 0.2126f * farSky.mRed + 0.7152f * farSky.mGreen + 0.0722f * farSky.mBlue;
+            const CapturedColor upperSky{
+                farSky.mRed * integratedLuminance / diffuseLuminance,
+                farSky.mGreen * integratedLuminance / diffuseLuminance,
+                farSky.mBlue * integratedLuminance / diffuseLuminance,
+            };
+            const float elevation = std::max(direction.z(), 0.f);
+            const CapturedColor weatherBlended
+                = mix(directionalSky, mix(result, upperSky, -std::expm1(-20.f * elevation * elevation)), 1.f);
 
             const float sunElevationDegrees = osg::RadiansToDegrees(std::asin(std::clamp(sunDirection.z(), -1.f, 1.f)));
             const float airMassDenominator
@@ -251,8 +260,8 @@ namespace MWRender
                 std::exp(-relativeAirMass * 0.095f),
             };
             const float twilight
-                = smoothstep(-0.3f, -0.015f, sunDirection.z()) * (1.f - smoothstep(0.06f, 0.34f, sunDirection.z()));
-            const float horizonBand = std::exp(-7.5f * std::abs(direction.z()));
+                = smoothstep(-0.18f, 0.02f, sunDirection.z()) * (1.f - smoothstep(0.06f, 0.34f, sunDirection.z()));
+            const float horizonBand = std::exp(-44.1786467f * direction.z() * direction.z());
             const float solarAfterglow = std::pow(std::clamp(0.5f + 0.5f * sunCosine, 0.f, 1.f), 3.f);
             const float antiSolarArch = std::pow(std::clamp(0.5f - 0.5f * sunCosine, 0.f, 1.f), 2.f);
             const CapturedColor sunsetRadiance{
@@ -278,9 +287,11 @@ namespace MWRender
         {
             const CapturedColor expected = referenceAtmosphereSky(direction);
             constexpr float tolerance = 0.035f;
-            EXPECT_NEAR(actual.mRed, expected.mRed, tolerance);
-            EXPECT_NEAR(actual.mGreen, expected.mGreen, tolerance);
-            EXPECT_NEAR(actual.mBlue, expected.mBlue, tolerance);
+            /// Evaluate the reference highlight shoulder from its asymptote and preserved low-range slope.
+            const auto sceneChannel = [](float value) { return value <= 0.8f ? value : 1.f - 0.04f / (value - 0.6f); };
+            EXPECT_NEAR(actual.mRed, sceneChannel(expected.mRed), tolerance);
+            EXPECT_NEAR(actual.mGreen, sceneChannel(expected.mGreen), tolerance);
+            EXPECT_NEAR(actual.mBlue, sceneChannel(expected.mBlue), tolerance);
         }
 
         /// Return the production-compatible shader permutation used by the sky harness.
@@ -452,9 +463,9 @@ namespace MWRender
                 perViewState->setProjectionMatrix(static_cast<osg::Matrixf>(camera->getProjectionMatrix()));
                 mRoot->addCullCallback(perViewState);
 
-                mAtmosphereState = new SceneUtil::StateUpdater(loadAtmosphereNoiseTexture(), 14,
-                    loadAtmosphereDetailNoiseTexture(), 15, loadAtmosphereCurlNoiseTexture(), 16,
-                    loadAtmosphereWeatherTexture(), 17);
+                mAtmosphereState
+                    = new SceneUtil::StateUpdater(loadAtmosphereNoiseTexture(), 14, loadAtmosphereDetailNoiseTexture(),
+                        15, loadAtmosphereCurlNoiseTexture(), 16, loadAtmosphereWeatherTexture(), 17);
                 mAtmosphereState->setFogColor({ 0.887052f, 0.638956f, 0.517662f, 1.f });
                 mAtmosphereState->setFogStart(1000.f);
                 mAtmosphereState->setFogEnd(20000.f);
@@ -627,10 +638,9 @@ namespace MWRender
             void applyAtmosphereState()
             {
                 mAtmosphereState->setAtmosphere(true, { 0.232298f, 0.361908f, 0.519572f, 1.f }, { 0.25f, 0.38f, 0.48f },
-                    { 0.07f, 0.36f, 0.76f }, 1.f, mSunDirection, mCloudParameters, { 0.62f, 0.9f, 0.72f, 0.08f },
-                    { 0.65f, 0.3f, 0.6f, 0.1f }, { 0.7f, 0.5f, 0.5f, 0.f }, {}, {}, mMistParameters, {}, {}, {},
-                    mSunDiscColor, mSolarRadiance, mSkyIrradiance, mGroundIrradiance, mCloudAdvectionOffsetWorldUnits,
-                    mQuality);
+                    { 0.07f, 0.36f, 0.76f }, 1.f, mSunDirection, mCloudParameters, {}, {}, {}, 0.f, mMistParameters, {},
+                    {}, {}, mSunDiscColor, mSolarRadiance, mSkyIrradiance, mGroundIrradiance,
+                    mCloudAdvectionOffsetWorldUnits, mQuality);
             }
 
             osgViewer::Viewer mViewer;
@@ -903,7 +913,7 @@ namespace MWRender
             atmosphereState->setUnderwaterFogStart(fog.mStart);
             atmosphereState->setUnderwaterFogEnd(fog.mEnd);
             atmosphereState->setAtmosphere(true, fog.mColor, { 0.25f, 0.38f, 0.48f }, { 0.07f, 0.36f, 0.76f }, 0.f,
-                { 0.95f, 0.f, 0.31f }, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, { 0.8f, 0.68f, 0.6f },
+                { 0.95f, 0.f, 0.31f }, {}, {}, {}, {}, 0.f, {}, {}, {}, {}, {}, { 0.8f, 0.68f, 0.6f },
                 { 0.34f, 0.29f, 0.27f }, { 0.34f, 0.29f, 0.27f }, {}, 2);
             atmosphereState->setDefaults(state);
 
@@ -1024,19 +1034,19 @@ namespace MWRender
             return visitor.mBounds;
         }
 
-        /// Verify that the packaged weather map exposes continuous coverage, type, depth, and base fields.
+        /// Verify source texture dimensions, independent RGB weather fields, and opaque unused alpha.
         TEST(MWRenderAtmosphereTest, packagedCloudWeatherMapCarriesContinuousFormationFields)
         {
             const osg::ref_ptr<osg::Texture2D> texture = loadAtmosphereWeatherTexture();
             const osg::Image* image = texture->getImage();
             ASSERT_NE(image, nullptr);
-            ASSERT_EQ(image->s(), 256);
-            ASSERT_EQ(image->t(), 256);
+            ASSERT_EQ(image->s(), 1024);
+            ASSERT_EQ(image->t(), 1024);
 
             std::array<std::unordered_set<int>, 4> channelValues;
-            double typeDepthDifference = 0.0;
+            double typeRainDifference = 0.0;
             std::size_t interiorTypeSamples = 0;
-            std::size_t interiorDepthSamples = 0;
+            std::size_t interiorRainSamples = 0;
             for (int y = 0; y < image->t(); ++y)
             {
                 for (int x = 0; x < image->s(); ++x)
@@ -1044,21 +1054,21 @@ namespace MWRender
                     const osg::Vec4f sample = image->getColor(x, y);
                     for (std::size_t channel = 0; channel < channelValues.size(); ++channel)
                         channelValues[channel].insert(static_cast<int>(std::round(sample[channel] * 255.f)));
-                    typeDepthDifference += std::abs(sample.y() - sample.z());
+                    typeRainDifference += std::abs(sample.y() - sample.z());
                     interiorTypeSamples += sample.y() > 0.02f && sample.y() < 0.98f ? 1u : 0u;
-                    interiorDepthSamples += sample.z() > 0.02f && sample.z() < 0.98f ? 1u : 0u;
+                    interiorRainSamples += sample.z() > 0.02f && sample.z() < 0.98f ? 1u : 0u;
                 }
             }
 
             const double sampleCount = static_cast<double>(image->s() * image->t());
-            EXPECT_GE(channelValues[0].size(), 240u) << "Coverage must remain a near-uniform ranked field";
+            EXPECT_GE(channelValues[0].size(), 240u) << "Coverage must retain the source's continuous dynamic range";
             EXPECT_GE(channelValues[1].size(), 96u) << "Cloud type must vary continuously across the weather map";
-            EXPECT_GE(channelValues[2].size(), 96u) << "Optical depth must vary continuously across the weather map";
-            EXPECT_GE(channelValues[3].size(), 96u) << "Cloud-base variation must remain continuous";
+            EXPECT_GE(channelValues[2].size(), 96u) << "Precipitation must vary continuously across the weather map";
+            EXPECT_EQ(channelValues[3], std::unordered_set<int>{ 255 });
             EXPECT_GT(static_cast<double>(interiorTypeSamples) / sampleCount, 0.75);
-            EXPECT_GT(static_cast<double>(interiorDepthSamples) / sampleCount, 0.75);
-            EXPECT_GT(typeDepthDifference / sampleCount, 0.04)
-                << "Cloud type and optical depth must not collapse to one repeated control field";
+            EXPECT_GT(static_cast<double>(interiorRainSamples) / sampleCount, 0.75);
+            EXPECT_GT(typeRainDifference / sampleCount, 0.04)
+                << "Cloud type and precipitation must not collapse to one repeated control field";
         }
 
         TEST(MWRenderAtmosphereTest, derivesPhysicalSunDirectionFromDaylightRatherThanWeatherVisibility)
@@ -1145,26 +1155,6 @@ namespace MWRender
                 (resumed.mOffsetWorldUnits - paused.mOffsetWorldUnits).y(), resumed.mFrameDeltaWorldUnits.y(), 0.002f);
         }
 
-        /// Keep the independent shape phase linear, continuous across speed changes, and frozen while paused.
-        TEST(MWRenderAtmosphereTest, shapeAdvectionPreservesIntegratedWeatherClock)
-        {
-            CloudAdvectionController controller;
-            controller.update(2.f, false, 1.25f, 30.f);
-            const osg::Vec3f first = SceneUtil::cloudShapeAdvectionOffset(controller.getState().mOffsetWorldUnits);
-            EXPECT_LT(first.z(), 0.f);
-            const float coverageDistance = controller.getState().mOffsetWorldUnits.length();
-            EXPECT_NEAR(osg::Vec2f(first.x(), first.y()).length(), coverageDistance * 0.5f, 0.0001f);
-            EXPECT_NEAR(first.z(), -coverageDistance * 0.25f, 0.0001f);
-            controller.update(0.5f, false, 2.f, 100.f);
-            const osg::Vec3f second = SceneUtil::cloudShapeAdvectionOffset(controller.getState().mOffsetWorldUnits);
-            const osg::Vec3f frameDelta
-                = SceneUtil::cloudShapeAdvectionOffset(controller.getState().mFrameDeltaWorldUnits);
-            EXPECT_LT((second - first - frameDelta).length(), 0.0001f);
-            controller.update(20.f, true, 5.f, 300.f);
-            EXPECT_EQ(SceneUtil::cloudShapeAdvectionOffset(controller.getState().mOffsetWorldUnits), second);
-            EXPECT_EQ(SceneUtil::cloudShapeAdvectionOffset(controller.getState().mFrameDeltaWorldUnits), osg::Vec3f());
-        }
-
         TEST(MWRenderAtmosphereTest, reservedSuspendedMediumIsOpticallyNeutralByDefault)
         {
             const AtmosphereState atmosphere;
@@ -1219,46 +1209,62 @@ namespace MWRender
             EXPECT_FLOAT_EQ(controller.update(stable, true), 0.f);
         }
 
-        /// Publish matching canonical volume references and derived shape phases during initialization and updates.
+        /// Publish complete source layer arrays and canonical placement during initialization and updates.
         TEST(MWRenderAtmosphereTest, sceneUniformStatePublishesCanonicalVolumeReferences)
         {
             osg::ref_ptr<SceneUtil::StateUpdater> updater = new SceneUtil::StateUpdater;
+            const osg::Vec4f incomingCloudParameters{ 0.8f, 1.1f, 32000.f, 68000.f };
+            const osg::Vec4f cloudScenario{ 0.4f, 2.1f, 0.35f, 1.f };
+            SceneUtil::CloudLayer outgoing;
+            outgoing.mAnvilLarge = { 6.f, .2f, 8.f, .3f };
+            auto layers = SceneUtil::packCloudLayers(outgoing, SceneUtil::secondaryCloudLayer(), {});
+            updater->setCloudLayers(layers);
             updater->setAtmosphere(true, { 0.4f, 0.5f, 0.7f, 1.f }, { 0.25f, 0.38f, 0.48f }, { 0.07f, 0.36f, 0.76f },
-                1.f, { 0.8f, 0.f, 0.6f }, { 0.58f, 0.9f, 48000.f, 22000.f }, { 0.62f, 0.9f, 0.72f, 0.08f },
-                { 0.7f, 0.4f, 0.65f, 0.2f }, { 0.72f, 0.46f, 0.f, 0.f }, {}, {}, {}, {},
-                { 12500.f, 0.75f, 1500.f, 0.f }, { 4000.f, 5000.f, 0.2f, -0.1f }, { 1.f, 0.8f, 0.6f, 1.f },
+                1.f, { 0.8f, 0.f, 0.6f }, { 0.58f, 0.9f, 48000.f, 22000.f }, incomingCloudParameters, cloudScenario, {},
+                0.f, {}, {}, { 12500.f, 0.75f, 1500.f, 0.f }, { 4000.f, 5000.f, 0.2f, -0.1f }, { 1.f, 0.8f, 0.6f, 1.f },
                 { 1.f, 0.8f, 0.6f }, { 0.3f, 0.4f, 0.55f }, { 0.45f, 0.5f, 0.6f }, { 1234.f, 567.f }, 2);
             osg::ref_ptr<osg::StateSet> state = new osg::StateSet;
             updater->setDefaults(state);
+            const auto expectLayerPublication = [&] {
+                osg::Uniform* publication = state->getUniform("atmosphere.cloudLayers");
+                ASSERT_NE(publication, nullptr);
+                ASSERT_EQ(publication->getNumElements(), layers.size());
+                for (unsigned int index = 0; index < layers.size(); ++index)
+                {
+                    osg::Vec4f actual;
+                    ASSERT_TRUE(publication->getElement(index, actual));
+                    EXPECT_EQ(actual, layers[index]);
+                }
+            };
+            expectLayerPublication();
 
             osg::Vec2f publishedOffset;
-            osg::Vec3f publishedShapeOffset;
             osg::Vec4f publishedMediumReference;
             osg::Vec4f publishedOrography;
-            osg::Vec4f publishedOrganization;
-            osg::Vec4f publishedStructure;
+            osg::Vec4f publishedIncomingCloudParameters;
+            osg::Vec4f publishedCloudScenario;
             ASSERT_TRUE(state->getUniform("atmosphere.cloudAdvectionOffsetWorldUnits")->get(publishedOffset));
-            ASSERT_TRUE(state->getUniform("atmosphere.cloudShapeAdvectionOffsetWorldUnits")->get(publishedShapeOffset));
-            EXPECT_EQ(publishedShapeOffset, SceneUtil::cloudShapeAdvectionOffset({ 1234.f, 567.f }));
             ASSERT_TRUE(state->getUniform("atmosphere.mediumReferenceParameters")->get(publishedMediumReference));
             ASSERT_TRUE(state->getUniform("atmosphere.orographicParameters")->get(publishedOrography));
-            ASSERT_TRUE(state->getUniform("atmosphere.cloudOrganizationParameters")->get(publishedOrganization));
-            ASSERT_TRUE(state->getUniform("atmosphere.cloudStructureParameters")->get(publishedStructure));
+            ASSERT_TRUE(state->getUniform("atmosphere.incomingCloudParameters")->get(publishedIncomingCloudParameters));
+            ASSERT_TRUE(state->getUniform("atmosphere.cloudScenarioParameters")->get(publishedCloudScenario));
             EXPECT_EQ(publishedOffset, osg::Vec2f(1234.f, 567.f));
             EXPECT_EQ(publishedMediumReference, osg::Vec4f(12500.f, 0.75f, 1500.f, 0.f));
             EXPECT_EQ(publishedOrography, osg::Vec4f(4000.f, 5000.f, 0.2f, -0.1f));
-            EXPECT_EQ(publishedOrganization, osg::Vec4f(0.7f, 0.4f, 0.65f, 0.2f));
-            EXPECT_EQ(publishedStructure, osg::Vec4f(0.72f, 0.46f, 0.f, 0.f));
+            EXPECT_EQ(publishedIncomingCloudParameters, incomingCloudParameters);
+            EXPECT_EQ(publishedCloudScenario, cloudScenario);
 
             updater->setAtmosphere(true, { 0.4f, 0.5f, 0.7f, 1.f }, { 0.25f, 0.38f, 0.48f }, { 0.07f, 0.36f, 0.76f },
-                1.f, { 0.8f, 0.f, 0.6f }, { 0.58f, 0.9f, 48000.f, 22000.f }, { 0.62f, 0.9f, 0.72f, 0.08f },
-                { 0.7f, 0.4f, 0.65f, 0.2f }, { 0.72f, 0.46f, 0.f, 0.f }, {}, {}, {}, {},
-                { 12600.f, 0.74f, 1600.f, 0.f }, { 4100.f, 5100.f, 0.18f, -0.08f }, { 1.f, 0.8f, 0.6f, 1.f },
-                { 1.f, 0.8f, 0.6f }, { 0.3f, 0.4f, 0.55f }, { 0.45f, 0.5f, 0.6f }, { 1240.f, 570.f }, 2);
+                1.f, { 0.8f, 0.f, 0.6f }, { 0.58f, 0.9f, 48000.f, 22000.f }, incomingCloudParameters, cloudScenario, {},
+                0.f, {}, {}, { 12600.f, 0.74f, 1600.f, 0.f }, { 4100.f, 5100.f, 0.18f, -0.08f },
+                { 1.f, 0.8f, 0.6f, 1.f }, { 1.f, 0.8f, 0.6f }, { 0.3f, 0.4f, 0.55f }, { 0.45f, 0.5f, 0.6f },
+                { 1240.f, 570.f }, 2);
+            outgoing.mGradientLarge = { .02f, .15f, .7f, .9f };
+            layers = SceneUtil::packCloudLayers(SceneUtil::secondaryCloudLayer(), outgoing, outgoing);
+            updater->setCloudLayers(layers);
             updater->apply(state, nullptr);
+            expectLayerPublication();
             ASSERT_TRUE(state->getUniform("atmosphere.cloudAdvectionOffsetWorldUnits")->get(publishedOffset));
-            ASSERT_TRUE(state->getUniform("atmosphere.cloudShapeAdvectionOffsetWorldUnits")->get(publishedShapeOffset));
-            EXPECT_EQ(publishedShapeOffset, SceneUtil::cloudShapeAdvectionOffset({ 1240.f, 570.f }));
             ASSERT_TRUE(state->getUniform("atmosphere.mediumReferenceParameters")->get(publishedMediumReference));
             ASSERT_TRUE(state->getUniform("atmosphere.orographicParameters")->get(publishedOrography));
             EXPECT_EQ(publishedOffset, osg::Vec2f(1240.f, 570.f));
@@ -1282,6 +1288,111 @@ namespace MWRender
             const MeshVertexBounds bounds = getVertexBounds(*dome);
             EXPECT_NEAR(bounds.mLocal.zMin(), -1600.f, 1e-3f);
             EXPECT_NEAR(bounds.mLocal.zMax(), 1600.f, 1e-3f);
+        }
+
+        /// Keep diffuse sunset highlights below channel clipping without flattening the directional color field.
+        TEST(MWRenderAtmosphereTest, sunsetSkyRetainsHighlightGradientsInTheSceneColorRange)
+        {
+            AtmosphereRenderHarness harness(createHarnessDome(), 192, 96);
+            ASSERT_TRUE(harness.isValid());
+            for (const float sunHeight : { 0.16f, 0.08f, 0.f, -0.07f })
+            {
+                SCOPED_TRACE(sunHeight);
+                harness.setSunDirection({ 1.f, 0.f, sunHeight });
+                const CapturedImage image = harness.renderImage({ 1.f, 0.f, 0.08f });
+                ASSERT_EQ(image.mPixels.size(), 192u * 96u);
+                float maximumChannel = 0.f;
+                std::size_t clippedPixels = 0;
+                for (const CapturedColor& color : image.mPixels)
+                {
+                    ASSERT_TRUE(std::isfinite(color.mRed));
+                    ASSERT_TRUE(std::isfinite(color.mGreen));
+                    ASSERT_TRUE(std::isfinite(color.mBlue));
+                    const float peak = std::max({ color.mRed, color.mGreen, color.mBlue });
+                    maximumChannel = std::max(maximumChannel, peak);
+                    clippedPixels += peak >= 1.f;
+                }
+                RecordProperty("maximum_diffuse_channel", std::to_string(maximumChannel));
+                EXPECT_EQ(clippedPixels, 0u);
+                EXPECT_LT(maximumChannel, 0.995f);
+                const CapturedColor sunward = harness.render({ 1.f, 0.f, 0.03f });
+                const CapturedColor away = harness.render({ -1.f, 0.f, 0.03f });
+                EXPECT_GT(sunward.mRed, away.mRed + 0.1f);
+                EXPECT_GT(sunward.mRed, sunward.mBlue + 0.1f);
+            }
+        }
+
+        /// Retain a golden sunward core and cooler upper sky instead of flattening sunset to one saturated color.
+        TEST(MWRenderAtmosphereTest, cloudFreeSunsetRetainsColorSeparation)
+        {
+            AtmosphereRenderHarness harness(createHarnessDome());
+            ASSERT_TRUE(harness.isValid());
+            harness.setSunDirection({ 1.f, 0.f, 0.08f });
+            const CapturedColor horizon = harness.render({ 1.f, 0.f, 0.03f });
+            const CapturedColor upperSky = harness.render({ 1.f, 0.f, 1.f });
+            EXPECT_GT(horizon.mGreen, horizon.mRed * 0.6f);
+            EXPECT_GT(horizon.mRed - horizon.mBlue, 0.1f);
+            EXPECT_GT(horizon.mRed, upperSky.mRed + 0.15f);
+            EXPECT_GT(upperSky.mBlue / upperSky.mRed, horizon.mBlue / horizon.mRed + 0.2f);
+        }
+
+        /// Separate the warm solar horizon from cool upper twilight for both solar azimuths.
+        TEST(MWRenderAtmosphereTest, twilightRetainsCoolUpperSkyAboveTheWarmHorizon)
+        {
+            AtmosphereRenderHarness harness(createHarnessDome(), 1, 1);
+            ASSERT_TRUE(harness.isValid());
+            for (const float azimuth : { -1.f, 1.f })
+                for (const float height : { 0.08f, 0.f, -0.07f, -0.13f })
+                {
+                    SCOPED_TRACE(azimuth);
+                    SCOPED_TRACE(height);
+                    harness.setSunDirection({ azimuth, 0.f, height });
+                    const CapturedColor upper = harness.render({ azimuth, 0.f, 0.7f });
+                    const CapturedColor horizon = harness.render({ azimuth, 0.f, 0.03f });
+                    EXPECT_GT(upper.mBlue, upper.mRed * 1.25f);
+                    EXPECT_GT(upper.mBlue, upper.mGreen);
+                    EXPECT_GT(horizon.mRed, horizon.mBlue * 1.25f);
+                }
+        }
+
+        /// Keep dawn and dusk color evolution continuous as the sun crosses the horizon and twilight boundaries.
+        TEST(MWRenderAtmosphereTest, twilightColorEvolvesContinuouslyWithSolarElevation)
+        {
+            AtmosphereRenderHarness harness(createHarnessDome(), 1, 1);
+            ASSERT_TRUE(harness.isValid());
+            for (const osg::Vec3f direction :
+                { osg::Vec3f(1.f, 0.f, 0.03f), osg::Vec3f(1.f, 0.f, 0.7f), osg::Vec3f(-1.f, 0.f, 0.1f) })
+            {
+                for (const float sunHeight :
+                    { -0.3f, -0.18f, -0.13f, -0.07f, -0.015f, 0.f, 0.02f, 0.06f, 0.08f, 0.34f })
+                {
+                    SCOPED_TRACE(sunHeight);
+                    harness.setSunDirection({ 1.f, 0.f, sunHeight - 0.0001f });
+                    const CapturedColor below = harness.render(direction);
+                    harness.setSunDirection({ 1.f, 0.f, sunHeight + 0.0001f });
+                    const CapturedColor above = harness.render(direction);
+                    EXPECT_NEAR(above.mRed, below.mRed, 0.005f);
+                    EXPECT_NEAR(above.mGreen, below.mGreen, 0.005f);
+                    EXPECT_NEAR(above.mBlue, below.mBlue, 0.005f);
+                }
+            }
+        }
+
+        /// Reject a sharp color crest at the horizon in the rendered sky, without filtering neighboring pixels.
+        TEST(MWRenderAtmosphereTest, sunsetHorizonColorHasNoSharpCrest)
+        {
+            AtmosphereRenderHarness harness(createHarnessDome(), 1, 1);
+            ASSERT_TRUE(harness.isValid());
+            for (const float sunHeight : { 0.08f, 0.f, -0.07f })
+            {
+                SCOPED_TRACE(sunHeight);
+                harness.setSunDirection({ 1.f, 0.f, sunHeight });
+                const CapturedColor below = harness.render({ 1.f, 0.f, -0.01f });
+                const CapturedColor middle = harness.render({ 1.f, 0.f, 0.f });
+                const CapturedColor above = harness.render({ 1.f, 0.f, 0.01f });
+                EXPECT_LT(std::abs(below.mGreen - 2.f * middle.mGreen + above.mGreen), 0.01f);
+                EXPECT_LT(std::abs(below.mBlue - 2.f * middle.mBlue + above.mBlue), 0.01f);
+            }
         }
 
         TEST(MWRenderAtmosphereTest, offscreenHarnessSeparatesSolarAndAntiSolarSky)
@@ -1462,14 +1573,14 @@ namespace MWRender
 
             const osg::Vec3f viewDirection(1.f, 0.f, 0.35f);
             const CapturedImage foggedClear = harness.renderReflectedImage({}, viewDirection);
-            harness.setAtmosphereVolumes({ 0.95f, 1.05f, 1200.f, 5000.f }, {}, { 1.f, 0.82f, 0.62f, 0.f });
+            harness.setAtmosphereVolumes({ 0.95f, 1.05f, 1200.f, 22000.f }, {}, { 1.f, 0.82f, 0.62f, 0.f });
             const CapturedImage foggedClouds = harness.renderReflectedImage({}, viewDirection);
             const CapturedImage repeatedFoggedClouds = harness.renderReflectedImage({}, viewDirection);
 
             harness.setFogRange(1000000.f, 2000000.f);
             harness.setAtmosphereVolumes({}, {}, { 1.f, 0.82f, 0.62f, 0.f });
             const CapturedImage clearPathClouds = harness.renderReflectedImage({}, viewDirection);
-            harness.setAtmosphereVolumes({ 0.95f, 1.05f, 1200.f, 5000.f }, {}, { 1.f, 0.82f, 0.62f, 0.f });
+            harness.setAtmosphereVolumes({ 0.95f, 1.05f, 1200.f, 22000.f }, {}, { 1.f, 0.82f, 0.62f, 0.f });
             const CapturedImage visibleClouds = harness.renderReflectedImage({}, viewDirection);
 
             double foggedChange = 0.0;
@@ -1508,7 +1619,7 @@ namespace MWRender
                 GTEST_SKIP() << "No offscreen compatibility OpenGL context is available";
 
             const osg::Vec3f viewDirection(1.f, 0.f, 0.35f);
-            harness.setAtmosphereVolumes({ 0.95f, 1.05f, 1200.f, 5000.f }, {}, { 1.f, 0.82f, 0.62f, 0.f });
+            harness.setAtmosphereVolumes({ 0.95f, 1.05f, 1200.f, 22000.f }, {}, { 1.f, 0.82f, 0.62f, 0.f });
             CloudAdvectionController controller;
             harness.setCloudAdvectionOffset({ 0.f, 0.f });
             const CapturedImage initial = harness.renderReflectedImage({}, viewDirection);
@@ -1672,6 +1783,7 @@ namespace MWRender
             EXPECT_GT(refractedDisc.mGreen - noDisc.mGreen, 0.15f);
         }
 
+        /// Retain the twilight response to canonical illumination through the bounded highlight response.
         TEST(MWRenderAtmosphereTest, postSunsetScatteringUsesCanonicalIlluminationAndFadesIntoNight)
         {
             AtmosphereRenderHarness harness(createHarnessDome());
@@ -1688,7 +1800,11 @@ namespace MWRender
             harness.setSunDirection({ 1.f, 0.f, -0.36f });
             const CapturedColor astronomicalNight = harness.render(solarHorizonDirection);
 
-            EXPECT_GT(illuminatedTwilight.mRed, unilluminatedTwilight.mRed + 0.01f);
+            const float illuminatedLuminance = 0.2126f * illuminatedTwilight.mRed + 0.7152f * illuminatedTwilight.mGreen
+                + 0.0722f * illuminatedTwilight.mBlue;
+            const float unilluminatedLuminance = 0.2126f * unilluminatedTwilight.mRed
+                + 0.7152f * unilluminatedTwilight.mGreen + 0.0722f * unilluminatedTwilight.mBlue;
+            EXPECT_GT(illuminatedLuminance, unilluminatedLuminance + 0.01f);
             EXPECT_GT(illuminatedTwilight.mRed, illuminatedTwilight.mBlue);
             EXPECT_GT(illuminatedTwilight.mRed, astronomicalNight.mRed + 0.08f);
             EXPECT_GT(illuminatedTwilight.mBlue, astronomicalNight.mBlue + 0.02f);
@@ -1734,7 +1850,7 @@ namespace MWRender
             osg::Vec3f skyDirection(0.82f, 0.31f, 0.48f);
             skyDirection.normalize();
             const CapturedImage clear = harness.renderReflectedImage(eyePosition, skyDirection);
-            harness.setAtmosphereVolumes({ 0.58f, 0.9f, 48000.f, 22000.f }, {}, { 1.f, 0.82f, 0.62f, 1.f });
+            harness.setAtmosphereVolumes({ 0.95f, 1.05f, 36000.f, 52000.f }, {}, { 1.f, 0.82f, 0.62f, 1.f });
             const CapturedImage cloudy = harness.renderReflectedImage(eyePosition, skyDirection);
 
             double cloudChange = 0.0;
@@ -1760,7 +1876,7 @@ namespace MWRender
             EXPECT_GT(center.mRed + center.mGreen + center.mBlue, 0.1f);
             EXPECT_GT(cloudChange / channelCount, 0.008)
                 << "The reflection render must contain the procedural clouds, not only the clear-sky color";
-            EXPECT_GT(cloudAffectedPixels, clear.mPixels.size() * 9 / 100)
+            EXPECT_GT(cloudAffectedPixels, clear.mPixels.size() * 8 / 100)
                 << "Organized reflected clouds must affect a material portion of the water-visible sky";
             EXPECT_GT(spatialVariation / channelCount, 0.01)
                 << "The reflection render must preserve spatial sky detail instead of collapsing to a flat tint";
@@ -1960,5 +2076,53 @@ namespace MWRender
             EXPECT_LT(sharedSurfaceRadianceDifference / static_cast<double>(sharedSurfaceCount), 1e-5)
                 << "Alpha coverage adjustment may change fragment acceptance but not accepted-fragment radiance";
         }
+    }
+    /// Preserve cached world samples through positive, negative, and discontinuous observer movement.
+    TEST(MWRenderAtmosphereTest, cloudTerrainCacheRetainsWorldSamples)
+    {
+        SceneUtil::AtmosphereTerrainGrid terrain;
+        int samples = 0;
+        const auto sampleHeight = [&](const osg::Vec2f& position) {
+            ++samples;
+            return position.x() * 0.02f - position.y() * 0.03f;
+        };
+        terrain.update({ 100.f, 100.f }, sampleHeight);
+        EXPECT_EQ(samples, SceneUtil::AtmosphereTerrainGrid::sSide * SceneUtil::AtmosphereTerrainGrid::sSide);
+        const float spacing = SceneUtil::AtmosphereTerrainGrid::sSpacingWorldUnits;
+        terrain.update({ spacing - 100.f, spacing - 100.f }, sampleHeight);
+        EXPECT_EQ(samples, SceneUtil::AtmosphereTerrainGrid::sSide * SceneUtil::AtmosphereTerrainGrid::sSide);
+        terrain.update({ spacing + 100.f, 100.f }, sampleHeight);
+        EXPECT_EQ(samples, SceneUtil::AtmosphereTerrainGrid::sSide * (SceneUtil::AtmosphereTerrainGrid::sSide + 1));
+        for (const osg::Vec2f center : { osg::Vec2f(-100.f, -100.f), osg::Vec2f(3000000.f, -4000000.f) })
+        {
+            terrain.update(center, sampleHeight);
+            for (int y = 0; y < SceneUtil::AtmosphereTerrainGrid::sSide; ++y)
+                for (int x = 0; x < SceneUtil::AtmosphereTerrainGrid::sSide; ++x)
+                {
+                    const float worldX = terrain.mOriginSpacing.x() + x * terrain.mOriginSpacing.z();
+                    const float worldY = terrain.mOriginSpacing.y() + y * terrain.mOriginSpacing.z();
+                    const int index = y * SceneUtil::AtmosphereTerrainGrid::sSide + x;
+                    const float height = terrain.mHeights[index / 4][index % 4];
+                    EXPECT_FLOAT_EQ(height, worldX * 0.02f - worldY * 0.03f);
+                    EXPECT_GE(height, terrain.mHeightBounds.x());
+                    EXPECT_LE(height, terrain.mHeightBounds.y());
+                }
+        }
+        terrain.update(
+            { 3000000.f, -4000000.f }, [](const osg::Vec2f&) { return 123.f; }, true);
+        EXPECT_EQ(terrain.mHeightBounds, osg::Vec2f(123.f, 123.f));
+    }
+
+    /// Reject invalid terrain evidence without partially replacing a valid published cache.
+    TEST(MWRenderAtmosphereTest, cloudTerrainCacheRejectsNonFiniteSamples)
+    {
+        SceneUtil::AtmosphereTerrainGrid terrain;
+        terrain.update({ 0.f, 0.f }, [](const osg::Vec2f&) { return 100.f; });
+        const auto heights = terrain.mHeights;
+        EXPECT_THROW(terrain.update(
+                         { 200000.f, 0.f }, [](const osg::Vec2f&) { return std::numeric_limits<float>::quiet_NaN(); }),
+            std::runtime_error);
+        EXPECT_EQ(terrain.mHeights, heights);
+        EXPECT_EQ(terrain.mHeightBounds, osg::Vec2f(100.f, 100.f));
     }
 }

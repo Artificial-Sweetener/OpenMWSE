@@ -81,6 +81,7 @@ namespace Fx
 #define omw_Out @out
 #define omw_Position @position
 #define omw_Texture1D @texture1D
+#define omw_Texture2DLod @texture2DLod
 #define omw_Texture2D @texture2D
 #define omw_Texture2DArray @texture2DArray
 #define omw_Texture3D @texture3D
@@ -342,6 +343,7 @@ mat4 omw_InvProjectionMatrix()
                   // Note, @texture2DArray must be defined before @texture2D since @texture2D is a perfect prefix of
                   // texture2DArray
                   { "@texture2DArray", mLegacyGLSL ? "texture2DArray" : "texture" },
+                  { "@texture2DLod", mLegacyGLSL ? "texture2DLod" : "textureLod" },
                   { "@texture2D", mLegacyGLSL ? "texture2D" : "texture" },
                   { "@texture3D", mLegacyGLSL ? "texture3D" : "texture" },
                   { "@texture3DLod", mLegacyGLSL ? "texture3DLod" : "textureLod" },

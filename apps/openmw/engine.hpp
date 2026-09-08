@@ -228,7 +228,7 @@ namespace OMW
         /// Toggle bounded live route recording from the reserved input shortcut.
         void toggleDiagnosticGameplayRoute();
 
-        /// Apply the next loaded route frame before simulation updates.
+        /// Apply recorded movement and camera input before simulation without idle-camera interference.
         void applyDiagnosticGameplayRoute();
 
         /// Record the authoritative state produced by the current rendered frame.

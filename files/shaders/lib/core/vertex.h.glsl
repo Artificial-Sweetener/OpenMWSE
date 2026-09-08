@@ -1,3 +1,4 @@
+@link "lib/atmosphere/cloud_model_vertex.glsl"
 @link "lib/core/vertex.glsl" if !@useOVR_multiview
 @link "lib/core/vertex_multiview.glsl" if @useOVR_multiview
 @link "lib/core/lighting_vertex.glsl" if @lightingMethodClustered

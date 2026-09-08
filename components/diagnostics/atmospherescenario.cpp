@@ -32,6 +32,12 @@ namespace Diagnostics
             if (scenario.mGameHour
                 && (!std::isfinite(*scenario.mGameHour) || *scenario.mGameHour < 0.0 || *scenario.mGameHour >= 24.0))
                 throw std::invalid_argument("atmosphere scenario game hour must be within [0, 24)");
+            if (scenario.mGameHour && scenario.mStartGameHour)
+                throw std::invalid_argument("atmosphere scenario cannot lock and advance game hour together");
+            if (scenario.mStartGameHour
+                && (!std::isfinite(*scenario.mStartGameHour) || *scenario.mStartGameHour < 0.0
+                    || *scenario.mStartGameHour >= 24.0))
+                throw std::invalid_argument("atmosphere scenario starting game hour must be within [0, 24)");
             if (scenario.mRecentPrecipitation
                 && (!std::isfinite(*scenario.mRecentPrecipitation) || *scenario.mRecentPrecipitation < 0.f
                     || *scenario.mRecentPrecipitation > 1.f))
@@ -83,6 +89,8 @@ namespace Diagnostics
         }
         if (scenario.mGameHour)
             output << YAML::Key << "game-hour" << YAML::Value << *scenario.mGameHour;
+        if (scenario.mStartGameHour)
+            output << YAML::Key << "start-game-hour" << YAML::Value << *scenario.mStartGameHour;
         if (scenario.mMedia)
         {
             output << YAML::Key << "media" << YAML::Value << YAML::BeginMap << YAML::Key << "main-clouds" << YAML::Value
@@ -128,7 +136,7 @@ namespace Diagnostics
         const YAML::Node root = YAML::Load(std::string(text));
         requireKnownKeys(root,
             { "version", "weather", "game-hour", "media", "distance-fog", "cloud-seed", "weather-effects",
-                "environment", "recent-precipitation" },
+                "environment", "recent-precipitation", "start-game-hour" },
             "atmosphere scenario");
         if (!root["version"])
             throw std::invalid_argument("atmosphere scenario version is not supported");
@@ -145,6 +153,9 @@ namespace Diagnostics
             throw std::invalid_argument("atmosphere scenario environment requires version 5");
         if (version < 6 && root["recent-precipitation"])
             throw std::invalid_argument("atmosphere scenario recent precipitation requires version 6");
+
+        if (version < 7 && root["start-game-hour"])
+            throw std::invalid_argument("atmosphere scenario starting game hour requires version 7");
 
         AtmosphereScenario scenario;
         if (const YAML::Node weather = root["weather"])
@@ -167,6 +178,8 @@ namespace Diagnostics
         }
         if (root["game-hour"])
             scenario.mGameHour = root["game-hour"].as<double>();
+        if (root["start-game-hour"])
+            scenario.mStartGameHour = root["start-game-hour"].as<double>();
         if (const YAML::Node media = root["media"])
         {
             requireKnownKeys(media, { "main-clouds", "low-clouds", "mist", "fog" }, "atmosphere scenario media");

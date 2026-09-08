@@ -5,7 +5,9 @@
 
 #include <optional>
 
+#include <components/sceneutil/atmosphereterraingrid.hpp>
 #include <components/sceneutil/cloudadvection.hpp>
+#include <components/sceneutil/cloudlayer.hpp>
 #include <components/sceneutil/lightmanager.hpp>
 #include <components/sceneutil/statesetupdater.hpp>
 #include <components/std140/ubo.hpp>
@@ -109,6 +111,13 @@ namespace Fx
         /// Read the frame identity published to a render state set, independent of subsequent updater changes.
         static std::optional<int> getPublishedFrameNumber(const osg::StateSet& stateset);
 
+        /// Read all cloud-model controls from the immutable binding consumed by the captured frame.
+        static std::optional<SceneUtil::CloudLayerUniforms> getPublishedCloudLayers(const osg::StateSet& stateset);
+
+        /// Read the immutable terrain lattice consumed by a captured atmosphere frame.
+        static std::optional<SceneUtil::AtmosphereTerrainGrid> getPublishedAtmosphereTerrain(
+            const osg::StateSet& stateset);
+
         void setWindSpeed(float speed) { mData.get<WindSpeed>() = speed; }
 
         void setWeatherTransition(float transition)
@@ -117,11 +126,24 @@ namespace Fx
         }
 
         /// Publish canonical scene-linear atmosphere, volume, and lighting state to native passes.
+        /// Publish complete source-derived cloud models to the atmosphere volume pass.
+        void setCloudLayers(const SceneUtil::CloudLayerUniforms& layers)
+        {
+            mData.get<AtmosphereCloudLayers>() = layers;
+        }
+
+        /// Publish the observer-independent cloud terrain field through both uniform binding paths.
+        void setAtmosphereTerrain(const SceneUtil::AtmosphereTerrainGrid& terrain)
+        {
+            mData.get<AtmosphereTerrainHeights>() = terrain.mHeights;
+            mData.get<AtmosphereTerrainOriginSpacing>() = terrain.mOriginSpacing;
+            mData.get<AtmosphereTerrainHeightBounds>() = terrain.mHeightBounds;
+        }
+
         void setAtmosphere(const osg::Vec3f& inScattering, const osg::Vec3f& outScattering,
-            const osg::Vec4f& cloudParameters, const osg::Vec4f& cloudShapeParameters,
-            const osg::Vec4f& cloudOrganizationParameters, const osg::Vec4f& cloudStructureParameters,
-            const osg::Vec4f& lowCloudParameters, const osg::Vec4f& lowCloudShapeParameters,
-            const osg::Vec4f& mistParameters, const osg::Vec4f& fogVolumeParameters,
+            const osg::Vec4f& cloudParameters, const osg::Vec4f& incomingCloudParameters,
+            const osg::Vec4f& cloudScenarioParameters, const osg::Vec4f& lowCloudParameters,
+            float lowCloudEnvironmentInfluence, const osg::Vec4f& mistParameters, const osg::Vec4f& fogVolumeParameters,
             const osg::Vec4f& mediumReferenceParameters, const osg::Vec4f& orographicParameters,
             const osg::Vec4f& sunDiscColor, const osg::Vec3f& solarRadiance, const osg::Vec3f& skyIrradiance,
             const osg::Vec3f& groundIrradiance, const osg::Vec2f& cloudAdvectionOffsetWorldUnits,
@@ -131,11 +153,10 @@ namespace Fx
             mData.get<AtmosphereInScattering>() = inScattering;
             mData.get<AtmosphereOutScattering>() = outScattering;
             mData.get<AtmosphereCloudParameters>() = cloudParameters;
-            mData.get<AtmosphereCloudShapeParameters>() = cloudShapeParameters;
-            mData.get<AtmosphereCloudOrganizationParameters>() = cloudOrganizationParameters;
-            mData.get<AtmosphereCloudStructureParameters>() = cloudStructureParameters;
+            mData.get<AtmosphereIncomingCloudParameters>() = incomingCloudParameters;
+            mData.get<AtmosphereCloudScenarioParameters>() = cloudScenarioParameters;
             mData.get<AtmosphereLowCloudParameters>() = lowCloudParameters;
-            mData.get<AtmosphereLowCloudShapeParameters>() = lowCloudShapeParameters;
+            mData.get<AtmosphereLowCloudEnvironmentInfluence>() = lowCloudEnvironmentInfluence;
             mData.get<AtmosphereMistParameters>() = mistParameters;
             mData.get<AtmosphereFogVolumeParameters>() = fogVolumeParameters;
             mData.get<AtmosphereMediumReferenceParameters>() = mediumReferenceParameters;
@@ -145,8 +166,6 @@ namespace Fx
             mData.get<AtmosphereSkyIrradiance>() = skyIrradiance;
             mData.get<AtmosphereGroundIrradiance>() = groundIrradiance;
             mData.get<AtmosphereCloudAdvectionOffset>() = cloudAdvectionOffsetWorldUnits;
-            mData.get<AtmosphereCloudShapeAdvectionOffset>()
-                = SceneUtil::cloudShapeAdvectionOffset(cloudAdvectionOffsetWorldUnits);
             mData.get<AtmosphereCloudAdvectionDelta>() = cloudAdvectionDeltaWorldUnits;
             mData.get<AtmosphereHistoryLightingWeight>() = historyLightingWeight;
             mData.get<AtmosphereWeatherWeight>() = weatherWeight;
@@ -356,22 +375,16 @@ namespace Fx
             static constexpr std::string_view sName = "atmosphereCloudParameters";
         };
 
-        /// Bind weather-controlled cloud morphology, scale, vertical development, and anvil strength.
-        struct AtmosphereCloudShapeParameters : Std140::Vec4
+        /// Bind incoming coverage, density, base height, and thickness during a weather transition.
+        struct AtmosphereIncomingCloudParameters : Std140::Vec4
         {
-            static constexpr std::string_view sName = "atmosphereCloudShapeParameters";
+            static constexpr std::string_view sName = "atmosphereIncomingCloudParameters";
         };
 
-        /// Bind independent deck continuity, convective frequency, maturity, and storm organization.
-        struct AtmosphereCloudOrganizationParameters : Std140::Vec4
+        /// Bind outgoing and incoming field phases, transition weight, and incoming-field activity.
+        struct AtmosphereCloudScenarioParameters : Std140::Vec4
         {
-            static constexpr std::string_view sName = "atmosphereCloudOrganizationParameters";
-        };
-
-        /// Bind tower taper, cloud-base variation, and the stratiform deck family.
-        struct AtmosphereCloudStructureParameters : Std140::Vec4
-        {
-            static constexpr std::string_view sName = "atmosphereCloudStructureParameters";
+            static constexpr std::string_view sName = "atmosphereCloudScenarioParameters";
         };
 
         /// Bind low-cloud coverage, density, base height, and thickness.
@@ -380,10 +393,10 @@ namespace Fx
             static constexpr std::string_view sName = "atmosphereLowCloudParameters";
         };
 
-        /// Bind low-cloud morphology, scale, vertical development, and environment influence.
-        struct AtmosphereLowCloudShapeParameters : Std140::Vec4
+        /// Bind the environmental cloud layer's coupling to local terrain.
+        struct AtmosphereLowCloudEnvironmentInfluence : Std140::Float
         {
-            static constexpr std::string_view sName = "atmosphereLowCloudShapeParameters";
+            static constexpr std::string_view sName = "atmosphereLowCloudEnvironmentInfluence";
         };
 
         /// Bind weather-controlled mist density, base height, thickness, and shaft intensity.
@@ -440,12 +453,6 @@ namespace Fx
             static constexpr std::string_view sName = "atmosphereCloudAdvectionOffsetWorldUnits";
         };
 
-        /// Store independent three-dimensional shape motion without changing coverage or low-media advection.
-        struct AtmosphereCloudShapeAdvectionOffset : Std140::Vec3
-        {
-            static constexpr std::string_view sName = "atmosphereCloudShapeAdvectionOffsetWorldUnits";
-        };
-
         /// Store exact current-frame cloud displacement in world units for temporal reprojection.
         struct AtmosphereCloudAdvectionDelta : Std140::Vec2
         {
@@ -482,16 +489,44 @@ namespace Fx
             static constexpr std::string_view sName = "atmosphereVolumeResolutionScale";
         };
 
-        using UniformData = Std140::UBO<ProjectionMatrix, InvProjectionMatrix, PrevProjectionMatrix, ViewMatrix,
-            PrevViewMatrix, InvViewMatrix, EyePos, EyeVec, FogColor, AmbientColor, SkyColor, SunColor, SunPos, SunVec,
-            Resolution, RcpResolution, FogNear, FogFar, Near, Far, Fov, GameHour, SunVis, WaterHeight, IsWaterEnabled,
-            SimulationTime, DeltaSimulationTime, FrameNumber, WindSpeed, WeatherTransition, WeatherID, NextWeatherID,
-            IsUnderwater, IsInterior, AtmosphereInScattering, AtmosphereOutScattering, AtmosphereCloudParameters,
-            AtmosphereCloudShapeParameters, AtmosphereCloudOrganizationParameters, AtmosphereCloudStructureParameters,
-            AtmosphereLowCloudParameters, AtmosphereLowCloudShapeParameters, AtmosphereMistParameters,
-            AtmosphereFogVolumeParameters, AtmosphereMediumReferenceParameters, AtmosphereOrographicParameters,
-            AtmosphereSunDiscColor, AtmosphereSolarRadiance, AtmosphereSkyIrradiance, AtmosphereGroundIrradiance,
-            AtmosphereCloudAdvectionOffset, AtmosphereCloudShapeAdvectionOffset, AtmosphereCloudAdvectionDelta,
+        /// Bind the outgoing, incoming, and environmental cloud layer parameter blocks.
+        struct AtmosphereCloudLayers : Std140::Vec4Array<42>
+        {
+            static constexpr std::string_view sName = "atmosphereCloudLayers";
+        };
+
+        /// Bind packed scalar samples on the fixed world terrain lattice.
+        struct AtmosphereTerrainHeights : Std140::Vec4Array<SceneUtil::AtmosphereTerrainGrid::sPackedSize>
+        {
+            static constexpr std::string_view sName = "atmosphereTerrainHeights";
+        };
+
+        /// Bind the cache origin and world lattice spacing without changing the field's phase.
+        struct AtmosphereTerrainOriginSpacing : Std140::Vec4
+        {
+            static constexpr std::string_view sName = "atmosphereTerrainOriginSpacing";
+        };
+
+        /// Enclose the sampled terrain heights for conservative cloud-ray intersection.
+        struct AtmosphereTerrainHeightBounds : Std140::Vec2
+        {
+            static constexpr std::string_view sName = "atmosphereTerrainHeightBounds";
+        };
+
+        using UniformData = Std140::UBO<AtmosphereTerrainHeights, AtmosphereTerrainOriginSpacing,
+            AtmosphereTerrainHeightBounds, AtmosphereCloudLayers, ProjectionMatrix, InvProjectionMatrix,
+            PrevProjectionMatrix, ViewMatrix, PrevViewMatrix, InvViewMatrix, EyePos, EyeVec, FogColor, AmbientColor,
+            SkyColor, SunColor, SunPos, SunVec, Resolution, RcpResolution, FogNear, FogFar, Near, Far, Fov, GameHour,
+            SunVis, WaterHeight, IsWaterEnabled, SimulationTime, DeltaSimulationTime, FrameNumber, WindSpeed,
+            WeatherTransition, WeatherID, NextWeatherID, IsUnderwater, IsInterior, AtmosphereInScattering,
+            AtmosphereOutScattering, AtmosphereCloudParameters,
+
+            AtmosphereIncomingCloudParameters,
+
+            AtmosphereCloudScenarioParameters, AtmosphereLowCloudParameters, AtmosphereLowCloudEnvironmentInfluence,
+            AtmosphereMistParameters, AtmosphereFogVolumeParameters, AtmosphereMediumReferenceParameters,
+            AtmosphereOrographicParameters, AtmosphereSunDiscColor, AtmosphereSolarRadiance, AtmosphereSkyIrradiance,
+            AtmosphereGroundIrradiance, AtmosphereCloudAdvectionOffset, AtmosphereCloudAdvectionDelta,
             AtmosphereHistoryLightingWeight, AtmosphereWeatherWeight, AtmosphereQuality,
             AtmosphereVolumeResolutionScale, AtmosphereEnabled>;
 

@@ -209,6 +209,30 @@ namespace MWRender
                     shaderFrame = Fx::StateUpdater::getPublishedFrameNumber(**it);
                 if (!shaderFrame)
                     throw std::runtime_error("Atmosphere capture cannot identify the published shader frame");
+                std::optional<SceneUtil::CloudLayerUniforms> cloudLayers;
+                for (auto it = stateSets.rbegin(); it != stateSets.rend() && !cloudLayers; ++it)
+                    cloudLayers = Fx::StateUpdater::getPublishedCloudLayers(**it);
+                if (!cloudLayers)
+                    throw std::runtime_error("Atmosphere capture cannot identify the published cloud models");
+                RenderDiagnosticImage models{ "atmosphere-cloud-models-v2", 14, 3, 4, {} };
+                for (const osg::Vec4f& parameters : *cloudLayers)
+                    models.mPixels.insert(models.mPixels.end(), parameters.ptr(), parameters.ptr() + 4);
+                images.emplace_back(std::move(models));
+                std::optional<SceneUtil::AtmosphereTerrainGrid> terrain;
+                for (auto it = stateSets.rbegin(); it != stateSets.rend() && !terrain; ++it)
+                    terrain = Fx::StateUpdater::getPublishedAtmosphereTerrain(**it);
+                if (!terrain)
+                    throw std::runtime_error("Atmosphere capture cannot identify the published terrain field");
+                RenderDiagnosticImage terrainField{ "atmosphere-cloud-terrain-v1",
+                    static_cast<std::uint32_t>(SceneUtil::AtmosphereTerrainGrid::sPackedSize + 2), 1, 4, {} };
+                terrainField.mPixels.insert(
+                    terrainField.mPixels.end(), terrain->mOriginSpacing.ptr(), terrain->mOriginSpacing.ptr() + 4);
+                terrainField.mPixels.insert(terrainField.mPixels.end(),
+                    { terrain->mHeightBounds.x(), terrain->mHeightBounds.y(),
+                        static_cast<float>(SceneUtil::AtmosphereTerrainGrid::sSide), 0.f });
+                for (const osg::Vec4f& heights : terrain->mHeights)
+                    terrainField.mPixels.insert(terrainField.mPixels.end(), heights.ptr(), heights.ptr() + 4);
+                images.emplace_back(std::move(terrainField));
                 const int phase = *shaderFrame % 4;
                 images.push_back({ "atmosphere-checkerboard-layout", 1, 1, 4,
                     { static_cast<float>(phase), static_cast<float>(resolvedVolume->getTextureWidth()),

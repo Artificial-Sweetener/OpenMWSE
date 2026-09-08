@@ -3,6 +3,12 @@
 
 struct Atmosphere
 {
+    // Fourteen vec4 parameters per outgoing, incoming, and environmental cloud layer.
+    vec4 cloudLayers[42];
+    // Four scalar terrain heights per slot on a fixed 15 by 15 world lattice.
+    vec4 terrainHeights[57];
+    vec4 terrainOriginSpacing;
+    vec2 terrainHeightBounds;
     bool enabled;
     vec4 skyColor;
     vec3 inScattering;
@@ -11,16 +17,14 @@ struct Atmosphere
     vec3 sunDirection;
     // coverage, density, base altitude in world units, thickness in world units
     vec4 cloudParameters;
-    // morphology from stratus to storm, feature scale, vertical development, anvil strength
-    vec4 cloudShapeParameters;
-    // deck continuity, convective frequency, convective maturity, storm organization
-    vec4 cloudOrganizationParameters;
-    // tower taper, base-height variation, reserved, reserved
-    vec4 cloudStructureParameters;
+    // Incoming episode parameters retain a distinct procedural domain during transition.
+    vec4 incomingCloudParameters;
+    // outgoing phase, incoming phase, incoming blend weight, incoming field enabled
+    vec4 cloudScenarioParameters;
     // coverage, density, base altitude in world units, thickness in world units
     vec4 lowCloudParameters;
-    // morphology, feature scale, vertical development, environment influence
-    vec4 lowCloudShapeParameters;
+    // Coupling of the environmental source layer to local terrain.
+    float lowCloudEnvironmentInfluence;
     // density, base altitude in world units, thickness in world units, shaft intensity
     vec4 mistParameters;
     // density, base altitude in world units, thickness in world units, scattering anisotropy
@@ -37,8 +41,6 @@ struct Atmosphere
     vec3 groundIrradiance;
     // Integrated world-space offset shared by visible clouds, reflections, and surface shadows.
     vec2 cloudAdvectionOffsetWorldUnits;
-    // Independent 3D shape-noise displacement, derived from the same integrated weather phase.
-    vec3 cloudShapeAdvectionOffsetWorldUnits;
     int quality;
 };
 
