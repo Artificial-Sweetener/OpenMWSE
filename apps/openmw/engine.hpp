@@ -268,7 +268,7 @@ namespace OMW
 
         void setGrabMouse(bool grab) { mGrab = grab; }
 
-        /// Initialise and enter main loop.
+        /// Initialise the main loop and preserve consumed route-state boundaries across nested loading renders.
         void go();
 
         /// Enable the protected diagnostic bridge and optional isolated child behavior.

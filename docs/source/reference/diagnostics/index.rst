@@ -72,6 +72,13 @@ Route replay applies the recorded player and camera state authoritatively at eac
 mouse, physics, or gameplay decisions. This preserves the recorded viewport, cell traversal, streaming pressure, and rendering
 workload while making repeated candidate comparisons independent of physical input timing. The controller verifies that each
 scheduled route state was consumed before accepting a segment. Rendering frames without advancing the route is a replay failure.
+Performance collection spans every renderer frame used by the requested route states, including loading-screen draws.
+The ``route-frame-map`` associates each segment-local ``route-ordinal`` with its ``first-render-frame`` (world update) and
+``scene-render-frame`` (completed scene traversal). Use this map when pairing route states; a raw renderer-frame ordinal is
+not a route ordinal. Loading frames remain in the complete trace with the viewer's ``Loading`` statistic. Collections that
+outgrow retained statistics fail explicitly; use fewer ``--performance-samples`` per segment for those routes.
+Route image sequences begin at the scheduled route boundary. Older draw-thread frames already queued when the request arrives
+are excluded, so they cannot consume image slots intended for the route's final states.
 The controller measures every route
 frame in bounded segments, writes ``performance-segment-*.txt``, captures full graphics evidence at each segment boundary, and
 then closes and cleans the isolated child. Use the same capsule, build configuration, driver state, and replay command for every
@@ -207,7 +214,7 @@ The versioned providers expose these evidence domains:
 
 * ``core@2`` records the effective video, camera, atmosphere, and complete shadow configuration used by the captured engine
   instance so replay evidence can attest to rendering-setting parity.
-* ``graphics@2`` captures scene color and depth, resolved atmospheric volumes and metadata, shafts, and the final composite over
+* ``graphics@3`` captures scene color and depth, resolved atmospheric volumes and metadata, shafts, and the final composite over
   normal and diagnostic-isolation stages. It also supports native-resolution route composites;
   ``graphics@1`` supports 1024-pixel route previews.
 * ``gameplay@8`` records the cell, camera position and angles, first-person and underwater state, current and next weather,
@@ -218,7 +225,7 @@ The versioned providers expose these evidence domains:
   cloud-field offset used by procedural density and shadow evaluation. Readers also accept ``gameplay@4``, ``gameplay@5``,
   ``gameplay@6``, and ``gameplay@7`` capsules.
   The replay controller checks stable save fields before applying any explicit atmosphere scenario and advancing the simulation.
-* ``performance@14`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
+* ``performance@15`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
   scopes for scripts, Lua, mechanics, physics, world, and UI, resource caches and work queues, navigation and paging activity,
   scene statistics, delayed per-camera GPU/render timing, and camera-owned GPU passes for the main scene, shadow maps, water
   reflection, sky render target, post-processing, precipitation occlusion, ripples, and terrain-composite generation. It divides

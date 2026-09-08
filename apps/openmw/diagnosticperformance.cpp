@@ -1,5 +1,6 @@
 #include "diagnosticperformance.hpp"
 
+#include "diagnosticcollection.hpp"
 #include "diagnosticrenderingtiming.hpp"
 #include "diagnosticworkcounter.hpp"
 #include "mwrender/renderworkcounter.hpp"
@@ -549,6 +550,17 @@ namespace OMW
             .mWorst = sorted.back() };
     }
 
+    void reportDiagnosticRouteFrames(std::span<const DiagnosticRouteFrame> frames, std::ostream& output)
+    {
+        if (frames.empty())
+            return;
+        output << "route-sampled-frames: " << frames.size() << '\n' << "route-frame-map:\n";
+        for (std::size_t ordinal = 0; ordinal < frames.size(); ++ordinal)
+            output << "  - route-ordinal: " << ordinal << '\n'
+                   << "    first-render-frame: " << frames[ordinal].mFirstRenderFrame << '\n'
+                   << "    scene-render-frame: " << frames[ordinal].mSceneRenderFrame << '\n';
+    }
+
     void reportDiagnosticPerformance(
         unsigned firstFrame, unsigned lastFrame, osgViewer::Viewer& viewer, std::ostream& output)
     {
@@ -566,7 +578,7 @@ namespace OMW
         forEachUserStatsValue(
             [&](const UserStats& value) { metrics.push_back({ value.mTaken, Metric::Owner::Viewer }); });
 
-        output << std::setprecision(17) << "provider: performance@14\n"
+        output << std::setprecision(17) << "provider: performance@15\n"
                << "threading-model: " << threadingModelName(viewer.getThreadingModel()) << '\n'
                << "first-sampled-frame: " << firstFrame << '\n'
                << "last-sampled-frame: " << lastFrame << '\n'

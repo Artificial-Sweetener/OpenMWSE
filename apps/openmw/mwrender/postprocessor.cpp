@@ -157,10 +157,10 @@ namespace MWRender
         return mAtmosphereDiagnostics->captureInProgress();
     }
 
-    void PostProcessor::requestRenderFrameDiagnosticCapture(
-        const std::filesystem::path& outputPath, std::uint32_t frameCount, bool nativeResolution)
+    void PostProcessor::requestRenderFrameDiagnosticCapture(const std::filesystem::path& outputPath,
+        std::uint32_t frameCount, bool nativeResolution, std::uint64_t firstFrameNumber)
     {
-        mRenderFrameDiagnostics->requestCapture(outputPath, frameCount, nativeResolution);
+        mRenderFrameDiagnostics->requestCapture(outputPath, frameCount, nativeResolution, firstFrameNumber);
         Log(Debug::Info) << "Exact production-frame diagnostic sequence requested at " << outputPath;
     }
 

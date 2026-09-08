@@ -1,6 +1,11 @@
 #include <apps/openmw/mwrender/renderdiagnosticbundle.hpp>
+#include <apps/openmw/mwrender/renderframediagnostics.hpp>
 
 #include <gtest/gtest.h>
+
+#include <osg/FrameStamp>
+#include <osg/RenderInfo>
+#include <osg/State>
 
 #include <array>
 #include <chrono>
@@ -54,6 +59,29 @@ namespace
         EXPECT_EQ(static_cast<unsigned char>(actual[20]), 2u);
         EXPECT_THROW(writer.finish(1234), std::logic_error);
         EXPECT_THROW(writer.append(images), std::logic_error);
+    }
+
+    /// Leave a scheduled capture untouched by older draw-thread work, then handle the eligible frame normally.
+    TEST_F(RenderDiagnosticBundleTest, ScheduledCaptureIgnoresPreviouslyQueuedDrawFrames)
+    {
+        MWRender::RenderFrameDiagnostics capture;
+        const auto path = mDirectory / "scheduled.omwdiag";
+        capture.requestCapture(path, 1, true, 100);
+        osg::ref_ptr<osg::State> state = new osg::State;
+        state->setFrameStamp(new osg::FrameStamp);
+        osg::RenderInfo renderInfo(state.get(), nullptr);
+        state->getFrameStamp()->setFrameNumber(98);
+        capture.captureFrame(renderInfo, 0, 0, 0);
+        ASSERT_TRUE(capture.captureInProgress());
+        state->getFrameStamp()->setFrameNumber(99);
+        capture.captureFrame(renderInfo, 0, 0, 0);
+        ASSERT_TRUE(capture.captureInProgress());
+        state->getFrameStamp()->setFrameNumber(100);
+        // Invalid native dimensions cancel an eligible request before any OpenGL access.
+        capture.captureFrame(renderInfo, 0, 0, 0);
+        EXPECT_FALSE(capture.captureInProgress());
+        EXPECT_FALSE(std::filesystem::exists(path));
+        EXPECT_FALSE(std::filesystem::exists(mDirectory / "scheduled.omwdiag.partial"));
     }
 
     /// Discard incomplete output and reject attachments whose dimensions contradict their payload.

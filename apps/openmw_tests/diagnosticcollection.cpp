@@ -56,7 +56,7 @@ TEST(DiagnosticCollectionTest, CollectsLazyRenderTargetsAndStopsAtTheBoundary)
     osg::ref_ptr<DiagnosticReflectionTarget> target = new DiagnosticReflectionTarget;
     viewer.setSceneData(target);
     OMW::DiagnosticCollection collection(viewer);
-    ASSERT_TRUE(collection.start(22, 1, 100));
+    ASSERT_TRUE(collection.start(22, 1, 100, OMW::DiagnosticSampleBasis::RenderedFrames));
     osg::Camera* camera = target->getCamera(nullptr);
     ASSERT_NE(camera, nullptr);
     EXPECT_TRUE(SceneUtil::diagnosticGpuPassStatisticsCollectionEnabled(*camera));
@@ -69,7 +69,7 @@ TEST(DiagnosticCollectionTest, CollectsLazyRenderTargetsAndStopsAtTheBoundary)
     ASSERT_NE(camera->getFinalDrawCallback(), nullptr);
     ASSERT_TRUE(collection.update(110).has_value());
     EXPECT_FALSE(SceneUtil::diagnosticGpuPassStatisticsCollectionEnabled(*camera));
-    ASSERT_TRUE(collection.start(23, 1, 120));
+    ASSERT_TRUE(collection.start(23, 1, 120, OMW::DiagnosticSampleBasis::RenderedFrames));
     EXPECT_TRUE(SceneUtil::diagnosticGpuPassStatisticsCollectionEnabled(*camera));
     ASSERT_TRUE(collection.update(130).has_value());
     EXPECT_FALSE(SceneUtil::diagnosticGpuPassStatisticsCollectionEnabled(*camera));
@@ -98,7 +98,7 @@ TEST(DiagnosticCollectionTest, SeparatesRenderBinInstrumentationAndStopsCollecti
     double cpuSeconds = 0.0;
     {
         OMW::DiagnosticCollection collection(viewer);
-        ASSERT_TRUE(collection.start(1, 1, 100));
+        ASSERT_TRUE(collection.start(1, 1, 100, OMW::DiagnosticSampleBasis::RenderedFrames));
         bin->draw(renderInfo, previous);
         ASSERT_TRUE(viewer.getCamera()->getStats()->getAttribute(100, overheadStatistic, firstOverhead));
         EXPECT_GE(firstOverhead, 0.0);
@@ -130,7 +130,7 @@ TEST(DiagnosticCollectionTest, EnablesOnlyOneBoundedFutureIntervalAndRestoresPri
     EXPECT_FALSE(viewer.getViewerStats()->collectStats("scene"));
     EXPECT_FALSE(viewer.getCamera()->getStats()->collectStats("rendering"));
 
-    EXPECT_TRUE(collection.start(17, 4, 100));
+    EXPECT_TRUE(collection.start(17, 4, 100, OMW::DiagnosticSampleBasis::RenderedFrames));
     EXPECT_TRUE(collection.active());
     EXPECT_TRUE(SDLUtil::diagnosticPresentationTimingCollectionEnabled());
     SDLUtil::recordDiagnosticSwapBufferTime(100, 0.004);
@@ -141,7 +141,7 @@ TEST(DiagnosticCollectionTest, EnablesOnlyOneBoundedFutureIntervalAndRestoresPri
     EXPECT_FALSE(viewer.getViewerStats()->collectStats("scene"));
     EXPECT_TRUE(viewer.getCamera()->getStats()->collectStats("rendering"));
     EXPECT_TRUE(viewer.getCamera()->getStats()->collectStats("scene"));
-    EXPECT_FALSE(collection.start(18, 1, 100));
+    EXPECT_FALSE(collection.start(18, 1, 100, OMW::DiagnosticSampleBasis::RenderedFrames));
     EXPECT_FALSE(collection.update(110).has_value());
     EXPECT_FALSE(collection.update(111).has_value());
     EXPECT_FALSE(collection.update(112).has_value());
@@ -158,15 +158,83 @@ TEST(DiagnosticCollectionTest, EnablesOnlyOneBoundedFutureIntervalAndRestoresPri
     EXPECT_TRUE(viewer.getViewerStats()->collectStats("frame_rate"));
 }
 
+/// Keep collecting across loading renders until every requested route state has produced its scene frame.
+TEST(DiagnosticCollectionTest, RouteCollectionIncludesLoadingFramesAndTheCompleteRouteTail)
+{
+    osgViewer::Viewer viewer;
+    viewer.setViewerStats(new osg::Stats("viewer"));
+    OMW::DiagnosticCollection collection(viewer);
+    ASSERT_TRUE(collection.start(24, 3, 100, OMW::DiagnosticSampleBasis::GameplayRouteFrames));
+    collection.recordRouteFrame(100, 100);
+    collection.recordRouteFrame(101, 140);
+    EXPECT_FALSE(collection.update(141).has_value());
+    EXPECT_TRUE(collection.active());
+    collection.recordRouteFrame(141, 141);
+    EXPECT_FALSE(collection.update(150).has_value());
+    const auto completed = collection.update(151);
+    ASSERT_TRUE(completed.has_value());
+    EXPECT_FALSE(completed->mHistoryExpired);
+    EXPECT_EQ(completed->mFirstFrame, 100u);
+    EXPECT_EQ(completed->mLastFrame, 141u);
+    ASSERT_EQ(completed->mRouteFrames.size(), 3u);
+    EXPECT_EQ(completed->mRouteFrames[1].mFirstRenderFrame, 101u);
+    EXPECT_EQ(completed->mRouteFrames[1].mSceneRenderFrame, 140u);
+    EXPECT_EQ(completed->mRouteFrames[2].mSceneRenderFrame, 141u);
+    EXPECT_FALSE(collection.active());
+}
+
+/// Reject route statistics that cannot survive the bounded asynchronous readback window.
+TEST(DiagnosticCollectionTest, RouteCollectionFailsExplicitlyBeforeItsHistoryExpires)
+{
+    osgViewer::Viewer viewer;
+    viewer.setViewerStats(new osg::Stats("viewer"));
+    OMW::DiagnosticCollection collection(viewer);
+    ASSERT_TRUE(collection.start(25, 2, 100, OMW::DiagnosticSampleBasis::GameplayRouteFrames));
+    collection.recordRouteFrame(100, 1120);
+    const auto completed = collection.update(1121);
+    ASSERT_TRUE(completed.has_value());
+    EXPECT_TRUE(completed->mHistoryExpired);
+    EXPECT_FALSE(collection.active());
+    EXPECT_FALSE(SDLUtil::diagnosticPresentationTimingCollectionEnabled());
+
+    ASSERT_TRUE(collection.start(26, 2, 1200, OMW::DiagnosticSampleBasis::GameplayRouteFrames));
+    const auto incomplete = collection.update(2222);
+    ASSERT_TRUE(incomplete.has_value());
+    EXPECT_TRUE(incomplete->mHistoryExpired);
+
+    ASSERT_TRUE(collection.start(28, 1, 2300, OMW::DiagnosticSampleBasis::GameplayRouteFrames));
+    collection.recordRouteFrame(2300, 2300);
+    const auto delayed = collection.update(3323);
+    ASSERT_TRUE(delayed.has_value());
+    EXPECT_TRUE(delayed->mHistoryExpired);
+}
+
+/// Require adjacent route intervals and reject extra states instead of producing a misleading frame map.
+TEST(DiagnosticCollectionTest, RouteCollectionRejectsInvalidStateBoundaries)
+{
+    osgViewer::Viewer viewer;
+    viewer.setViewerStats(new osg::Stats("viewer"));
+    OMW::DiagnosticCollection collection(viewer);
+    ASSERT_TRUE(collection.start(27, 2, 100, OMW::DiagnosticSampleBasis::GameplayRouteFrames));
+    EXPECT_THROW(collection.recordRouteFrame(101, 101), std::logic_error);
+    EXPECT_THROW(collection.recordRouteFrame(100, 99), std::logic_error);
+    collection.recordRouteFrame(100, 105);
+    EXPECT_THROW(collection.recordRouteFrame(105, 105), std::logic_error);
+    collection.recordRouteFrame(106, 106);
+    EXPECT_THROW(collection.recordRouteFrame(107, 107), std::logic_error);
+}
+
 TEST(DiagnosticCollectionTest, RejectsInvalidAndOverflowingIntervals)
 {
     osgViewer::Viewer viewer;
     viewer.setViewerStats(new osg::Stats("viewer"));
     OMW::DiagnosticCollection collection(viewer);
 
-    EXPECT_THROW(collection.start(1, 0, 10), std::invalid_argument);
-    EXPECT_THROW(collection.start(1, 601, 10), std::invalid_argument);
-    EXPECT_THROW(collection.start(1, 2, std::numeric_limits<unsigned>::max()), std::overflow_error);
+    EXPECT_THROW(collection.start(1, 0, 10, OMW::DiagnosticSampleBasis::RenderedFrames), std::invalid_argument);
+    EXPECT_THROW(collection.start(1, 601, 10, OMW::DiagnosticSampleBasis::RenderedFrames), std::invalid_argument);
+    EXPECT_THROW(
+        collection.start(1, 2, std::numeric_limits<unsigned>::max(), OMW::DiagnosticSampleBasis::RenderedFrames),
+        std::overflow_error);
 }
 
 TEST(DiagnosticCollectionTest, WaitsForPendingQueriesWithoutExtendingTheMeasuredInterval)
@@ -174,7 +242,7 @@ TEST(DiagnosticCollectionTest, WaitsForPendingQueriesWithoutExtendingTheMeasured
     osgViewer::Viewer viewer;
     viewer.setViewerStats(new osg::Stats("viewer"));
     OMW::DiagnosticCollection collection(viewer);
-    ASSERT_TRUE(collection.start(19, 4, 100));
+    ASSERT_TRUE(collection.start(19, 4, 100, OMW::DiagnosticSampleBasis::RenderedFrames));
     osg::Stats& stats = *viewer.getCamera()->getStats();
     const std::string statistic(SceneUtil::diagnosticGpuQueryStateStatistic);
     stats.setAttribute(100, statistic, static_cast<int>(SceneUtil::DiagnosticGpuQueryState::Pending));
@@ -194,7 +262,7 @@ TEST(DiagnosticCollectionTest, ReportsUnretiredQueriesBeforeTheirSampleHistoryEx
     osgViewer::Viewer viewer;
     viewer.setViewerStats(new osg::Stats("viewer"));
     OMW::DiagnosticCollection collection(viewer);
-    ASSERT_TRUE(collection.start(20, 600, 100));
+    ASSERT_TRUE(collection.start(20, 600, 100, OMW::DiagnosticSampleBasis::RenderedFrames));
     osg::Stats& stats = *viewer.getCamera()->getStats();
     const std::string statistic(SceneUtil::diagnosticGpuQueryStateStatistic);
     stats.setAttribute(100, statistic, static_cast<int>(SceneUtil::DiagnosticGpuQueryState::Pending));
@@ -215,7 +283,7 @@ TEST(DiagnosticCollectionTest, DoesNotWaitForUnavailableOrNonRenderingCameras)
     osgViewer::Viewer viewer;
     viewer.setViewerStats(new osg::Stats("viewer"));
     OMW::DiagnosticCollection collection(viewer);
-    ASSERT_TRUE(collection.start(21, 4, 100));
+    ASSERT_TRUE(collection.start(21, 4, 100, OMW::DiagnosticSampleBasis::RenderedFrames));
     osg::Stats& stats = *viewer.getCamera()->getStats();
     const std::string statistic(SceneUtil::diagnosticGpuQueryStateStatistic);
     stats.setAttribute(100, statistic, static_cast<int>(SceneUtil::DiagnosticGpuQueryState::Unsupported));

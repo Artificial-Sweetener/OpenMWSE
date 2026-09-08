@@ -1096,10 +1096,10 @@ void OMW::Engine::go()
                                       .count()
             * timeManager.getSimulationTimeScale();
         const Diagnostics::FixedStepScheduler::Frame diagnosticFrame = mDiagnosticStepScheduler.beginFrame();
+        const bool replayingRoute = mDiagnosticChild && diagnosticFrame.mScheduled && mDiagnosticGameplayRoute
+            && mDiagnosticGameplayRoute->replaying();
         const double dt = mDiagnosticChild
-            ? (diagnosticFrame.mScheduled && mDiagnosticGameplayRoute && mDiagnosticGameplayRoute->replaying()
-                      ? mDiagnosticGameplayRoute->replayFrame().mDuration
-                      : diagnosticFrame.mDuration)
+            ? (replayingRoute ? mDiagnosticGameplayRoute->replayFrame().mDuration : diagnosticFrame.mDuration)
             : realtimeDt;
 
         mViewer->advance(timeManager.getRenderingSimulationTime());
@@ -1111,6 +1111,8 @@ void OMW::Engine::go()
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
             continue;
         }
+        if (replayingRoute)
+            mDiagnosticCollection->recordRouteFrame(frameNumber, mViewer->getFrameStamp()->getFrameNumber());
         timeManager.updateIsPaused();
         if (!timeManager.isPaused())
         {

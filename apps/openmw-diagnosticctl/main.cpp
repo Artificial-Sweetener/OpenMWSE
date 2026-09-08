@@ -1132,8 +1132,8 @@ namespace
                 const Diagnostics::Response capabilities
                     = Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::InspectSession, {} });
                 requireSuccessfulResponse(capabilities);
-                if (payloadText(capabilities.mPayload).find("graphics@2") == std::string::npos)
-                    throw std::runtime_error("native route capture requires graphics@2");
+                if (payloadText(capabilities.mPayload).find("graphics@3") == std::string::npos)
+                    throw std::runtime_error("native route capture requires graphics@3");
             }
             std::size_t completedFrames = 0;
             unsigned segmentIndex = 0;

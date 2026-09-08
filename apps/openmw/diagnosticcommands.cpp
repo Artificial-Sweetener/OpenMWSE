@@ -96,7 +96,7 @@ Diagnostics::Capsule OMW::Engine::createDiagnosticCapsule(unsigned frameNumber)
     manifest << "capsule-version: " << Diagnostics::capsuleVersion << '\n'
              << "build: " << quoteDiagnosticYaml(Version::getOpenmwVersionDescription()) << '\n'
              << "frame: " << frameNumber << '\n'
-             << "providers: [core@2, graphics@2, gameplay@8, performance@14]\n"
+             << "providers: [core@2, graphics@3, gameplay@8, performance@15]\n"
              << "content:\n";
     for (const std::string& content : mContentFiles)
     {
@@ -168,13 +168,23 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
             mDiagnosticShadowOverrideRequest.reset();
         }
         std::ostringstream output;
-        output << "request-frame: " << completed->mFirstFrame << '\n'
-               << "readback-rendered-frames: " << frameNumber - completed->mLastFrame << '\n'
-               << "fixed-step: " << (mDiagnosticChild ? "true" : "false") << '\n'
-               << "fixed-step-duration: " << mDiagnosticStepScheduler.frameDuration() << '\n';
-        reportDiagnosticPerformance(completed->mFirstFrame, completed->mLastFrame, *mViewer, output);
-        mDiagnosticSession->respond(
-            { completed->mRequestId, Diagnostics::ErrorCode::None, diagnosticBytes(output.str()) });
+        if (completed->mHistoryExpired)
+        {
+            mDiagnosticSession->respond({ completed->mRequestId, Diagnostics::ErrorCode::InvalidFrame,
+                diagnosticBytes("route rendering exceeded retained statistics; replay with fewer performance samples "
+                                "per segment") });
+        }
+        else
+        {
+            output << "request-frame: " << completed->mFirstFrame << '\n'
+                   << "readback-rendered-frames: " << frameNumber - completed->mLastFrame << '\n'
+                   << "fixed-step: " << (mDiagnosticChild ? "true" : "false") << '\n'
+                   << "fixed-step-duration: " << mDiagnosticStepScheduler.frameDuration() << '\n';
+            reportDiagnosticRouteFrames(completed->mRouteFrames, output);
+            reportDiagnosticPerformance(completed->mFirstFrame, completed->mLastFrame, *mViewer, output);
+            mDiagnosticSession->respond(
+                { completed->mRequestId, Diagnostics::ErrorCode::None, diagnosticBytes(output.str()) });
+        }
     }
 
     for (const Diagnostics::Command& command : mDiagnosticSession->drain())
@@ -257,7 +267,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << '\n'
                            << "performance-capture: " << (mDiagnosticCollection->active() ? "collecting" : "idle")
                            << '\n'
-                           << "providers: [core@2, graphics@2, gameplay@8, performance@14]\n";
+                           << "providers: [core@2, graphics@3, gameplay@8, performance@15]\n";
                     response.mPayload = diagnosticBytes(output.str());
                     break;
 
@@ -329,7 +339,8 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                         count |= static_cast<std::uint32_t>(std::to_integer<unsigned char>(command.mPayload[byte]))
                             << (byte * 8);
                     if (count == 0 || count > 600 || count > mDiagnosticGameplayRoute->remainingReplayFrames()
-                        || !mDiagnosticCollection->start(command.mRequestId, count, frameNumber + 1))
+                        || !mDiagnosticCollection->start(
+                            command.mRequestId, count, frameNumber + 1, DiagnosticSampleBasis::GameplayRouteFrames))
                     {
                         response.mError = Diagnostics::ErrorCode::InvalidState;
                         break;
@@ -339,7 +350,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                         const std::filesystem::path outputPath = mDiagnosticArtifactRoot
                             / ("route-frames-" + std::to_string(command.mRequestId) + ".omwdiag");
                         mWorld->getPostProcessor()->requestRenderFrameDiagnosticCapture(
-                            outputPath, count, nativeResolution);
+                            outputPath, count, nativeResolution, frameNumber + 1);
                     }
                     if (bypassShadows)
                     {
@@ -482,7 +493,8 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                         response.mError = Diagnostics::ErrorCode::InvalidFrame;
                         break;
                     }
-                    if (!mDiagnosticCollection->start(command.mRequestId, sampleCount, frameNumber))
+                    if (!mDiagnosticCollection->start(
+                            command.mRequestId, sampleCount, frameNumber, DiagnosticSampleBasis::RenderedFrames))
                     {
                         response.mError = Diagnostics::ErrorCode::InvalidState;
                         break;

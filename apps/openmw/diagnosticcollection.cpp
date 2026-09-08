@@ -42,7 +42,8 @@ namespace OMW
         endCollection();
     }
 
-    bool DiagnosticCollection::start(std::uint64_t requestId, std::uint32_t sampleCount, unsigned currentFrame)
+    bool DiagnosticCollection::start(
+        std::uint64_t requestId, std::uint32_t sampleCount, unsigned currentFrame, DiagnosticSampleBasis sampleBasis)
     {
         if (mPending.has_value())
             return false;
@@ -61,20 +62,56 @@ namespace OMW
             .mRequestId = requestId,
             .mFirstFrame = currentFrame,
             .mLastFrame = static_cast<unsigned>(lastFrame),
+            .mRouteFrames = {},
+            .mHistoryExpired = false,
         };
         mCompletionFrame = static_cast<unsigned>(completionFrame);
         mRetirementLimitFrame = static_cast<unsigned>(retirementLimit);
+        mRequestedRouteFrames = sampleBasis == DiagnosticSampleBasis::GameplayRouteFrames ? sampleCount : 0;
+        mPending->mRouteFrames.reserve(mRequestedRouteFrames);
         return true;
+    }
+
+    void DiagnosticCollection::recordRouteFrame(unsigned firstRenderFrame, unsigned sceneRenderFrame)
+    {
+        if (!mPending || mRequestedRouteFrames == 0 || mPending->mHistoryExpired)
+            return;
+        if (mPending->mRouteFrames.size() >= mRequestedRouteFrames)
+            throw std::logic_error("diagnostic route collection received too many route frames");
+        const unsigned expectedFirstFrame = mPending->mRouteFrames.empty()
+            ? mPending->mFirstFrame
+            : mPending->mRouteFrames.back().mSceneRenderFrame + 1;
+        if (firstRenderFrame != expectedFirstFrame || sceneRenderFrame < firstRenderFrame)
+            throw std::logic_error("diagnostic route collection received a discontinuous renderer interval");
+
+        mPending->mRouteFrames.push_back({ firstRenderFrame, sceneRenderFrame });
+        mPending->mLastFrame = sceneRenderFrame;
+        const std::uint64_t completionFrame = static_cast<std::uint64_t>(sceneRenderFrame) + renderStatisticsLatency;
+        if (completionFrame > mRetirementLimitFrame)
+            mPending->mHistoryExpired = true;
+        else
+            mCompletionFrame = static_cast<unsigned>(completionFrame);
     }
 
     std::optional<CompletedDiagnosticCollection> DiagnosticCollection::update(unsigned currentFrame)
     {
-        if (!mPending.has_value() || currentFrame < mCompletionFrame)
+        if (!mPending.has_value())
             return std::nullopt;
-        if (currentFrame < mRetirementLimitFrame
+        if (mRequestedRouteFrames != 0 && currentFrame > mRetirementLimitFrame)
+            mPending->mHistoryExpired = true;
+        if (mRequestedRouteFrames != 0 && mPending->mRouteFrames.size() < mRequestedRouteFrames)
+        {
+            if (currentFrame >= mRetirementLimitFrame)
+                mPending->mHistoryExpired = true;
+            if (!mPending->mHistoryExpired)
+                return std::nullopt;
+        }
+        if (!mPending->mHistoryExpired && currentFrame < mCompletionFrame)
+            return std::nullopt;
+        if (!mPending->mHistoryExpired && currentFrame < mRetirementLimitFrame
             && SceneUtil::diagnosticGpuQueriesPending(mPending->mFirstFrame, mPending->mLastFrame))
             return std::nullopt;
-        CompletedDiagnosticCollection completed = *mPending;
+        CompletedDiagnosticCollection completed = std::move(*mPending);
         mPending.reset();
         endCollection();
         return completed;

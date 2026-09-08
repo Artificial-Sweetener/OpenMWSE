@@ -1,3 +1,4 @@
+#include <apps/openmw/diagnosticcollection.hpp>
 #include <apps/openmw/diagnosticperformance.hpp>
 #include <apps/openmw/diagnosticrenderingtiming.hpp>
 
@@ -20,6 +21,22 @@
 #include <limits>
 #include <sstream>
 #include <string>
+
+/// Preserve explicit route-to-renderer identities without excluding nested loading draws from their intervals.
+TEST(DiagnosticPerformanceTest, ReportsRouteFramesWithNestedRendererIntervals)
+{
+    const std::array<OMW::DiagnosticRouteFrame, 3> frames{ { { 100, 100 }, { 101, 105 }, { 106, 106 } } };
+    std::ostringstream output;
+    OMW::reportDiagnosticRouteFrames(frames, output);
+    EXPECT_EQ(output.str(),
+        "route-sampled-frames: 3\nroute-frame-map:\n"
+        "  - route-ordinal: 0\n    first-render-frame: 100\n    scene-render-frame: 100\n"
+        "  - route-ordinal: 1\n    first-render-frame: 101\n    scene-render-frame: 105\n"
+        "  - route-ordinal: 2\n    first-render-frame: 106\n    scene-render-frame: 106\n");
+    std::ostringstream ordinary;
+    OMW::reportDiagnosticRouteFrames({}, ordinary);
+    EXPECT_TRUE(ordinary.str().empty());
+}
 
 TEST(DiagnosticPerformanceTest, CalculatesStableTailQuantiles)
 {
@@ -202,7 +219,7 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     OMW::reportDiagnosticPerformance(frame, frame, viewer, output);
     const std::string report = output.str();
 
-    EXPECT_NE(report.find("provider: performance@14"), std::string::npos);
+    EXPECT_NE(report.find("provider: performance@15"), std::string::npos);
     EXPECT_NE(report.find("threading-model: automatic-selection"), std::string::npos);
     EXPECT_NE(report.find("presentation:\n  swap-buffers:\n    available: true\n    count: 1"), std::string::npos)
         << report;

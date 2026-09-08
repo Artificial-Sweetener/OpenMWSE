@@ -17,8 +17,8 @@
 
 namespace MWRender
 {
-    void RenderFrameDiagnostics::requestCapture(
-        std::filesystem::path outputPath, std::uint32_t frameCount, bool nativeResolution)
+    void RenderFrameDiagnostics::requestCapture(std::filesystem::path outputPath, std::uint32_t frameCount,
+        bool nativeResolution, std::uint64_t firstFrameNumber)
     {
         if (frameCount == 0 || frameCount > 600)
             throw std::invalid_argument("render frame diagnostic count must be within [1, 600]");
@@ -31,6 +31,7 @@ namespace MWRender
         mNativeResolution = nativeResolution;
         mRequestedFrameCount = frameCount;
         mCapturedFrameCount = 0;
+        mFirstFrameNumber = firstFrameNumber;
         mLastFrameNumber.reset();
     }
 
@@ -53,7 +54,8 @@ namespace MWRender
         std::size_t frameOrdinal = 0;
         {
             std::lock_guard lock(mMutex);
-            if (!mOutputPath || mCapturedFrameCount >= mRequestedFrameCount || mLastFrameNumber == frameNumber)
+            if (!mOutputPath || frameNumber < mFirstFrameNumber || mCapturedFrameCount >= mRequestedFrameCount
+                || mLastFrameNumber == frameNumber)
                 return;
             mLastFrameNumber = frameNumber;
             frameOrdinal = mCapturedFrameCount;

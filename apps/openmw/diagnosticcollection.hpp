@@ -20,12 +20,29 @@ namespace osgViewer
 
 namespace OMW
 {
+    /// Select whether a bounded collection counts renderer frames or consumed gameplay-route states.
+    enum class DiagnosticSampleBasis
+    {
+        RenderedFrames,
+        GameplayRouteFrames,
+    };
+
+    /// Associate one consumed route state with its world update and final scene render, including nested loading
+    /// renders.
+    struct DiagnosticRouteFrame
+    {
+        unsigned mFirstRenderFrame = 0;
+        unsigned mSceneRenderFrame = 0;
+    };
+
     /// Identifies one completed bounded performance collection.
     struct CompletedDiagnosticCollection
     {
         std::uint64_t mRequestId = 0;
         unsigned mFirstFrame = 0;
         unsigned mLastFrame = 0;
+        std::vector<DiagnosticRouteFrame> mRouteFrames;
+        bool mHistoryExpired = false;
     };
 
     /// Owns request-scoped statistics collection while leaving the diagnostic transport passive when idle.
@@ -41,8 +58,12 @@ namespace OMW
         DiagnosticCollection(const DiagnosticCollection&) = delete;
         DiagnosticCollection& operator=(const DiagnosticCollection&) = delete;
 
-        /// Begin a future bounded sample interval when no collection is active.
-        bool start(std::uint64_t requestId, std::uint32_t sampleCount, unsigned currentFrame);
+        /// Begin a bounded collection whose sample basis determines when its final renderer frame is known.
+        bool start(std::uint64_t requestId, std::uint32_t sampleCount, unsigned currentFrame,
+            DiagnosticSampleBasis sampleBasis);
+
+        /// Retain every renderer frame used by a consumed route state without counting loading draws as route progress.
+        void recordRouteFrame(unsigned firstRenderFrame, unsigned sceneRenderFrame);
 
         /// Report after sampled queries retire or before bounded history expires, without blocking rendering.
         std::optional<CompletedDiagnosticCollection> update(unsigned currentFrame);
@@ -71,6 +92,7 @@ namespace OMW
         std::optional<CompletedDiagnosticCollection> mPending;
         unsigned mCompletionFrame = 0;
         unsigned mRetirementLimitFrame = 0;
+        std::uint32_t mRequestedRouteFrames = 0;
     };
 }
 
