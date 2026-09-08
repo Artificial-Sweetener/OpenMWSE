@@ -1479,6 +1479,181 @@ void main()
         return result;
     }
 
+    /// Compare sky-vertex illumination against the original fragment integral under perspective interpolation.
+    PassImage renderReflectionLightingProbe(const NativePassInputs& inputs, bool gpuShader4)
+    {
+        Shader::ShaderManager manager;
+        manager.setShaderPath(std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/shaders");
+        auto defines = getAtmosphereTestDefines();
+        defines["useGPUShader4"] = gpuShader4 ? "1" : "0";
+        manager.setGlobalDefines(defines);
+        const osg::ref_ptr<osg::Program> program = manager.getProgram("compatibility/sky", defines);
+        if (!program)
+            throw std::runtime_error("Reflection lighting probe has no production sky program");
+        bool replaced = false;
+        for (unsigned index = 0; index < program->getNumShaders(); ++index)
+        {
+            osg::Shader* shader = program->getShader(index);
+            if (shader->getType() != osg::Shader::FRAGMENT)
+                continue;
+            std::string source = shader->getShaderSource();
+            if (source.find("void paintAtmosphere(") == std::string::npos)
+                continue;
+            const auto begin = source.find("void main()");
+            if (begin == std::string::npos)
+                throw std::runtime_error("Reflection lighting probe cannot locate the sky fragment entry point");
+            const auto body = source.find('{', begin);
+            std::size_t end = body + 1;
+            int depth = 1;
+            for (; end < source.size() && depth != 0; ++end)
+                depth += source[end] == '{' ? 1 : source[end] == '}' ? -1 : 0;
+            if (depth != 0)
+                throw std::runtime_error("Reflection lighting probe found an incomplete fragment entry point");
+            source.replace(begin, end - begin, R"glsl(
+void main()
+{
+    OpenMWSEVolumeIllumination reference = openmwseLocalVolumeIllumination(
+        atmosphere.solarRadiance, atmosphere.groundIrradiance,
+        waterHeight + atmosphere.lowCloudParameters.z + atmosphere.lowCloudParameters.w * 0.5,
+        openmwseAerialPerspectiveParameters());
+    vec3 solarError = abs(reference.solarIrradiance - skyLowCloudSolarIrradiance);
+    vec3 diffuseError = abs(reference.diffuseRadiance - skyLowCloudDiffuseRadiance);
+    gl_FragColor = vec4(max(max(solarError.x, solarError.y), solarError.z),
+        max(max(diffuseError.x, diffuseError.y), diffuseError.z),
+        dot(reference.diffuseRadiance, vec3(1.0 / 3.0)), 1.0);
+}
+)glsl");
+            shader->setShaderSource(source);
+            replaced = true;
+        }
+        if (!replaced)
+            throw std::runtime_error("Reflection lighting probe did not replace the production sky fragment output");
+
+        constexpr int width = 16;
+        constexpr int height = 8;
+        osg::ref_ptr<osg::GraphicsContext::Traits> traits = new osg::GraphicsContext::Traits;
+        traits->width = width;
+        traits->height = height;
+        traits->pbuffer = true;
+        traits->doubleBuffer = false;
+        traits->glContextVersion = "2.1";
+        osg::ref_ptr<osg::GraphicsContext> context = osg::GraphicsContext::createGraphicsContext(traits);
+        if (!context || !context->realize())
+            throw std::runtime_error("Reflection lighting probe cannot create its graphics context");
+        osgViewer::Viewer viewer;
+        viewer.setThreadingModel(osgViewer::Viewer::SingleThreaded);
+        osg::Camera* camera = viewer.getCamera();
+        camera->setGraphicsContext(context);
+        camera->setViewport(new osg::Viewport(0, 0, width, height));
+        camera->setProjectionMatrix(osg::Matrix::identity());
+        camera->setViewMatrix(osg::Matrix::identity());
+        camera->setClearMask(GL_COLOR_BUFFER_BIT);
+        camera->setClearColor(osg::Vec4f(-1.f, -1.f, -1.f, 0.f));
+        camera->setComputeNearFarMode(osg::CullSettings::DO_NOT_COMPUTE_NEAR_FAR);
+        camera->setCullingMode(0);
+        camera->setRenderTargetImplementation(osg::Camera::FRAME_BUFFER_OBJECT);
+        osg::ref_ptr<osg::Image> capture = new osg::Image;
+        capture->allocateImage(width, height, 1, GL_RGBA, GL_FLOAT);
+        capture->setInternalTextureFormat(GL_RGBA32F);
+        camera->attach(osg::Camera::COLOR_BUFFER, capture);
+        osg::ref_ptr<osg::Vec3Array> vertices = new osg::Vec3Array;
+        for (const osg::Vec3f vertex :
+            { osg::Vec3f(-1.f, -1.f, -1.f), osg::Vec3f(6.f, -2.f, -2.f), osg::Vec3f(-4.f, 12.f, -4.f) })
+            vertices->push_back(vertex);
+        osg::ref_ptr<osg::Geometry> geometry = new osg::Geometry;
+        geometry->setVertexArray(vertices);
+        geometry->addPrimitiveSet(new osg::DrawArrays(osg::PrimitiveSet::TRIANGLES, 0, 3));
+        osg::ref_ptr<osg::Geode> geode = new osg::Geode;
+        geode->addDrawable(geometry);
+        osg::StateSet* state = geode->getOrCreateStateSet();
+        state->setAttributeAndModes(program, osg::StateAttribute::ON);
+        state->setMode(GL_DEPTH_TEST, osg::StateAttribute::OFF);
+        state->setMode(GL_BLEND, osg::StateAttribute::OFF);
+        state->addUniform(new osg::Uniform("projectionMatrix", osg::Matrixf::frustum(-1.f, 1.f, -1.f, 1.f, 1.f, 8.f)));
+        state->addUniform(new osg::Uniform("pass", 0));
+        state->addUniform(new osg::Uniform("isReflection", true));
+        state->addUniform(new osg::Uniform("waterHeight", 321.f));
+        state->addUniform(new osg::Uniform("osg_ViewMatrixInverse", osg::Matrixf::translate(inputs.eyePosition)));
+        state->addUniform(new osg::Uniform("fog.color", inputs.fogColor));
+        state->addUniform(new osg::Uniform("fog.start", inputs.fogNear));
+        state->addUniform(new osg::Uniform("fog.end", inputs.fogFar));
+        state->addUniform(new osg::Uniform("atmosphere.enabled", true));
+        state->addUniform(new osg::Uniform("atmosphere.skyColor", inputs.skyColor));
+        state->addUniform(new osg::Uniform("atmosphere.inScattering", inputs.inScattering));
+        state->addUniform(new osg::Uniform("atmosphere.outScattering", inputs.outScattering));
+        state->addUniform(new osg::Uniform("atmosphere.weatherWeight", inputs.weatherWeight));
+        state->addUniform(new osg::Uniform("atmosphere.sunDirection",
+            osg::Vec3f(inputs.sunDirection.x(), inputs.sunDirection.y(), inputs.sunDirection.z())));
+        state->addUniform(new osg::Uniform("atmosphere.solarRadiance", inputs.solarRadiance));
+        state->addUniform(new osg::Uniform("atmosphere.skyIrradiance", inputs.skyIrradiance));
+        state->addUniform(new osg::Uniform("atmosphere.groundIrradiance", inputs.groundIrradiance));
+        state->addUniform(new osg::Uniform("atmosphere.cloudParameters", inputs.cloudParameters));
+        state->addUniform(new osg::Uniform("atmosphere.incomingCloudParameters", inputs.incomingCloudParameters));
+        state->addUniform(new osg::Uniform("atmosphere.cloudScenarioParameters", inputs.cloudScenarioParameters));
+        state->addUniform(new osg::Uniform("atmosphere.lowCloudParameters", inputs.lowCloudParameters));
+        state->addUniform(
+            new osg::Uniform("atmosphere.cloudAdvectionOffsetWorldUnits", inputs.cloudAdvectionOffsetWorldUnits));
+        const auto layers
+            = SceneUtil::packCloudLayers(inputs.cloudModel, inputs.incomingCloudModel, inputs.environmentalCloudModel);
+        osg::ref_ptr<osg::Uniform> models
+            = new osg::Uniform(osg::Uniform::FLOAT_VEC4, "atmosphere.cloudLayers", static_cast<int>(layers.size()));
+        for (unsigned index = 0; index < layers.size(); ++index)
+            models->setElement(index, layers[index]);
+        state->addUniform(models);
+        viewer.setSceneData(geode);
+        viewer.realize();
+        context->makeCurrent();
+        program->compileGLObjects(*context->getState());
+        const auto* compiled = program->getPCP(*context->getState());
+        if (!compiled->isLinked())
+        {
+            std::string infoLog;
+            compiled->getInfoLog(infoLog);
+            throw std::runtime_error("Reflection lighting probe failed to link: " + infoLog);
+        }
+        viewer.frame();
+        context->makeCurrent();
+        glFinish();
+        PassImage result{ width, height, {} };
+        for (int y = 0; y < height; ++y)
+            for (int x = 0; x < width; ++x)
+            {
+                const float* pixel = reinterpret_cast<const float*>(capture->data(x, y));
+                result.pixels.emplace_back(pixel[0], pixel[1], pixel[2], pixel[3]);
+            }
+        context->close();
+        return result;
+    }
+
+    /// Preserve reflected local lighting across sun elevations, layer altitudes, and legacy varying interpolation.
+    TEST(AtmosphereShaderTest, reflectedVertexLightingMatchesOriginalFragmentIntegral)
+    {
+        for (const std::string_view weather : { "Cloudy", "Foggy" })
+            for (const bool gpuShader4 : { false, true })
+                for (const float sunHeight : { -0.12f, 0.03f, 0.65f })
+                    for (const float altitude : { 500.f, 10000.f, 25000.f })
+                    {
+                        SCOPED_TRACE(::testing::Message() << "weather=" << weather << " gpuShader4=" << gpuShader4
+                                                          << " sun=" << sunHeight << " altitude=" << altitude);
+                        NativePassInputs inputs = makePackagedAtmosphereInputs(weather, "Sunset");
+                        inputs.sunDirection = { 1.f, 0.2f, sunHeight, 0.f };
+                        inputs.lowCloudParameters = { 0.4f, 0.9f, altitude, 10000.f };
+                        inputs.cloudParameters = { 0.9f, 0.1f, 5000.f, 5000.f };
+                        inputs.eyePosition = { -17500.f, 23000.f, altitude + 2000.f };
+                        const auto result = renderReflectionLightingProbe(inputs, gpuShader4);
+                        ASSERT_EQ(result.pixels.size(), 128u);
+                        for (const auto& pixel : result.pixels)
+                        {
+                            for (int channel = 0; channel < 4; ++channel)
+                                ASSERT_TRUE(std::isfinite(pixel[channel]));
+                            EXPECT_FLOAT_EQ(pixel.a(), 1.f);
+                            EXPECT_GT(pixel.b(), 0.01f);
+                            EXPECT_NEAR(pixel.r(), 0.f, 1e-6f);
+                            EXPECT_NEAR(pixel.g(), 0.f, 1e-6f);
+                        }
+                    }
+    }
+
     /// Interpolate reference colors without depending on production shader code.
     Rgb mix(const Rgb& from, const Rgb& to, float factor)
     {
@@ -1598,7 +1773,7 @@ void main()
         EXPECT_NE(sky->getShaderSource().find("atmosphereSkyColor"), std::string::npos);
         EXPECT_NE(sky->getShaderSource().find("atmosphereCloudScattering"), std::string::npos);
         EXPECT_NE(
-            sky->getShaderSource().find("atmosphereCloudScattering(worldDirection, skyRadiance)"), std::string::npos);
+            sky->getShaderSource().find("atmosphereCloudScattering(worldDirection, skyRadiance,"), std::string::npos);
         EXPECT_NE(sky->getShaderSource().find("openmwseApplyAerialPerspectiveTowardTarget"), std::string::npos);
         EXPECT_NE(sky->getShaderSource().find("openmwseIntegrateCloudsStable"), std::string::npos);
         EXPECT_NE(sky->getShaderSource().find("openmwseApplyAerialPerspective"), std::string::npos);

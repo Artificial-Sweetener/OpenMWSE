@@ -1,4 +1,4 @@
-#include "lib/light/struct.glsl"
+#include "fog.h.glsl"
 #include "lib/atmosphere/diagnostics.glsl"
 
 #if @skyBlending
@@ -7,24 +7,7 @@
 uniform float skyBlendingStart;
 #endif
 
-struct Fog {
-    vec4 color;
-    vec4 underwaterColor;
-    float start;
-    float underwaterStart;
-    float end;
-    float underwaterEnd;
-    float depth;
-};
-
-uniform Fog fog;
-uniform float waterHeight;
-uniform bool waterEnabled;
-uniform bool waterSurface;
-uniform bool isReflection;
-uniform mat4 osg_ViewMatrixInverse;
-uniform DirectionalLight sun;
-
+@link "lib/atmosphere/cloud_model_fragment.glsl"
 #include "atmosphere.glsl"
 
 const vec3 WATER_COLOR = vec3(0.090195, 0.115685, 0.12745);

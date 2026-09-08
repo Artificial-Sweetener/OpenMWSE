@@ -1,5 +1,7 @@
 #version 120
 
+#include "lib/sky/cloud_lighting.h.glsl"
+
 #include "lib/sky/passes.glsl"
 
 uniform int pass;
@@ -18,6 +20,7 @@ varying vec2 diffuseMapUV;
 varying vec4 passColor;
 varying vec3 passViewDirection;
 
+/// Composite the directional sky with reflected clouds using scene-uniform local illumination.
 void paintAtmosphere(inout vec4 color)
 {
     color = diffuseColor;
@@ -25,7 +28,8 @@ void paintAtmosphere(inout vec4 color)
     vec3 worldDirection = atmosphereWorldDirection(viewDirection);
     vec3 skyRadiance = atmosphereSkyColor(viewDirection);
     vec4 clouds
-        = isReflection ? atmosphereCloudScattering(worldDirection, skyRadiance) : vec4(0.0, 0.0, 0.0, 1.0);
+        = isReflection ? atmosphereCloudScattering(worldDirection, skyRadiance,
+            OpenMWSEVolumeIllumination(skyLowCloudSolarIrradiance, skyLowCloudDiffuseRadiance)) : vec4(0.0, 0.0, 0.0, 1.0);
     color.xyz = skyRadiance * clouds.a + clouds.rgb;
     color.xyz += atmosphereSunDisc(worldDirection) * clouds.a;
     color.xyz += openmwseTriangularDither(gl_FragCoord.xy) * (0.5 / 255.0);

@@ -1016,9 +1016,9 @@ vec4 openmwseIntegrateClouds(vec3 rayOrigin, vec3 worldDirection, float maximumD
         quadratureSampling, false, localMedia, visibleDistanceSum, visibleCloudOpacity);
 }
 
-/// Integrate deterministic reflected clouds without frame-dependent sampling noise.
+/// Integrate deterministic reflected clouds with fixed-altitude illumination supplied by the sky vertices.
 vec4 openmwseIntegrateCloudsStable(vec3 rayOrigin, vec3 worldDirection, float maximumDistance, int quality,
-    vec3 solarRadiance, vec3 skyIrradiance, vec3 groundIrradiance, vec3 atmosphericTarget,
+    vec3 solarRadiance, vec3 skyIrradiance, vec3 groundIrradiance, OpenMWSEVolumeIllumination lowIllumination, vec3 atmosphericTarget,
     OpenMWSEAerialPerspectiveParameters atmosphere)
 {
     float visibleDistanceSum;
@@ -1027,9 +1027,6 @@ vec4 openmwseIntegrateCloudsStable(vec3 rayOrigin, vec3 worldDirection, float ma
     localMedia.count = 0;
     localMedia.startDistance = 0.0;
     localMedia.stepLength = 1.0;
-    vec4 lowParameters = openmwseLowCloudParameters();
-    OpenMWSEVolumeIllumination lowIllumination = openmwseLocalVolumeIllumination(solarRadiance,
-        groundIrradiance, openmwseCloudWaterHeight() + lowParameters.z + lowParameters.w * 0.5, atmosphere);
     return openmwseIntegrateCloudsInternal(rayOrigin, worldDirection, maximumDistance, quality, solarRadiance,
         skyIrradiance, groundIrradiance, lowIllumination, atmosphericTarget, atmosphere, 0.5, true, true, localMedia, visibleDistanceSum, visibleCloudOpacity);
 }

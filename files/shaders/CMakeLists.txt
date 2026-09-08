@@ -53,6 +53,7 @@ set(SHADER_FILES
     lib/light/util.glsl
     lib/light/struct.glsl
     lib/sky/passes.glsl
+    lib/sky/cloud_lighting.h.glsl
     lib/material/parallax.glsl
     lib/material/alpha.glsl
     lib/material/struct.glsl
@@ -61,6 +62,7 @@ set(SHADER_FILES
     compatibility/ripples_blobber.frag
     compatibility/ripples_simulate.frag
     compatibility/fog.glsl
+    compatibility/fog.h.glsl
     compatibility/atmosphere.glsl
     compatibility/groundcover.vert
     compatibility/groundcover.frag

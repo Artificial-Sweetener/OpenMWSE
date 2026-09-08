@@ -115,7 +115,6 @@ vec4 openmwseCloudModelParameter(int layer, int field)
     return atmosphere.cloudLayers[layer * 14 + field];
 }
 
-@link "lib/atmosphere/cloud_model_fragment.glsl"
 #include "lib/atmosphere/clouds.glsl"
 
 /// Transform a view-space ray into the reflected or main-view world-space convention.
@@ -175,14 +174,14 @@ vec3 atmosphereSkyColor(vec3 viewDirection)
     return openmwseAtmosphereSkyRadiance(worldDirection, openmwseAerialPerspectiveParameters());
 }
 
-/// Integrate deterministic cloud radiance for sky and water-reflection rendering.
-vec4 atmosphereCloudScattering(vec3 worldDirection, vec3 atmosphericTarget)
+/// Integrate reflected cloud radiance with the low-cloud lighting supplied by the sky vertices.
+vec4 atmosphereCloudScattering(vec3 worldDirection, vec3 atmosphericTarget, OpenMWSEVolumeIllumination lowLighting)
 {
     if (atmosphere.enabled == false)
         return vec4(0.0, 0.0, 0.0, 1.0);
     return openmwseIntegrateCloudsStable(atmosphereEyePosition(), worldDirection, openmwseCloudMaximumRayDistance,
         atmosphere.quality, atmosphere.solarRadiance, atmosphere.skyIrradiance, atmosphere.groundIrradiance,
-        atmosphericTarget, openmwseAerialPerspectiveParameters());
+        lowLighting, atmosphericTarget, openmwseAerialPerspectiveParameters());
 }
 
 /// Draw the refracted scene-linear sun disc while leaving broad glow to atmospheric scattering.
