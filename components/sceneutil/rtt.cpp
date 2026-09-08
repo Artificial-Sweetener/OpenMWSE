@@ -1,4 +1,5 @@
 #include "rtt.hpp"
+#include "diagnosticgputiming.hpp"
 #include "util.hpp"
 
 #include <osg/Texture2D>
@@ -170,6 +171,7 @@ namespace SceneUtil
         return getViewDependentData(cv)->mCamera;
     }
 
+    /// Create each view's target once and register its camera independently of scene-graph traversal.
     RTTNode::ViewDependentData* RTTNode::getViewDependentData(osgUtil::CullVisitor* cv)
     {
         if (!shouldDoPerViewMapping())
@@ -194,6 +196,7 @@ namespace SceneUtil
                 "screenRes", osg::Vec2f(static_cast<float>(mTextureWidth), static_cast<float>(mTextureHeight))));
 
             setDefaults(camera);
+            enableDiagnosticGpuPassStatistics(*camera);
 
             if (camera->getBufferAttachmentMap().count(osg::Camera::COLOR_BUFFER))
                 vdd->mColorTexture = camera->getBufferAttachmentMap()[osg::Camera::COLOR_BUFFER]._texture;

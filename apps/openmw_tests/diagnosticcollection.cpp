@@ -2,16 +2,120 @@
 
 #include <gtest/gtest.h>
 
+#include <osg/FrameStamp>
 #include <osg/Group>
+#include <osg/RenderInfo>
+#include <osg/State>
 #include <osg/Stats>
+#include <osgUtil/RenderBin>
 #include <osgViewer/Viewer>
 
 #include <components/sceneutil/diagnosticgputiming.hpp>
+#include <components/sceneutil/rtt.hpp>
 #include <components/sdlutil/diagnosticpresentationtiming.hpp>
 
+#include <algorithm>
 #include <limits>
 #include <optional>
 #include <stdexcept>
+
+namespace
+{
+    /// Create a reflection-style camera lazily outside the traversable scene graph.
+    class DiagnosticReflectionTarget final : public SceneUtil::RTTNode
+    {
+    public:
+        /// Use a single small target without requiring a rendering context.
+        DiagnosticReflectionTarget()
+            : RTTNode(16, 16, 0, false, 0, StereoAwareness::Unaware, false)
+        {
+        }
+
+        /// Identify the lazily created camera as a water-reflection pass.
+        void setDefaults(osg::Camera* camera) override
+        {
+            camera->setName(std::string(SceneUtil::reflectionCameraName));
+        }
+    };
+
+    /// Count delegated draws without requiring a graphics context for CPU instrumentation coverage.
+    struct CountDiagnosticDraw final : osgUtil::RenderBin::DrawCallback
+    {
+        unsigned mDraws = 0;
+
+        /// Record each draw forwarded by the diagnostic wrapper.
+        void drawImplementation(osgUtil::RenderBin*, osg::RenderInfo&, osgUtil::RenderLeaf*&) override { ++mDraws; }
+    };
+}
+
+/// Include cameras created during culling in the current and subsequent bounded measurement windows.
+TEST(DiagnosticCollectionTest, CollectsLazyRenderTargetsAndStopsAtTheBoundary)
+{
+    osgViewer::Viewer viewer;
+    viewer.setViewerStats(new osg::Stats("viewer"));
+    osg::ref_ptr<DiagnosticReflectionTarget> target = new DiagnosticReflectionTarget;
+    viewer.setSceneData(target);
+    OMW::DiagnosticCollection collection(viewer);
+    ASSERT_TRUE(collection.start(22, 1, 100));
+    osg::Camera* camera = target->getCamera(nullptr);
+    ASSERT_NE(camera, nullptr);
+    EXPECT_TRUE(SceneUtil::diagnosticGpuPassStatisticsCollectionEnabled(*camera));
+    const auto cameras = SceneUtil::diagnosticGpuPassCameras();
+    EXPECT_EQ(std::count_if(cameras.begin(), cameras.end(),
+                  [camera](const auto& registered) { return registered.get() == camera; }),
+        1);
+    EXPECT_EQ(target->getCamera(nullptr), camera);
+    ASSERT_NE(camera->getInitialDrawCallback(), nullptr);
+    ASSERT_NE(camera->getFinalDrawCallback(), nullptr);
+    ASSERT_TRUE(collection.update(110).has_value());
+    EXPECT_FALSE(SceneUtil::diagnosticGpuPassStatisticsCollectionEnabled(*camera));
+    ASSERT_TRUE(collection.start(23, 1, 120));
+    EXPECT_TRUE(SceneUtil::diagnosticGpuPassStatisticsCollectionEnabled(*camera));
+    ASSERT_TRUE(collection.update(130).has_value());
+    EXPECT_FALSE(SceneUtil::diagnosticGpuPassStatisticsCollectionEnabled(*camera));
+}
+
+/// Publish cumulative callback overhead independently of delegated work, including without GPU timer support.
+TEST(DiagnosticCollectionTest, SeparatesRenderBinInstrumentationAndStopsCollectingAtTheBoundary)
+{
+    osgViewer::Viewer viewer;
+    viewer.setViewerStats(new osg::Stats("viewer"));
+    osg::ref_ptr<osg::State> state = new osg::State;
+    state->setFrameStamp(new osg::FrameStamp);
+    state->getFrameStamp()->setFrameNumber(100);
+    osg::RenderInfo renderInfo;
+    renderInfo.setState(state);
+    renderInfo.pushCamera(viewer.getCamera());
+    osg::ref_ptr<osgUtil::RenderBin> bin = new osgUtil::RenderBin;
+    osg::ref_ptr<CountDiagnosticDraw> delegate = new CountDiagnosticDraw;
+    bin->setDrawCallback(delegate);
+    const std::string cpuStatistic = "test CPU bin";
+    const std::string overheadStatistic = cpuStatistic + " callback overhead";
+    SceneUtil::enableDiagnosticGpuRenderBinStatistics(*bin, bin->getBinNum(), "test GPU bin", cpuStatistic);
+    osgUtil::RenderLeaf* previous = nullptr;
+    double firstOverhead = 0.0;
+    double cumulativeOverhead = 0.0;
+    double cpuSeconds = 0.0;
+    {
+        OMW::DiagnosticCollection collection(viewer);
+        ASSERT_TRUE(collection.start(1, 1, 100));
+        bin->draw(renderInfo, previous);
+        ASSERT_TRUE(viewer.getCamera()->getStats()->getAttribute(100, overheadStatistic, firstOverhead));
+        EXPECT_GE(firstOverhead, 0.0);
+        bin->draw(renderInfo, previous);
+        EXPECT_EQ(delegate->mDraws, 2u);
+        ASSERT_TRUE(viewer.getCamera()->getStats()->getAttribute(100, overheadStatistic, cumulativeOverhead));
+        EXPECT_GE(cumulativeOverhead, firstOverhead);
+        EXPECT_TRUE(viewer.getCamera()->getStats()->getAttribute(100, cpuStatistic, cpuSeconds));
+        EXPECT_GE(cpuSeconds, 0.0);
+        EXPECT_FALSE(viewer.getCamera()->getStats()->getAttribute(100, "test GPU bin", cpuSeconds));
+    }
+    state->getFrameStamp()->setFrameNumber(101);
+    bin->draw(renderInfo, previous);
+    EXPECT_EQ(delegate->mDraws, 3u);
+    EXPECT_FALSE(viewer.getCamera()->getStats()->getAttribute(101, overheadStatistic, cumulativeOverhead));
+    EXPECT_FALSE(viewer.getCamera()->getStats()->getAttribute(101, cpuStatistic, cpuSeconds));
+}
 
 TEST(DiagnosticCollectionTest, EnablesOnlyOneBoundedFutureIntervalAndRestoresPriorCategories)
 {

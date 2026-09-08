@@ -24,6 +24,7 @@ namespace SceneUtil
     /// previous views, leading to
     ///     the results of the last view being broadcast to all views. An error in all cases where the RTT result
     ///     depends on the view.
+    /// Each camera participates in bounded diagnostic collection from its creation, including during culling.
     /// @par If using an RTTNode this is solved by mapping RTT operations to CullVisitors, which will be unique per
     /// view. This requires
     ///     instancing one camera per view, and traversing only the camera mapped to that CV during cull traversals.

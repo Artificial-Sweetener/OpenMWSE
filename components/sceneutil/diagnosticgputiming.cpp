@@ -318,10 +318,11 @@ namespace SceneUtil
                 , mBinNumber(binNumber)
                 , mGpuStatistic(gpuStatistic)
                 , mCpuStatistic(cpuStatistic)
+                , mCpuOverheadStatistic(std::string(cpuStatistic) + " callback overhead")
             {
             }
 
-            /// Time matching diagnostic draws and preserve the prototype's original behavior.
+            /// Time matching draws and their instrumentation separately while preserving the prototype's behavior.
             void drawImplementation(
                 osgUtil::RenderBin* bin, osg::RenderInfo& renderInfo, osgUtil::RenderLeaf*& previous) override
             {
@@ -339,6 +340,7 @@ namespace SceneUtil
 
                 const unsigned contextId = state->getContextID();
                 const unsigned currentFrame = state->getFrameStamp()->getFrameNumber();
+                const auto callbackStart = std::chrono::steady_clock::now();
                 const bool gpuTimingEnabled = supportsTimestamps(extensions);
                 if (gpuTimingEnabled)
                     retireCompleted(*extensions, contextId, currentFrame);
@@ -362,21 +364,28 @@ namespace SceneUtil
                 double existingCpuSeconds = 0.0;
                 camera->getStats()->getAttribute(interval.mFrame, mCpuStatistic, existingCpuSeconds);
                 camera->getStats()->setAttribute(interval.mFrame, mCpuStatistic, existingCpuSeconds + cpuSeconds);
-                if (!gpuTimingEnabled)
-                    return;
-                extensions->glQueryCounter(interval.mEnd, GL_TIMESTAMP);
-
+                if (gpuTimingEnabled)
                 {
-                    std::lock_guard lock(mMutex);
-                    std::deque<PendingInterval>& pending = mPending[contextId];
-                    pending.push_back(interval);
-                    while (pending.size() > diagnosticGpuTimingRetainedFrames)
+                    extensions->glQueryCounter(interval.mEnd, GL_TIMESTAMP);
                     {
-                        deleteInterval(*extensions, pending.front());
-                        pending.pop_front();
+                        std::lock_guard lock(mMutex);
+                        std::deque<PendingInterval>& pending = mPending[contextId];
+                        pending.push_back(interval);
+                        while (pending.size() > diagnosticGpuTimingRetainedFrames)
+                        {
+                            deleteInterval(*extensions, pending.front());
+                            pending.pop_front();
+                        }
                     }
+                    retireCompleted(*extensions, contextId, currentFrame);
                 }
-                retireCompleted(*extensions, contextId, currentFrame);
+                const double overheadSeconds
+                    = std::chrono::duration<double>(std::chrono::steady_clock::now() - callbackStart).count()
+                    - cpuSeconds;
+                double existingOverhead = 0.0;
+                camera->getStats()->getAttribute(interval.mFrame, mCpuOverheadStatistic, existingOverhead);
+                camera->getStats()->setAttribute(
+                    interval.mFrame, mCpuOverheadStatistic, existingOverhead + overheadSeconds);
             }
 
         private:
@@ -442,6 +451,7 @@ namespace SceneUtil
             int mBinNumber;
             std::string mGpuStatistic;
             std::string mCpuStatistic;
+            std::string mCpuOverheadStatistic;
             std::mutex mMutex;
             std::map<unsigned, std::deque<PendingInterval>> mPending;
         };

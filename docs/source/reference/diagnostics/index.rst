@@ -100,6 +100,9 @@ GPU passes cover the main scene, shadow maps, water reflection, sky render targe
 and ripple simulation. A sample count must not exceed the frame count or 600. Visual capture begins after the timed window so
 synchronous readback does not contaminate its distributions.
 
+Render-to-texture cameras join diagnostic collection when they are created during culling. This includes water reflections,
+whose camera lifetime is managed per view outside the traversable scene graph.
+
 Atmosphere captures can replace save-derived weather and game hour without changing the save or its region probabilities.
 ``--weather <name>`` locks one steady weather. ``--weather-from <name> --weather-to <name>
 --weather-transition <progress>`` locks an exact transition, where progress is within ``[0, 1]`` from the first weather to the
@@ -245,7 +248,9 @@ The versioned providers expose these evidence domains:
   duration so an over-budget map can be distinguished from queue pressure, drawable work, or GPU cost. Presentation detail
   reports time blocked in buffer swap. Main-camera render-bin intervals further
   identify the scene root and its nested early-sky, attachment-resolve, transparency, occlusion-query, first-person, sun-glare,
-  and distortion intervals. Groundcover submission and primitive near/far work are attributed separately to each named camera
+  and distortion intervals. Raw render-bin CPU statistics include a separate ``callback overhead`` duration for timestamp
+  allocation, retirement, and timing publication, excluding delegated rendering and the overhead statistic's own publication.
+  Groundcover submission and primitive near/far work are attributed separately to each named camera
   pass. It also reports a bounded stable counter schema for static rendering, attachment resolves,
   transparent and first-person replay, actors, lights, groundcover,
   deformation, uploads, caches, and optimized-path fallbacks. Counters and pass timings not produced by their owning subsystem
