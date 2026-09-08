@@ -192,17 +192,60 @@ vec2 openmwseCloudLayerHeightBounds(OpenMWSECloudLayer layer)
 }
 
 /// Enclose the piecewise-linear gradients reachable through the authored weather-type remap.
-vec2 openmwseCloudDensityHeightBounds(OpenMWSECloudLayer layer)
+vec2 openmwseCloudTypeHeightBounds(CloudModelLayer model)
 {
-    float minimumType = layer.model.typeMinimum;
-    float maximumType = minimumType + min(layer.model.typeAmount, 1.0) * (1.0 - minimumType);
-    vec4 first = cloudModelHeightGradient(vec3(0.0, minimumType, 0.0), layer.model);
-    vec4 last = cloudModelHeightGradient(vec3(0.0, maximumType, 0.0), layer.model);
-    vec4 middle = cloudModelHeightGradient(vec3(0.0, clamp(0.5, minimumType, maximumType), 0.0), layer.model);
+    float minimumType = model.typeMinimum;
+    float maximumType = minimumType + min(model.typeAmount, 1.0) * (1.0 - minimumType);
+    vec4 first = cloudModelHeightGradient(vec3(0.0, minimumType, 0.0), model);
+    vec4 last = cloudModelHeightGradient(vec3(0.0, maximumType, 0.0), model);
+    vec4 middle = cloudModelHeightGradient(vec3(0.0, clamp(0.5, minimumType, maximumType), 0.0), model);
     float lower = min(first.x, min(middle.x, last.x));
     float upper = max(first.w, max(middle.w, last.w));
+    return vec2(lower, upper);
+}
+
+/// Enclose all reachable typed density over the published terrain cache.
+vec2 openmwseCloudDensityHeightBounds(OpenMWSECloudLayer layer)
+{
+    vec2 typeBounds = openmwseCloudTypeHeightBounds(layer.model);
     vec2 bounds = openmwseCloudLayerHeightBounds(layer);
-    return bounds + layer.parameters.w * vec2(lower, upper - 1.0);
+    return bounds + layer.parameters.w * (typeBounds - vec2(0.0, 1.0));
+}
+
+/// Bound the fixed terrain field using every interpolation node touched by a ray's horizontal rectangle.
+vec2 openmwseCloudTerrainBoundsAlongRay(vec3 origin, vec3 direction, vec2 interval)
+{
+    vec4 grid = openmwseCloudTerrainOriginSpacing();
+    vec2 first = clamp((origin.xy + direction.xy * interval.x - grid.xy) / grid.z,
+        vec2(0.0), vec2(grid.w - 1.0));
+    vec2 last = clamp((origin.xy + direction.xy * interval.y - grid.xy) / grid.z,
+        vec2(0.0), vec2(grid.w - 1.0));
+    ivec2 lower = ivec2(min(floor(min(first, last)), vec2(grid.w - 2.0)));
+    ivec2 upper = ivec2(min(floor(max(first, last)), vec2(grid.w - 2.0))) + ivec2(1);
+    vec2 bounds = vec2(1e20, -1e20);
+    // Smooth interpolation is a convex combination of these nodes, including at the clamped cache edge.
+    for (int y = lower.y; y <= upper.y; ++y)
+        for (int x = lower.x; x <= upper.x; ++x)
+        {
+            float height = openmwseCloudTerrainNode(ivec2(x, y));
+            bounds = vec2(min(bounds.x, height), max(bounds.y, height));
+        }
+    return bounds;
+}
+
+/// Reject empty low-cloud samples without changing the march allocation or its quadrature positions.
+vec2 openmwseLowCloudRayDensityHeightBounds(vec3 origin, vec3 direction, vec2 interval,
+    OpenMWSECloudLayer layer)
+{
+    vec2 bases = vec2(openmwseCloudWaterHeight() + layer.parameters.z);
+    float influence = clamp(layer.terrainInfluence * openmwseCloudMediumReferenceParameters().y, 0.0, 1.0);
+    if (influence > 0.0)
+    {
+        vec2 terrain = openmwseCloudTerrainBoundsAlongRay(origin, direction, interval);
+        bases = mix(bases, terrain + openmwseCloudMediumReferenceParameters().z, influence);
+    }
+    // Expand by one world unit to keep floating-point boundary roundoff conservative.
+    return bases + layer.parameters.w * openmwseCloudTypeHeightBounds(layer.model) + vec2(-1.0, 1.0);
 }
 
 /// Transition the reachable deck top with the weather owner while retaining separate density geometry.
@@ -611,6 +654,7 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
 
     vec2 mainInterval = vec2(1.0, 0.0);
     vec2 lowInterval = vec2(1.0, 0.0);
+    vec2 lowHeightBounds = vec2(1e20, -1e20);
     if (mainLayerEnabled)
     {
         vec2 mainDensityBounds = outgoingLayerEnabled
@@ -627,7 +671,7 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
     }
     if (lowLayerEnabled)
     {
-        vec2 lowHeightBounds = openmwseCloudDensityHeightBounds(lowLayer);
+        lowHeightBounds = openmwseCloudDensityHeightBounds(lowLayer);
         lowInterval = openmwseCloudLayerIntersection(
             rayOrigin, worldDirection, lowHeightBounds.x, lowHeightBounds.y);
         lowInterval.y = min(lowInterval.y, maximumDistance);
@@ -638,6 +682,10 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
     bool lowIntervalValid = lowInterval.y > lowInterval.x;
     if (!mainIntervalValid && !lowIntervalValid)
         return openmwseIntegrateLocalMedia(localMedia, maximumDistance, worldDirection, atmosphere, visibleDistanceSum);
+
+    vec2 lowRayHeightBounds = lowIntervalValid
+        ? openmwseLowCloudRayDensityHeightBounds(rayOrigin, worldDirection, lowInterval, lowLayer)
+        : vec2(1e20, -1e20);
 
     vec2 firstInterval = mainIntervalValid ? mainInterval : lowInterval;
     vec2 secondInterval = vec2(1.0, 0.0);
@@ -736,6 +784,16 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
         float sampleOffset = sampleQuadrature ? 0.5 : rayDither;
         float sampleDistance = distanceAlongRay + segmentLength * sampleOffset;
         vec3 samplePosition = rayOrigin + worldDirection * sampleDistance;
+        float sampleHeightRadius = sampleQuadrature
+            ? abs(worldDirection.z) * segmentLength * (0.5 - openmwseCloudQuadratureOffsetLow) : 0.0;
+        // The main interval can continue beyond the low march limit into terrain outside this ray bound.
+        bool boundedLowSegment = lowIntervalValid && distanceAlongRay >= lowInterval.x
+            && distanceAlongRay + segmentLength <= lowInterval.y;
+        vec2 sampleLowHeightBounds = boundedLowSegment
+            ? lowRayHeightBounds : lowHeightBounds + vec2(-1.0, 1.0);
+        bool sampleLowLayer = lowLayerEnabled
+            && samplePosition.z + sampleHeightRadius >= sampleLowHeightBounds.x
+            && samplePosition.z - sampleHeightRadius <= sampleLowHeightBounds.y;
         openmwseAdvanceLocalMedia(localMedia, sampleDistance, localCursor, transmittance,
             localScatteredLight, localOpacity, localDistanceSum);
         if (!sampleQuadrature)
@@ -786,7 +844,7 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
                 incomingDensityForHeight = incomingDensity;
                 mainDensity += incomingDensity;
             }
-            if (lowLayerEnabled)
+            if (sampleLowLayer)
             {
                 OpenMWSECloudDensitySample sample = openmwseCloudSegmentDensity(
                     rayOrigin, worldDirection, distanceAlongRay, segmentLength, lowLayer);
@@ -812,7 +870,7 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
                 incomingDensityForHeight = sample.density;
                 mainDensity += sample.density;
             }
-            if (lowLayerEnabled)
+            if (sampleLowLayer)
             {
                 OpenMWSECloudDensitySample sample = openmwseCloudDensitySample(
                     samplePosition, sampleDistance, 0.0, lowLayer);

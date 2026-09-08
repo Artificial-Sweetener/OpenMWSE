@@ -159,6 +159,7 @@ namespace
         int cloudDensitySliceQuantity = 0;
         bool renderCloudDensitySlice = false;
         bool renderCloudRayOffsets = false;
+        bool useUnculledLowCloudReference = false;
         bool resolveReprojectedVolume = false;
     };
 
@@ -425,6 +426,26 @@ namespace
         geode->addDrawable(triangle);
         osg::StateSet* state = geode->getOrCreateStateSet();
         (*passIt)->prepareStateSet(state, technique.getName());
+        if (inputs.useUnculledLowCloudReference)
+        {
+            auto* program = dynamic_cast<osg::Program*>(state->getAttribute(osg::StateAttribute::PROGRAM));
+            if (!program)
+                throw std::runtime_error("Unculled cloud reference has no production shader");
+            for (unsigned index = 0; index < program->getNumShaders(); ++index)
+            {
+                osg::Shader* shader = program->getShader(index);
+                if (shader->getType() != osg::Shader::FRAGMENT)
+                    continue;
+                std::string source = shader->getShaderSource();
+                const auto start = source.find("bool sampleLowLayer =");
+                const auto end = source.find(';', start);
+                if (start == std::string::npos || end == std::string::npos)
+                    throw std::runtime_error("Unculled cloud reference cannot locate the sample rejection predicate");
+                // The reference evaluates every original quadrature point through production density and transport.
+                source.replace(start, end - start + 1, "bool sampleLowLayer = lowLayerEnabled;");
+                shader->setShaderSource(source);
+            }
+        }
         if (passName == "reprojectAtmosphereVolume" && inputs.renderReprojectionCoordinates)
         {
             auto* program = dynamic_cast<osg::Program*>(state->getAttribute(osg::StateAttribute::PROGRAM));
@@ -748,6 +769,36 @@ void main()
         float density = openmwseCloudDensity(samplePosition, 0.0, 0.0, lowLayer);
         float base = openmwseCloudNominalBaseHeight(samplePosition, lowLayer);
         omw_FragColor = vec4(density, base / 10000.0, openmwseCloudOrographicDensityScale(samplePosition, lowLayer), 1.0);
+        return;
+    }
+    if (openmwseTestCloudDensitySliceQuantity == 33)
+    {
+        vec3 direction = normalize(omw_GetWorldPosFromUV(omw_TexCoord) - omw.eyePos.xyz);
+        vec2 shell = openmwseCloudDensityHeightBounds(lowLayer);
+        vec2 interval = openmwseCloudLayerIntersection(omw.eyePos.xyz, direction, shell.x, shell.y);
+        interval.y = min(interval.y, omw.far);
+        if (interval.y <= interval.x)
+        {
+            omw_FragColor = vec4(0.0);
+            return;
+        }
+        vec2 bounds = openmwseLowCloudRayDensityHeightBounds(omw.eyePos.xyz, direction, interval, lowLayer);
+        float rejectedDensity = 0.0;
+        float maximumDensity = 0.0;
+        float rejectedSamples = 0.0;
+        for (int i = 0; i < 256; ++i)
+        {
+            float distance = mix(interval.x, interval.y, (float(i) + 0.5) / 256.0);
+            vec3 position = omw.eyePos.xyz + direction * distance;
+            float density = openmwseCloudDensity(position, distance, 0.0, lowLayer);
+            maximumDensity = max(maximumDensity, density);
+            if (position.z < bounds.x || position.z > bounds.y)
+            {
+                rejectedDensity = max(rejectedDensity, density);
+                rejectedSamples += 1.0;
+            }
+        }
+        omw_FragColor = vec4(rejectedDensity, maximumDensity, rejectedSamples / 256.0, 1.0);
         return;
     }
     if (openmwseTestCloudDensitySliceQuantity == 28)
@@ -6449,6 +6500,124 @@ void main()
             EXPECT_NEAR(movedReference.pixels[0].a(), finerReference.pixels[0].a(), 0.0005f);
             inputs.renderCloudDensitySlice = false;
         }
+    }
+
+    /// Keep every occupied low-cloud sample inside conservative ray bounds across terrain slopes and lattice edges.
+    TEST(AtmosphereShaderTest, lowCloudRayBoundsNeverRejectOccupiedDensity)
+    {
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Overcast", "Day");
+        inputs.width = 16;
+        inputs.height = 8;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceQuantity = 33;
+        inputs.lowCloudParameters = { 0.8f, 1.f, 4000.f, 14000.f };
+        inputs.lowCloudEnvironmentInfluence = 1.f;
+        inputs.mediumReferenceParameters = { 1500.f, 0.6f, 5000.f, 0.f };
+        inputs.viewDirection = { 0.96f, 0.25f, -0.12f };
+        inputs.viewDirection.normalize();
+        inputs.farPlane = 229376.f;
+        float maximumDensity = 0.f;
+        float maximumRejectedFraction = 0.f;
+        for (const float slope : { -0.15f, 0.f, 0.15f })
+        {
+            inputs.orographicParameters = { 0.f, 0.f, slope, -slope * 0.5f };
+            for (const float x : { -163850.f, 163830.f, 1300000.f })
+            {
+                inputs.eyePosition = { x, -12000.f, 12000.f };
+                const PassImage result = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                for (const osg::Vec4f& pixel : result.pixels)
+                {
+                    EXPECT_EQ(pixel.r(), 0.f) << "x=" << x << ", slope=" << slope;
+                    maximumDensity = std::max(maximumDensity, pixel.g());
+                    maximumRejectedFraction = std::max(maximumRejectedFraction, pixel.b());
+                }
+            }
+        }
+        EXPECT_GT(maximumDensity, 0.01f);
+        EXPECT_GT(maximumRejectedFraction, 0.1f);
+    }
+
+    /// Match an unculled production integral while traversing low cloud from below, within, and above its terrain
+    /// layer.
+    TEST(AtmosphereShaderTest, lowCloudRayBoundsPreserveUnculledTransport)
+    {
+        for (const auto& [weather, phase] :
+            { std::pair{ "Overcast", "Day" }, std::pair{ "Clear", "Sunset" }, std::pair{ "Foggy", "Day" } })
+        {
+            for (const int quality : { 0, 2, 3 })
+            {
+                NativePassInputs inputs = makePackagedAtmosphereInputs(weather, phase);
+                inputs.width = 16;
+                inputs.height = 8;
+                inputs.quality = quality;
+                inputs.lowCloudParameters = { 0.35f, 0.9f, 4000.f, 12000.f };
+                inputs.lowCloudEnvironmentInfluence = 1.f;
+                inputs.mediumReferenceParameters = { 1200.f, 0.5f, 6000.f, 0.f };
+                inputs.orographicParameters = { 0.f, 0.f, 0.08f, -0.03f };
+                inputs.eyePosition = { 150000.f, -70000.f, quality == 0 ? 900.f : quality == 2 ? 8000.f : 60000.f };
+                inputs.viewDirection = { 0.92f, 0.25f, quality == 0 ? 0.2f : -0.2f };
+                inputs.viewDirection.normalize();
+                inputs.farPlane = 229376.f;
+                const PassImage culled = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                inputs.useUnculledLowCloudReference = true;
+                const PassImage reference = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                ASSERT_EQ(culled.pixels.size(), reference.pixels.size());
+                ASSERT_FALSE(culled.pixels.empty());
+                for (std::size_t pixel = 0; pixel < culled.pixels.size(); ++pixel)
+                    for (int channel = 0; channel < 4; ++channel)
+                        EXPECT_NEAR(culled.pixels[pixel][channel], reference.pixels[pixel][channel], 1e-6f)
+                            << weather << ", quality=" << quality << ", pixel=" << pixel << ", channel=" << channel;
+            }
+        }
+    }
+
+    /// Retain terrain-following density beyond the low march limit when the main interval continues through it.
+    TEST(AtmosphereShaderTest, lowCloudRayBoundsPreserveDensityBeyondLowMarchLimit)
+    {
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Overcast", "Day");
+        inputs.width = 16;
+        inputs.height = 8;
+        inputs.verticalFov = 2.f;
+        inputs.cloudParameters = { 1.f, 0.002f, 30000.f, 30000.f };
+        inputs.cloudModel.mCoverageMinimum = 1.f;
+        inputs.cloudModel.mPhysicalScale = 1.f;
+        inputs.cloudModel.mGradientSmall = { 0.f, 0.1f, 0.9f, 1.f };
+        inputs.cloudModel.mGradientMedium = inputs.cloudModel.mGradientSmall;
+        inputs.cloudModel.mGradientLarge = inputs.cloudModel.mGradientSmall;
+        inputs.lowCloudParameters = { 1.f, 1.f, 0.f, 8000.f };
+        inputs.environmentalCloudModel.mPhysicalScale = 0.04f;
+        inputs.environmentalCloudModel.mCoverageMinimum = 1.f;
+        inputs.environmentalCloudModel.mDetailErosion = 0.f;
+        inputs.environmentalCloudModel.mGradientSmall = { 0.f, 0.1f, 0.9f, 1.f };
+        inputs.environmentalCloudModel.mGradientMedium = inputs.environmentalCloudModel.mGradientSmall;
+        inputs.environmentalCloudModel.mGradientLarge = inputs.environmentalCloudModel.mGradientSmall;
+        inputs.lowCloudEnvironmentInfluence = 1.f;
+        inputs.mediumReferenceParameters = { 0.f, 1.f, 0.f, 0.f };
+        inputs.orographicParameters = { 0.f, 0.f, 0.15f, 0.f };
+        inputs.mistParameters = {};
+        inputs.fogVolumeParameters = {};
+        inputs.eyePosition = { 0.f, 0.f, 40000.f };
+        inputs.viewDirection = { 1.f, 0.f, 0.f };
+        inputs.farPlane = 800000.f;
+        const PassImage culled = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        inputs.useUnculledLowCloudReference = true;
+        const PassImage reference = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_EQ(culled.pixels.size(), reference.pixels.size());
+        ASSERT_FALSE(culled.pixels.empty());
+        inputs.lowCloudParameters.y() = 0.f;
+        const PassImage withoutLowCloud = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_EQ(withoutLowCloud.pixels.size(), reference.pixels.size());
+        double lowCloudDifference = 0.0;
+        for (std::size_t pixel = 0; pixel < reference.pixels.size(); ++pixel)
+            for (int channel = 0; channel < 4; ++channel)
+                lowCloudDifference = std::max(lowCloudDifference,
+                    static_cast<double>(
+                        std::abs(reference.pixels[pixel][channel] - withoutLowCloud.pixels[pixel][channel])));
+        EXPECT_GT(lowCloudDifference, 0.01);
+        for (std::size_t pixel = 0; pixel < culled.pixels.size(); ++pixel)
+            for (int channel = 0; channel < 4; ++channel)
+                EXPECT_NEAR(culled.pixels[pixel][channel], reference.pixels[pixel][channel], 1e-6f)
+                    << "pixel=" << pixel << ", channel=" << channel;
     }
 
     /// Keep a frozen condensate volume's radiance stable when the observer advances through empty air.
