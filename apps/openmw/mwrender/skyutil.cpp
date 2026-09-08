@@ -29,6 +29,7 @@
 #include <components/resource/scenemanager.hpp>
 
 #include <components/sceneutil/depth.hpp>
+#include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/texmat.hpp>
 #include <components/sceneutil/texturetype.hpp>
 
@@ -93,6 +94,27 @@ namespace
 
 namespace MWRender
 {
+    ReflectionSkyCullCallback::ReflectionSkyCullCallback()
+        : mStateSet(new osg::StateSet)
+    {
+        mStateSet->setRenderBinDetails(RenderBin_ReflectionSky, "RenderBin");
+        mStateSet->setNestRenderBins(false);
+        const double farDepth = SceneUtil::AutoDepth::isReversed() ? 0.0 : 1.0;
+        mStateSet->setAttributeAndModes(new SceneUtil::AutoDepth(osg::Depth::LEQUAL, farDepth, farDepth, false),
+            osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE);
+        mStateSet->setMode(GL_DEPTH_TEST, osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE);
+    }
+
+    void ReflectionSkyCullCallback::operator()(osg::Node* node, osgUtil::CullVisitor* visitor)
+    {
+        const bool reflection = visitor->getCurrentCamera()->getName() == SceneUtil::reflectionCameraName;
+        if (reflection)
+            visitor->pushStateSet(mStateSet);
+        traverse(node, visitor);
+        if (reflection)
+            visitor->popStateSet();
+    }
+
     class SunUpdater : public SceneUtil::StateSetUpdater
     {
     public:

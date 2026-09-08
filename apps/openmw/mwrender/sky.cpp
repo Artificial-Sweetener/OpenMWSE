@@ -274,8 +274,9 @@ namespace MWRender
         parentNode->addChild(mSkyRootNode);
 
         mEarlyRenderBinRoot = new osg::Group;
-        // render before the world is rendered
+        // Main-view sky is available before the world; reflected sky follows opaque depth.
         mEarlyRenderBinRoot->getOrCreateStateSet()->setRenderBinDetails(RenderBin_Sky, "RenderBin");
+        mEarlyRenderBinRoot->addCullCallback(new ReflectionSkyCullCallback);
         // Prevent unwanted clipping by water reflection camera's clipping plane
         mEarlyRenderBinRoot->getOrCreateStateSet()->setMode(GL_CLIP_PLANE0, osg::StateAttribute::OFF);
 

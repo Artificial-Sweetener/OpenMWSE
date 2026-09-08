@@ -22,8 +22,28 @@ namespace Resource
     class SceneManager;
 }
 
+namespace osgUtil
+{
+    class CullVisitor;
+}
+
 namespace MWRender
 {
+    /// Cull reflected sky after opaque geometry so depth testing can reject hidden cloud fragments.
+    class ReflectionSkyCullCallback
+        : public SceneUtil::NodeCallback<ReflectionSkyCullCallback, osg::Node*, osgUtil::CullVisitor*>
+    {
+    public:
+        /// Prepare a background depth range without changing the scene's depth buffer or stencil state.
+        ReflectionSkyCullCallback();
+
+        /// Scope the late background state to the reflection camera's sky traversal.
+        void operator()(osg::Node* node, osgUtil::CullVisitor* visitor);
+
+    private:
+        osg::ref_ptr<osg::StateSet> mStateSet;
+    };
+
     struct MoonUpdater;
     class SunUpdater;
     class SunFlashCallback;
