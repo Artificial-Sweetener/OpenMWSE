@@ -23,7 +23,7 @@ struct OpenMWSECloudLayer
     CloudModelLayer model;
     vec2 fieldOffsetWorldUnits;
     float terrainCoupling;
-    float terrainInfluence;
+    float terrainWeight;
 };
 
 // Use an Earth-scale 6360 km cloud datum. Only the main cloud shell and its optical paths
@@ -64,11 +64,12 @@ OpenMWSECloudLayer openmwseIncomingCloudLayer()
         openmwseCloudEpisodeOffset(scenario.y), 0.0, 0.0);
 }
 
-/// Place the environmental cloud layer against OpenMW's local terrain model.
+/// Place the environmental cloud layer and resolve its bounded terrain weight once per integration.
 OpenMWSECloudLayer openmwseLowCloudLayer()
 {
     return OpenMWSECloudLayer(openmwseLowCloudParameters(), openmwseReadCloudModel(2),
-        vec2(137000.0, -91000.0), 1.0, openmwseLowCloudEnvironmentInfluence());
+        vec2(137000.0, -91000.0), 1.0,
+        clamp(openmwseLowCloudEnvironmentInfluence() * openmwseCloudMediumReferenceParameters().y, 0.0, 1.0));
 }
 
 /// Return the fixed virtual-planet center for OpenMW's world-space tangent frame.
@@ -146,31 +147,40 @@ vec3 openmwseCloudFormationTerrain(vec2 worldPosition)
         mix(c - a, d - b, weight.x) * derivative.y);
 }
 
-/// Return a cloud base that follows local terrain only for the low environmental stratum.
-float openmwseCloudNominalBaseHeight(vec3 worldPosition, OpenMWSECloudLayer layer)
+/// Keep terrain-driven placement and droplet formation from the same world-space field evaluation.
+struct OpenMWSECloudFormation
+{
+    float baseHeight;
+    float densityScale;
+};
+
+/// Evaluate the shared terrain field once for cloud placement and windward or leeward formation.
+OpenMWSECloudFormation openmwseCloudFormation(vec3 worldPosition, OpenMWSECloudLayer layer)
 {
     float fixedBaseHeight = openmwseCloudWaterHeight() + layer.parameters.z;
-    vec4 mediumReference = openmwseCloudMediumReferenceParameters();
-    if (layer.terrainCoupling <= 0.0)
-        return fixedBaseHeight;
-    float terrainInfluence = layer.terrainInfluence * mediumReference.y;
-    float terrainBaseHeight = openmwseCloudFormationTerrain(worldPosition.xy).x + mediumReference.z;
-    return mix(fixedBaseHeight, terrainBaseHeight, clamp(terrainInfluence, 0.0, 1.0));
-}
-
-/// Return terrain-driven windward formation or leeward dissipation for the low environmental stratum.
-float openmwseCloudOrographicDensityScale(vec3 worldPosition, OpenMWSECloudLayer layer)
-{
-    if (layer.terrainCoupling <= 0.0)
-        return 1.0;
-    vec2 terrainGradient = openmwseCloudFormationTerrain(worldPosition.xy).yz;
+    if (layer.terrainWeight <= 0.0)
+        return OpenMWSECloudFormation(fixedBaseHeight, 1.0);
+    vec3 terrain = openmwseCloudFormationTerrain(worldPosition.xy);
+    float terrainBaseHeight = terrain.x + openmwseCloudMediumReferenceParameters().z;
     vec2 cloudMotionDirection = normalize(vec2(-0.78, -0.36));
-    float slopeAlongWind = dot(terrainGradient, cloudMotionDirection);
+    float slopeAlongWind = dot(terrain.yz, cloudMotionDirection);
     float windwardFormation = smoothstep(0.025, 0.22, slopeAlongWind);
     float leewardDissipation = smoothstep(0.025, 0.22, -slopeAlongWind);
     float response = 1.0 + windwardFormation * 0.85 - leewardDissipation * 0.7;
-    float influence = layer.terrainInfluence * openmwseCloudMediumReferenceParameters().y;
-    return mix(1.0, response, clamp(influence, 0.0, 1.0));
+    return OpenMWSECloudFormation(mix(fixedBaseHeight, terrainBaseHeight, layer.terrainWeight),
+        mix(1.0, response, layer.terrainWeight));
+}
+
+/// Follow local terrain only when the low environmental stratum has a positive terrain weight.
+float openmwseCloudNominalBaseHeight(vec3 worldPosition, OpenMWSECloudLayer layer)
+{
+    return openmwseCloudFormation(worldPosition, layer).baseHeight;
+}
+
+/// Return the terrain formation multiplier independently of the source cloud-noise model.
+float openmwseCloudOrographicDensityScale(vec3 worldPosition, OpenMWSECloudLayer layer)
+{
+    return openmwseCloudFormation(worldPosition, layer).densityScale;
 }
 
 /// Scale the occupied-ray budget independently of authored noise frequencies.
@@ -183,8 +193,7 @@ float openmwseCloudLayerMaximumMarchingDistance(OpenMWSECloudLayer layer)
 vec2 openmwseCloudLayerHeightBounds(OpenMWSECloudLayer layer)
 {
     float base = openmwseCloudWaterHeight() + layer.parameters.z;
-    float weight = layer.terrainCoupling * layer.terrainInfluence
-        * openmwseCloudMediumReferenceParameters().y;
+    float weight = layer.terrainCoupling * layer.terrainWeight;
     vec2 terrainBounds = max(openmwseCloudTerrainHeightBounds(), vec2(openmwseCloudWaterHeight()))
         + openmwseCloudMediumReferenceParameters().z;
     return vec2(min(base, mix(base, terrainBounds.x, clamp(weight, 0.0, 1.0))),
@@ -238,7 +247,7 @@ vec2 openmwseLowCloudRayDensityHeightBounds(vec3 origin, vec3 direction, vec2 in
     OpenMWSECloudLayer layer)
 {
     vec2 bases = vec2(openmwseCloudWaterHeight() + layer.parameters.z);
-    float influence = clamp(layer.terrainInfluence * openmwseCloudMediumReferenceParameters().y, 0.0, 1.0);
+    float influence = layer.terrainWeight;
     if (influence > 0.0)
     {
         vec2 terrain = openmwseCloudTerrainBoundsAlongRay(origin, direction, interval);
@@ -276,11 +285,10 @@ vec3 openmwseCloudModelPosition(vec3 fieldPosition, OpenMWSECloudLayer layer)
     return fieldPosition.xzy / openmwseAtmosphereWorldUnitsPerMeter;
 }
 
-/// Compute the density model's normalized height within its independently placed shell.
-float openmwseCloudHeightFraction(vec3 fieldPosition, OpenMWSECloudLayer layer)
+/// Normalize the world-space field height against its prepared cloud base and thickness.
+float openmwseCloudHeightFraction(float fieldHeight, float baseHeight, float thickness)
 {
-    vec2 placement = openmwseCloudLocalLayer(fieldPosition, layer);
-    return (fieldPosition.z - placement.x) / placement.y;
+    return (fieldHeight - baseHeight) / max(thickness, 1.0);
 }
 
 /// Return the forward ray interval intersecting the conservative cloud-height bounds.
@@ -354,7 +362,8 @@ float openmwseMainCloudPresentationWeight(float distanceFromEye)
 bool openmwseCloudPotentialDensity(vec3 worldPosition, OpenMWSECloudLayer layer)
 {
     vec3 fieldPosition = openmwseCloudFieldPosition(worldPosition, layer);
-    float heightFraction = openmwseCloudHeightFraction(fieldPosition, layer);
+    float heightFraction = openmwseCloudHeightFraction(fieldPosition.z,
+        openmwseCloudNominalBaseHeight(fieldPosition, layer), layer.parameters.w);
     if (heightFraction < 0.0 || heightFraction > 1.0)
         return false;
     vec3 weather = cloudModelSampleWeather(openmwseCloudModelPosition(fieldPosition, layer), heightFraction, layer.model);
@@ -381,14 +390,15 @@ OpenMWSECloudDensitySample openmwseCloudDensitySample(vec3 worldPosition, float 
     float additionalLodBias, OpenMWSECloudLayer layer)
 {
     vec3 fieldPosition = openmwseCloudFieldPosition(worldPosition, layer);
-    float heightFraction = openmwseCloudHeightFraction(fieldPosition, layer);
+    OpenMWSECloudFormation formation = openmwseCloudFormation(fieldPosition, layer);
+    float heightFraction = openmwseCloudHeightFraction(fieldPosition.z, formation.baseHeight, layer.parameters.w);
     if (heightFraction < 0.0 || heightFraction > 1.0)
         return OpenMWSECloudDensitySample(0.0, 0.0);
     vec3 positionMeters = openmwseCloudModelPosition(fieldPosition, layer);
     vec3 weather = cloudModelSampleWeather(positionMeters, heightFraction, layer.model);
     float density = cloudModelSampleDensity(positionMeters, heightFraction, layer.model, weather,
         openmwseCloudNoiseLod(distanceFromEye, additionalLodBias, layer), true);
-    density *= max(layer.parameters.y, 0.0) * openmwseCloudOrographicDensityScale(fieldPosition, layer);
+    density *= max(layer.parameters.y, 0.0) * formation.densityScale;
     return OpenMWSECloudDensitySample(density, weather.b);
 }
 
@@ -420,13 +430,14 @@ OpenMWSECloudDensitySample openmwseCloudSegmentDensity(vec3 origin, vec3 directi
 float openmwseCloudBroadDensity(vec3 worldPosition, OpenMWSECloudLayer layer)
 {
     vec3 fieldPosition = openmwseCloudFieldPosition(worldPosition, layer);
-    float heightFraction = openmwseCloudHeightFraction(fieldPosition, layer);
+    OpenMWSECloudFormation formation = openmwseCloudFormation(fieldPosition, layer);
+    float heightFraction = openmwseCloudHeightFraction(fieldPosition.z, formation.baseHeight, layer.parameters.w);
     if (heightFraction < 0.0 || heightFraction > 1.0)
         return 0.0;
     vec3 positionMeters = openmwseCloudModelPosition(fieldPosition, layer);
     vec3 weather = cloudModelSampleWeather(positionMeters, heightFraction, layer.model);
     return cloudModelSampleDensity(positionMeters, heightFraction, layer.model, weather, 0.0, false)
-        * max(layer.parameters.y, 0.0) * openmwseCloudOrographicDensityScale(fieldPosition, layer);
+        * max(layer.parameters.y, 0.0) * formation.densityScale;
 }
 
 /// Evaluate stable broad density from every enabled stratum for temporal classification.

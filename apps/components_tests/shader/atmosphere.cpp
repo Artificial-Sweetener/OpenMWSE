@@ -747,7 +747,8 @@ void main()
     if (openmwseTestCloudDensitySliceQuantity == 11)
     {
         vec3 positionMeters = openmwseCloudModelPosition(samplePosition, mainLayer);
-        float height = clamp(openmwseCloudHeightFraction(samplePosition, mainLayer), 0.0, 1.0);
+        float height = clamp(openmwseCloudHeightFraction(samplePosition.z,
+            openmwseCloudNominalBaseHeight(samplePosition, mainLayer), mainLayer.parameters.w), 0.0, 1.0);
         vec3 weather = cloudModelSampleWeather(positionMeters, height, mainLayer.model);
         vec2 coordinates = cloudModelWeatherCoordinates(positionMeters, height, mainLayer.model);
         omw_FragColor = vec4(openmwseCloudWeatherSample(coordinates).r, weather.r, weather.g, weather.b);
@@ -3011,6 +3012,82 @@ void main()
         EXPECT_FLOAT_EQ(windward.pixels[0].g(), leeward.pixels[0].g());
         EXPECT_GT(windward.pixels[0].r(), 0.001f);
         EXPECT_GT(windward.pixels[0].r(), leeward.pixels[0].r() * 1.15f);
+    }
+
+    /// Keep droplet density and placement independent of terrain whenever either influence factor is zero.
+    TEST(AtmosphereShaderTest, zeroTerrainInfluencePreservesLowCloudDensityAndPlacement)
+    {
+        NativePassInputs inputs;
+        inputs.width = inputs.height = 1;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceQuantity = 29;
+        inputs.lowCloudParameters = { 1.f, 0.9f, 2600.f, 9000.f };
+        inputs.environmentalCloudModel.mCoverageMinimum = 1.f;
+        inputs.environmentalCloudModel.mDetailErosion = 0.f;
+        inputs.lowCloudEnvironmentInfluence = 0.f;
+        inputs.mediumReferenceParameters = {};
+        const float cellCenter = 0.5f * SceneUtil::AtmosphereTerrainGrid::sSpacingWorldUnits;
+        inputs.eyePosition = { cellCenter, cellCenter, 3800.f };
+        const PassImage reference = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_EQ(reference.pixels.size(), 1u);
+        ASSERT_GT(reference.pixels[0].r(), 0.001f);
+        // The diagnostic slice stores normalized height in RGBA16F.
+        EXPECT_NEAR(reference.pixels[0].g(), 0.26f, 1.f / 4096.f);
+        EXPECT_FLOAT_EQ(reference.pixels[0].b(), 1.f);
+        for (const osg::Vec2f weights : { osg::Vec2f(0.f, 1.f), osg::Vec2f(1.f, 0.f), osg::Vec2f(0.5f, 0.f) })
+        {
+            inputs.lowCloudEnvironmentInfluence = weights.x();
+            inputs.mediumReferenceParameters = { 100000.f, weights.y(), 16000.f, 0.f };
+            for (const float slope : { -0.2f, 0.f, 0.2f })
+            {
+                inputs.orographicParameters = { cellCenter, cellCenter, slope, -slope };
+                const PassImage result = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                ASSERT_EQ(result.pixels.size(), 1u);
+                for (int channel = 0; channel < 4; ++channel)
+                    EXPECT_FLOAT_EQ(result.pixels[0][channel], reference.pixels[0][channel]);
+            }
+        }
+    }
+
+    /// Preserve terrain-weighted placement and droplet formation on analytic flat, windward, and leeward slopes.
+    TEST(AtmosphereShaderTest, terrainFollowingCloudDensityPreservesWeightedPlacementAndFormation)
+    {
+        NativePassInputs inputs;
+        inputs.width = inputs.height = 1;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceQuantity = 29;
+        inputs.lowCloudParameters = { 1.f, 0.9f, 2600.f, 9000.f };
+        inputs.environmentalCloudModel.mCoverageMinimum = 1.f;
+        inputs.environmentalCloudModel.mDetailErosion = 0.f;
+        const float cellCenter = 0.5f * SceneUtil::AtmosphereTerrainGrid::sSpacingWorldUnits;
+        for (const osg::Vec2f weights : { osg::Vec2f(0.25f, 1.f), osg::Vec2f(1.f, 0.5f), osg::Vec2f(1.f, 1.f) })
+        {
+            const float weight = weights.x() * weights.y();
+            const float expectedBase = 2600.f + 100000.f * weight;
+            inputs.lowCloudEnvironmentInfluence = weights.x();
+            inputs.mediumReferenceParameters = { 100000.f, weights.y(), 2600.f, 0.f };
+            inputs.eyePosition = { cellCenter, cellCenter, expectedBase + 1200.f };
+            for (const float slope : { -0.2f, 0.f, 0.2f })
+            {
+                SCOPED_TRACE(::testing::Message() << "weight=" << weight << ", slope=" << slope);
+                inputs.orographicParameters = { cellCenter, cellCenter, slope, 0.f };
+                const PassImage result = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                NativePassInputs fixedPlacement = inputs;
+                fixedPlacement.lowCloudEnvironmentInfluence = 0.f;
+                fixedPlacement.lowCloudParameters.z() = expectedBase;
+                const PassImage reference = renderNativeAtmospherePass("integrateAtmosphereRayGrid", fixedPlacement);
+                ASSERT_EQ(result.pixels.size(), 1u);
+                ASSERT_EQ(reference.pixels.size(), 1u);
+                ASSERT_GT(reference.pixels[0].r(), 0.001f);
+                // At the cell midpoint, smooth interpolation multiplies the analytic slope by 1.5;
+                // these opposing slopes saturate the windward and leeward responses.
+                const float expectedScale = 1.f + weight * (slope < 0.f ? 0.85f : slope > 0.f ? -0.7f : 0.f);
+                EXPECT_FLOAT_EQ(result.pixels[0].g(), reference.pixels[0].g());
+                EXPECT_NEAR(result.pixels[0].b(), expectedScale, expectedScale / 1024.f);
+                EXPECT_NEAR(result.pixels[0].r(), reference.pixels[0].r() * expectedScale,
+                    reference.pixels[0].r() * expectedScale / 512.f);
+            }
+        }
     }
 
     TEST(AtmosphereShaderTest, valleyConcavityPoolsMistMoreStronglyThanContinuousFog)
