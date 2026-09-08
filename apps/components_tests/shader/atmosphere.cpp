@@ -633,34 +633,45 @@ void main()
             omw.atmosphereQuality) / distance);
         return;
     }
-    if (openmwseTestCloudDensitySliceQuantity == 23)
+    if (openmwseTestCloudDensitySliceQuantity == 23 || openmwseTestCloudDensitySliceQuantity == 36)
     {
         // Independent reference evaluation of the volumetric shadow integral.
         // The density evaluator has separate source-reference coverage; this checks light-ray sampling.
+        OpenMWSECloudLayer shadowLayer = openmwseTestCloudDensitySliceQuantity == 23 ? mainLayer : lowLayer;
+        int quality = openmwseTestCloudDensitySliceQuantity == 23 ? 3 : omw.atmosphereQuality;
+        int count = quality >= 2 ? 5 : quality >= 1 ? 4 : 3;
+        bool skippedSample = false;
+        bool resumedSampling = false;
         vec3 direction = normalize(omw.sunPos.xyz);
-        float stepLength = 3000.0 * mainLayer.model.physicalScale * 69.99125109;
+        float stepLength = 3000.0 * shadowLayer.model.physicalScale * 69.99125109;
         float viewDistance = length(samplePosition - omw.eyePos.xyz);
         vec3 referenceDepth = vec3(0.0);
         float lodOffset = 0.5;
         for (int s = 0; s < 5; ++s)
         {
-            float t0 = float(s) / 5.0;
-            float t1 = float(s + 1) / 5.0;
+            if (s >= count)
+                break;
+            float t0 = float(s) / float(count);
+            float t1 = float(s + 1) / float(count);
             t0 *= t0;
             t1 *= t1;
             float delta = t1 - t0;
-            vec3 p = samplePosition + direction * stepLength * (t0 + delta * 0.5);
-            if (!openmwseCloudPotentialDensity(p, mainLayer))
+            vec3 p = samplePosition + direction * (stepLength * (t0 + delta * 0.5));
+            if (!openmwseCloudPotentialDensity(p, shadowLayer))
+            {
+                skippedSample = true;
                 continue;
-            float density = openmwseCloudDensity(p, viewDistance, lodOffset, mainLayer);
-            referenceDepth += clamp(density * mainLayer.model.extinctionPerMeter, 0.0, 1.0)
-                * delta * (stepLength / 69.99125109);
+            }
+            resumedSampling = resumedSampling || skippedSample;
+            float density = openmwseCloudDensity(p, viewDistance, lodOffset, shadowLayer);
+            referenceDepth += clamp(density * shadowLayer.model.extinctionPerMeter, 0.0, 1.0)
+                * (stepLength * delta / 69.99125109);
             lodOffset += 0.5;
         }
         vec3 reference = exp(-referenceDepth);
-        vec3 actual = exp(-openmwseCloudSunOpticalDepth(samplePosition, direction, 3, mainLayer));
+        vec3 actual = exp(-openmwseCloudSunOpticalDepth(samplePosition, direction, quality, shadowLayer));
         vec3 error = abs(actual - reference);
-        omw_FragColor = vec4(actual.r, reference.r, max(error.r, max(error.g, error.b)) * 1000.0, 1.0);
+        omw_FragColor = vec4(actual.r, reference.r, max(error.r, max(error.g, error.b)) * 1000.0, resumedSampling ? 1.0 : 0.0);
         return;
     }
     if (openmwseTestCloudDensitySliceQuantity == 22)
@@ -2456,6 +2467,60 @@ void main()
                 EXPECT_LT(maximumError, 0.0001f);
             }
         }
+    }
+
+    /// Preserve spectral attenuation and mip advancement for rising and setting sunlight across terrain-cloud gaps.
+    TEST(AtmosphereShaderTest, lowCloudSunShadowPreservesSamplingAcrossTerrainAndMips)
+    {
+        NativePassInputs inputs;
+        inputs.width = 64;
+        inputs.height = 32;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceAxis = 1;
+        inputs.cloudDensitySliceQuantity = 36;
+        inputs.lowCloudParameters = { 1.f, 0.9f, 2600.f, 9000.f };
+        inputs.environmentalCloudModel.mCoverageAmount = 0.6f;
+        inputs.environmentalCloudModel.mCoverageMinimum = 0.2f;
+        inputs.environmentalCloudModel.mExtinctionPerMeter = { 0.00071f, 0.00086f, 0.001f };
+        inputs.cloudDensitySliceExtent = { 60000.f, 18000.f };
+        inputs.mediumReferenceParameters = { 16000.f, 1.f, 2600.f, 0.f };
+        const float cellCenter = 0.5f * SceneUtil::AtmosphereTerrainGrid::sSpacingWorldUnits;
+        inputs.orographicParameters = { cellCenter, cellCenter, 0.08f, 0.f };
+        std::size_t resumedLightRays = 0;
+        for (const float influence : { 0.f, 0.65f })
+        {
+            inputs.lowCloudEnvironmentInfluence = influence;
+            inputs.eyePosition = { cellCenter, cellCenter, 2600.f + 16000.f * influence + 4500.f };
+            for (const float scale : { 0.04f, 0.35f })
+            {
+                inputs.environmentalCloudModel.mPhysicalScale = scale;
+                inputs.environmentalCloudModel.mNoiseScalePerMeter = 0.0006f / scale;
+                for (const int quality : { 0, 1, 2, 3 })
+                {
+                    inputs.quality = quality;
+                    for (const auto& direction : { osg::Vec4f(1.f, 0.f, 0.08f, 0.f), osg::Vec4f(0.2f, -0.5f, 0.8f, 0.f),
+                             osg::Vec4f(0.2f, -0.5f, -0.8f, 0.f) })
+                    {
+                        SCOPED_TRACE(testing::Message() << "influence=" << influence << " scale=" << scale
+                                                        << " quality=" << quality << " sun-z=" << direction.z());
+                        inputs.sunDirection = direction;
+                        const PassImage result = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                        ASSERT_FALSE(result.pixels.empty());
+                        float maximumError = 0.f;
+                        std::size_t shadowed = 0;
+                        for (const auto& pixel : result.pixels)
+                        {
+                            maximumError = std::max(maximumError, pixel.z() / 1000.f);
+                            shadowed += pixel.y() < 0.99f ? 1 : 0;
+                            resumedLightRays += pixel.a() > 0.5f ? 1 : 0;
+                        }
+                        EXPECT_GT(shadowed, 0u);
+                        EXPECT_LT(maximumError, 0.0001f);
+                    }
+                }
+            }
+        }
+        EXPECT_GT(resumedLightRays, 0u) << "Exercise mip selection after a rejected light sample";
     }
 
     /// Compare the GLSL density model with independently computed GPU reference samples.

@@ -484,7 +484,7 @@ float openmwseCloudDualLobePhase(float cosineAngle)
         openmwseCloudMiePhase(cosineAngle, -0.5), 0.2);
 }
 
-/// Integrate fixed nonlinear sun-ray samples, scaled with the layer's explicit physical scale.
+/// Retain nonlinear sun samples while rejecting wholly empty terrain-dependent paths before sampling.
 vec3 openmwseCloudSunOpticalDepth(vec3 samplePosition, vec3 sunDirection, int quality,
     OpenMWSECloudLayer layer)
 {
@@ -492,6 +492,18 @@ vec3 openmwseCloudSunOpticalDepth(vec3 samplePosition, vec3 sunDirection, int qu
         return vec3(0.0);
     float lightPathLength = 3000.0 * layer.model.physicalScale
         * openmwseAtmosphereWorldUnitsPerMeter;
+    if (layer.terrainWeight > 0.0)
+    {
+        vec2 heightBounds = openmwseCloudLayerHeightBounds(layer);
+        // Density normalizes thickness to at least one world unit, including authored sub-unit layers.
+        heightBounds.y += max(1.0 - layer.parameters.w, 0.0);
+        float lastHeight = samplePosition.z + sunDirection.z * lightPathLength;
+        float padding = max(1.0, max(abs(samplePosition.z), abs(lastHeight)) * 0.00001);
+        // All fixed light samples lie between these endpoints; the terrain envelope covers the entire field.
+        if (max(samplePosition.z, lastHeight) < heightBounds.x - padding
+            || min(samplePosition.z, lastHeight) > heightBounds.y + padding)
+            return vec3(0.0);
+    }
     float distanceFromEye = length(samplePosition - openmwseCloudEyePosition());
 
     int shadowSampleCount = quality >= 2 ? 5 : quality >= 1 ? 4 : 3;
