@@ -164,6 +164,7 @@ namespace
         bool renderCloudRayOffsets = false;
         bool measureCloudMarchProgress = false;
         bool useLegacyCloudMarchReference = false;
+        bool usePerSampleCloudIntervalReference = false;
         bool useUnculledLowCloudReference = false;
         bool useUncachedLocalLighting = false;
         bool resolveReprojectedVolume = false;
@@ -178,14 +179,43 @@ namespace
         source.replace(position, marker.size(), replacement);
     }
 
+    /// Compare interval ownership while sharing the production density, lighting, and transport body.
+    std::string makePerSampleCloudIntervalReference(std::string source)
+    {
+        const auto start = source.find("    int sampleIndex = 0;\n    for (int intervalIndex = 0;");
+        const auto body = source.find("            float remainingIntervalLength", start);
+        const auto end = source.find("\n    openmwseAdvanceLocalMedia(localMedia, maximumDistance", body);
+        if (start == std::string::npos || body == std::string::npos || end == std::string::npos)
+            throw std::runtime_error("Cloud interval reference requires the production transport loop");
+        std::string transport = source.substr(body, end - body);
+        replaceUniqueShaderText(transport, "                    sampleIndex = maximumSampleCount;\n", "");
+        replaceUniqueShaderText(transport, "\n    }\n", "\n");
+        source.replace(start, end - start, R"glsl(
+    for (int sampleIndex = 0; sampleIndex < maximumSampleCount; ++sampleIndex)
+    {
+        if (distanceAlongCloudIntervals >= traversedIntervalLength)
+            break;
+        bool sampleSecondInterval = separatedIntervals && distanceAlongCloudIntervals >= firstIntervalLength;
+        bool activeIntervalIsMain
+            = sampleSecondInterval ? !firstIntervalIsMain : firstIntervalIsMain;
+        float intervalPathOffset
+            = sampleSecondInterval ? distanceAlongCloudIntervals - firstIntervalLength : distanceAlongCloudIntervals;
+        vec2 activeInterval = sampleSecondInterval ? secondInterval : firstInterval;
+        float activeIntervalLength = sampleSecondInterval ? secondIntervalLength : firstIntervalLength;
+        float activeIntervalEnd = sampleSecondInterval ? traversedIntervalLength : firstIntervalLength;
+        float fineStepLength = sampleSecondInterval ? secondFineStepLength : firstFineStepLength;
+)glsl" + transport);
+        return source;
+    }
+
     /// Retain the original accumulation only as a reference for rays that completed without repeated steps.
     std::string makeLegacyCloudMarchReference(std::string source)
     {
         replaceUniqueShaderText(source,
             "return stepLength >= remainingIntervalLength ? intervalEndDistance : distanceAlongIntervals + stepLength;",
             "return distanceAlongIntervals + stepLength;");
-        replaceUniqueShaderText(source, "            distanceAlongCloudIntervals = activeIntervalEnd;",
-            "            distanceAlongCloudIntervals = firstIntervalLength;");
+        replaceUniqueShaderText(source, "distanceAlongCloudIntervals = activeIntervalEnd;",
+            "distanceAlongCloudIntervals = firstIntervalLength;");
         return source;
     }
 
@@ -196,12 +226,12 @@ namespace
             "vec2 openmwseTestMarchProgress = vec2(0.0);\nvec4 openmwseIntegrateCloudsInternal(");
         replaceUniqueShaderText(source, "    float distanceAlongCloudIntervals = 0.0;",
             "    float previousDiagnosticDistance = -1.0;\n    float distanceAlongCloudIntervals = 0.0;");
-        replaceUniqueShaderText(source, "        bool sampleSecondInterval = separatedIntervals",
+        replaceUniqueShaderText(source, "float intervalPathOffset\n",
             "        openmwseTestMarchProgress.x += 1.0;\n"
             "        if (distanceAlongCloudIntervals <= previousDiagnosticDistance)\n"
             "            openmwseTestMarchProgress.y += 1.0;\n"
             "        previousDiagnosticDistance = distanceAlongCloudIntervals;\n"
-            "        bool sampleSecondInterval = separatedIntervals");
+            "        float intervalPathOffset\n");
         const auto output = source.rfind("    omw_FragColor1 = metadata;");
         if (output == std::string::npos)
             throw std::runtime_error("Cloud march instrumentation requires the ray-grid output");
@@ -597,6 +627,8 @@ void main()
     omw_FragColor1 = metadata;
 }
 )glsl";
+                if (inputs.usePerSampleCloudIntervalReference)
+                    source = makePerSampleCloudIntervalReference(std::move(source));
                 if (inputs.useLegacyCloudMarchReference)
                     source = makeLegacyCloudMarchReference(std::move(source));
                 if (inputs.measureCloudMarchProgress)
@@ -2722,6 +2754,79 @@ void main()
                 }
                 EXPECT_GT(shadowed, 0u);
                 EXPECT_LT(maximumError, 0.0001f);
+            }
+        }
+    }
+
+    /// Retain radiance, opacity, and depth moments across separate and overlapping cloud intervals with dense mist.
+    TEST(AtmosphereShaderTest, intervalCloudMarchPreservesPerSampleTransport)
+    {
+        NativePassInputs inputs;
+        inputs.width = 64;
+        inputs.height = 48;
+        inputs.farPlane = 229376.f;
+        inputs.fogFar = 229376.f;
+        inputs.verticalFov = 75.f;
+        inputs.lowCloudParameters = { 0.5f, 0.25f, 5948.21f, 6589.7f };
+        inputs.cloudModel.mCoverageMinimum = 0.6f;
+        inputs.environmentalCloudModel.mCoverageMinimum = 0.6f;
+        inputs.sunDirection = { -0.924063f, -0.230443f, 0.304965f, 0.f };
+        for (const int quality : { 0, 1, 2, 3 })
+        {
+            inputs.quality = quality;
+            for (const bool temporalSampling : { false, true })
+            {
+                SCOPED_TRACE(testing::Message() << "temporal=" << temporalSampling);
+                inputs.historyValid = temporalSampling;
+                inputs.reverseZ = temporalSampling;
+                inputs.depth = [reverseZ = inputs.reverseZ](int, int) { return reverseZ ? 0.f : 1.f; };
+                inputs.previousDepth = inputs.depth;
+                inputs.useUniformBuffer = temporalSampling;
+                inputs.incomingCloudModel.mCoverageMinimum = 0.65f;
+                inputs.incomingCloudParameters
+                    = temporalSampling ? osg::Vec4f(0.35f, 0.12f, 98000.f, 94000.f) : osg::Vec4f();
+                inputs.cloudScenarioParameters = temporalSampling ? osg::Vec4f(0.f, 0.f, 0.45f, 1.f) : osg::Vec4f();
+                for (const float cloudBase : { 4000.f, 66000.f })
+                {
+                    inputs.cloudParameters = { 0.5f, 0.2f, cloudBase, 124150.f };
+                    for (const float altitude : { 1534.89f, 10000.f, 210000.f })
+                    {
+                        SCOPED_TRACE(testing::Message()
+                            << "quality=" << quality << " base=" << cloudBase << " altitude=" << altitude);
+                        inputs.eyePosition = { 19962.8f, -97319.7f, altitude };
+                        inputs.viewDirection = { 0.97f, 0.f, altitude < 66000.f ? 0.2f : -0.2f };
+                        inputs.usePerSampleCloudIntervalReference = true;
+                        PassImage referenceMetadata;
+                        const PassImage reference
+                            = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs, &referenceMetadata);
+                        inputs.usePerSampleCloudIntervalReference = false;
+                        PassImage metadata;
+                        const PassImage actual
+                            = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs, &metadata);
+                        ASSERT_EQ(actual.pixels.size(), reference.pixels.size());
+                        ASSERT_EQ(metadata.pixels.size(), referenceMetadata.pixels.size());
+                        float maximumError = 0.f;
+                        float maximumMetadataError = 0.f;
+                        float maximumOpacity = 0.f;
+                        for (std::size_t index = 0; index < actual.pixels.size(); ++index)
+                        {
+                            maximumOpacity = std::max(maximumOpacity, 1.f - actual.pixels[index].a());
+                            for (int channel = 0; channel < 4; ++channel)
+                            {
+                                ASSERT_TRUE(std::isfinite(actual.pixels[index][channel]));
+                                ASSERT_TRUE(std::isfinite(metadata.pixels[index][channel]));
+                                maximumError = std::max(maximumError,
+                                    std::abs(actual.pixels[index][channel] - reference.pixels[index][channel]));
+                                maximumMetadataError = std::max(maximumMetadataError,
+                                    std::abs(
+                                        metadata.pixels[index][channel] - referenceMetadata.pixels[index][channel]));
+                            }
+                        }
+                        EXPECT_GT(maximumOpacity, 0.001f);
+                        EXPECT_LE(maximumError, 1e-5f);
+                        EXPECT_LE(maximumMetadataError, 1e-5f);
+                    }
+                }
             }
         }
     }
