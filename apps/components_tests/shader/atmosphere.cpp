@@ -38,6 +38,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 
 #include <gtest/gtest.h>
 
@@ -161,10 +162,52 @@ namespace
         int cloudDensitySliceQuantity = 0;
         bool renderCloudDensitySlice = false;
         bool renderCloudRayOffsets = false;
+        bool measureCloudMarchProgress = false;
+        bool useLegacyCloudMarchReference = false;
         bool useUnculledLowCloudReference = false;
         bool useUncachedLocalLighting = false;
         bool resolveReprojectedVolume = false;
     };
+
+    /// Reject ambiguous shader fixture substitutions rather than silently testing a different path.
+    void replaceUniqueShaderText(std::string& source, const std::string& marker, const std::string& replacement)
+    {
+        const auto position = source.find(marker);
+        if (position == std::string::npos || source.find(marker, position + marker.size()) != std::string::npos)
+            throw std::runtime_error("Atmosphere shader fixture requires a unique production anchor");
+        source.replace(position, marker.size(), replacement);
+    }
+
+    /// Retain the original accumulation only as a reference for rays that completed without repeated steps.
+    std::string makeLegacyCloudMarchReference(std::string source)
+    {
+        replaceUniqueShaderText(source,
+            "return stepLength >= remainingIntervalLength ? intervalEndDistance : distanceAlongIntervals + stepLength;",
+            "return distanceAlongIntervals + stepLength;");
+        replaceUniqueShaderText(source, "            distanceAlongCloudIntervals = activeIntervalEnd;",
+            "            distanceAlongCloudIntervals = firstIntervalLength;");
+        return source;
+    }
+
+    /// Observe repeated march positions without replacing production interval or sampling calculations.
+    std::string instrumentCloudMarchProgress(std::string source)
+    {
+        replaceUniqueShaderText(source, "vec4 openmwseIntegrateCloudsInternal(",
+            "vec2 openmwseTestMarchProgress = vec2(0.0);\nvec4 openmwseIntegrateCloudsInternal(");
+        replaceUniqueShaderText(source, "    float distanceAlongCloudIntervals = 0.0;",
+            "    float previousDiagnosticDistance = -1.0;\n    float distanceAlongCloudIntervals = 0.0;");
+        replaceUniqueShaderText(source, "        bool sampleSecondInterval = separatedIntervals",
+            "        openmwseTestMarchProgress.x += 1.0;\n"
+            "        if (distanceAlongCloudIntervals <= previousDiagnosticDistance)\n"
+            "            openmwseTestMarchProgress.y += 1.0;\n"
+            "        previousDiagnosticDistance = distanceAlongCloudIntervals;\n"
+            "        bool sampleSecondInterval = separatedIntervals");
+        const auto output = source.rfind("    omw_FragColor1 = metadata;");
+        if (output == std::string::npos)
+            throw std::runtime_error("Cloud march instrumentation requires the ray-grid output");
+        source.insert(output, "    omw_FragColor = vec4(openmwseTestMarchProgress, 0.0, 1.0);\n");
+        return source;
+    }
 
     /// Return the representative shader permutation used by atmosphere rendering tests.
     Shader::ShaderManager::DefineMap getAtmosphereTestDefines();
@@ -554,6 +597,10 @@ void main()
     omw_FragColor1 = metadata;
 }
 )glsl";
+                if (inputs.useLegacyCloudMarchReference)
+                    source = makeLegacyCloudMarchReference(std::move(source));
+                if (inputs.measureCloudMarchProgress)
+                    source = instrumentCloudMarchProgress(std::move(source));
                 shader->setShaderSource(source);
             }
             state->addUniform(new osg::Uniform(
@@ -2675,6 +2722,86 @@ void main()
                 }
                 EXPECT_GT(shadowed, 0u);
                 EXPECT_LT(maximumError, 0.0001f);
+            }
+        }
+    }
+
+    /// Finish separated strata without replaying or stalling at a rounded interval endpoint.
+    TEST(AtmosphereShaderTest, separatedCloudStrataMakeForwardProgress)
+    {
+        NativePassInputs inputs;
+        inputs.width = 96;
+        inputs.height = 64;
+        inputs.measureCloudMarchProgress = true;
+        inputs.farPlane = 229376.f;
+        inputs.fogFar = 229376.f;
+        inputs.verticalFov = 75.f;
+        inputs.mistParameters = {};
+        inputs.cloudParameters = { 0.5f, 0.04f, 66000.f, 124150.f };
+        inputs.lowCloudParameters = { 0.25f, 0.04f, 5948.21f, 6589.7f };
+        inputs.cloudModel.mCoverageMinimum = 0.6f;
+        inputs.environmentalCloudModel.mCoverageMinimum = 0.6f;
+        inputs.sunDirection = { -0.924063f, -0.230443f, 0.304965f, 0.f };
+        for (const int quality : { 0, 1, 2, 3 })
+        {
+            inputs.quality = quality;
+            for (const float altitude : { 1534.89f, 210000.f })
+            {
+                SCOPED_TRACE(testing::Message() << "quality=" << quality << " altitude=" << altitude);
+                inputs.eyePosition = { 19962.8f, -97319.7f, altitude };
+                inputs.viewDirection = { 0.97f, 0.f, altitude < 66000.f ? 0.2f : -0.2f };
+                const PassImage result = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                std::size_t sampledRays = 0;
+                std::size_t repeatedRays = 0;
+                float maximumRepeatedSteps = 0.f;
+                for (const auto& pixel : result.pixels)
+                {
+                    ASSERT_TRUE(std::isfinite(pixel.x()));
+                    ASSERT_TRUE(std::isfinite(pixel.y()));
+                    sampledRays += pixel.x() > 0.f ? 1 : 0;
+                    repeatedRays += pixel.y() > 0.f ? 1 : 0;
+                    maximumRepeatedSteps = std::max(maximumRepeatedSteps, pixel.y());
+                }
+                EXPECT_GT(sampledRays, 100u);
+                EXPECT_EQ(repeatedRays, 0u) << "Maximum repeated/backward steps: " << maximumRepeatedSteps;
+
+                inputs.useLegacyCloudMarchReference = true;
+                const PassImage legacyProgress = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                inputs.measureCloudMarchProgress = false;
+                PassImage legacyMetadata;
+                const PassImage legacy
+                    = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs, &legacyMetadata);
+                inputs.useLegacyCloudMarchReference = false;
+                PassImage metadata;
+                const PassImage actual = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs, &metadata);
+                inputs.measureCloudMarchProgress = true;
+                ASSERT_EQ(actual.pixels.size(), legacy.pixels.size());
+                ASSERT_EQ(actual.pixels.size(), legacyProgress.pixels.size());
+                ASSERT_EQ(metadata.pixels.size(), legacyMetadata.pixels.size());
+                std::size_t unchangedRays = 0;
+                float maximumError = 0.f;
+                float maximumMetadataError = 0.f;
+                float maximumOpacity = 0.f;
+                for (std::size_t index = 0; index < actual.pixels.size(); ++index)
+                {
+                    if (legacyProgress.pixels[index].x() == 0.f || legacyProgress.pixels[index].y() > 0.f)
+                        continue;
+                    ++unchangedRays;
+                    maximumOpacity = std::max(maximumOpacity, 1.f - actual.pixels[index].a());
+                    for (int channel = 0; channel < 4; ++channel)
+                    {
+                        ASSERT_TRUE(std::isfinite(actual.pixels[index][channel]));
+                        ASSERT_TRUE(std::isfinite(metadata.pixels[index][channel]));
+                        maximumError = std::max(
+                            maximumError, std::abs(actual.pixels[index][channel] - legacy.pixels[index][channel]));
+                        maximumMetadataError = std::max(maximumMetadataError,
+                            std::abs(metadata.pixels[index][channel] - legacyMetadata.pixels[index][channel]));
+                    }
+                }
+                EXPECT_GT(unchangedRays, 100u);
+                EXPECT_GT(maximumOpacity, 0.001f);
+                EXPECT_LE(maximumError, 1e-5f);
+                EXPECT_LE(maximumMetadataError, 1e-5f);
             }
         }
     }

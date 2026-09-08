@@ -659,6 +659,13 @@ float openmwseCloudMarchStepLength(float intervalLength, float physicalScale, in
     return min(intervalLength / (maximumSteps * 0.125), max(intervalLength, allocationDistance) / maximumSteps);
 }
 
+/// Finish a clipped interval at its explicit endpoint so rounded cumulative distances cannot stall or replay it.
+float openmwseAdvanceCloudMarch(float distanceAlongIntervals, float stepLength,
+    float remainingIntervalLength, float intervalEndDistance)
+{
+    return stepLength >= remainingIntervalLength ? intervalEndDistance : distanceAlongIntervals + stepLength;
+}
+
 /// Interleave cloud and local-medium transport with supplied local illumination and visible-opacity-weighted distances.
 vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float maximumDistance, int quality,
     vec3 solarRadiance, vec3 skyIrradiance, vec3 groundIrradiance, OpenMWSEVolumeIllumination lowIllumination, vec3 atmosphericTarget,
@@ -778,10 +785,11 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
             = sampleSecondInterval ? distanceAlongCloudIntervals - firstIntervalLength : distanceAlongCloudIntervals;
         vec2 activeInterval = sampleSecondInterval ? secondInterval : firstInterval;
         float activeIntervalLength = sampleSecondInterval ? secondIntervalLength : firstIntervalLength;
+        float activeIntervalEnd = sampleSecondInterval ? traversedIntervalLength : firstIntervalLength;
         float remainingIntervalLength = activeIntervalLength - intervalPathOffset;
         if (remainingIntervalLength <= 0.0)
         {
-            distanceAlongCloudIntervals = firstIntervalLength;
+            distanceAlongCloudIntervals = activeIntervalEnd;
             continue;
         }
         float fineStepLength = sampleSecondInterval ? secondFineStepLength : firstFineStepLength;
@@ -836,7 +844,8 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
                 float skipLength = min(fineStepLength * emptySpaceStepCount, remainingIntervalLength);
                 if (lowIntervalValid && distanceAlongRay < lowInterval.x)
                     skipLength = min(skipLength, lowInterval.x - distanceAlongRay);
-                distanceAlongCloudIntervals += skipLength;
+                distanceAlongCloudIntervals = openmwseAdvanceCloudMarch(
+                    distanceAlongCloudIntervals, skipLength, remainingIntervalLength, activeIntervalEnd);
                 continue;
             }
         }
@@ -986,7 +995,8 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
             if (all(lessThan(transmittance, vec3(0.005))))
                 break;
         }
-        distanceAlongCloudIntervals += segmentLength;
+        distanceAlongCloudIntervals = openmwseAdvanceCloudMarch(
+            distanceAlongCloudIntervals, segmentLength, remainingIntervalLength, activeIntervalEnd);
     }
 
     openmwseAdvanceLocalMedia(localMedia, maximumDistance, localCursor, transmittance,
