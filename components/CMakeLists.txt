@@ -133,7 +133,7 @@ add_component_dir (resource
     )
 
 add_component_dir (shader
-    shadermanager shadervisitor removedalphafunc
+    shadermanager shadervisitor removedalphafunc cloudprogram
     )
 
 add_component_dir (sceneutil
@@ -141,7 +141,7 @@ add_component_dir (sceneutil
     lightmanager lightutil positionattitudetransform workqueue pathgridutil waterutil writescene serialize optimizer
     detourdebugdraw navmesh agentpath animblendrules shadow mwshadowtechnique recastmesh shadowsbin osgacontroller rtt
     screencapture depth color riggeometryosgaextension extradata unrefqueue lightcommon clearcolor offscreencontext optimizeroptions
-    cullsafeboundsvisitor keyframe nodecallback textkeymap glextensions fog texmat material cloudadvection cloudlayer atmosphereterraingrid
+    cullsafeboundsvisitor keyframe nodecallback textkeymap glextensions fog texmat material cloudadvection cloudlayer cloudshaderstate atmosphereterraingrid
     )
 
 add_component_dir (nif

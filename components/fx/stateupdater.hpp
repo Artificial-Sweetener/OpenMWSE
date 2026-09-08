@@ -183,6 +183,7 @@ namespace Fx
 
         void setDefaults(osg::StateSet* stateset) override;
 
+        /// Publish the frame's uniforms and matching cloud specialization through either binding path.
         void apply(osg::StateSet* stateset, osg::NodeVisitor* nv) override;
 
     private:

@@ -2,6 +2,7 @@
 #include <components/fx/stateupdater.hpp>
 #include <components/fx/technique.hpp>
 #include <components/resource/imagemanager.hpp>
+#include <components/sceneutil/cloudshaderstate.hpp>
 #include <components/sceneutil/depth.hpp>
 #include <components/shader/shadermanager.hpp>
 #include <components/vfs/filesystemarchive.hpp>
@@ -145,6 +146,7 @@ namespace
         bool atmosphereEnabled = true;
         bool reverseZ = false;
         bool useUniformBuffer = false;
+        bool useGeneralCloudShader = false;
         bool bindUniformBufferOnAncestor = false;
         bool renderReprojectionCoordinates = false;
         int width = 64;
@@ -1093,6 +1095,8 @@ void main()
         osg::StateSet* updaterState = inputs.bindUniformBufferOnAncestor ? scene->getOrCreateStateSet() : state;
         updater.setDefaults(updaterState);
         updater.apply(updaterState, nullptr);
+        if (inputs.useGeneralCloudShader)
+            updaterState->setDefine("OPENMWSE_CLOUD_STEADY", "0", osg::StateAttribute::ON);
 
         viewer.setSceneData(scene);
         viewer.realize();
@@ -3669,6 +3673,116 @@ void main()
             EXPECT_NEAR(varied.pixels[index].y(), restrained.pixels[index].y(), 0.001f);
         }
         EXPECT_FLOAT_EQ(maximumBaseDifference, 0.f);
+    }
+
+    /// Prepare both weather programs at first compilation while preserving stacked and directly applied defines.
+    TEST(AtmosphereShaderTest, cloudProgramsPrecompileWeatherVariants)
+    {
+        osg::ref_ptr<osg::GraphicsContext::Traits> traits = new osg::GraphicsContext::Traits;
+        traits->width = traits->height = 1;
+        traits->pbuffer = true;
+        traits->doubleBuffer = false;
+        osg::ref_ptr<osg::GraphicsContext> context = osg::GraphicsContext::createGraphicsContext(traits);
+        ASSERT_TRUE(context && context->realize());
+        ASSERT_TRUE(context->makeCurrent());
+        osg::State& state = *context->getState();
+        for (const bool stacked : { false, true })
+        {
+            osg::ref_ptr<Shader::CloudProgram> program = new Shader::CloudProgram;
+            program->addShader(
+                new osg::Shader(osg::Shader::VERTEX, "#version 120\nvoid main() { gl_Position = gl_Vertex; }\n"));
+            program->addShader(new osg::Shader(osg::Shader::FRAGMENT, R"glsl(
+                #version 120
+                #pragma import_defines(OPENMWSE_CLOUD_STEADY, TEST_UNRELATED)
+                #ifndef OPENMWSE_CLOUD_STEADY
+                #define OPENMWSE_CLOUD_STEADY 0
+                #endif
+                void main() { gl_FragColor = vec4(float(OPENMWSE_CLOUD_STEADY)); }
+            )glsl"));
+            osg::ref_ptr<osg::StateSet> initial = new osg::StateSet;
+            initial->setDefine(Shader::sSteadyCloudDefine, "0", osg::StateAttribute::ON);
+            initial->setDefine("TEST_UNRELATED", "7", osg::StateAttribute::ON);
+            if (stacked)
+                state.pushStateSet(initial);
+            else
+                state.apply(initial);
+            const std::string before = state.getDefineString(program->getShaderDefines());
+            program->compileGLObjects(state);
+            EXPECT_EQ(state.getDefineString(program->getShaderDefines()), before);
+            for (const char* variant : { "1", "0", "1", "0" })
+            {
+                auto& defines = state.getDefineMap();
+                defines.currentDefines[Shader::sSteadyCloudDefine] = { variant, osg::StateAttribute::ON };
+                const auto* compiled = program->getPCP(state);
+                ASSERT_NE(compiled, nullptr);
+                EXPECT_FALSE(compiled->needsLink());
+                EXPECT_TRUE(compiled->isLinked());
+            }
+            if (stacked)
+                state.popStateSet();
+            else
+                state.apply();
+        }
+        context->close();
+    }
+
+    /// Preserve cloud radiance and visible-depth metadata when the incoming weather branch is compiled away.
+    TEST(AtmosphereShaderTest, steadyCloudVariantPreservesWeatherTransport)
+    {
+        for (const bool useUniformBuffer : { false, true })
+            for (const float transition : { 0.f, 0.0001f, 0.5f, 1.f })
+                for (const int quality : { 0, 1, 2, 3 })
+                {
+                    SCOPED_TRACE(::testing::Message()
+                        << "ubo=" << useUniformBuffer << " transition=" << transition << " quality=" << quality);
+                    NativePassInputs inputs = makePackagedAtmosphereInputs("Cloudy", "Sunset");
+                    inputs.width = 12;
+                    inputs.height = 8;
+                    inputs.useUniformBuffer = useUniformBuffer;
+                    inputs.bindUniformBufferOnAncestor = useUniformBuffer;
+                    inputs.quality = quality;
+                    inputs.cloudParameters = { 0.8f, 0.8f, 4000.f, 12000.f };
+                    inputs.incomingCloudParameters = { 0.7f, 0.9f, 6000.f, 16000.f };
+                    inputs.cloudModel.mCoverageMinimum = 0.9f;
+                    inputs.incomingCloudModel.mCoverageMinimum = 0.9f;
+                    inputs.cloudScenarioParameters = { 0.2f, 2.4f, transition, 1.f };
+                    inputs.eyePosition = { 0.f, 0.f, 7000.f };
+                    inputs.viewDirection = { 1.f, 0.f, 0.2f };
+                    inputs.viewDirection.normalize();
+                    inputs.farPlane = 40000.f;
+                    inputs.lowCloudParameters = {};
+                    inputs.mistParameters = {};
+                    inputs.fogVolumeParameters = {};
+                    PassImage metadata;
+                    const PassImage actual
+                        = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs, &metadata);
+                    inputs.useGeneralCloudShader = true;
+                    PassImage referenceMetadata;
+                    const PassImage reference
+                        = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs, &referenceMetadata);
+                    ASSERT_EQ(actual.pixels.size(), reference.pixels.size());
+                    ASSERT_EQ(metadata.pixels.size(), referenceMetadata.pixels.size());
+                    ASSERT_FALSE(actual.pixels.empty());
+                    float maximumError = 0.f;
+                    float maximumMetadataError = 0.f;
+                    float maximumOpacity = 0.f;
+                    for (std::size_t index = 0; index < actual.pixels.size(); ++index)
+                    {
+                        maximumOpacity = std::max(maximumOpacity, 1.f - reference.pixels[index].a());
+                        for (int channel = 0; channel < 4; ++channel)
+                        {
+                            ASSERT_TRUE(std::isfinite(actual.pixels[index][channel]));
+                            ASSERT_TRUE(std::isfinite(metadata.pixels[index][channel]));
+                            maximumError = std::max(maximumError,
+                                std::abs(actual.pixels[index][channel] - reference.pixels[index][channel]));
+                            maximumMetadataError = std::max(maximumMetadataError,
+                                std::abs(metadata.pixels[index][channel] - referenceMetadata.pixels[index][channel]));
+                        }
+                    }
+                    EXPECT_GT(maximumOpacity, 0.01f);
+                    EXPECT_LE(maximumError, 1e-6f);
+                    EXPECT_LE(maximumMetadataError, 1e-6f);
+                }
     }
 
     /// Keep outgoing and incoming feature domains independent while their optical influence crossfades.

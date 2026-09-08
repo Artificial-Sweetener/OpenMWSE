@@ -54,12 +54,15 @@ OpenMWSECloudLayer openmwseMainCloudLayer()
         openmwseCloudEpisodeOffset(scenario.x), 0.0, 0.0);
 }
 
-/// Keep the incoming episode's density model and field phase independent throughout its optical crossfade.
+/// Preserve the incoming optical crossfade and eliminate its inactive work in a published steady-weather variant.
 OpenMWSECloudLayer openmwseIncomingCloudLayer()
 {
     vec4 parameters = openmwseIncomingCloudParameters();
     vec4 scenario = openmwseCloudScenarioParameters();
     parameters.y *= clamp(scenario.z, 0.0, 1.0) * step(0.5, scenario.w);
+#if defined(OPENMWSE_CLOUD_STEADY) && OPENMWSE_CLOUD_STEADY
+    parameters.y = 0.0;
+#endif
     return OpenMWSECloudLayer(parameters, openmwseReadCloudModel(1),
         openmwseCloudEpisodeOffset(scenario.y), 0.0, 0.0);
 }

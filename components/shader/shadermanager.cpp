@@ -1,4 +1,5 @@
 #include "shadermanager.hpp"
+#include "cloudprogram.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -577,11 +578,15 @@ namespace Shader
         return shaderIt->second;
     }
 
-    class SamplerProgram : public osg::Program
+    /// Apply fixed sampler bindings to ordinary and precompiled cloud program variants.
+    class SamplerProgram : public CloudProgram
     {
     public:
+        /// Create a sampler program with no fixed texture-unit assignments.
         SamplerProgram() = default;
+        /// Retain texture-unit assignments for every graphics-context program variant.
         explicit SamplerProgram(const ShaderManager::SamplerBindingMap& samplers);
+        /// Copy a program template and attach its fixed sampler assignments.
         SamplerProgram(
             const ShaderManager::SamplerBindingMap& samplers, const osg::Program& other, const osg::CopyOp& copyop);
         SamplerProgram(const SamplerProgram& other, const osg::CopyOp& copyop = osg::CopyOp::SHALLOW_COPY);
@@ -607,10 +612,8 @@ namespace Shader
 
     SamplerProgram::SamplerProgram(
         const ShaderManager::SamplerBindingMap& samplers, const osg::Program& other, const osg::CopyOp& copyop)
-        : osg::Program(other, copyop)
+        : CloudProgram(other, copyop)
     {
-        for (const auto& [name, index] : other.getUniformBlockBindingList())
-            addBindUniformBlock(name, index);
         for (const auto& [name, unit] : samplers)
             mSamplers.emplace_back(new osg::Uniform(name.c_str(), unit));
     }

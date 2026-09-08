@@ -1,5 +1,7 @@
 #version 120
 
+#pragma import_defines(OPENMWSE_CLOUD_STEADY)
+
 #include "lib/sky/cloud_lighting.h.glsl"
 
 #include "lib/sky/passes.glsl"

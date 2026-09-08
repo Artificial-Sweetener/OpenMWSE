@@ -4,6 +4,7 @@
 #include <osg/PolygonMode>
 
 #include "cloudadvection.hpp"
+#include "cloudshaderstate.hpp"
 #include "depth.hpp"
 #include "rtt.hpp"
 #include "statesetupdater.hpp"
@@ -241,8 +242,10 @@ namespace SceneUtil
         stateset->addUniform(new osg::Uniform("openmwseAtmosphereDiagnosticMode", mAtmosphereDiagnosticMode));
     }
 
+    /// Publish atmosphere uniforms and cloud specialization together for compatibility rendering.
     void StateUpdater::apply(osg::StateSet* stateset, osg::NodeVisitor*)
     {
+        updateCloudShaderState(*stateset, mAtmosphereCloudScenarioParameters);
         configureSunAmbientOverride(mAmbientColor, stateset);
 
         SceneUtil::updateFogColor(*stateset, mFogColor);

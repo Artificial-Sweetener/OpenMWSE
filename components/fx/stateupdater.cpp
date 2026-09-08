@@ -4,6 +4,7 @@
 #include <osg/BufferObject>
 
 #include <components/resource/scenemanager.hpp>
+#include <components/sceneutil/cloudshaderstate.hpp>
 
 namespace Fx
 {
@@ -135,8 +136,10 @@ namespace Fx
         }
     }
 
+    /// Publish uniforms and the matching cloud variant to the same frame-owned state set.
     void StateUpdater::apply(osg::StateSet* stateset, osg::NodeVisitor* nv)
     {
+        SceneUtil::updateCloudShaderState(*stateset, mData.get<AtmosphereCloudScenarioParameters>());
         if (mUseUBO)
         {
             osg::UniformBufferBinding* ubb = dynamic_cast<osg::UniformBufferBinding*>(

@@ -632,6 +632,7 @@ vertex integrateAtmosphereVolume {
 }
 
 fragment integrateAtmosphereVolume(target=AtmosphereVolumeRaw, secondary_target=AtmosphereVolumeMetadataRaw) {
+    #pragma import_defines(OPENMWSE_CLOUD_STEADY)
     omw_In vec2 omw_TexCoord;
 #if __VERSION__ >= 130 || defined(GL_EXT_gpu_shader4)
     flat
@@ -948,6 +949,7 @@ vertex resolveAtmosphereVolumeHistory {
 fragment resolveAtmosphereVolumeHistory(
     target=AtmosphereVolumeHistory, secondary_target=AtmosphereVolumeMetadataHistory,
     rt1=AtmosphereVolumeReprojected, rt2=AtmosphereVolumeMetadataReprojected) {
+    #pragma import_defines(OPENMWSE_CLOUD_STEADY)
     omw_In vec2 omw_TexCoord;
 #if __VERSION__ >= 130 || defined(GL_EXT_gpu_shader4)
     flat

@@ -97,7 +97,7 @@ namespace SceneUtil
         /// Initialize scene uniforms, including independent shape motion derived from the coverage phase.
         void setDefaults(osg::StateSet* stateset) override;
 
-        /// Publish the current scene state and coherent coverage/shape phases to an existing render state set.
+        /// Publish scene uniforms, coherent cloud phases, and their matching shader specialization together.
         void apply(osg::StateSet* stateset, osg::NodeVisitor*) override;
 
         void setAmbientColor(const osg::Vec4f& col);

@@ -14,6 +14,7 @@
 #include <components/resource/scenemanager.hpp>
 #include <components/sceneutil/lightmanager.hpp>
 #include <components/settings/values.hpp>
+#include <components/shader/cloudprogram.hpp>
 #include <components/stereo/multiview.hpp>
 #include <components/version/version.hpp>
 
@@ -374,17 +375,24 @@ mat4 omw_InvProjectionMatrix()
         return header;
     }
 
+    /// Bind independent pass stages with their imported defines and declared fragment outputs intact.
     void Pass::prepareStateSet(osg::StateSet* stateSet, const std::string& name) const
     {
-        osg::ref_ptr<osg::Program> program = new osg::Program;
+        osg::ref_ptr<osg::Program> program = new Shader::CloudProgram;
+        const auto addStage = [&](const osg::Shader& source) {
+            osg::ref_ptr<osg::Shader> shader = new osg::Shader(source);
+            // OSG 3.6's copy constructor omits parsed pragma metadata; reparse before the program reads its defines.
+            shader->setShaderSource(source.getShaderSource());
+            program->addShader(shader);
+        };
         if (mType == Type::Pixel)
         {
-            program->addShader(new osg::Shader(*mVertex));
-            program->addShader(new osg::Shader(*mFragment));
+            addStage(*mVertex);
+            addStage(*mFragment);
         }
         else if (mType == Type::Compute)
         {
-            program->addShader(new osg::Shader(*mCompute));
+            addStage(*mCompute);
         }
 
         if (mUBO)

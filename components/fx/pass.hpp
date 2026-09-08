@@ -51,7 +51,7 @@ namespace Fx
 
         const std::array<std::string, 3>& getRenderTargets() const { return mRenderTargets; }
 
-        /// Bind the compiled stages and all declared fragment-output locations to a pass state set.
+        /// Bind independent stages with their imported defines and declared fragment-output locations intact.
         void prepareStateSet(osg::StateSet* stateSet, const std::string& name) const;
 
         std::string getName() const { return mName; }

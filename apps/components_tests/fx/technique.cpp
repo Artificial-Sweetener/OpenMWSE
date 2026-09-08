@@ -7,6 +7,8 @@
 #include <components/settings/settings.hpp>
 #include <components/testing/util.hpp>
 
+#include <osg/Program>
+
 namespace
 {
     constexpr VFS::Path::NormalizedView techniquePropertiesPath("shaders/technique_properties.omwfx");
@@ -283,6 +285,41 @@ namespace
 
         EXPECT_EQ(mTechnique->getPasses().size(), 2);
         EXPECT_EQ(mTechnique->getPasses()[0]->getTarget(), "rendertarget");
+    }
+
+    /// Preserve imported shader defines when a technique creates independent stages for a render pass.
+    TEST(TechniqueOutputTest, passStagesRetainImportedDefines)
+    {
+        TestingOpenMW::VFSTestFile file(R"(
+            shared {
+                #pragma import_defines(TEST_VARIANT)
+            }
+            vertex main { void main() { omw_Position = omw_Vertex; } }
+            fragment main { void main() { omw_FragColor = vec4(1.0); } }
+            technique { passes = main; }
+        )");
+        auto vfs = TestingOpenMW::createTestVFS({ { VFS::Path::NormalizedView("shaders/variants.omwfx"), &file } });
+        Resource::ImageManager images(vfs.get(), 0);
+        Technique technique(
+            *vfs, images, VFS::Path::NormalizedView("shaders/variants.omwfx"), "variants", 1, 1, false, true);
+        ASSERT_TRUE(technique.compile()) << technique.getLastError();
+        ASSERT_EQ(technique.getPasses().size(), 1u);
+        osg::ref_ptr<osg::StateSet> state = new osg::StateSet;
+        technique.getPasses()[0]->prepareStateSet(state, "variants");
+        auto* program = dynamic_cast<osg::Program*>(state->getAttribute(osg::StateAttribute::PROGRAM));
+        ASSERT_NE(program, nullptr);
+        ASSERT_EQ(program->getNumShaders(), 2u);
+        EXPECT_EQ(program->getShaderDefines().count("TEST_VARIANT"), 1u);
+        for (unsigned int index = 0; index < program->getNumShaders(); ++index)
+            EXPECT_EQ(program->getShader(index)->getShaderDefines().count("TEST_VARIANT"), 1u);
+        program->addBindUniformBlock("TestBlock", 2);
+        for (const auto copy : { osg::CopyOp::SHALLOW_COPY, osg::CopyOp::DEEP_COPY_STATEATTRIBUTES })
+        {
+            osg::ref_ptr<osg::Program> clone = dynamic_cast<osg::Program*>(program->clone(copy));
+            ASSERT_TRUE(clone);
+            EXPECT_EQ(clone->getShaderDefines(), program->getShaderDefines());
+            EXPECT_EQ(clone->getUniformBlockBindingList(), program->getUniformBlockBindingList());
+        }
     }
 
     TEST(TechniqueOutputTest, validatesSimultaneousOutputContracts)
