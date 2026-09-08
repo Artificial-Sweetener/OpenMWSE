@@ -160,6 +160,7 @@ namespace
         bool renderCloudDensitySlice = false;
         bool renderCloudRayOffsets = false;
         bool useUnculledLowCloudReference = false;
+        bool useUncachedLocalLighting = false;
         bool resolveReprojectedVolume = false;
     };
 
@@ -426,6 +427,34 @@ namespace
         geode->addDrawable(triangle);
         osg::StateSet* state = geode->getOrCreateStateSet();
         (*passIt)->prepareStateSet(state, technique.getName());
+        if (inputs.useUncachedLocalLighting)
+        {
+            auto* program = dynamic_cast<osg::Program*>(state->getAttribute(osg::StateAttribute::PROGRAM));
+            if (!program)
+                throw std::runtime_error("Local lighting reference has no production shader");
+            for (unsigned index = 0; index < program->getNumShaders(); ++index)
+            {
+                osg::Shader* shader = program->getShader(index);
+                if (shader->getType() != osg::Shader::FRAGMENT)
+                    continue;
+                std::string source = shader->getShaderSource();
+                const std::string guard = "if (lightRecovery != previousLightRecovery)";
+                const auto position = source.find(guard);
+                if (position == std::string::npos)
+                    throw std::runtime_error("Local lighting reference cannot locate recovery reuse");
+                source.replace(position, guard.size(), "if (true)");
+                const std::string integral = "vec4 integratedVolume = openmwseIntegrateClouds(";
+                const auto integralPosition = source.find(integral);
+                if (integralPosition == std::string::npos)
+                    throw std::runtime_error("Fragment lighting reference cannot locate cloud transport");
+                source.insert(integralPosition,
+                    "vec4 referenceLowParameters = openmwseLowCloudParameters();\n"
+                    "lowCloudLighting = openmwseLocalVolumeIllumination(omw.atmosphereSolarRadiance, "
+                    "omw.atmosphereGroundIrradiance, omw.waterHeight + referenceLowParameters.z "
+                    "+ referenceLowParameters.w * 0.5, atmosphere);\n");
+                shader->setShaderSource(source);
+            }
+        }
         if (inputs.useUnculledLowCloudReference)
         {
             auto* program = dynamic_cast<osg::Program*>(state->getAttribute(osg::StateAttribute::PROGRAM));
@@ -517,7 +546,9 @@ void main()
 {
     vec4 metadata;
     omw_FragColor = integrateAtmosphereAtUv(
-        gl_FragCoord.xy / openmwseTestRayGridDimensions, gl_FragCoord.xy, atmosphereTemporalSamplingEnabled(), metadata);
+        gl_FragCoord.xy / openmwseTestRayGridDimensions, gl_FragCoord.xy, atmosphereTemporalSamplingEnabled(),
+        OpenMWSEVolumeIllumination(atmosphereLowSolarIrradiance, atmosphereLowDiffuseRadiance),
+        atmosphereBelowCloudDiffuse, metadata);
     omw_FragColor1 = metadata;
 }
 )glsl";
@@ -6642,6 +6673,63 @@ void main()
             EXPECT_NEAR(movedReference.pixels[0].a(), finerReference.pixels[0].a(), 0.0005f);
             inputs.renderCloudDensitySlice = false;
         }
+    }
+
+    /// Preserve local-medium radiance and depth when lighting is reused below, across, and above cloud recovery.
+    TEST(AtmosphereShaderTest, localLightReusePreservesPerSampleIllumination)
+    {
+        for (const float sunHeight : { -0.12f, 0.03f, 0.65f })
+            for (const float layerAltitude : { 500.f, 10000.f, 25000.f })
+                for (const bool reverseZ : { false, true })
+                    for (const bool lowClouds : { false, true })
+                    {
+                        SCOPED_TRACE(::testing::Message() << "sun=" << sunHeight << " altitude=" << layerAltitude
+                                                          << " reverseZ=" << reverseZ << " lowClouds=" << lowClouds);
+                        NativePassInputs inputs = makePackagedAtmosphereInputs("Cloudy", "Sunset");
+                        inputs.width = 12;
+                        inputs.height = 8;
+                        inputs.quality = 2;
+                        inputs.reverseZ = reverseZ;
+                        inputs.useUniformBuffer = reverseZ;
+                        inputs.depth = [reverseZ](int, int) { return reverseZ ? 0.f : 1.f; };
+                        inputs.sunDirection = { 1.f, 0.2f, sunHeight, 0.f };
+                        inputs.cloudParameters = { 0.9f, 0.1f, 5000.f, 5000.f };
+                        inputs.incomingCloudParameters = {};
+                        inputs.lowCloudParameters
+                            = lowClouds ? osg::Vec4f(0.4f, 0.9f, layerAltitude, 10000.f) : osg::Vec4f();
+                        inputs.environmentalCloudModel = SceneUtil::CloudLayer{};
+                        inputs.environmentalCloudModel.mCoverageMinimum = 1.f;
+                        inputs.environmentalCloudModel.mTypeAmount = 0.f;
+                        inputs.environmentalCloudModel.mTypeMinimum = 0.5f;
+                        inputs.lowCloudEnvironmentInfluence = 0.f;
+                        inputs.mistParameters = {};
+                        inputs.fogVolumeParameters = { 0.025f, layerAltitude, 14000.f, 0.35f };
+                        inputs.eyePosition = { 0.f, 0.f, layerAltitude + 2000.f };
+                        inputs.viewDirection = { 1.f, 0.f, 0.5f };
+                        inputs.viewDirection.normalize();
+                        inputs.farPlane = 40000.f;
+                        PassImage cachedMetadata;
+                        const PassImage cached
+                            = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs, &cachedMetadata);
+                        inputs.useUncachedLocalLighting = true;
+                        PassImage referenceMetadata;
+                        const PassImage reference
+                            = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs, &referenceMetadata);
+                        ASSERT_EQ(cached.pixels.size(), reference.pixels.size());
+                        ASSERT_FALSE(cached.pixels.empty());
+                        float maximumOpacity = 0.f;
+                        for (std::size_t pixel = 0; pixel < cached.pixels.size(); ++pixel)
+                        {
+                            maximumOpacity = std::max(maximumOpacity, 1.f - reference.pixels[pixel].a());
+                            for (int channel = 0; channel < 4; ++channel)
+                            {
+                                EXPECT_NEAR(cached.pixels[pixel][channel], reference.pixels[pixel][channel], 1e-6f);
+                                EXPECT_NEAR(cachedMetadata.pixels[pixel][channel],
+                                    referenceMetadata.pixels[pixel][channel], 1e-6f);
+                            }
+                        }
+                        EXPECT_GT(maximumOpacity, 0.01f);
+                    }
     }
 
     /// Keep every occupied low-cloud sample inside conservative ray bounds across terrain slopes and lattice edges.

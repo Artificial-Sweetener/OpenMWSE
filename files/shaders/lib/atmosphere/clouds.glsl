@@ -656,9 +656,9 @@ float openmwseCloudMarchStepLength(float intervalLength, float physicalScale, in
     return min(intervalLength / (maximumSteps * 0.125), max(intervalLength, allocationDistance) / maximumSteps);
 }
 
-/// Interleave cloud and local-medium transport along the ray, retaining visible-opacity-weighted world distances.
+/// Interleave cloud and local-medium transport with supplied local illumination and visible-opacity-weighted distances.
 vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float maximumDistance, int quality,
-    vec3 solarRadiance, vec3 skyIrradiance, vec3 groundIrradiance, vec3 atmosphericTarget,
+    vec3 solarRadiance, vec3 skyIrradiance, vec3 groundIrradiance, OpenMWSEVolumeIllumination lowIllumination, vec3 atmosphericTarget,
     OpenMWSEAerialPerspectiveParameters atmosphere, float rayDither, bool quadratureSampling,
     bool useAtmosphericTarget, OpenMWSELocalMedia localMedia,
     out float visibleDistanceSum, out float visibleCloudOpacity)
@@ -761,10 +761,6 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
     float primaryPhase = openmwseCloudDualLobePhase(dot(worldDirection, sunDirection));
     float secondaryPhase = mix(0.07957747, primaryPhase, 0.2);
     OpenMWSEVolumeIllumination illumination = openmwseCloudIllumination(solarRadiance, skyIrradiance, atmosphere);
-    // Nearby condensate receives both sky and ground hemispheres at its own altitude.
-    // Its illumination cannot inherit the observer's altitude or the main deck's above-cloud recovery.
-    OpenMWSEVolumeIllumination lowIllumination = openmwseLocalVolumeIllumination(solarRadiance,
-        groundIrradiance, openmwseCloudWaterHeight() + lowLayer.parameters.z + lowLayer.parameters.w * 0.5, atmosphere);
     // Incident light is evaluated above the deck, but the cloud-to-eye path belongs to the real observer.
     vec3 viewSkyRadiance = openmwseAtmosphereSkyRadiance(worldDirection, atmosphere);
 
@@ -1009,14 +1005,14 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
     return vec4(scatteredLight, dot(transmittance, vec3(1.0 / 3.0)));
 }
 
-/// Return the ordered native atmosphere integral and visible cloud contribution for history metadata.
+/// Integrate native atmosphere using fixed-altitude low-cloud illumination and retain cloud history metadata.
 vec4 openmwseIntegrateClouds(vec3 rayOrigin, vec3 worldDirection, float maximumDistance, int quality,
-    vec3 solarRadiance, vec3 skyIrradiance, vec3 groundIrradiance,
+    vec3 solarRadiance, vec3 skyIrradiance, vec3 groundIrradiance, OpenMWSEVolumeIllumination lowIllumination,
     OpenMWSEAerialPerspectiveParameters atmosphere, float rayDither, bool quadratureSampling,
     OpenMWSELocalMedia localMedia, out float visibleDistanceSum, out float visibleCloudOpacity)
 {
     return openmwseIntegrateCloudsInternal(rayOrigin, worldDirection, maximumDistance, quality, solarRadiance,
-        skyIrradiance, groundIrradiance, vec3(0.0), atmosphere, rayDither,
+        skyIrradiance, groundIrradiance, lowIllumination, vec3(0.0), atmosphere, rayDither,
         quadratureSampling, false, localMedia, visibleDistanceSum, visibleCloudOpacity);
 }
 
@@ -1031,8 +1027,11 @@ vec4 openmwseIntegrateCloudsStable(vec3 rayOrigin, vec3 worldDirection, float ma
     localMedia.count = 0;
     localMedia.startDistance = 0.0;
     localMedia.stepLength = 1.0;
+    vec4 lowParameters = openmwseLowCloudParameters();
+    OpenMWSEVolumeIllumination lowIllumination = openmwseLocalVolumeIllumination(solarRadiance,
+        groundIrradiance, openmwseCloudWaterHeight() + lowParameters.z + lowParameters.w * 0.5, atmosphere);
     return openmwseIntegrateCloudsInternal(rayOrigin, worldDirection, maximumDistance, quality, solarRadiance,
-        skyIrradiance, groundIrradiance, atmosphericTarget, atmosphere, 0.5, true, true, localMedia, visibleDistanceSum, visibleCloudOpacity);
+        skyIrradiance, groundIrradiance, lowIllumination, atmosphericTarget, atmosphere, 0.5, true, true, localMedia, visibleDistanceSum, visibleCloudOpacity);
 }
 
 #endif

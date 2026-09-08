@@ -278,6 +278,8 @@ foreach (f ${BUILTIN_DATA_FILES})
     copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/${f}" "${OPENMW_RESOURCES_ROOT}" "resources/vfs/${f}")
 endforeach (f)
 
+copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/volume_lighting_vertex.glsl" "${OPENMW_RESOURCES_ROOT}"
+    "resources/vfs/shaders/lib/atmosphere/volume_lighting_vertex.glsl")
 copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/clouds.glsl" "${OPENMW_RESOURCES_ROOT}"
     "resources/vfs/shaders/lib/atmosphere/clouds.glsl")
 copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/participating_media.glsl" "${OPENMW_RESOURCES_ROOT}"

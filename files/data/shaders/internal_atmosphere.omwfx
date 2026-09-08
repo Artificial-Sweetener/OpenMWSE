@@ -420,9 +420,10 @@ shared {
         return temporalSamplingEnabled ? fract(spatialOffset + temporalPhase) : spatialOffset;
     }
 
-    /// Integrate one camera ray through the canonical ordered media, including its visible depth moment.
+    /// Integrate one camera ray with draw-constant lighting and altitude-dependent recovery, retaining its depth moment.
     vec4 integrateAtmosphereAtUv(vec2 uv, vec2 volumePixelCoordinate,
-        bool temporalSamplingEnabled, out vec4 metadata)
+        bool temporalSamplingEnabled, OpenMWSEVolumeIllumination lowCloudLighting,
+        vec3 belowCloudDiffuse, out vec4 metadata)
     {
         float sceneDistance = atmosphereSceneRayDistance(uv);
         metadata = vec4(encodeAtmosphereDistance(omw.far), 0.0,
@@ -482,6 +483,10 @@ shared {
                 OpenMWSECloudLayer incomingCloud = openmwseIncomingCloudLayer();
                 OpenMWSECloudLayer lowCloud = openmwseLowCloudLayer();
 
+                float previousLightRecovery = 0.0;
+                OpenMWSEVolumeIllumination illumination
+                    = OpenMWSEVolumeIllumination(lowCloudLighting.solarIrradiance, belowCloudDiffuse);
+
                 for (int sampleIndex = 0; sampleIndex < 15; ++sampleIndex)
                 {
                     if (sampleIndex >= sampleCount)
@@ -499,9 +504,16 @@ shared {
                     {
                         float extinction = mistDensity * 0.00042 + fogDensity * 0.00032;
                         vec3 localLight = atmospherePointLighting(samplePosition);
-                        OpenMWSEVolumeIllumination illumination = openmwseLocalVolumeIllumination(
-                            omw.atmosphereSolarRadiance,
-                            omw.atmosphereGroundIrradiance, samplePosition.z, atmosphere);
+                        OpenMWSEAerialPerspectiveParameters sampleAtmosphere = atmosphere;
+                        sampleAtmosphere.observerHeight = samplePosition.z;
+                        float lightRecovery = openmwseClearAirRecovery(sampleAtmosphere);
+                        // Height changes incident light only through clear-air recovery; its plateaus share one integral.
+                        if (lightRecovery != previousLightRecovery)
+                        {
+                            illumination = openmwseLocalVolumeIllumination(omw.atmosphereSolarRadiance,
+                                omw.atmosphereGroundIrradiance, samplePosition.z, atmosphere);
+                            previousLightRecovery = lightRecovery;
+                        }
                         float solarVisibility = openmwseLocalMediaSunTransmittance(
                             samplePosition, sunDirection, mainCloud, incomingCloud, lowCloud);
                         vec3 directLight = illumination.solarIrradiance * solarVisibility * phase;
@@ -516,7 +528,7 @@ shared {
         float visibleCloudOpacity = 0.0;
         vec4 integratedVolume = openmwseIntegrateClouds(omw.eyePos.xyz, rayDirection,
             cloudMaximumDistance, omw.atmosphereQuality, omw.atmosphereSolarRadiance,
-            omw.atmosphereSkyIrradiance, omw.atmosphereGroundIrradiance, atmosphere,
+            omw.atmosphereSkyIrradiance, omw.atmosphereGroundIrradiance, lowCloudLighting, atmosphere,
             cloudDither, quadratureSampling, localMedia, visibleDistanceSum, visibleCloudOpacity);
         float opacity = 1.0 - integratedVolume.a;
         if (opacity > 1e-5)
@@ -615,8 +627,25 @@ render_target AtmosphereShafts {
     clear_color = vec4(0.0, 0.0, 0.0, 1.0);
 }
 
+vertex integrateAtmosphereVolume {
+    #include "lib/atmosphere/volume_lighting_vertex.glsl"
+}
+
 fragment integrateAtmosphereVolume(target=AtmosphereVolumeRaw, secondary_target=AtmosphereVolumeMetadataRaw) {
     omw_In vec2 omw_TexCoord;
+#if __VERSION__ >= 130 || defined(GL_EXT_gpu_shader4)
+    flat
+#endif
+    omw_In vec3 atmosphereLowSolarIrradiance;
+#if __VERSION__ >= 130 || defined(GL_EXT_gpu_shader4)
+    flat
+#endif
+    omw_In vec3 atmosphereLowDiffuseRadiance;
+#if __VERSION__ >= 130 || defined(GL_EXT_gpu_shader4)
+    flat
+#endif
+    omw_In vec3 atmosphereBelowCloudDiffuse;
+
 
     void main()
     {
@@ -625,7 +654,9 @@ fragment integrateAtmosphereVolume(target=AtmosphereVolumeRaw, secondary_target=
         vec2 uv = (volumeCoordinate + 0.5) / atmosphereVolumeDimensions();
         vec4 metadata;
         omw_FragColor = integrateAtmosphereAtUv(
-            uv, volumeCoordinate + 0.5, atmosphereTemporalSamplingEnabled(), metadata);
+            uv, volumeCoordinate + 0.5, atmosphereTemporalSamplingEnabled(),
+            OpenMWSEVolumeIllumination(atmosphereLowSolarIrradiance, atmosphereLowDiffuseRadiance),
+            atmosphereBelowCloudDiffuse, metadata);
         omw_FragColor1 = metadata;
     }
 }
@@ -910,10 +941,27 @@ fragment reprojectAtmosphereVolume(
     }
 }
 
+vertex resolveAtmosphereVolumeHistory {
+    #include "lib/atmosphere/volume_lighting_vertex.glsl"
+}
+
 fragment resolveAtmosphereVolumeHistory(
     target=AtmosphereVolumeHistory, secondary_target=AtmosphereVolumeMetadataHistory,
     rt1=AtmosphereVolumeReprojected, rt2=AtmosphereVolumeMetadataReprojected) {
     omw_In vec2 omw_TexCoord;
+#if __VERSION__ >= 130 || defined(GL_EXT_gpu_shader4)
+    flat
+#endif
+    omw_In vec3 atmosphereLowSolarIrradiance;
+#if __VERSION__ >= 130 || defined(GL_EXT_gpu_shader4)
+    flat
+#endif
+    omw_In vec3 atmosphereLowDiffuseRadiance;
+#if __VERSION__ >= 130 || defined(GL_EXT_gpu_shader4)
+    flat
+#endif
+    omw_In vec3 atmosphereBelowCloudDiffuse;
+
 
     /// Repair only unavailable rays and publish complete ordered radiance and metadata to history.
     void main()
@@ -922,7 +970,9 @@ fragment resolveAtmosphereVolumeHistory(
         vec4 volume;
         if (metadata.a < 0.0)
             volume = integrateAtmosphereAtUv(
-                (floor(gl_FragCoord.xy) + 0.5) / atmosphereVolumeDimensions(), gl_FragCoord.xy, false, metadata);
+                (floor(gl_FragCoord.xy) + 0.5) / atmosphereVolumeDimensions(), gl_FragCoord.xy, false,
+                OpenMWSEVolumeIllumination(atmosphereLowSolarIrradiance, atmosphereLowDiffuseRadiance),
+                atmosphereBelowCloudDiffuse, metadata);
         else
             volume = omw_Texture2D(AtmosphereVolumeReprojected, omw_TexCoord);
         omw_FragColor = volume;
