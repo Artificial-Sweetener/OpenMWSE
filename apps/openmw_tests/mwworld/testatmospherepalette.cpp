@@ -123,6 +123,61 @@ namespace MWWorld
             }
         }
 
+        /// Grow and erode the same environmental field throughout every authored weather transition.
+        TEST(MWWorldAtmospherePaletteTest, environmentalCloudCoverageFormsAndDispersesContinuously)
+        {
+            const auto palette = paletteWithVolumes(authoredVolumeProfiles());
+            const auto weather = makeWeatherDefinitions();
+            for (const Weather& from : weather)
+                for (const Weather& to : weather)
+                {
+                    SCOPED_TRACE(from.mName + " -> " + to.mName);
+                    const auto first = palette->getState(from.mName, {}, 0.f).mVolumes.mEnvironmentalCloudLayer;
+                    const auto last = palette->getState(to.mName, {}, 0.f).mVolumes.mEnvironmentalCloudLayer;
+                    for (const float progress : { 0.f, .1f, .4999f, .5f, .5001f, .9f, 1.f })
+                    {
+                        SCOPED_TRACE(progress);
+                        const auto current
+                            = palette->getState(from.mName, to.mName, progress).mVolumes.mEnvironmentalCloudLayer;
+                        const float weight = progress * progress * (3.f - 2.f * progress);
+                        EXPECT_NEAR(current.mCoverageAmount,
+                            std::lerp(first.mCoverageAmount, last.mCoverageAmount, weight), 1e-6f);
+                        EXPECT_FLOAT_EQ(current.mNoiseScalePerMeter, first.mNoiseScalePerMeter);
+                        EXPECT_FLOAT_EQ(current.mWeatherScalePerMeter, first.mWeatherScalePerMeter);
+                        EXPECT_FLOAT_EQ(current.mWindSpeedMetersPerSecond, first.mWindSpeedMetersPerSecond);
+                    }
+                }
+        }
+
+        /// Preserve continuous publication for custom environmental models as well as bundled weather profiles.
+        TEST(MWWorldAtmospherePaletteTest, authoredEnvironmentalCloudControlsRemainContinuousAtWeatherMidpoint)
+        {
+            YAML::Node volumes = authoredVolumeProfiles();
+            volumes["Clear"]["environmentalCloudLayer"] = YAML::Load("{profile: primary, physicalScale: 0.18}");
+            volumes["Rain"]["environmentalCloudLayer"] = YAML::Load("{profile: secondary, physicalScale: 0.3}");
+            const auto palette = paletteWithVolumes(volumes);
+            const auto first
+                = SceneUtil::packCloudLayer(palette->getState("Clear", {}, 0.f).mVolumes.mEnvironmentalCloudLayer);
+            const auto last
+                = SceneUtil::packCloudLayer(palette->getState("Rain", {}, 0.f).mVolumes.mEnvironmentalCloudLayer);
+            const auto middle
+                = SceneUtil::packCloudLayer(palette->getState("Clear", "Rain", .5f).mVolumes.mEnvironmentalCloudLayer);
+            const auto before = SceneUtil::packCloudLayer(
+                palette->getState("Clear", "Rain", .49999f).mVolumes.mEnvironmentalCloudLayer);
+            const auto after = SceneUtil::packCloudLayer(
+                palette->getState("Clear", "Rain", .50001f).mVolumes.mEnvironmentalCloudLayer);
+            for (std::size_t field = 0; field < middle.size(); ++field)
+                for (int channel = 0; channel < 4; ++channel)
+                {
+                    SCOPED_TRACE(field);
+                    SCOPED_TRACE(channel);
+                    const float scale = std::max(1.f, std::abs(last[field][channel] - first[field][channel]));
+                    EXPECT_NEAR(
+                        middle[field][channel], (first[field][channel] + last[field][channel]) * .5f, scale * 1e-6f);
+                    EXPECT_NEAR(before[field][channel], after[field][channel], scale * 1e-4f);
+                }
+        }
+
         /// Reject malformed source gradients, optics, and episode references at the authoring boundary.
         TEST(MWWorldAtmospherePaletteTest, rejectsInvalidSourceModelsAndEpisodeChoices)
         {

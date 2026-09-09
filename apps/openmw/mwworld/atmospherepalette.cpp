@@ -373,10 +373,66 @@ namespace MWWorld
             return profile;
         }
 
+        /// Evolve environmental coverage and shaping continuously within the shared world-space field.
+        SceneUtil::CloudLayer blendEnvironmentalCloudLayer(
+            const SceneUtil::CloudLayer& from, const SceneUtil::CloudLayer& to, float factor)
+        {
+            SceneUtil::CloudLayer result;
+            result.mPhysicalScale = std::lerp(from.mPhysicalScale, to.mPhysicalScale, factor);
+            for (int channel = 0; channel < 3; ++channel)
+                result.mAlbedo[channel] = std::lerp(from.mAlbedo[channel], to.mAlbedo[channel], factor);
+            for (int channel = 0; channel < 3; ++channel)
+                result.mExtinctionPerMeter[channel]
+                    = std::lerp(from.mExtinctionPerMeter[channel], to.mExtinctionPerMeter[channel], factor);
+            result.mShapeSkewMeters = std::lerp(from.mShapeSkewMeters, to.mShapeSkewMeters, factor);
+            result.mNoiseScalePerMeter = std::lerp(from.mNoiseScalePerMeter, to.mNoiseScalePerMeter, factor);
+            result.mCurlScale = std::lerp(from.mCurlScale, to.mCurlScale, factor);
+            result.mCurlHeightExponent = std::lerp(from.mCurlHeightExponent, to.mCurlHeightExponent, factor);
+            result.mCurlDisplacementMeters
+                = std::lerp(from.mCurlDisplacementMeters, to.mCurlDisplacementMeters, factor);
+            result.mDetailScale = std::lerp(from.mDetailScale, to.mDetailScale, factor);
+            result.mDetailHeightFraction = std::lerp(from.mDetailHeightFraction, to.mDetailHeightFraction, factor);
+            result.mDetailErosion = std::lerp(from.mDetailErosion, to.mDetailErosion, factor);
+            result.mCoverageSkewMeters = std::lerp(from.mCoverageSkewMeters, to.mCoverageSkewMeters, factor);
+            result.mWeatherScalePerMeter = std::lerp(from.mWeatherScalePerMeter, to.mWeatherScalePerMeter, factor);
+            result.mCoverageAmount = std::lerp(from.mCoverageAmount, to.mCoverageAmount, factor);
+            result.mCoverageMinimum = std::lerp(from.mCoverageMinimum, to.mCoverageMinimum, factor);
+            result.mTypeAmount = std::lerp(from.mTypeAmount, to.mTypeAmount, factor);
+            result.mTypeMinimum = std::lerp(from.mTypeMinimum, to.mTypeMinimum, factor);
+            result.mRainAmount = std::lerp(from.mRainAmount, to.mRainAmount, factor);
+            result.mRainMinimum = std::lerp(from.mRainMinimum, to.mRainMinimum, factor);
+            for (int channel = 0; channel < 4; ++channel)
+                result.mGradientSmall[channel]
+                    = std::lerp(from.mGradientSmall[channel], to.mGradientSmall[channel], factor);
+            for (int channel = 0; channel < 4; ++channel)
+                result.mGradientMedium[channel]
+                    = std::lerp(from.mGradientMedium[channel], to.mGradientMedium[channel], factor);
+            for (int channel = 0; channel < 4; ++channel)
+                result.mGradientLarge[channel]
+                    = std::lerp(from.mGradientLarge[channel], to.mGradientLarge[channel], factor);
+            for (int channel = 0; channel < 4; ++channel)
+                result.mAnvilSmall[channel] = std::lerp(from.mAnvilSmall[channel], to.mAnvilSmall[channel], factor);
+            for (int channel = 0; channel < 4; ++channel)
+                result.mAnvilMedium[channel] = std::lerp(from.mAnvilMedium[channel], to.mAnvilMedium[channel], factor);
+            for (int channel = 0; channel < 4; ++channel)
+                result.mAnvilLarge[channel] = std::lerp(from.mAnvilLarge[channel], to.mAnvilLarge[channel], factor);
+            result.mWindSpeedMetersPerSecond
+                = std::lerp(from.mWindSpeedMetersPerSecond, to.mWindSpeedMetersPerSecond, factor);
+            result.mWindAngleRadians = std::lerp(from.mWindAngleRadians, to.mWindAngleRadians, factor);
+            result.mWindUpAmount = std::lerp(from.mWindUpAmount, to.mWindUpAmount, factor);
+            result.mCoverageWindSpeedMetersPerSecond
+                = std::lerp(from.mCoverageWindSpeedMetersPerSecond, to.mCoverageWindSpeedMetersPerSecond, factor);
+            result.mCoverageWindAngleRadians
+                = std::lerp(from.mCoverageWindAngleRadians, to.mCoverageWindAngleRadians, factor);
+            return result;
+        }
+
         /// Interpolate resolved episode volumes over the full authoritative weather transition.
         VolumeProfile blend(const VolumeProfile& from, const VolumeProfile& to, float factor)
         {
             VolumeProfile result = factor < .5f ? from : to;
+            result.mEnvironmentalCloudLayer
+                = blendEnvironmentalCloudLayer(from.mEnvironmentalCloudLayer, to.mEnvironmentalCloudLayer, factor);
             result.mCloudDeckCoverage = std::lerp(from.mCloudDeckCoverage, to.mCloudDeckCoverage, factor);
             result.mCloudDensity = std::lerp(from.mCloudDensity, to.mCloudDensity, factor);
             result.mCloudBaseAltitudeWorldUnits

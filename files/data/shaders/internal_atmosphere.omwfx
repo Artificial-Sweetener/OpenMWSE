@@ -32,14 +32,6 @@ sampler_2d openmwseCloudWeatherTexture {
     wrap_t = repeat;
 }
 
-sampler_2d openmwseAtmosphereBlueNoiseTexture {
-    source = "textures/openmwse/atmosphere_blue_noise.dds";
-    min_filter = nearest;
-    mag_filter = nearest;
-    wrap_s = repeat;
-    wrap_t = repeat;
-}
-
 shared {
     // World reconstruction and linear depth helpers abstract the active depth convention. Distances are world units;
     // lighting and pass outputs remain scene-linear HDR until the normal post-processing tonemap.
@@ -276,7 +268,7 @@ shared {
         return (mistWeight + fogWeight * 0.32) / max(mistWeight + fogWeight, 0.0001);
     }
 
-    /// Report whether global state permits frame-varying samples to accumulate in temporal history.
+    /// Report whether global state permits checkerboard reprojection and local-medium accumulation.
     bool atmosphereTemporalSamplingEnabled()
     {
         if (!omw_AtmosphereHistoryValid || omw.atmosphereHistoryLightingWeight < 0.5
@@ -398,31 +390,8 @@ shared {
         return vec2(mod(phase, 2.0), floor(phase * 0.5));
     }
 
-    /// Distribute cloud rays without the directional hatching produced by an interleaved-gradient lattice.
-    float atmosphereCloudSpatialDither(vec2 pixelCoordinate)
-    {
-        vec2 resolvedCoordinate = floor(pixelCoordinate);
-        // Address the tile with the selected resolved pixel. Sharing one sample across a 2x2
-        // checkerboard block correlates four differently aged estimates into horizontal bands.
-        return omw_Texture2D(openmwseAtmosphereBlueNoiseTexture,
-            (mod(resolvedCoordinate, 128.0) + 0.5) / 128.0).r;
-    }
-
-    /// Select a ray-segment offset under the active checkerboard sampling contract.
-    float atmosphereCloudRayOffset(vec2 pixelCoordinate, bool temporalSamplingEnabled)
-    {
-        float spatialOffset = atmosphereCloudSpatialDither(pixelCoordinate);
-        // Follow a continuously rotated blue-noise sequence. Every checkerboard member is
-        // refreshed once per four frames, and the resulting stride remains irrational, so each
-        // member visits the full segment instead of repeating a four-abscissa integration lattice.
-        const float goldenRatioConjugate = 0.61803398875;
-        float temporalPhase = fract(float(omw.frameNumber) * goldenRatioConjugate);
-        return temporalSamplingEnabled ? fract(spatialOffset + temporalPhase) : spatialOffset;
-    }
-
     /// Integrate one camera ray with draw-constant lighting and altitude-dependent recovery, retaining its depth moment.
-    vec4 integrateAtmosphereAtUv(vec2 uv, vec2 volumePixelCoordinate,
-        bool temporalSamplingEnabled, OpenMWSEVolumeIllumination lowCloudLighting,
+    vec4 integrateAtmosphereAtUv(vec2 uv, OpenMWSEVolumeIllumination lowCloudLighting,
         vec3 belowCloudDiffuse, out vec4 metadata)
     {
         float sceneDistance = atmosphereSceneRayDistance(uv);
@@ -442,8 +411,6 @@ shared {
         bool openSky = atmosphereDepthIsClear(uv);
         float cloudMaximumDistance = openSky ? openmwseCloudMaximumRayDistance : sceneDistance;
         OpenMWSEAerialPerspectiveParameters atmosphere = aerialPerspectiveParameters();
-        float cloudDither = atmosphereCloudRayOffset(volumePixelCoordinate, temporalSamplingEnabled);
-        bool quadratureSampling = !temporalSamplingEnabled;
         OpenMWSELocalMedia localMedia;
         localMedia.count = 0;
         localMedia.startDistance = 0.0;
@@ -529,7 +496,7 @@ shared {
         vec4 integratedVolume = openmwseIntegrateClouds(omw.eyePos.xyz, rayDirection,
             cloudMaximumDistance, omw.atmosphereQuality, omw.atmosphereSolarRadiance,
             omw.atmosphereSkyIrradiance, omw.atmosphereGroundIrradiance, lowCloudLighting, atmosphere,
-            cloudDither, quadratureSampling, localMedia, visibleDistanceSum, visibleCloudOpacity);
+            localMedia, visibleDistanceSum, visibleCloudOpacity);
         float opacity = 1.0 - integratedVolume.a;
         if (opacity > 1e-5)
         {
@@ -655,7 +622,7 @@ fragment integrateAtmosphereVolume(target=AtmosphereVolumeRaw, secondary_target=
         vec2 uv = (volumeCoordinate + 0.5) / atmosphereVolumeDimensions();
         vec4 metadata;
         omw_FragColor = integrateAtmosphereAtUv(
-            uv, volumeCoordinate + 0.5, atmosphereTemporalSamplingEnabled(),
+            uv,
             OpenMWSEVolumeIllumination(atmosphereLowSolarIrradiance, atmosphereLowDiffuseRadiance),
             atmosphereBelowCloudDiffuse, metadata);
         omw_FragColor1 = metadata;
@@ -668,40 +635,12 @@ fragment reprojectAtmosphereVolume(
     rt1=AtmosphereVolumeRaw, rt2=AtmosphereVolumeMetadataRaw) {
     omw_In vec2 omw_TexCoord;
 
-    /// Bound cloud color independently of coverage and retain the native local-medium cross.
-    vec4 clipAtmosphereHistory(vec4 history, vec2 uv, bool containsCloud)
+    /// Bound local mist and fog history with the current five-sample neighborhood.
+    vec4 clipLocalMediaHistory(vec4 history, vec2 uv)
     {
         vec2 texel = 1.0 / atmosphereRawDimensions();
         vec2 minimumUv = texel * 0.5;
         vec2 maximumUv = vec2(1.0) - minimumUv;
-        if (containsCloud)
-        {
-            vec4 firstMoment = vec4(0.0);
-            vec4 secondMoment = vec4(0.0);
-            float opacitySum = 0.0;
-            for (int y = -1; y <= 1; ++y)
-                for (int x = -1; x <= 1; ++x)
-                {
-                    vec4 sampleValue = omw_Texture2D(AtmosphereVolumeRaw,
-                        clamp(uv + vec2(float(x), float(y)) * texel, minimumUv, maximumUv));
-                    float opacity = clamp(1.0 - sampleValue.a, 0.0, 1.0);
-                    firstMoment += sampleValue;
-                    // Opacity-weighted straight-radiance moments keep a silhouette's coverage variance
-                    // from admitting old illumination after the sunset sky has darkened.
-                    secondMoment += vec4(sampleValue.rgb * sampleValue.rgb / max(opacity, 1e-4),
-                        sampleValue.a * sampleValue.a);
-                    opacitySum += opacity;
-                }
-            if (opacitySum <= 1e-4)
-                return vec4(0.0, 0.0, 0.0, 1.0);
-            vec4 normalization = vec4(vec3(opacitySum), 9.0);
-            vec4 mean = firstMoment / normalization;
-            vec4 deviation = sqrt(max(secondMoment / normalization - mean * mean, vec4(0.0)));
-            float transmittance = clamp(history.a, mean.a - deviation.a, mean.a + deviation.a);
-            vec3 historyRadiance = history.rgb / max(1.0 - history.a, 1e-4);
-            vec3 radiance = clamp(historyRadiance, mean.rgb - deviation.rgb, mean.rgb + deviation.rgb);
-            return vec4(radiance * (1.0 - transmittance), transmittance);
-        }
         vec4 current = omw_Texture2D(AtmosphereVolumeRaw, uv);
         vec4 left = omw_Texture2D(AtmosphereVolumeRaw, clamp(uv - vec2(texel.x, 0.0), minimumUv, maximumUv));
         vec4 right = omw_Texture2D(AtmosphereVolumeRaw, clamp(uv + vec2(texel.x, 0.0), minimumUv, maximumUv));
@@ -712,7 +651,7 @@ fragment reprojectAtmosphereVolume(
         vec4 mean = sum / 5.0;
         vec4 deviation = sqrt(max(squaredSum / 5.0 - mean * mean, vec4(0.0)));
         // A resolved current pixel can be a genuine spatial extremum, not temporal noise. Keep it in
-        // the clipping box so repeated reconstruction cannot flatten an already stable cloud edge.
+        // the clipping box so repeated reconstruction cannot flatten an already stable medium edge.
         return clamp(history, min(mean - deviation, current), max(mean + deviation, current));
     }
 
@@ -800,6 +739,14 @@ fragment reprojectAtmosphereVolume(
             return;
         }
         currentMetadata.b = encodeAtmosphereDistance(sceneDistance);
+
+        // Deterministic cloud quadrature needs no stochastic accumulation on a traced ray.
+        // Publish it immediately so changing view integrals cannot inherit multi-refresh edge lag.
+        if (tracedPixel && currentMetadata.a >= 1.5)
+        {
+            writeFreshAtmosphere(currentVolume, currentMetadata, true);
+            return;
+        }
 
         // Reproject geometry independently from participating media. Geometry depth validates disocclusion,
         // while the native fog/mist field retains its own advection. Cloud density contains
@@ -890,22 +837,20 @@ fragment reprojectAtmosphereVolume(
             return;
         }
 
-        float reprojectionMotionPixels
-            = length((previousUv - omw_TexCoord) * atmosphereVolumeDimensions());
-        // Dominant-medium identity is an integration result, not a disocclusion signal. The ordered volume
-        // may alternate between foreground mist and cloud without any scene change.
-        // Geometry and global atmosphere state validate history; current statistics bound its radiance.
-        // A participating-volume moment is not an opaque surface depth. Use it to locate history, then
-        // validate scene occlusion above and constrain the history to current volume statistics.
+        // The volume moment locates history and scene geometry validates its visibility.
+        // Cloud refreshes publish the deterministic integral; fog and mist retain statistical accumulation.
         bool containsCloud = max(currentMetadata.a, previousMetadata.a) >= 1.5;
         vec4 history = containsCloud && !currentOpenSky
             ? sampleTerrainCloudHistory(previousUv, historyUv, previousMetadata)
             : omw_GetAtmosphereHistory(historyUv);
-        // Clip refreshed cloud history to the current 3x3 mean/variance neighborhood.
-        // Untraced checkerboard pixels retain validated history: their current neighbors are other rays
-        // and cannot supply a fresh bound without smearing camera motion.
-        if (tracedPixel || !containsCloud)
-            history = clipAtmosphereHistory(history, rawUv, containsCloud);
+        if (containsCloud && tracedPixel)
+        {
+            // A newly empty ray must also replace a previous cloud integral without fading its stale silhouette.
+            writeFreshAtmosphere(currentVolume, currentMetadata, true);
+            return;
+        }
+        if (!containsCloud)
+            history = clipLocalMediaHistory(history, rawUv);
         if (!tracedPixel)
         {
             // Carry the previous radial moment into the current camera/advection frame. It is not an opaque depth.
@@ -920,23 +865,9 @@ fragment reprojectAtmosphereVolume(
         float confidenceWeight = mix(0.94, 1.0, smoothstep(0.0, 0.15, confidence));
         float qualityWeight = float(omw.atmosphereQuality) / 3.0;
         float volumeHistoryWeight = mix(0.82, 0.92, qualityWeight);
-        // A missed cloud sample still needs the cloud estimator's temporal response when the preceding
-        // ordered integral contains it; dominant mist must not repeatedly shorten that accumulation.
-        float cloudHistory = step(1.5, max(currentMetadata.a, previousMetadata.a));
-        // Use the stable response, then shorten it toward its 0.86 disocclusion response as
-        // history moves across the reconstruction grid.
-        float cloudTemporalResponse = mix(
-            0.96, 0.86, smoothstep(0.05, 0.75, reprojectionMotionPixels));
-        volumeHistoryWeight = mix(volumeHistoryWeight,
-            mix(0.94, cloudTemporalResponse, qualityWeight), cloudHistory);
         float historyWeight
             = volumeHistoryWeight * confidenceWeight * omw.atmosphereHistoryLightingWeight;
-        // A cloud ray refreshes once per four frames and uses the source response directly.
-        // Its depth validation, refreshed-neighborhood clipping, and lighting validation already own
-        // disocclusion; shallow-volume opacity confidence would continually reinject edge noise.
-        float refreshHistoryWeight = mix(pow(historyWeight, 4.0),
-            cloudTemporalResponse * omw.atmosphereHistoryLightingWeight, cloudHistory);
-        omw_FragColor = mix(currentVolume, history, refreshHistoryWeight);
+        omw_FragColor = mix(currentVolume, history, pow(historyWeight, 4.0));
         currentMetadata.g = 1.0 - omw_FragColor.a;
         omw_FragColor1 = currentMetadata;
     }
@@ -972,7 +903,7 @@ fragment resolveAtmosphereVolumeHistory(
         vec4 volume;
         if (metadata.a < 0.0)
             volume = integrateAtmosphereAtUv(
-                (floor(gl_FragCoord.xy) + 0.5) / atmosphereVolumeDimensions(), gl_FragCoord.xy, false,
+                (floor(gl_FragCoord.xy) + 0.5) / atmosphereVolumeDimensions(),
                 OpenMWSEVolumeIllumination(atmosphereLowSolarIrradiance, atmosphereLowDiffuseRadiance),
                 atmosphereBelowCloudDiffuse, metadata);
         else

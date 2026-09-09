@@ -146,6 +146,7 @@ namespace
         bool historyValid = false;
         bool atmosphereEnabled = true;
         bool reverseZ = false;
+        std::optional<bool> exponentialFog;
         bool useUniformBuffer = false;
         bool useGeneralCloudShader = false;
         bool bindUniformBufferOnAncestor = false;
@@ -161,7 +162,7 @@ namespace
         int cloudDensitySliceAxis = 0;
         int cloudDensitySliceQuantity = 0;
         bool renderCloudDensitySlice = false;
-        bool renderCloudRayOffsets = false;
+        int cloudTransportReferenceSubdivisions = 1;
         bool measureCloudMarchProgress = false;
         bool useLegacyCloudMarchReference = false;
         bool usePerSampleCloudIntervalReference = false;
@@ -411,6 +412,7 @@ namespace
     }
 
     /// Execute a native pass or focused shared-integrator ray grid and read its simultaneous outputs off-screen.
+    /// Compile only the selected density diagnostic while retaining the production shader implementation.
     PassImage renderNativeAtmospherePass(
         std::string_view passName, const NativePassInputs& inputs, PassImage* secondaryOutput = nullptr)
     {
@@ -502,6 +504,23 @@ namespace
         geode->addDrawable(triangle);
         osg::StateSet* state = geode->getOrCreateStateSet();
         (*passIt)->prepareStateSet(state, technique.getName());
+        if (inputs.exponentialFog)
+        {
+            auto* program = dynamic_cast<osg::Program*>(state->getAttribute(osg::StateAttribute::PROGRAM));
+            if (!program)
+                throw std::runtime_error("Fog permutation has no production shader");
+            for (unsigned index = 0; index < program->getNumShaders(); ++index)
+            {
+                osg::Shader* shader = program->getShader(index);
+                std::string source = shader->getShaderSource();
+                const std::string marker = "#define OMW_EXPONENTIAL_FOG ";
+                const auto position = source.find(marker);
+                if (position == std::string::npos)
+                    throw std::runtime_error("Fog permutation cannot locate its production definition");
+                source.replace(position + marker.size(), 1, *inputs.exponentialFog ? "1" : "0");
+                shader->setShaderSource(source);
+            }
+        }
         if (inputs.useUncachedLocalLighting)
         {
             auto* program = dynamic_cast<osg::Program*>(state->getAttribute(osg::StateAttribute::PROGRAM));
@@ -606,27 +625,27 @@ void main()
                 // Focused transport tests exercise the shared integrator at every ray; complete-frame
                 // tests below execute the unmodified checkerboard production entry points.
                 source.erase(mainPosition);
-                source += inputs.renderCloudRayOffsets ? R"glsl(
-void main()
-{
-    float temporal = atmosphereCloudRayOffset(gl_FragCoord.xy, true);
-    float stable = atmosphereCloudRayOffset(gl_FragCoord.xy, false);
-    omw_FragColor = vec4(temporal, stable, 0.0, 1.0);
-    omw_FragColor1 = vec4(0.0);
-}
-)glsl"
-                                                       : R"glsl(
+                source += R"glsl(
 uniform vec2 openmwseTestRayGridDimensions;
 void main()
 {
     vec4 metadata;
     omw_FragColor = integrateAtmosphereAtUv(
-        gl_FragCoord.xy / openmwseTestRayGridDimensions, gl_FragCoord.xy, atmosphereTemporalSamplingEnabled(),
+        gl_FragCoord.xy / openmwseTestRayGridDimensions,
         OpenMWSEVolumeIllumination(atmosphereLowSolarIrradiance, atmosphereLowDiffuseRadiance),
         atmosphereBelowCloudDiffuse, metadata);
     omw_FragColor1 = metadata;
 }
 )glsl";
+                if (inputs.cloudTransportReferenceSubdivisions > 1)
+                {
+                    const std::string subdivisions = std::to_string(inputs.cloudTransportReferenceSubdivisions);
+                    replaceUniqueShaderText(source, "float maximumSteps = float(48 + quality * 16);",
+                        "float maximumSteps = float(48 + quality * 16) * " + subdivisions + ".0;");
+                    replaceUniqueShaderText(source,
+                        "96 * (openmwseSkyCloudTransportSubdivisions + openmwseCondensateTransportSubdivisions) + 8;",
+                        "(" + subdivisions + " * (96 * (openmwseSkyCloudTransportSubdivisions + openmwseCondensateTransportSubdivisions) + 8));");
+                }
                 if (inputs.usePerSampleCloudIntervalReference)
                     source = makePerSampleCloudIntervalReference(std::move(source));
                 if (inputs.useLegacyCloudMarchReference)
@@ -655,10 +674,12 @@ void main()
                 source.replace(
                     mainPosition, std::string_view("void main()").size(), "void openmwseProductionAtmosphereMain()");
                 source += ShaderTest::cloudModelDensityReference;
+                // Specialize the requested diagnostic so unused dense-reference marches do not burden compilation.
+                source += "const int openmwseTestCloudDensitySliceQuantity = "
+                    + std::to_string(inputs.cloudDensitySliceQuantity) + ";\n";
                 source += R"glsl(
 uniform vec2 openmwseTestCloudDensitySliceExtent;
 uniform int openmwseTestCloudDensitySliceAxis;
-uniform int openmwseTestCloudDensitySliceQuantity;
 
 void main()
 {
@@ -747,8 +768,8 @@ void main()
     }
     if (openmwseTestCloudDensitySliceQuantity == 23 || openmwseTestCloudDensitySliceQuantity == 36)
     {
-        // Independent reference evaluation of the volumetric shadow integral.
-        // The density evaluator has separate source-reference coverage; this checks light-ray sampling.
+        // Evaluate every position in the nonlinear light lattice, including empty samples.
+        // The optimized march must retain the same density mip when it skips zero extinction.
         OpenMWSECloudLayer shadowLayer = openmwseTestCloudDensitySliceQuantity == 23 ? mainLayer : lowLayer;
         int quality = openmwseTestCloudDensitySliceQuantity == 23 ? 3 : omw.atmosphereQuality;
         int count = quality >= 2 ? 5 : quality >= 1 ? 4 : 3;
@@ -758,7 +779,6 @@ void main()
         float stepLength = 3000.0 * shadowLayer.model.physicalScale * 69.99125109;
         float viewDistance = length(samplePosition - omw.eyePos.xyz);
         vec3 referenceDepth = vec3(0.0);
-        float lodOffset = 0.5;
         for (int s = 0; s < 5; ++s)
         {
             if (s >= count)
@@ -769,16 +789,12 @@ void main()
             t1 *= t1;
             float delta = t1 - t0;
             vec3 p = samplePosition + direction * (stepLength * (t0 + delta * 0.5));
-            if (!openmwseCloudPotentialDensity(p, shadowLayer))
-            {
-                skippedSample = true;
-                continue;
-            }
-            resumedSampling = resumedSampling || skippedSample;
-            float density = openmwseCloudDensity(p, viewDistance, lodOffset, shadowLayer);
+            float density = openmwseCloudDensity(p, viewDistance, 0.5 * float(s + 1), shadowLayer);
+            bool emptySample = density <= 0.0;
+            resumedSampling = resumedSampling || (!emptySample && skippedSample);
+            skippedSample = skippedSample || emptySample;
             referenceDepth += clamp(density * shadowLayer.model.extinctionPerMeter, 0.0, 1.0)
                 * (stepLength * delta / 69.99125109);
-            lodOffset += 0.5;
         }
         vec3 reference = exp(-referenceDepth);
         vec3 actual = exp(-openmwseCloudSunOpticalDepth(samplePosition, direction, quality, shadowLayer));
@@ -925,12 +941,18 @@ void main()
         omw_FragColor = vec4(rejectedDensity, maximumDensity, rejectedSamples / 256.0, 1.0);
         return;
     }
-    if (openmwseTestCloudDensitySliceQuantity == 28)
+    if (openmwseTestCloudDensitySliceQuantity == 28 || openmwseTestCloudDensitySliceQuantity == 34)
     {
         vec3 direction = normalize(omw_GetWorldPosFromUV(omw_TexCoord) - omw.eyePos.xyz);
-        vec2 bounds = openmwseCloudDensityHeightBounds(lowLayer);
-        vec2 interval = openmwseCloudLayerIntersection(omw.eyePos.xyz, direction, bounds.x, bounds.y);
-        interval.y = min(interval.y, interval.x + openmwseCloudLayerMaximumMarchingDistance(lowLayer));
+        bool mainReference = openmwseTestCloudDensitySliceQuantity == 34;
+        OpenMWSECloudLayer referenceLayer = mainReference ? mainLayer : lowLayer;
+        vec2 bounds = openmwseCloudDensityHeightBounds(referenceLayer);
+        vec2 interval = mainReference
+            ? openmwseMainCloudLayerIntersection(omw.eyePos.xyz, direction, bounds.x, bounds.y)
+            : openmwseCloudLayerIntersection(omw.eyePos.xyz, direction, bounds.x, bounds.y);
+        if (mainReference)
+            interval.y = min(interval.y, openmwseCloudMaximumRayDistance);
+        interval.y = min(interval.y, interval.x + openmwseCloudLayerMaximumMarchingDistance(referenceLayer));
         int sampleCount = openmwseTestCloudDensitySliceAxis == 0 ? 4096 : 8192;
         float stepLength = max(interval.y - interval.x, 0.0) / float(sampleCount);
         vec3 opticalDepth = vec3(0.0);
@@ -939,8 +961,10 @@ void main()
             if (i >= sampleCount)
                 break;
             float distance = interval.x + (float(i) + 0.5) * stepLength;
-            float density = openmwseCloudDensity(omw.eyePos.xyz + direction * distance, distance, 0.0, lowLayer);
-            opticalDepth += density * lowLayer.model.extinctionPerMeter
+            float density = openmwseCloudDensity(omw.eyePos.xyz + direction * distance, distance, 0.0, referenceLayer);
+            if (mainReference)
+                density *= openmwseMainCloudPresentationWeight(distance);
+            opticalDepth += density * referenceLayer.model.extinctionPerMeter
                 * (stepLength / openmwseAtmosphereWorldUnitsPerMeter);
         }
         vec3 transmittance = exp(-opticalDepth);
@@ -989,8 +1013,6 @@ void main()
             }
             state->addUniform(new osg::Uniform("openmwseTestCloudDensitySliceExtent", inputs.cloudDensitySliceExtent));
             state->addUniform(new osg::Uniform("openmwseTestCloudDensitySliceAxis", inputs.cloudDensitySliceAxis));
-            state->addUniform(
-                new osg::Uniform("openmwseTestCloudDensitySliceQuantity", inputs.cloudDensitySliceQuantity));
         }
         if (inputs.reverseZ)
         {
@@ -2719,7 +2741,7 @@ void main()
     }
 
     /// Preserve fixed nonlinear light-ray offsets and the originating view sample's mip selection.
-    TEST(AtmosphereShaderTest, cloudSunShadowMatchesReferenceSampling)
+    TEST(AtmosphereShaderTest, cloudSunShadowMatchesUnculledNonlinearSampling)
     {
         constexpr float unitsPerMeter = 69.99125109f;
         NativePassInputs inputs;
@@ -2922,7 +2944,8 @@ void main()
         inputs.cloudDensitySliceQuantity = 36;
         inputs.lowCloudParameters = { 1.f, 0.9f, 2600.f, 9000.f };
         inputs.environmentalCloudModel.mCoverageAmount = 0.6f;
-        inputs.environmentalCloudModel.mCoverageMinimum = 0.2f;
+        // Retain shadowed support at the coarsest tested mip; the terrain profile supplies empty gaps.
+        inputs.environmentalCloudModel.mCoverageMinimum = 0.6f;
         inputs.environmentalCloudModel.mExtinctionPerMeter = { 0.00071f, 0.00086f, 0.001f };
         inputs.cloudDensitySliceExtent = { 60000.f, 18000.f };
         inputs.mediumReferenceParameters = { 16000.f, 1.f, 2600.f, 0.f };
@@ -3402,6 +3425,69 @@ void main()
                 for (const osg::Vec4f& pixel : image.pixels)
                     EXPECT_NEAR(pixel.x(), expectedVisibility, 0.002);
             }
+        }
+    }
+
+    /// Compare a uniform cloud's fogged radiance with numerical front-to-back transport at each physical distance.
+    TEST(AtmosphereShaderTest, cloudAerialPerspectiveIntegratesDistributedRadiance)
+    {
+        NativePassInputs inputs;
+        inputs.width = 1;
+        inputs.height = 1;
+        inputs.eyePosition = {};
+        inputs.viewDirection = { 1.f, 0.f, 0.f };
+        inputs.mistParameters = {};
+        inputs.lowCloudParameters = { 1.f, 1.f, -3000.f, 10000.f };
+        inputs.lowCloudEnvironmentInfluence = 0.f;
+        inputs.environmentalCloudModel.mNoiseScalePerMeter = 0.f;
+        inputs.environmentalCloudModel.mCoverageMinimum = 1.f;
+        inputs.environmentalCloudModel.mTypeMinimum = 1.f;
+        inputs.environmentalCloudModel.mDetailErosion = 0.f;
+        inputs.environmentalCloudModel.mExtinctionPerMeter = { .0001f, .0001f, .0001f };
+        inputs.environmentalCloudModel.mAlbedo = { 1.f, 1.f, 1.f };
+        inputs.solarRadiance = {};
+        inputs.skyIrradiance = {};
+        inputs.groundIrradiance = { 1.f, 1.f, 1.f };
+        inputs.skyColor = { 0.f, 0.f, 0.f, 1.f };
+        inputs.fogColor = inputs.skyColor;
+        inputs.weatherWeight = 0.f;
+        inputs.fogNear = 20000.f;
+        inputs.fogFar = 180000.f;
+        inputs.farPlane = 1000000.f;
+
+        NativePassInputs densityInputs = inputs;
+        densityInputs.renderCloudDensitySlice = true;
+        densityInputs.cloudDensitySliceQuantity = 29;
+        const PassImage density = renderNativeAtmospherePass("integrateAtmosphereRayGrid", densityInputs);
+        ASSERT_EQ(density.pixels.size(), 1u);
+        ASSERT_GT(density.pixels.front().x(), .01f);
+        constexpr double worldUnitsPerMeter = 69.99125109;
+        constexpr double cloudDistance = 13000.0 * worldUnitsPerMeter;
+        const double extinction
+            = density.pixels.front().x() * inputs.environmentalCloudModel.mExtinctionPerMeter.x() / worldUnitsPerMeter;
+        const double expectedTransmittance = std::exp(-extinction * cloudDistance);
+        for (const bool exponential : { false, true })
+        {
+            SCOPED_TRACE(exponential);
+            inputs.exponentialFog = exponential;
+            const double fogScale = exponential ? 4.4 : 1.0;
+            const double curveStart = inputs.fogNear / fogScale;
+            const double curveRange = (inputs.fogFar - curveStart) / fogScale;
+            double expectedRadiance = 0.0;
+            constexpr int steps = 16384;
+            constexpr double stepLength = cloudDistance / steps;
+            for (int step = 0; step < steps; ++step)
+            {
+                const double distance = (step + .5) * stepLength;
+                const double opticalDepth = std::max(0.0, (distance - curveStart) / curveRange);
+                const double visibility = exponential ? std::exp(-opticalDepth) : 1.0 - std::min(opticalDepth, 1.0);
+                expectedRadiance += .5 * extinction * std::exp(-extinction * distance) * visibility * stepLength;
+            }
+            const PassImage actual = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            ASSERT_EQ(actual.pixels.size(), 1u);
+            EXPECT_NEAR(actual.pixels.front().a(), expectedTransmittance, .002);
+            for (int channel = 0; channel < 3; ++channel)
+                EXPECT_NEAR(actual.pixels.front()[channel], expectedRadiance, .002);
         }
     }
 
@@ -4083,6 +4169,46 @@ void main()
         EXPECT_LT(maximumSumError, 6e-4f);
         EXPECT_GT(outgoingDensity, 1.0);
         EXPECT_GT(incomingDensity, 1.0);
+    }
+
+    /// Preserve cloud radiance and extinction when a weather transition blends identical episode fields.
+    TEST(AtmosphereShaderTest, identicalWeatherCloudsPreserveRadianceThroughoutTransition)
+    {
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Cloudy", "Sunset");
+        inputs.width = 32;
+        inputs.height = 24;
+        inputs.lowCloudParameters = {};
+        inputs.mistParameters = {};
+        inputs.fogVolumeParameters = {};
+        inputs.fogNear = 1e8f;
+        inputs.fogFar = 2e8f;
+        inputs.farPlane = 229376.f;
+        inputs.cloudParameters = { .7f, .04f, 42660.f, 153203.f };
+        inputs.cloudModel.mCoverageMinimum = .6f;
+        inputs.incomingCloudParameters = inputs.cloudParameters;
+        inputs.incomingCloudModel = inputs.cloudModel;
+        inputs.cloudScenarioParameters = { 0.f, 0.f, 0.f, 1.f };
+        inputs.eyePosition = { -30126.f, 72900.f, 41595.f };
+        inputs.viewDirection = { -.8f, .55f, .08f };
+        inputs.viewDirection.normalize();
+        inputs.verticalFov = 35.f;
+        const PassImage reference = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_GT(std::count_if(reference.pixels.begin(), reference.pixels.end(),
+                      [](const osg::Vec4f& pixel) { return pixel.a() < .9f; }),
+            0);
+        for (const float weight : { .1f, .5f, .9f, 1.f })
+        {
+            SCOPED_TRACE(weight);
+            inputs.cloudScenarioParameters.z() = weight;
+            const PassImage transition = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            ASSERT_EQ(reference.pixels.size(), transition.pixels.size());
+            float maximumError = 0.f;
+            for (std::size_t index = 0; index < reference.pixels.size(); ++index)
+                for (int channel = 0; channel < 4; ++channel)
+                    maximumError = std::max(
+                        maximumError, std::abs(transition.pixels[index][channel] - reference.pixels[index][channel]));
+            EXPECT_LT(maximumError, .002f);
+        }
     }
 
     /// Verify that production Clear clouds do not carry their lower support unchanged into the upper layer.
@@ -5500,7 +5626,8 @@ void main()
         EXPECT_NEAR(metadata.at(33, 24).b(), encodeAtmosphereDistance(5000.f), 0.001f);
     }
 
-    TEST(AtmosphereShaderTest, translatedHistoryMatchesAnAnalyticWorldSpaceRadiancePlane)
+    /// Reproject an analytic world plane while preserving independently marked current checkerboard samples.
+    TEST(AtmosphereShaderTest, translatedCloudHistoryPreservesIndependentRefreshes)
     {
         for (const bool reverseZ : { false, true })
             for (const bool uniformBuffer : { false, true })
@@ -5527,8 +5654,8 @@ void main()
                     return osg::Vec4f(value, value * 0.5f, value * 0.25f, 1.f - value);
                 };
                 inputs.passInput = [&](int x, int y) {
-                    const float noise = (x + y) % 2 == 0 ? 0.003f : -0.003f;
-                    return color(x, y, 0.f) + osg::Vec4f(noise, noise, noise, noise);
+                    const float refreshSignal = (x + y) % 2 == 0 ? 0.003f : -0.003f;
+                    return color(x, y, 0.f) + osg::Vec4f(refreshSignal, refreshSignal, refreshSignal, refreshSignal);
                 };
                 inputs.atmosphereHistory = [&](int x, int y) { return color(x, y, -1800.f); };
                 inputs.volumeMetadataInput = [&](int x, int y) {
@@ -5540,12 +5667,17 @@ void main()
                 ASSERT_FALSE(result.pixels.empty());
                 for (int y = 2; y < inputs.height - 2; ++y)
                     for (int x = 2; x < inputs.width - 2; ++x)
+                    {
+                        const int phase = (inputs.frameNumber + ((x / 2) + (y / 2)) % 2) % 4;
+                        const bool traced = x % 2 == phase % 2 && y % 2 == phase / 2;
+                        const osg::Vec4f expected = traced ? inputs.passInput(x, y) : color(x, y, 0.f);
                         for (int channel = 0; channel < 4; ++channel)
-                            EXPECT_NEAR(result.at(x, y)[channel], color(x, y, 0.f)[channel], 0.001f);
+                            EXPECT_NEAR(result.at(x, y)[channel], expected[channel], 0.001f);
+                    }
             }
     }
 
-    /// Reject geometric discontinuities while retaining compatible history across jittered medium labels.
+    /// Accumulate valid mist history while refreshed rays replace former clouds and repair disocclusions.
     TEST(AtmosphereShaderTest, temporalMistRejectsDisocclusionAndConvergesOnStableDepth)
     {
         NativePassInputs currentInputs;
@@ -5611,8 +5743,8 @@ void main()
         EXPECT_LT(std::abs(translatedCenter.x() - 0.55f), std::abs(rawCenter.x() - 0.55f));
         EXPECT_LT(std::abs(translatedCenter.w() - 0.55f), std::abs(rawCenter.w() - 0.55f));
         EXPECT_NEAR(largeAdvectionCenter.x(), rawCenter.x(), 0.002f);
-        EXPECT_LT(std::abs(changedMediumCenter.x() - 0.55f), std::abs(rawCenter.x() - 0.55f));
-        EXPECT_LT(std::abs(changedMediumCenter.w() - 0.55f), std::abs(rawCenter.w() - 0.55f));
+        EXPECT_NEAR(changedMediumCenter.x(), rawCenter.x(), 0.002f);
+        EXPECT_NEAR(changedMediumCenter.w(), rawCenter.w(), 0.002f);
         const osg::Vec4f& rawEdge = current.at(56, current.height / 2);
         const osg::Vec4f& stableEdge = stable.at(56, stable.height / 2);
         const osg::Vec4f& fovCutEdge = fovCut.at(56, fovCut.height / 2);
@@ -5744,104 +5876,8 @@ void main()
         EXPECT_LT(maximumRelativeDarkening, 0.15f);
     }
 
-    /// Follow the per-frame temporal blue-noise phase used by the reference cloud reconstruction.
-    TEST(AtmosphereShaderTest, cloudSamplesFollowTemporalBlueNoiseSequence)
-    {
-        NativePassInputs inputs;
-        inputs.width = 16;
-        inputs.height = 16;
-        inputs.renderCloudRayOffsets = true;
-        constexpr std::array frameNumbers{ 0, 1, 7, 15 };
-        std::array<PassImage, frameNumbers.size()> offsets;
-        for (std::size_t sample = 0; sample < offsets.size(); ++sample)
-        {
-            inputs.frameNumber = frameNumbers[sample];
-            offsets[sample] = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-            ASSERT_EQ(offsets[sample].pixels.size(), 256u);
-        }
-        float maximumTemporalError = 0.f;
-        float maximumStableError = 0.f;
-        constexpr float goldenRatioConjugate = 0.61803398875f;
-        for (std::size_t pixel = 0; pixel < offsets.front().pixels.size(); ++pixel)
-        {
-            const float spatial = offsets.front().pixels[pixel].g();
-            for (std::size_t sample = 0; sample < offsets.size(); ++sample)
-            {
-                const int frame = frameNumbers[sample];
-                const float temporalPhase = frame * goldenRatioConjugate - std::floor(frame * goldenRatioConjugate);
-                const float phased = spatial + temporalPhase;
-                const float expected = phased - std::floor(phased);
-                maximumTemporalError
-                    = std::max(maximumTemporalError, std::abs(offsets[sample].pixels[pixel].r() - expected));
-                maximumStableError
-                    = std::max(maximumStableError, std::abs(offsets[sample].pixels[pixel].g() - spatial));
-            }
-        }
-        EXPECT_LT(maximumTemporalError, 0.001f);
-        EXPECT_LT(maximumStableError, 0.001f);
-    }
-
-    /// Keep reconstructed checkerboard members from sharing a directional spatial sample pattern.
-    TEST(AtmosphereShaderTest, cloudCheckerboardMembersUseDistinctSpatialDither)
-    {
-        NativePassInputs inputs;
-        inputs.width = 16;
-        inputs.height = 16;
-        inputs.renderCloudRayOffsets = true;
-        const PassImage offsets = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-        ASSERT_EQ(offsets.pixels.size(), 256u);
-
-        std::size_t distinctBlocks = 0;
-        std::size_t blockCount = 0;
-        for (int y = 0; y < inputs.height; y += 2)
-            for (int x = 0; x < inputs.width; x += 2)
-            {
-                const std::array<float, 4> samples{ offsets.at(x, y).g(), offsets.at(x + 1, y).g(),
-                    offsets.at(x, y + 1).g(), offsets.at(x + 1, y + 1).g() };
-                std::size_t distinctSampleCount = 0;
-                for (std::size_t sampleIndex = 0; sampleIndex < samples.size(); ++sampleIndex)
-                {
-                    bool matchesEarlierSample = false;
-                    for (std::size_t earlierIndex = 0; earlierIndex < sampleIndex; ++earlierIndex)
-                        matchesEarlierSample |= std::abs(samples[sampleIndex] - samples[earlierIndex]) < 0.001f;
-                    distinctSampleCount += matchesEarlierSample ? 0u : 1u;
-                }
-                distinctBlocks += distinctSampleCount >= 3 ? 1u : 0u;
-                ++blockCount;
-            }
-
-        EXPECT_GT(distinctBlocks, blockCount * 9 / 10);
-    }
-
-    /// Preserve a broad blue-noise distribution throughout checkerboard refresh cycles.
-    TEST(AtmosphereShaderTest, cloudRayPhaseRetainsBroadDistribution)
-    {
-        NativePassInputs inputs;
-        inputs.width = 16;
-        inputs.height = 16;
-        inputs.renderCloudRayOffsets = true;
-        for (const int frameNumber : { 20, 21, 23, 27 })
-        {
-            inputs.frameNumber = frameNumber;
-            const PassImage offsets = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-            ASSERT_EQ(offsets.pixels.size(), 256u);
-            double mean = 0.0;
-            float minimum = 1.f;
-            float maximum = 0.f;
-            for (const osg::Vec4f& pixel : offsets.pixels)
-            {
-                mean += pixel.r();
-                minimum = std::min(minimum, pixel.r());
-                maximum = std::max(maximum, pixel.r());
-            }
-            mean /= static_cast<double>(offsets.pixels.size());
-            EXPECT_NEAR(mean, 0.5, 0.03);
-            EXPECT_LT(minimum, 0.05f);
-            EXPECT_GT(maximum, 0.95f);
-        }
-    }
-
-    TEST(AtmosphereShaderTest, temporalCloudHistoryResolvesDeterministicFrameDither)
+    /// Retain useful cloud history during continuous density changes and reject it at scene disocclusions.
+    TEST(AtmosphereShaderTest, temporalCloudHistoryResolvesChangingDensity)
     {
         NativePassInputs firstFrameInputs;
         firstFrameInputs.cloudParameters = { 0.58f, 0.9f, 48000.f, 22000.f };
@@ -5860,12 +5896,13 @@ void main()
         NativePassInputs secondFrameInputs = firstFrameInputs;
         secondFrameInputs.frameNumber = 5;
         secondFrameInputs.historyValid = true;
+        secondFrameInputs.cloudParameters.y() *= 1.02f;
         const PassImage secondFrame = renderNativeAtmospherePass("integrateAtmosphereRayGrid", secondFrameInputs);
         ASSERT_EQ(firstFrame.pixels.size(), secondFrame.pixels.size());
 
         double deterministicDifference = 0.0;
         double stableNonTemporalDifference = 0.0;
-        double temporalDitherDifference = 0.0;
+        double densityChangeDifference = 0.0;
         for (std::size_t index = 0; index < firstFrame.pixels.size(); ++index)
             for (int channel = 0; channel < 4; ++channel)
             {
@@ -5873,12 +5910,12 @@ void main()
                     += std::abs(firstFrame.pixels[index][channel] - repeatedFirstFrame.pixels[index][channel]);
                 stableNonTemporalDifference
                     += std::abs(firstFrame.pixels[index][channel] - stableNonTemporalFrame.pixels[index][channel]);
-                temporalDitherDifference
+                densityChangeDifference
                     += std::abs(firstFrame.pixels[index][channel] - secondFrame.pixels[index][channel]);
             }
         EXPECT_LT(deterministicDifference, 1e-6);
         EXPECT_LT(stableNonTemporalDifference, 1e-6);
-        EXPECT_GT(temporalDitherDifference, 0.01);
+        EXPECT_GT(densityChangeDifference, 0.01);
 
         NativePassInputs resolveInputs = secondFrameInputs;
         resolveInputs.historyValid = true;
@@ -5906,13 +5943,8 @@ void main()
         ASSERT_EQ(disoccluded.pixels.size(), secondFrame.pixels.size());
         for (std::size_t index = 0; index < disoccluded.pixels.size(); ++index)
         {
-            const int x = static_cast<int>(index) % disoccluded.width;
-            const int y = static_cast<int>(index) / disoccluded.width;
-            const int phase = (secondFrameInputs.frameNumber + (x / 2 + y / 2) % 2) % 4;
-            const bool tracedPixel = x % 2 + (y % 2) * 2 == phase;
-            const PassImage& fresh = tracedPixel ? secondFrame : firstFrame;
             for (int channel = 0; channel < 4; ++channel)
-                EXPECT_NEAR(disoccluded.pixels[index][channel], fresh.pixels[index][channel], 0.002f);
+                EXPECT_NEAR(disoccluded.pixels[index][channel], secondFrame.pixels[index][channel], 0.002f);
         }
     }
 
@@ -6491,8 +6523,8 @@ void main()
         }
     }
 
-    /// Retain bounded ordered-volume history when jitter changes which overlapping medium dominates the sample.
-    TEST(AtmosphereShaderTest, dominantMediumChangesRetainCompatibleRadianceHistory)
+    /// Publish the current cloud integral when a previously mist-dominated ray reveals a cloud.
+    TEST(AtmosphereShaderTest, cloudRefreshReplacesFormerlyDominantMist)
     {
         const osg::Vec4f brightCloud(0.8f, 0.85f, 0.9f, 0.1f);
         const osg::Vec4f faintMist(0.1f, 0.13f, 0.15f, 0.9f);
@@ -6514,9 +6546,7 @@ void main()
         const osg::Vec4f& center = resolved.at(resolved.width / 2, resolved.height / 2);
         for (int channel = 0; channel < 4; ++channel)
         {
-            EXPECT_GT(std::abs(center[channel] - brightCloud[channel]), 0.05f);
-            EXPECT_LT(std::abs(center[channel] - historyVolume[channel]),
-                std::abs(brightCloud[channel] - historyVolume[channel]));
+            EXPECT_NEAR(center[channel], brightCloud[channel], 0.002f);
         }
     }
 
@@ -6543,29 +6573,39 @@ void main()
             EXPECT_NEAR(center[channel], currentVolume[channel], halfFloatTolerance);
     }
 
-    /// Suppress an isolated stochastic cloud-ray excursion with the production per-refresh temporal response.
-    TEST(AtmosphereShaderTest, cloudHistoryRejectsVisibleRayMarchGrain)
+    /// Replace old cloud radiance at refreshed rays as cloud coverage grows, disperses, or reveals mist.
+    TEST(AtmosphereShaderTest, cloudRefreshReplacesThePreviousIntegral)
     {
-        const osg::Vec4f stableCloud(0.3f, 0.32f, 0.34f, 0.7f);
-        const osg::Vec4f noisyCloud(0.9f, 0.92f, 0.94f, 0.1f);
+        const osg::Vec4f previousCloud(0.3f, 0.32f, 0.34f, 0.7f);
         const osg::Vec4f cloudMetadata(encodeAtmosphereDistance(18000.f), 0.3f, encodeAtmosphereDistance(20000.f), 2.f);
-
-        NativePassInputs inputs;
-        inputs.historyValid = true;
-        inputs.passInput = [stableCloud, noisyCloud](int x, int y) {
-            return x >= 31 && x <= 32 && y >= 31 && y <= 32 ? noisyCloud : stableCloud;
-        };
-        inputs.volumeMetadataInput = [cloudMetadata](int, int) { return cloudMetadata; };
-        inputs.atmosphereHistory = [stableCloud](int, int) { return stableCloud; };
-        inputs.atmosphereMetadataHistory = [cloudMetadata](int, int) { return cloudMetadata; };
-
-        const PassImage resolved = renderNativeAtmospherePass("resolveAtmosphereVolumeHistory", inputs);
-        ASSERT_FALSE(resolved.pixels.empty());
-        const osg::Vec4f& center = resolved.at(resolved.width / 2, resolved.height / 2);
-        for (int channel = 0; channel < 4; ++channel)
+        const std::array<osg::Vec4f, 3> currentIntegrals{ osg::Vec4f(0.f, 0.f, 0.f, 1.f),
+            osg::Vec4f(0.05f, 0.07f, 0.09f, 0.9f), osg::Vec4f(0.9f, 0.92f, 0.94f, 0.1f) };
+        for (int medium = 0; medium < 3; ++medium)
         {
-            const float expected = noisyCloud[channel] * 0.04f + stableCloud[channel] * 0.96f;
-            EXPECT_NEAR(center[channel], expected, 0.002f);
+            SCOPED_TRACE(medium);
+            const osg::Vec4f currentIntegral = currentIntegrals[medium];
+            NativePassInputs inputs;
+            inputs.historyValid = true;
+            inputs.passInput = [previousCloud, currentIntegral](int x, int y) {
+                return x >= 31 && x <= 32 && y >= 31 && y <= 32 ? currentIntegral : previousCloud;
+            };
+            inputs.volumeMetadataInput = [cloudMetadata, currentIntegral, medium](int x, int y) {
+                osg::Vec4f metadata = cloudMetadata;
+                if (x >= 31 && x <= 32 && y >= 31 && y <= 32)
+                {
+                    metadata.g() = 1.f - currentIntegral.a();
+                    metadata.a() = static_cast<float>(medium);
+                }
+                return metadata;
+            };
+            inputs.atmosphereHistory = [previousCloud](int, int) { return previousCloud; };
+            inputs.atmosphereMetadataHistory = [cloudMetadata](int, int) { return cloudMetadata; };
+
+            const PassImage resolved = renderNativeAtmospherePass("resolveAtmosphereVolumeHistory", inputs);
+            ASSERT_FALSE(resolved.pixels.empty());
+            const osg::Vec4f& center = resolved.at(resolved.width / 2, resolved.height / 2);
+            for (int channel = 0; channel < 4; ++channel)
+                EXPECT_NEAR(center[channel], currentIntegral[channel], 0.002f);
         }
     }
 
@@ -6643,6 +6683,8 @@ void main()
         }
     }
 
+    /// Preserve beyond-far cloud history on untraced rays while every checkerboard phase refreshes its current
+    /// integral.
     TEST(AtmosphereShaderTest, movingGroundCameraReprojectsUnoccludedCloudsBeyondTheFarPlane)
     {
         const float encodedCloudDistance = encodeAtmosphereDistance(60000.f);
@@ -6655,21 +6697,28 @@ void main()
         inputs.historyValid = true;
         inputs.previousEyeOffset = { 0.f, -180.f, 0.f };
         inputs.passInput = [currentVolume, historyVolume](int x, int y) {
-            return x >= 31 && x <= 32 && y >= 31 && y <= 32 ? currentVolume : historyVolume;
+            return x >= 32 && x < 34 && y >= 32 && y < 34 ? currentVolume : historyVolume;
         };
         inputs.volumeMetadataInput = [cloudMetadata](int, int) { return cloudMetadata; };
         inputs.atmosphereHistory = [historyVolume](int, int) { return historyVolume; };
         inputs.atmosphereMetadataHistory = [cloudMetadata](int, int) { return cloudMetadata; };
         inputs.previousDepth = [](int, int) { return SceneUtil::AutoDepth::isReversed() ? 0.f : 1.f; };
 
-        const PassImage resolved = renderNativeAtmospherePass("resolveAtmosphereVolumeHistory", inputs);
-        ASSERT_FALSE(resolved.pixels.empty());
-        const osg::Vec4f& center = resolved.at(resolved.width / 2, resolved.height / 2);
-        for (int channel = 0; channel < 4; ++channel)
+        for (int frame = 4; frame < 8; ++frame)
         {
-            EXPECT_GT(std::abs(center[channel] - currentVolume[channel]), 0.001f);
-            EXPECT_LT(std::abs(center[channel] - currentVolume[channel]),
-                std::abs(historyVolume[channel] - currentVolume[channel]));
+            inputs.frameNumber = frame;
+            const PassImage resolved = renderNativeAtmospherePass("resolveAtmosphereVolumeHistory", inputs);
+            ASSERT_FALSE(resolved.pixels.empty());
+            for (int y = 32; y < 34; ++y)
+                for (int x = 32; x < 34; ++x)
+                {
+                    const int phase = (frame + (x / 2 + y / 2) % 2) % 4;
+                    const bool traced = x % 2 == phase % 2 && y % 2 == phase / 2;
+                    const osg::Vec4f& expected = traced ? currentVolume : historyVolume;
+                    for (int channel = 0; channel < 4; ++channel)
+                        EXPECT_NEAR(resolved.at(x, y)[channel], expected[channel], 0.001f)
+                            << "frame=" << frame << " pixel=" << x << ',' << y << " traced=" << traced;
+                }
         }
     }
 
@@ -6996,7 +7045,8 @@ void main()
         EXPECT_LT(directionDependentDifference, 1e-5);
     }
 
-    TEST(AtmosphereShaderTest, translatingCameraUsesTemporalCloudSamples)
+    /// Keep a current ray independent of frame phase while the camera has a translation history.
+    TEST(AtmosphereShaderTest, translatingCameraRetainsStableCloudIntegration)
     {
         NativePassInputs firstInputs;
         firstInputs.width = 32;
@@ -7013,10 +7063,11 @@ void main()
         secondInputs.frameNumber = 6;
         const PassImage second = renderNativeAtmospherePass("integrateAtmosphereRayGrid", secondInputs);
         ASSERT_EQ(first.pixels.size(), second.pixels.size());
-        EXPECT_GT(meanRgbDifference(first, second), 1e-6);
+        EXPECT_LT(meanRgbDifference(first, second), 1e-6);
     }
 
-    TEST(AtmosphereShaderTest, stationaryCloudHistoryConvergesFrameDither)
+    /// Reduce spatial checkerboard variation in a stationary cloud field.
+    TEST(AtmosphereShaderTest, stationaryCloudHistoryConvergesCheckerboardSamples)
     {
         NativePassInputs volumeInputs;
         volumeInputs.width = 32;
@@ -7371,7 +7422,226 @@ void main()
                     << "pixel=" << pixel << ", channel=" << channel;
     }
 
-    /// Keep a frozen condensate volume's radiance stable when the observer advances through empty air.
+    /// Resolve nearby sky-cloud edges against a converged world-field integral during camera approach.
+    TEST(AtmosphereShaderTest, nearbySkyCloudEdgesMatchDenseWorldField)
+    {
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Cloudy", "Sunset");
+        inputs.width = 48;
+        inputs.height = 24;
+        inputs.lowCloudParameters = {};
+        inputs.mistParameters = {};
+        inputs.fogVolumeParameters = {};
+        inputs.fogNear = 1e8f;
+        inputs.fogFar = 2e8f;
+        inputs.farPlane = 229376.f;
+        inputs.cloudParameters = { .7f, .35f, 42660.f, 153203.f };
+        inputs.cloudModel.mCoverageMinimum = .6f;
+        inputs.viewDirection = { -.8f, .55f, .12f };
+        inputs.viewDirection.normalize();
+        inputs.verticalFov = 35.f;
+        inputs.previousVerticalFov = inputs.verticalFov;
+        for (const osg::Vec3f eye : { osg::Vec3f(-30126.f, 72900.f, 41595.f), osg::Vec3f(-31726.f, 74000.f, 41835.f) })
+        {
+            SCOPED_TRACE(eye.x());
+            inputs.eyePosition = eye;
+            inputs.renderCloudDensitySlice = false;
+            const PassImage actual = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            inputs.cloudTransportReferenceSubdivisions = 8;
+            const PassImage fineTransport = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            inputs.cloudTransportReferenceSubdivisions = 16;
+            const PassImage convergedTransport = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            inputs.cloudTransportReferenceSubdivisions = 1;
+            double meanRadianceError = 0.0;
+            float maximumRadianceError = 0.f;
+            for (std::size_t index = 0; index < actual.pixels.size(); ++index)
+            {
+                for (int channel = 0; channel < 3; ++channel)
+                {
+                    EXPECT_NEAR(fineTransport.pixels[index][channel], convergedTransport.pixels[index][channel], .01f);
+                    const float error
+                        = std::abs(actual.pixels[index][channel] - convergedTransport.pixels[index][channel]);
+                    maximumRadianceError = std::max(maximumRadianceError, error);
+                    meanRadianceError += error;
+                }
+            }
+            EXPECT_LT(maximumRadianceError, .02f);
+            EXPECT_LT(meanRadianceError / (actual.pixels.size() * 3), .0025);
+            inputs.renderCloudDensitySlice = true;
+            inputs.cloudDensitySliceQuantity = 34;
+            inputs.cloudDensitySliceAxis = 0;
+            const PassImage reference = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            inputs.cloudDensitySliceAxis = 1;
+            const PassImage converged = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            double meanError = 0.0;
+            float maximumError = 0.f;
+            float maximumOpacity = 0.f;
+            for (std::size_t index = 0; index < actual.pixels.size(); ++index)
+            {
+                EXPECT_NEAR(reference.pixels[index].a(), converged.pixels[index].a(), .002f);
+                const float error = std::abs(actual.pixels[index].a() - converged.pixels[index].a());
+                maximumError = std::max(maximumError, error);
+                meanError += error;
+                maximumOpacity = std::max(maximumOpacity, 1.f - converged.pixels[index].a());
+            }
+            EXPECT_GT(maximumOpacity, .1f);
+            EXPECT_LT(maximumError, .02f);
+            EXPECT_LT(meanError / actual.pixels.size(), .0025);
+        }
+    }
+
+    /// Verify approach and yaw against dense current-field transport and a freshly reconstructed frame.
+    void expectCloudMotionMatchesDenseField(NativePassInputs inputs, const osg::Vec3f& translation, float yawPerFrame)
+    {
+        const osg::Vec3f origin = inputs.eyePosition;
+        const osg::Vec3f direction = inputs.viewDirection;
+        ProductionAtmosphereFrame previous;
+        osg::Vec3f previousDirection;
+        double cumulativeMotion = 0.0;
+        for (int frame = 0; frame < 12; ++frame)
+        {
+            SCOPED_TRACE(frame);
+            const float yaw = static_cast<float>(frame) * yawPerFrame;
+            inputs.viewDirection = { direction.x() * std::cos(yaw) - direction.y() * std::sin(yaw),
+                direction.x() * std::sin(yaw) + direction.y() * std::cos(yaw), direction.z() };
+            inputs.viewDirection.normalize();
+            inputs.eyePosition = origin + translation * static_cast<float>(frame);
+            inputs.previousEyeOffset = frame > 0 ? -translation : osg::Vec3f{};
+            inputs.previousViewDirection = frame > 0 ? std::optional(previousDirection) : std::nullopt;
+            inputs.frameNumber = frame;
+            inputs.historyValid = frame > 0;
+            ProductionAtmosphereFrame current
+                = renderProductionAtmosphereVolumeFrame(inputs, frame > 0 ? &previous : nullptr);
+            ASSERT_FALSE(current.mResolvedVolume.pixels.empty());
+            NativePassInputs referenceInputs = inputs;
+            referenceInputs.width = current.mResolvedVolume.width;
+            referenceInputs.height = current.mResolvedVolume.height;
+            referenceInputs.sceneWidth = inputs.width;
+            referenceInputs.sceneHeight = inputs.height;
+            referenceInputs.cloudTransportReferenceSubdivisions = 8;
+            const PassImage reference = renderCloudFootprintReference(referenceInputs, 1);
+            NativePassInputs freshInputs = inputs;
+            freshInputs.historyValid = false;
+            const ProductionAtmosphereFrame fresh = renderProductionAtmosphereVolumeFrame(freshInputs);
+            ASSERT_EQ(current.mResolvedVolume.pixels.size(), reference.pixels.size());
+            ASSERT_EQ(fresh.mResolvedVolume.pixels.size(), reference.pixels.size());
+            double resolvedError = 0.0;
+            double freshError = 0.0;
+            std::size_t resolvedOutliers = 0;
+            std::size_t freshOutliers = 0;
+            for (std::size_t pixel = 0; pixel < reference.pixels.size(); ++pixel)
+            {
+                float resolvedMaximum = 0.f;
+                float freshMaximum = 0.f;
+                for (int channel = 0; channel < 4; ++channel)
+                {
+                    const float resolvedDelta
+                        = std::abs(current.mResolvedVolume.pixels[pixel][channel] - reference.pixels[pixel][channel]);
+                    const float freshDelta
+                        = std::abs(fresh.mResolvedVolume.pixels[pixel][channel] - reference.pixels[pixel][channel]);
+                    resolvedError += resolvedDelta;
+                    freshError += freshDelta;
+                    resolvedMaximum = std::max(resolvedMaximum, resolvedDelta);
+                    freshMaximum = std::max(freshMaximum, freshDelta);
+                    if (frame > 0)
+                        cumulativeMotion += std::abs(fresh.mResolvedVolume.pixels[pixel][channel]
+                            - previous.mResolvedVolume.pixels[pixel][channel]);
+                }
+                resolvedOutliers += resolvedMaximum > .1f ? 1 : 0;
+                freshOutliers += freshMaximum > .1f ? 1 : 0;
+            }
+            const double count = static_cast<double>(reference.pixels.size());
+            EXPECT_LT(resolvedError / (count * 4), .02);
+            EXPECT_LE(resolvedError / (count * 4), freshError / (count * 4) + .005);
+            EXPECT_LE(static_cast<double>(resolvedOutliers) / count, static_cast<double>(freshOutliers) / count + .01);
+            previous = std::move(current);
+            previousDirection = inputs.viewDirection;
+        }
+        EXPECT_GT(cumulativeMotion, 1.0);
+    }
+
+    /// Keep nearby cloud history aligned with a dense current-field reference during combined approach and rotation.
+    TEST(AtmosphereShaderTest, nearbySkyCloudMotionRetainsCurrentField)
+    {
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Cloudy", "Sunset");
+        inputs.width = 96;
+        inputs.height = 64;
+        inputs.lowCloudParameters = {};
+        inputs.mistParameters = {};
+        inputs.fogVolumeParameters = {};
+        inputs.fogNear = 1e8f;
+        inputs.fogFar = 2e8f;
+        inputs.farPlane = 229376.f;
+        inputs.cloudParameters = { .7f, .35f, 42660.f, 153203.f };
+        inputs.cloudModel.mCoverageMinimum = .6f;
+        inputs.verticalFov = 35.f;
+        inputs.previousVerticalFov = inputs.verticalFov;
+        inputs.eyePosition = { -30126.f, 72900.f, 41595.f };
+        inputs.viewDirection = { -.8f, .55f, .12f };
+        expectCloudMotionMatchesDenseField(inputs, { -480.f, 330.f, 40.f }, .006f);
+    }
+
+    /// Keep nearby environmental cloud history aligned during a descending, rotating approach.
+    TEST(AtmosphereShaderTest, nearbyLowCloudMotionRetainsCurrentField)
+    {
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Foggy", "Day");
+        inputs.width = 96;
+        inputs.height = 64;
+        inputs.cloudParameters = {};
+        inputs.incomingCloudParameters = {};
+        inputs.mistParameters = {};
+        inputs.fogVolumeParameters = {};
+        inputs.fogNear = 1e8f;
+        inputs.fogFar = 2e8f;
+        inputs.farPlane = 229376.f;
+        inputs.lowCloudParameters = { .253974f, .763042f, 3740.32f, 9954.81f };
+        inputs.environmentalCloudModel.mCoverageAmount = .49f;
+        inputs.mediumReferenceParameters = { 38.f, .45f, 6000.f, 0.f };
+        inputs.cloudAdvectionOffsetWorldUnits = { 914.f, 421.9f };
+        inputs.verticalFov = inputs.previousVerticalFov = 35.f;
+        inputs.eyePosition = { 48659.f, -76196.f, 11449.f };
+        inputs.viewDirection = { .919f, .303f, -.255f };
+        expectCloudMotionMatchesDenseField(inputs, { 480.f, 160.f, -120.f }, .006f);
+    }
+
+    /// Keep a frozen nearby sky volume stable across refresh phases that trace the same camera ray.
+    TEST(AtmosphereShaderTest, frozenNearbySkyCloudDoesNotBoilAcrossCheckerboardRefreshes)
+    {
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Cloudy", "Sunset");
+        inputs.width = inputs.height = 1;
+        inputs.lowCloudParameters = {};
+        inputs.mistParameters = {};
+        inputs.fogVolumeParameters = {};
+        inputs.fogNear = 1e8f;
+        inputs.fogFar = 2e8f;
+        inputs.farPlane = 229376.f;
+        inputs.historyValid = true;
+        inputs.cloudParameters = { .7f, .35f, 42660.f, 153203.f };
+        inputs.cloudModel.mCoverageMinimum = .6f;
+        inputs.eyePosition = { -30126.f, 72900.f, 41595.f };
+        inputs.verticalFov = .01f;
+        float maximumOpacity = 0.f;
+        for (const float elevation : { .08f, .2f, .45f })
+        {
+            inputs.viewDirection = { -.8f, .55f, elevation };
+            inputs.viewDirection.normalize();
+            inputs.frameNumber = 0;
+            const auto first = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            ASSERT_EQ(first.pixels.size(), 1u);
+            maximumOpacity = std::max(maximumOpacity, 1.f - first.pixels[0].a());
+            for (int refresh = 1; refresh < 8; ++refresh)
+            {
+                inputs.frameNumber = refresh * 4;
+                const auto current = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                ASSERT_EQ(current.pixels.size(), 1u);
+                for (int channel = 0; channel < 4; ++channel)
+                    EXPECT_NEAR(first.pixels[0][channel], current.pixels[0][channel], .005f)
+                        << "elevation=" << elevation << ", refresh=" << refresh << ", channel=" << channel;
+            }
+        }
+        EXPECT_GT(maximumOpacity, .1f);
+    }
+
+    /// Preserve a dense-reference condensate integral when the observer advances through empty air at every quality.
     TEST(AtmosphereShaderTest, approachingLowCloudPreservesFrozenVolumeRadiance)
     {
         NativePassInputs inputs = makePackagedAtmosphereInputs("Thunderstorm", "Day");
@@ -7391,29 +7661,54 @@ void main()
         inputs.historyValid = true;
         const osg::Vec3f origin{ 55451.7f, -70067.6f, 7571.85f };
         float maximumOpacity = 0.f;
-        for (const float horizontal : { -0.34f, -0.64f, -0.96f })
-        {
-            inputs.viewDirection = { 0.97545f + horizontal * 0.2174f, 0.2174f - horizontal * 0.97545f, -0.12f };
-            inputs.viewDirection.normalize();
-            inputs.eyePosition = origin;
-            const PassImage initial = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-            ASSERT_EQ(initial.pixels.size(), 1u);
-            maximumOpacity = std::max(maximumOpacity, 1.f - initial.pixels[0].a());
-            const auto sceneDepth = inputs.depth;
-            inputs.depth = [](int, int) { return normalizedDepthForViewDistance(1000.f, false); };
-            const PassImage foreground = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-            ASSERT_GT(foreground.pixels[0].a(), 0.999f);
-            inputs.depth = sceneDepth;
-            for (const float distance : { 100.f, 300.f, 600.f, 900.f })
+        float maximumReferenceError = 0.f;
+        float maximumMotionError = 0.f;
+        for (const int quality : { 0, 1, 2, 3 })
+            for (const float horizontal : { -0.34f, -0.64f, -0.96f })
             {
-                inputs.eyePosition = origin + inputs.viewDirection * distance;
-                const PassImage moved = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                SCOPED_TRACE(testing::Message() << "quality=" << quality << " horizontal=" << horizontal);
+                inputs.quality = quality;
+                inputs.viewDirection = { 0.97545f + horizontal * 0.2174f, 0.2174f - horizontal * 0.97545f, -0.12f };
+                inputs.viewDirection.normalize();
+                inputs.eyePosition = origin;
+                const PassImage initial = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                ASSERT_EQ(initial.pixels.size(), 1u);
+                NativePassInputs referenceInputs = inputs;
+                referenceInputs.cloudTransportReferenceSubdivisions = 16;
+                const PassImage reference = renderNativeAtmospherePass("integrateAtmosphereRayGrid", referenceInputs);
+                referenceInputs.cloudTransportReferenceSubdivisions = 32;
+                const PassImage converged = renderNativeAtmospherePass("integrateAtmosphereRayGrid", referenceInputs);
+                ASSERT_EQ(reference.pixels.size(), 1u);
+                ASSERT_EQ(converged.pixels.size(), 1u);
+                maximumOpacity = std::max(maximumOpacity, 1.f - converged.pixels[0].a());
                 for (int channel = 0; channel < 4; ++channel)
-                    EXPECT_NEAR(moved.pixels[0][channel], initial.pixels[0][channel], 0.002f)
-                        << "horizontal=" << horizontal << ", distance=" << distance << ", channel=" << channel;
+                {
+                    EXPECT_NEAR(reference.pixels[0][channel], converged.pixels[0][channel], .001f);
+                    const float error = std::abs(initial.pixels[0][channel] - converged.pixels[0][channel]);
+                    maximumReferenceError = std::max(maximumReferenceError, error);
+                    EXPECT_LT(error, .002f);
+                }
+                const auto sceneDepth = inputs.depth;
+                inputs.depth = [](int, int) { return normalizedDepthForViewDistance(1000.f, false); };
+                const PassImage foreground = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                ASSERT_GT(foreground.pixels[0].a(), 0.999f);
+                inputs.depth = sceneDepth;
+                for (const float distance : { 100.f, 300.f, 600.f, 900.f })
+                {
+                    inputs.eyePosition = origin + inputs.viewDirection * distance;
+                    const PassImage moved = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                    for (int channel = 0; channel < 4; ++channel)
+                    {
+                        maximumMotionError = std::max(
+                            maximumMotionError, std::abs(moved.pixels[0][channel] - initial.pixels[0][channel]));
+                        EXPECT_NEAR(moved.pixels[0][channel], initial.pixels[0][channel], 0.002f)
+                            << "horizontal=" << horizontal << ", distance=" << distance << ", channel=" << channel;
+                    }
+                }
             }
-        }
-        EXPECT_GT(maximumOpacity, 0.1f);
+        EXPECT_GT(maximumOpacity, .05f);
+        RecordProperty("maximum_reference_error", std::to_string(maximumReferenceError));
+        RecordProperty("maximum_motion_error", std::to_string(maximumMotionError));
     }
 
     /// Keep condensate at fixed world locations when the observer recenters an unchanged flat terrain sample.
@@ -7631,6 +7926,71 @@ void main()
             EXPECT_LT(maximumError, .02f);
             EXPECT_LT(meanError / actual.pixels.size(), .0025);
         }
+    }
+
+    /// Resolve low-cloud illumination against converged transport from both shallow and downward approach rays.
+    TEST(AtmosphereShaderTest, lowCloudTransportMatchesDenseWorldField)
+    {
+        float maximumObservedError = 0.f;
+        for (const char* phase : { "Day", "Sunset" })
+            for (const int quality : { 0, 1, 2, 3 })
+            {
+                SCOPED_TRACE(phase);
+                SCOPED_TRACE(quality);
+                NativePassInputs inputs = makePackagedAtmosphereInputs("Foggy", phase);
+                inputs.quality = quality;
+                inputs.width = 32;
+                inputs.height = 16;
+                inputs.cloudParameters = {};
+                inputs.incomingCloudParameters = {};
+                inputs.mistParameters = {};
+                inputs.fogVolumeParameters = {};
+                inputs.fogNear = 1e8f;
+                inputs.fogFar = 2e8f;
+                inputs.farPlane = 229376.f;
+                inputs.lowCloudParameters = { .253974f, .763042f, 3740.32f, 9954.81f };
+                inputs.mediumReferenceParameters = { 38.f, .45f, 6000.f, 0.f };
+                inputs.cloudAdvectionOffsetWorldUnits = { 914.f, 421.9f };
+                inputs.verticalFov = inputs.previousVerticalFov = 35.f;
+                for (const osg::Vec3f eye :
+                    { osg::Vec3f(48659.f, -76196.f, 11449.f), osg::Vec3f(65500.f, -70600.f, 6765.f) })
+                    for (const float elevation : { -.255f, .02f })
+                    {
+                        SCOPED_TRACE(testing::Message() << "height=" << eye.z() << " elevation=" << elevation);
+                        inputs.eyePosition = eye;
+                        inputs.viewDirection = { .919f, .303f, elevation };
+                        inputs.viewDirection.normalize();
+                        inputs.cloudTransportReferenceSubdivisions = 1;
+                        const PassImage actual = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                        inputs.cloudTransportReferenceSubdivisions = 8;
+                        const PassImage fine = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                        inputs.cloudTransportReferenceSubdivisions = 16;
+                        const PassImage converged = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                        ASSERT_EQ(actual.pixels.size(), static_cast<std::size_t>(inputs.width * inputs.height));
+                        ASSERT_EQ(fine.pixels.size(), actual.pixels.size());
+                        ASSERT_EQ(converged.pixels.size(), actual.pixels.size());
+                        double meanError = 0.0;
+                        float maximumError = 0.f;
+                        float maximumOpacity = 0.f;
+                        for (std::size_t index = 0; index < actual.pixels.size(); ++index)
+                        {
+                            maximumOpacity = std::max(maximumOpacity, 1.f - converged.pixels[index].a());
+                            for (int channel = 0; channel < 4; ++channel)
+                            {
+                                EXPECT_NEAR(fine.pixels[index][channel], converged.pixels[index][channel], .01f);
+                                const float error
+                                    = std::abs(actual.pixels[index][channel] - converged.pixels[index][channel]);
+                                maximumError = std::max(maximumError, error);
+                                meanError += error;
+                            }
+                        }
+                        EXPECT_GT(maximumOpacity, .1f);
+                        EXPECT_LT(maximumError, .02f);
+                        EXPECT_LT(meanError / (actual.pixels.size() * 4), .0025);
+                        maximumObservedError = std::max(maximumObservedError, maximumError);
+                    }
+            }
+        RecordProperty("maximum_transport_error", std::to_string(maximumObservedError));
     }
 
     /// Preserve fractional cloud motion over continuous opaque terrain instead of snapping history texels.

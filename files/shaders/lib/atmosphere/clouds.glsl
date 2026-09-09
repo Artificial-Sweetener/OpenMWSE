@@ -31,15 +31,22 @@ struct OpenMWSECloudLayer
 const float openmwseCloudVirtualPlanetRadius
     = 6360000.0 * openmwseAtmosphereWorldUnitsPerMeter;
 
-// Use the same reduced extinction for the second solar path and its analytical view-segment integral.
+// Use reduced extinction for the second-order solar path.
 const float openmwseCloudSecondaryExtinctionScale = 0.1;
 
-// Use the two-point Gauss-Legendre abscissae for both deterministic and temporally interleaved segments.
+// Use two-point Gauss-Legendre density sampling for the main weather deck.
 const float openmwseCloudQuadratureOffsetLow = 0.2113248654;
 const float openmwseCloudQuadratureOffsetHigh = 0.7886751346;
 
+// Resolve nonlinear source albedo and lighting within the density sampling allocation.
+const int openmwseSkyCloudTransportSubdivisions = 3;
+
 // Resolve thin condensate optics within the main deck's broader source sampling allocation.
-const int openmwseCondensateTransportSubdivisions = 8;
+const int openmwseCondensateTransportSubdivisions = 5;
+
+// Resolve thin condensate with four-point Gaussian density sampling inside each lighting segment.
+const vec4 openmwseCondensateQuadratureOffsets = vec4(0.0694318442, 0.3300094782, 0.6699905218, 0.9305681558);
+const vec4 openmwseCondensateQuadratureWeights = vec4(0.1739274226, 0.3260725774, 0.3260725774, 0.1739274226);
 
 // Scale density mip distances with the explicit physical scale.
 const float openmwseCloudNoiseLodDistance = 30000.0 * openmwseAtmosphereWorldUnitsPerMeter;
@@ -429,6 +436,24 @@ OpenMWSECloudDensitySample openmwseCloudSegmentDensity(vec3 origin, vec3 directi
     return OpenMWSECloudDensitySample(0.5 * densitySum, rainDensity / max(densitySum, 0.0001));
 }
 
+/// Resolve fine condensate extinction independently from its broader illumination sampling interval.
+OpenMWSECloudDensitySample openmwseCondensateSegmentDensity(vec3 origin, vec3 direction,
+    float startDistance, float segmentLength, OpenMWSECloudLayer layer)
+{
+    float density = 0.0;
+    float rainDensity = 0.0;
+    for (int index = 0; index < 4; ++index)
+    {
+        float distance = startDistance + segmentLength * openmwseCondensateQuadratureOffsets[index];
+        OpenMWSECloudDensitySample sample = openmwseCloudDensitySample(
+            origin + direction * distance, distance, 0.0, layer);
+        float contribution = sample.density * openmwseCondensateQuadratureWeights[index];
+        density += contribution;
+        rainDensity += contribution * sample.precipitation;
+    }
+    return OpenMWSECloudDensitySample(density, rainDensity / max(density, 0.0001));
+}
+
 /// Evaluate the sampleDetail=false path for stable temporal occupancy classification.
 float openmwseCloudBroadDensity(vec3 worldPosition, OpenMWSECloudLayer layer)
 {
@@ -511,7 +536,6 @@ vec3 openmwseCloudSunOpticalDepth(vec3 samplePosition, vec3 sunDirection, int qu
 
     int shadowSampleCount = quality >= 2 ? 5 : quality >= 1 ? 4 : 3;
     vec3 opticalDepth = vec3(0.0);
-    float shadowLodBias = 0.5;
     const int maximumShadowSampleCount = 5;
     for (int sampleIndex = 0; sampleIndex < maximumShadowSampleCount; ++sampleIndex)
     {
@@ -529,11 +553,12 @@ vec3 openmwseCloudSunOpticalDepth(vec3 samplePosition, vec3 sunDirection, int qu
         vec3 shadowPosition = samplePosition + sunDirection * sampleDistance;
         if (!openmwseCloudPotentialDensity(shadowPosition, layer))
             continue;
+        // Empty samples do not change the spatial footprint of later light samples.
+        float shadowLodBias = 0.5 * float(sampleIndex + 1);
         float shadowDensity = openmwseCloudDensity(
             shadowPosition, distanceFromEye, shadowLodBias, layer);
         opticalDepth += clamp(shadowDensity * layer.model.extinctionPerMeter, 0.0, 1.0)
             * (lightPathLength * intervalFraction / openmwseAtmosphereWorldUnitsPerMeter);
-        shadowLodBias += 0.5;
     }
     return opticalDepth;
 }
@@ -632,20 +657,22 @@ OpenMWSEVolumeIllumination openmwseLocalVolumeIllumination(vec3 solarRadiance,
         0.5 * (groundIrradiance + openmwseLocalSkyRadiance(atmosphere)));
 }
 
-/// Apply the canonical bounded aerial perspective to one cloud stratum's accumulated radiance.
-vec3 openmwseCloudAtmosphericContribution(vec3 scatteredLight, float opacity,
-    float representativeDistanceSum, vec3 atmosphericTarget, vec3 worldDirection, float opticalDistanceScale,
-    float opticalDistanceLimit,
+/// Apply the shared Morrowind fog transfer at a cloud segment's distance while retaining premultiplied radiance.
+vec3 openmwseCloudSegmentAtmosphericContribution(vec3 scatteredLight, float opacity,
+    float sampleDistance, vec3 atmosphericTarget, vec3 worldDirection, float opticalDistanceLimit,
     OpenMWSEAerialPerspectiveParameters atmosphere)
 {
-    if (opacity <= 1e-5)
-        return vec3(0.0);
+    return openmwseApplyAerialPerspectiveTowardTargetWithScale(scatteredLight,
+        atmosphericTarget * opacity, worldDirection, sampleDistance, 1.0, opticalDistanceLimit, atmosphere);
+}
 
-    float representativeDistance = representativeDistanceSum / opacity;
-    vec3 meanRadiance = scatteredLight / opacity;
-    vec3 atmosphericRadiance = openmwseApplyAerialPerspectiveTowardTargetWithScale(meanRadiance,
-        atmosphericTarget, worldDirection, representativeDistance, opticalDistanceScale, opticalDistanceLimit, atmosphere);
-    return atmosphericRadiance * opacity;
+/// Evaluate spectral scattering per metre with weather opacity applied once after the episode's powder response.
+vec3 openmwseWeatherCloudScattering(float density, float precipitation, float weatherWeight,
+    OpenMWSECloudLayer layer)
+{
+    float episodeDensity = density / max(weatherWeight, 1e-6);
+    return density * layer.model.extinctionPerMeter
+        * cloudModelSampleAlbedo(episodeDensity, precipitation, layer.model);
 }
 
 /// Preserve distance-based step allocation at the selected physical feature scale.
@@ -655,8 +682,18 @@ float openmwseCloudMarchStepLength(float intervalLength, float physicalScale, in
         * openmwseAtmosphereWorldUnitsPerMeter;
     float maximumSteps = float(48 + quality * 16);
     // OpenMW also has terrain condensate much thinner than the kilometre-scale shell. Retain
-    // one eighth of the quality budget in short intersections so jitter cannot alternate empty/full coverage.
+    // one eighth of the quality budget in short intersections to resolve their shallow density support.
     return min(intervalLength / (maximumSteps * 0.125), max(intervalLength, allocationDistance) / maximumSteps);
+}
+
+/// Keep condensate quadrature on fixed world planes when the observer moves along a ray.
+float openmwseCondensateLatticeSegmentLength(vec3 origin, vec3 direction,
+    float distanceAlongRay, float stepLength)
+{
+    float phase = fract((dot(origin, direction) + distanceAlongRay) / stepLength);
+    float remaining = (1.0 - phase) * stepLength;
+    // Treat a numerically completed lattice plane as a full step instead of stalling on its boundary.
+    return remaining > stepLength * 1e-4 ? remaining : stepLength;
 }
 
 /// Finish a clipped interval at its explicit endpoint so rounded cumulative distances cannot stall or replay it.
@@ -669,7 +706,7 @@ float openmwseAdvanceCloudMarch(float distanceAlongIntervals, float stepLength,
 /// March each cloud interval with one shared sample budget and interleaved local-medium transport.
 vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float maximumDistance, int quality,
     vec3 solarRadiance, vec3 skyIrradiance, vec3 groundIrradiance, OpenMWSEVolumeIllumination lowIllumination, vec3 atmosphericTarget,
-    OpenMWSEAerialPerspectiveParameters atmosphere, float rayDither, bool quadratureSampling,
+    OpenMWSEAerialPerspectiveParameters atmosphere,
     bool useAtmosphericTarget, OpenMWSELocalMedia localMedia,
     out float visibleDistanceSum, out float visibleCloudOpacity)
 {
@@ -735,8 +772,8 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
             separatedIntervals = true;
     }
 
-    // Quality three permits 96 steps per stratum; reserve the split-boundary segments as well.
-    const int maximumSampleCount = 96 * (1 + openmwseCondensateTransportSubdivisions) + 4;
+    // Reserve each stratum's transport subdivisions and the split-boundary segments.
+    const int maximumSampleCount = 96 * (openmwseSkyCloudTransportSubdivisions + openmwseCondensateTransportSubdivisions) + 8;
     float firstIntervalLength = min(firstInterval.y - firstInterval.x, openmwseCloudMaximumMarchingDistance);
     float secondIntervalLength = separatedIntervals
         ? min(secondInterval.y - secondInterval.x, openmwseCloudMaximumMarchingDistance - firstIntervalLength) : 0.0;
@@ -773,15 +810,18 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
     OpenMWSEVolumeIllumination illumination = openmwseCloudIllumination(solarRadiance, skyIrradiance, atmosphere);
     // Incident light is evaluated above the deck, but the cloud-to-eye path belongs to the real observer.
     vec3 viewSkyRadiance = openmwseAtmosphereSkyRadiance(worldDirection, atmosphere);
+    float incomingWeatherWeight = clamp(openmwseCloudScenarioParameters().z, 0.0, 1.0);
 
+    vec3 cloudAtmosphericTarget = useAtmosphericTarget ? atmosphericTarget : viewSkyRadiance;
+    vec2 mainCloudOpticalLimits = useAtmosphericTarget ? vec2(0.72, 1.27296568) : vec2(0.88, 2.12026354);
+    float mainCloudOpticalDistanceLimit
+        = mix(mainCloudOpticalLimits.x, mainCloudOpticalLimits.y, step(0.5, atmosphere.exponentialFog));
     int sampleIndex = 0;
     for (int intervalIndex = 0; intervalIndex < 2; ++intervalIndex)
     {
         if (sampleIndex >= maximumSampleCount || (intervalIndex == 1 && !separatedIntervals))
             break;
         bool sampleSecondInterval = intervalIndex == 1;
-        bool activeIntervalIsMain
-            = sampleSecondInterval ? !firstIntervalIsMain : firstIntervalIsMain;
         vec2 activeInterval = sampleSecondInterval ? secondInterval : firstInterval;
         float activeIntervalLength = sampleSecondInterval ? secondIntervalLength : firstIntervalLength;
         float activeIntervalEnd = sampleSecondInterval ? traversedIntervalLength : firstIntervalLength;
@@ -800,6 +840,14 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
             }
             float segmentLength = min(fineStepLength, remainingIntervalLength);
             float distanceAlongRay = activeInterval.x + intervalPathOffset;
+            if (mainIntervalValid && distanceAlongRay < mainInterval.y)
+            {
+                if (distanceAlongRay < mainInterval.x)
+                    segmentLength = min(segmentLength, mainInterval.x - distanceAlongRay);
+                else
+                    segmentLength = min(segmentLength, min(fineStepLength / float(openmwseSkyCloudTransportSubdivisions),
+                        mainInterval.y - distanceAlongRay));
+            }
             // Beer-powder albedo and sunlight must resolve the same shallow features as extinction.
             // Averaging fine density into a coarse lighting segment makes radiance change with its boundaries.
             if (lowIntervalValid && distanceAlongRay < lowInterval.y)
@@ -807,20 +855,19 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
                 if (distanceAlongRay < lowInterval.x)
                     segmentLength = min(segmentLength, lowInterval.x - distanceAlongRay);
                 else
-                    segmentLength = min(min(fineStepLength / float(openmwseCondensateTransportSubdivisions), remainingIntervalLength),
-                        lowInterval.y - distanceAlongRay);
+                {
+                    float lowStepLength = fineStepLength / float(openmwseCondensateTransportSubdivisions);
+                    float latticeSegmentLength = openmwseCondensateLatticeSegmentLength(
+                        rayOrigin, worldDirection, distanceAlongRay, lowStepLength);
+                    segmentLength = min(min(latticeSegmentLength, segmentLength), lowInterval.y - distanceAlongRay);
+                }
             }
-            // Keep one ray-coherent abscissa through the march, matching the blue-noise integration.
-            // The caller rotates this offset continuously between checkerboard refreshes.
-            // Shallow condensate resolves density and lighting on the same finer transport segments.
-            // Keep those samples deterministic wherever the ray intersects its occupied height envelope.
-            bool sampleQuadrature = quadratureSampling || (lowIntervalValid
-                && distanceAlongRay < lowInterval.y && distanceAlongRay + segmentLength > lowInterval.x);
-            float sampleOffset = sampleQuadrature ? 0.5 : rayDither;
-            float sampleDistance = distanceAlongRay + segmentLength * sampleOffset;
+            // Integrate the same segment in ordinary, repaired, and reflected rays. Changing the
+            // abscissa between refreshes changes nearby cloud opacity even when the field is frozen.
+            float sampleDistance = distanceAlongRay + segmentLength * 0.5;
             vec3 samplePosition = rayOrigin + worldDirection * sampleDistance;
-            float sampleHeightRadius = sampleQuadrature
-                ? abs(worldDirection.z) * segmentLength * (0.5 - openmwseCloudQuadratureOffsetLow) : 0.0;
+            float sampleHeightRadius
+                = abs(worldDirection.z) * segmentLength * (0.5 - openmwseCondensateQuadratureOffsets.x);
             // The main interval can continue beyond the low march limit into terrain outside this ray bound.
             bool boundedLowSegment = lowIntervalValid && distanceAlongRay >= lowInterval.x
                 && distanceAlongRay + segmentLength <= lowInterval.y;
@@ -831,29 +878,6 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
                 && samplePosition.z - sampleHeightRadius <= sampleLowHeightBounds.y;
             openmwseAdvanceLocalMedia(localMedia, sampleDistance, localCursor, transmittance,
                 localScatteredLight, localOpacity, localDistanceSum);
-            if (!sampleQuadrature)
-            {
-                bool fullySampleLowInterval
-                    = lowLayerEnabled && !activeIntervalIsMain && (!mainIntervalValid || separatedIntervals);
-                // A terrain-following low stratum can enter and leave its local height envelope inside one
-                // conservative interval. Do not skip the next valid segment from one empty point estimate.
-                bool potentialDensity = fullySampleLowInterval
-                    || (outgoingLayerEnabled && openmwseCloudPotentialDensity(samplePosition, mainLayer));
-                potentialDensity = potentialDensity || (incomingLayerEnabled
-                    && openmwseCloudPotentialDensity(samplePosition, incomingLayer));
-                potentialDensity = potentialDensity || (!fullySampleLowInterval && lowLayerEnabled
-                    && openmwseCloudPotentialDensity(samplePosition, lowLayer));
-                if (!potentialDensity)
-                {
-                    const float emptySpaceStepCount = 2.0;
-                    float skipLength = min(fineStepLength * emptySpaceStepCount, remainingIntervalLength);
-                    if (lowIntervalValid && distanceAlongRay < lowInterval.x)
-                        skipLength = min(skipLength, lowInterval.x - distanceAlongRay);
-                    distanceAlongCloudIntervals = openmwseAdvanceCloudMarch(
-                        distanceAlongCloudIntervals, skipLength, remainingIntervalLength, activeIntervalEnd);
-                    continue;
-                }
-            }
             float mainDensity = 0.0;
             float outgoingDensityForHeight = 0.0;
             float incomingDensityForHeight = 0.0;
@@ -861,58 +885,29 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
             float outgoingPrecipitation = 0.0;
             float incomingPrecipitation = 0.0;
             float lowPrecipitation = 0.0;
-            if (sampleQuadrature)
+            if (outgoingLayerEnabled)
             {
-                if (outgoingLayerEnabled)
-                {
-                    OpenMWSECloudDensitySample sample = openmwseCloudSegmentDensity(
-                        rayOrigin, worldDirection, distanceAlongRay, segmentLength, mainLayer);
-                    mainDensity = sample.density;
-                    outgoingDensityForHeight = mainDensity;
-                    outgoingPrecipitation = sample.precipitation;
-                }
-                if (incomingLayerEnabled)
-                {
-                    OpenMWSECloudDensitySample sample = openmwseCloudSegmentDensity(
-                        rayOrigin, worldDirection, distanceAlongRay, segmentLength, incomingLayer);
-                    float incomingDensity = sample.density;
-                    incomingPrecipitation = sample.precipitation;
-                    incomingDensityForHeight = incomingDensity;
-                    mainDensity += incomingDensity;
-                }
-                if (sampleLowLayer)
-                {
-                    OpenMWSECloudDensitySample sample = openmwseCloudSegmentDensity(
-                        rayOrigin, worldDirection, distanceAlongRay, segmentLength, lowLayer);
-                    lowDensity = sample.density;
-                    lowPrecipitation = sample.precipitation;
-                }
+                OpenMWSECloudDensitySample sample = openmwseCloudSegmentDensity(
+                    rayOrigin, worldDirection, distanceAlongRay, segmentLength, mainLayer);
+                mainDensity = sample.density;
+                outgoingDensityForHeight = mainDensity;
+                outgoingPrecipitation = sample.precipitation;
             }
-            else
+            if (incomingLayerEnabled)
             {
-                if (outgoingLayerEnabled)
-                {
-                    OpenMWSECloudDensitySample sample = openmwseCloudDensitySample(
-                        samplePosition, sampleDistance, 0.0, mainLayer);
-                    mainDensity = sample.density;
-                    outgoingDensityForHeight = mainDensity;
-                    outgoingPrecipitation = sample.precipitation;
-                }
-                if (incomingLayerEnabled)
-                {
-                    OpenMWSECloudDensitySample sample = openmwseCloudDensitySample(
-                        samplePosition, sampleDistance, 0.0, incomingLayer);
-                    incomingPrecipitation = sample.precipitation;
-                    incomingDensityForHeight = sample.density;
-                    mainDensity += sample.density;
-                }
-                if (sampleLowLayer)
-                {
-                    OpenMWSECloudDensitySample sample = openmwseCloudDensitySample(
-                        samplePosition, sampleDistance, 0.0, lowLayer);
-                    lowDensity = sample.density;
-                    lowPrecipitation = sample.precipitation;
-                }
+                OpenMWSECloudDensitySample sample = openmwseCloudSegmentDensity(
+                    rayOrigin, worldDirection, distanceAlongRay, segmentLength, incomingLayer);
+                float incomingDensity = sample.density;
+                incomingPrecipitation = sample.precipitation;
+                incomingDensityForHeight = incomingDensity;
+                mainDensity += incomingDensity;
+            }
+            if (sampleLowLayer)
+            {
+                OpenMWSECloudDensitySample sample = openmwseCondensateSegmentDensity(
+                    rayOrigin, worldDirection, distanceAlongRay, segmentLength, lowLayer);
+                lowDensity = sample.density;
+                lowPrecipitation = sample.precipitation;
             }
             float mainPresentationWeight = openmwseMainCloudPresentationWeight(sampleDistance);
             mainDensity *= mainPresentationWeight;
@@ -955,10 +950,11 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
                 OpenMWSECloudSolarTransmittance sunTransmittance = openmwseCloudSunTransmittance(
                     samplePosition, sunDirection, quality, mainLayer, incomingLayer, lowLayer);
                 vec3 sampleTransmittance = exp(-extinction);
-                vec3 cloudAlbedo = clamp(
-                    cloudModelSampleAlbedo(outgoingDensityForHeight, outgoingPrecipitation, mainLayer.model)
-                        + cloudModelSampleAlbedo(incomingDensityForHeight, incomingPrecipitation, incomingLayer.model),
-                    0.0, 1.0);
+                vec3 mainScattering = openmwseWeatherCloudScattering(
+                    outgoingDensityForHeight, outgoingPrecipitation, 1.0 - incomingWeatherWeight, mainLayer)
+                    + openmwseWeatherCloudScattering(
+                        incomingDensityForHeight, incomingPrecipitation, incomingWeatherWeight, incomingLayer);
+                vec3 cloudAlbedo = clamp(mainScattering / max(mainExtinction, vec3(1e-7)), 0.0, 1.0);
                 // Extinction already accounts for droplet concentration. Applying the source's density-driven
                 // powder response to thin condensate would make its single-scattering albedo approach black.
                 vec3 lowAlbedo = lowLayer.model.albedo * (1.0 - lowPrecipitation);
@@ -970,28 +966,26 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
                 vec3 primaryLight
                     = environmentLight + illumination.solarIrradiance * (sunTransmittance.primary * primaryPhase);
 
-                // The second scattering order retains the first-order scattering coefficient, reduces
-                // extinction by 0.1, and broadens the phase toward isotropic response. Integrate that order
-                // analytically over this segment instead of reusing first-order opacity: thick exposed cloud
-                // bodies then receive the characteristic soft interior fill without another shadow march.
+                // Both scattering orders reach the observer through the same physical extinction.
+                // Sharing the Beer-Lambert segment weight makes their camera-path transport invariant
+                // to partitioning; the second order retains its reduced solar extinction and wider phase.
                 vec3 secondaryLight = illumination.solarIrradiance
                     * (sunTransmittance.secondary * secondaryPhase);
                 vec3 primaryContribution = transmittance * (vec3(1.0) - sampleTransmittance);
-                vec3 secondaryContribution = transmittance
-                    * (vec3(1.0) - exp(-extinction * openmwseCloudSecondaryExtinctionScale))
-                    / openmwseCloudSecondaryExtinctionScale;
-                vec3 radiance = cloudAlbedo
-                    * (primaryContribution * primaryLight + secondaryContribution * secondaryLight);
+                vec3 radiance = cloudAlbedo * primaryContribution * (primaryLight + secondaryLight);
                 vec3 mainFraction = mainExtinction / max(combinedExtinction, vec3(1e-7));
                 vec3 lowFraction = lowExtinction / max(combinedExtinction, vec3(1e-7));
                 float mainContribution = dot(primaryContribution * mainFraction, vec3(1.0 / 3.0));
                 float lowContribution = dot(primaryContribution * lowFraction, vec3(1.0 / 3.0));
-                mainScatteredLight += radiance * mainFraction;
+                mainScatteredLight += openmwseCloudSegmentAtmosphericContribution(radiance * mainFraction, mainContribution,
+                    sampleDistance, cloudAtmosphericTarget, worldDirection,
+                    mainCloudOpticalDistanceLimit, atmosphere);
                 vec3 lowPrimaryLight = lowIllumination.diffuseRadiance
                     + lowIllumination.solarIrradiance * (sunTransmittance.primary * primaryPhase);
                 vec3 lowSecondaryLight = lowIllumination.solarIrradiance * (sunTransmittance.secondary * secondaryPhase);
-                lowScatteredLight += lowAlbedo * lowFraction
-                    * (primaryContribution * lowPrimaryLight + secondaryContribution * lowSecondaryLight);
+                lowScatteredLight += openmwseCloudSegmentAtmosphericContribution(lowAlbedo * lowFraction
+                    * primaryContribution * (lowPrimaryLight + lowSecondaryLight), lowContribution,
+                    sampleDistance, cloudAtmosphericTarget, worldDirection, 1e20, atmosphere);
                 mainOpacity += mainContribution;
                 lowOpacity += lowContribution;
                 mainRepresentativeDistanceSum += mainContribution * sampleDistance;
@@ -1010,16 +1004,7 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
 
     openmwseAdvanceLocalMedia(localMedia, maximumDistance, localCursor, transmittance,
         localScatteredLight, localOpacity, localDistanceSum);
-    vec3 cloudAtmosphericTarget = useAtmosphericTarget ? atmosphericTarget : viewSkyRadiance;
-    const float mainCloudOpticalDistanceScale = 1.0;
-    vec2 mainCloudOpticalLimits = useAtmosphericTarget ? vec2(0.72, 1.27296568) : vec2(0.88, 2.12026354);
-    float mainCloudOpticalDistanceLimit
-        = mix(mainCloudOpticalLimits.x, mainCloudOpticalLimits.y, step(0.5, atmosphere.exponentialFog));
-    vec3 scatteredLight = openmwseCloudAtmosphericContribution(mainScatteredLight, mainOpacity,
-        mainRepresentativeDistanceSum, cloudAtmosphericTarget, worldDirection, mainCloudOpticalDistanceScale,
-        mainCloudOpticalDistanceLimit, atmosphere);
-    scatteredLight += openmwseCloudAtmosphericContribution(lowScatteredLight, lowOpacity,
-        lowRepresentativeDistanceSum, cloudAtmosphericTarget, worldDirection, 1.0, 1e20, atmosphere);
+    vec3 scatteredLight = mainScatteredLight + lowScatteredLight;
     scatteredLight += openmwseLocalMediaRadiance(
         localScatteredLight, localOpacity, localDistanceSum, worldDirection, atmosphere);
     visibleCloudOpacity = mainOpacity + lowOpacity;
@@ -1030,12 +1015,11 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
 /// Integrate native atmosphere using fixed-altitude low-cloud illumination and retain cloud history metadata.
 vec4 openmwseIntegrateClouds(vec3 rayOrigin, vec3 worldDirection, float maximumDistance, int quality,
     vec3 solarRadiance, vec3 skyIrradiance, vec3 groundIrradiance, OpenMWSEVolumeIllumination lowIllumination,
-    OpenMWSEAerialPerspectiveParameters atmosphere, float rayDither, bool quadratureSampling,
+    OpenMWSEAerialPerspectiveParameters atmosphere,
     OpenMWSELocalMedia localMedia, out float visibleDistanceSum, out float visibleCloudOpacity)
 {
     return openmwseIntegrateCloudsInternal(rayOrigin, worldDirection, maximumDistance, quality, solarRadiance,
-        skyIrradiance, groundIrradiance, lowIllumination, vec3(0.0), atmosphere, rayDither,
-        quadratureSampling, false, localMedia, visibleDistanceSum, visibleCloudOpacity);
+        skyIrradiance, groundIrradiance, lowIllumination, vec3(0.0), atmosphere, false, localMedia, visibleDistanceSum, visibleCloudOpacity);
 }
 
 /// Integrate deterministic reflected clouds with fixed-altitude illumination supplied by the sky vertices.
@@ -1050,7 +1034,7 @@ vec4 openmwseIntegrateCloudsStable(vec3 rayOrigin, vec3 worldDirection, float ma
     localMedia.startDistance = 0.0;
     localMedia.stepLength = 1.0;
     return openmwseIntegrateCloudsInternal(rayOrigin, worldDirection, maximumDistance, quality, solarRadiance,
-        skyIrradiance, groundIrradiance, lowIllumination, atmosphericTarget, atmosphere, 0.5, true, true, localMedia, visibleDistanceSum, visibleCloudOpacity);
+        skyIrradiance, groundIrradiance, lowIllumination, atmosphericTarget, atmosphere, true, localMedia, visibleDistanceSum, visibleCloudOpacity);
 }
 
 #endif
