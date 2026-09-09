@@ -17,6 +17,7 @@ VERSION = 1
 STAGE_PATTERN = re.compile(r"atmosphere-(.+)-frame-\d+-\d+\.omwdiag")
 ATTACHMENT_RULES = {
     "atmosphere-cloud-models-v2": {"mean": 0.000001, "p999": 0.000001, "localize": 0.000001},
+    "atmosphere-cloud-terrain-v1": {"mean": 0.0, "p999": 0.0, "localize": 0.0},
     "scene-color-before-post-processing": {"mean": 0.002, "p999": 0.01, "localize": 0.0001},
     "scene-opaque-depth": {"mean": 0.00001, "p999": 0.0001, "localize": 0.000001},
     "previous-scene-opaque-depth": {"mean": 0.00001, "p999": 0.0001, "localize": 0.000001},

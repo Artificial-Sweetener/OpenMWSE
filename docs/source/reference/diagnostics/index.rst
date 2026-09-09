@@ -151,6 +151,7 @@ It does not disable volumetric fog, mist, or cloud media unless their correspond
 The ``atmosphere-cloud-terrain-v1`` attachment records the rendered world terrain cache. Its first RGBA texel
 contains the world origin XY, lattice spacing, and side length; the second contains minimum height, maximum height, and side length.
 Subsequent texels contain four scalar heights each in row-major order, with unused trailing channels set to zero.
+Graphics parity requires the terrain origin, bounds, and packed heights to match exactly between captures.
 
 Atmosphere bundles include ``atmosphere-cloud-models-v2``, a 14 by 3 RGBA attachment containing the published
 outgoing, incoming, and environmental model controls in ``SceneUtil::packCloudLayer`` order. It records the actual
