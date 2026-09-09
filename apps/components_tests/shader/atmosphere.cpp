@@ -167,6 +167,7 @@ namespace
         bool useLegacyCloudMarchReference = false;
         bool usePerSampleCloudIntervalReference = false;
         bool useUnculledLowCloudReference = false;
+        bool useSeparateCloudFogReference = false;
         bool useUncachedLocalLighting = false;
         bool resolveReprojectedVolume = false;
     };
@@ -546,6 +547,34 @@ namespace
                     "lowCloudLighting = openmwseLocalVolumeIllumination(omw.atmosphereSolarRadiance, "
                     "omw.atmosphereGroundIrradiance, omw.waterHeight + referenceLowParameters.z "
                     "+ referenceLowParameters.w * 0.5, atmosphere);\n");
+                shader->setShaderSource(source);
+            }
+        }
+        if (inputs.useSeparateCloudFogReference)
+        {
+            auto* program = dynamic_cast<osg::Program*>(state->getAttribute(osg::StateAttribute::PROGRAM));
+            if (!program)
+                throw std::runtime_error("Separate cloud fog reference has no production shader");
+            for (unsigned index = 0; index < program->getNumShaders(); ++index)
+            {
+                osg::Shader* shader = program->getShader(index);
+                if (shader->getType() != osg::Shader::FRAGMENT)
+                    continue;
+                std::string source = shader->getShaderSource();
+                replaceUniqueShaderText(source,
+                    "openmwseCloudSegmentAtmosphericContribution(radiance * mainFraction, mainContribution,\n"
+                    "                    cloudAtmosphericTarget, max(fogVisibility, mainCloudMinimumVisibility))",
+                    "openmwseApplyAerialPerspectiveTowardTargetWithScale(radiance * mainFraction, "
+                    "cloudAtmosphericTarget * mainContribution, worldDirection, sampleDistance, "
+                    "1.0, mainCloudOpticalDistanceLimit, atmosphere)");
+                replaceUniqueShaderText(source,
+                    "openmwseCloudSegmentAtmosphericContribution(lowAlbedo * lowFraction\n"
+                    "                    * primaryContribution * (lowPrimaryLight + lowSecondaryLight), "
+                    "lowContribution,\n"
+                    "                    cloudAtmosphericTarget, fogVisibility)",
+                    "openmwseApplyAerialPerspectiveTowardTargetWithScale(lowAlbedo * lowFraction "
+                    "* primaryContribution * (lowPrimaryLight + lowSecondaryLight), "
+                    "cloudAtmosphericTarget * lowContribution, worldDirection, sampleDistance, 1.0, 1e20, atmosphere)");
                 shader->setShaderSource(source);
             }
         }
@@ -3426,6 +3455,61 @@ void main()
                     EXPECT_NEAR(pixel.x(), expectedVisibility, 0.002);
             }
         }
+    }
+
+    /// Preserve each stratum's canonical fog response when sharing view-path evaluation at the same sample distance.
+    TEST(AtmosphereShaderTest, sharedCloudFogPreservesSeparateStratumTransfer)
+    {
+        float maximumOpacity = 0.f;
+        for (const auto& [weather, phase] :
+            { std::pair{ "Foggy", "Day" }, std::pair{ "Cloudy", "Sunset" }, std::pair{ "Clear", "Day" } })
+            for (const int quality : { 0, 1, 2, 3 })
+                for (const bool exponential : { false, true })
+                    for (const float altitude : { 9000.f, 90000.f })
+                    {
+                        SCOPED_TRACE(::testing::Message() << weather << " quality=" << quality << " exponential="
+                                                          << exponential << " altitude=" << altitude);
+                        NativePassInputs inputs = makePackagedAtmosphereInputs(weather, phase);
+                        inputs.width = 12;
+                        inputs.height = 8;
+                        inputs.quality = quality;
+                        inputs.useUniformBuffer = quality == 3;
+                        inputs.exponentialFog = exponential;
+                        inputs.mistParameters = {};
+                        inputs.fogVolumeParameters = {};
+                        inputs.cloudParameters = { .8f, .7f, 40000.f, 100000.f };
+                        inputs.lowCloudParameters = { .8f, .7f, 5000.f, 25000.f };
+                        inputs.cloudModel.mCoverageMinimum = .8f;
+                        inputs.environmentalCloudModel.mCoverageMinimum = .8f;
+                        inputs.mediumReferenceParameters = { 1500.f, .6f, 6000.f, 0.f };
+                        inputs.orographicParameters = { 0.f, 0.f, .08f, -.03f };
+                        inputs.eyePosition = { 150000.f, -70000.f, altitude };
+                        inputs.viewDirection = { .92f, .25f, altitude < 40000.f ? .2f : -.2f };
+                        inputs.viewDirection.normalize();
+                        inputs.fogNear = 5000.f;
+                        inputs.fogFar = 150000.f;
+                        inputs.farPlane = 229376.f;
+                        PassImage sharedMetadata;
+                        const PassImage shared
+                            = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs, &sharedMetadata);
+                        inputs.useSeparateCloudFogReference = true;
+                        PassImage referenceMetadata;
+                        const PassImage reference
+                            = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs, &referenceMetadata);
+                        ASSERT_EQ(shared.pixels.size(), reference.pixels.size());
+                        ASSERT_FALSE(reference.pixels.empty());
+                        for (std::size_t pixel = 0; pixel < reference.pixels.size(); ++pixel)
+                        {
+                            maximumOpacity = std::max(maximumOpacity, 1.f - reference.pixels[pixel].a());
+                            for (int channel = 0; channel < 4; ++channel)
+                            {
+                                EXPECT_NEAR(shared.pixels[pixel][channel], reference.pixels[pixel][channel], 1e-6f);
+                                EXPECT_NEAR(sharedMetadata.pixels[pixel][channel],
+                                    referenceMetadata.pixels[pixel][channel], 1e-6f);
+                            }
+                        }
+                    }
+        EXPECT_GT(maximumOpacity, .05f);
     }
 
     /// Compare a uniform cloud's fogged radiance with numerical front-to-back transport at each physical distance.

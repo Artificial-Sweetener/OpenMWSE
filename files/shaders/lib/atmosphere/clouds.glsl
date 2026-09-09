@@ -643,13 +643,11 @@ OpenMWSEVolumeIllumination openmwseLocalVolumeIllumination(vec3 solarRadiance,
         0.5 * (groundIrradiance + openmwseLocalSkyRadiance(atmosphere)));
 }
 
-/// Apply the shared Morrowind fog transfer at a cloud segment's distance while retaining premultiplied radiance.
+/// Blend premultiplied segment radiance using the shared observer-path fog visibility.
 vec3 openmwseCloudSegmentAtmosphericContribution(vec3 scatteredLight, float opacity,
-    float sampleDistance, vec3 atmosphericTarget, vec3 worldDirection, float opticalDistanceLimit,
-    OpenMWSEAerialPerspectiveParameters atmosphere)
+    vec3 atmosphericTarget, float visibility)
 {
-    return openmwseApplyAerialPerspectiveTowardTargetWithScale(scatteredLight,
-        atmosphericTarget * opacity, worldDirection, sampleDistance, 1.0, opticalDistanceLimit, atmosphere);
+    return mix(atmosphericTarget * opacity, scatteredLight, visibility);
 }
 
 /// Evaluate spectral scattering per metre with weather opacity applied once after the episode's powder response.
@@ -802,6 +800,7 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
     vec2 mainCloudOpticalLimits = useAtmosphericTarget ? vec2(0.72, 1.27296568) : vec2(0.88, 2.12026354);
     float mainCloudOpticalDistanceLimit
         = mix(mainCloudOpticalLimits.x, mainCloudOpticalLimits.y, step(0.5, atmosphere.exponentialFog));
+    float mainCloudMinimumVisibility = openmwseFogVisibility(mainCloudOpticalDistanceLimit, atmosphere);
     int sampleIndex = 0;
     for (int intervalIndex = 0; intervalIndex < 2; ++intervalIndex)
     {
@@ -963,15 +962,16 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
                 vec3 lowFraction = lowExtinction / max(combinedExtinction, vec3(1e-7));
                 float mainContribution = dot(primaryContribution * mainFraction, vec3(1.0 / 3.0));
                 float lowContribution = dot(primaryContribution * lowFraction, vec3(1.0 / 3.0));
+                float fogVisibility = openmwseFogVisibility(
+                    openmwseFogOpticalDistance(sampleDistance, worldDirection, atmosphere), atmosphere);
                 mainScatteredLight += openmwseCloudSegmentAtmosphericContribution(radiance * mainFraction, mainContribution,
-                    sampleDistance, cloudAtmosphericTarget, worldDirection,
-                    mainCloudOpticalDistanceLimit, atmosphere);
+                    cloudAtmosphericTarget, max(fogVisibility, mainCloudMinimumVisibility));
                 vec3 lowPrimaryLight = lowIllumination.diffuseRadiance
                     + lowIllumination.solarIrradiance * (sunTransmittance.primary * primaryPhase);
                 vec3 lowSecondaryLight = lowIllumination.solarIrradiance * (sunTransmittance.secondary * secondaryPhase);
                 lowScatteredLight += openmwseCloudSegmentAtmosphericContribution(lowAlbedo * lowFraction
                     * primaryContribution * (lowPrimaryLight + lowSecondaryLight), lowContribution,
-                    sampleDistance, cloudAtmosphericTarget, worldDirection, 1e20, atmosphere);
+                    cloudAtmosphericTarget, fogVisibility);
                 mainOpacity += mainContribution;
                 lowOpacity += lowContribution;
                 mainRepresentativeDistanceSum += mainContribution * sampleDistance;
