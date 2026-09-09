@@ -18,6 +18,7 @@
 #include <components/sceneutil/rtt.hpp>
 #include <components/sceneutil/shadow.hpp>
 #include <components/sceneutil/visitor.hpp>
+#include <components/shader/cloudprogram.hpp>
 
 #include <components/resource/imagemanager.hpp>
 #include <components/resource/scenemanager.hpp>
@@ -35,6 +36,7 @@
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
 
+#include "reflectedclouds.hpp"
 #include "renderbin.hpp"
 #include "skyutil.hpp"
 #include "util.hpp"
@@ -301,7 +303,11 @@ namespace MWRender
     {
         assert(!mCreated);
 
-        mAtmosphereDay = mSceneManager->getInstance(Settings::models().mSkyatmosphere.get(), mEarlyRenderBinRoot);
+        mEarlyRenderBinRoot->getOrCreateStateSet()->setDefine(
+            Shader::sReflectedCloudModeDefine, "0", osg::StateAttribute::ON);
+        osg::ref_ptr<osg::Group> atmosphereRoot = new osg::Group;
+        mEarlyRenderBinRoot->addChild(atmosphereRoot);
+        mAtmosphereDay = mSceneManager->getInstance(Settings::models().mSkyatmosphere.get(), atmosphereRoot);
         AtmosphereDomeVisitor atmosphereDome;
         mAtmosphereDay->accept(atmosphereDome);
         ModVertexAlphaVisitor modAtmosphere(ModVertexAlphaVisitor::Atmosphere);
@@ -309,6 +315,12 @@ namespace MWRender
 
         mAtmosphereUpdater = new AtmosphereUpdater;
         mAtmosphereDay->addUpdateCallback(mAtmosphereUpdater);
+
+        if (!mUseLegacyCloudRendering)
+        {
+            mReflectedClouds = new ReflectedClouds(mAtmosphereDay);
+            atmosphereRoot->addCullCallback(mReflectedClouds);
+        }
 
         mAtmosphereNightNode = new osg::PositionAttitudeTransform;
         mAtmosphereNightNode->setNodeMask(0);
@@ -647,6 +659,12 @@ namespace MWRender
             return;
 
         mAtmosphere = weather.mAtmosphere;
+        if (mReflectedClouds)
+        {
+            const auto& volumes = mAtmosphere.mVolumes;
+            mReflectedClouds->updateCloudCover(volumes.mCloudDensity > 0.f ? volumes.mCloudDeckCoverage : 0.f,
+                volumes.mLowCloudDensity > 0.f ? volumes.mLowCloudCoverage : 0.f);
+        }
         mAtmosphere.mSunDiscColor = weather.mSunDiscColor;
         mAtmosphere.mSunDiscColor.a() *= weather.mGlareView;
 

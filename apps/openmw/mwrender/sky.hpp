@@ -40,6 +40,8 @@ namespace SceneUtil
 
 namespace MWRender
 {
+    class ReflectedClouds;
+
     ///@brief The SkyManager handles rendering of the sky domes, celestial bodies as well as other objects that need to
     /// be rendered
     /// relative to the camera (e.g. weather particle effects)
@@ -66,7 +68,7 @@ namespace MWRender
         void setMoonColour(bool red);
         ///< change Secunda colour to red
 
-        /// Apply current weather colors, volume controls, and analytic sun state to the sky owner.
+        /// Publish current sky weather and select reflection transport from the active cloud cover.
         void setWeather(const WeatherResult& weather);
 
         void sunEnable();
@@ -116,6 +118,7 @@ namespace MWRender
         const AtmosphereState& getAtmosphereState() const { return mAtmosphere; }
 
     private:
+        /// Create atmospheric sky geometry with lazy per-view cloud transport for water reflections.
         void create();
         ///< no need to call this, automatically done on first enable()
 
@@ -150,6 +153,7 @@ namespace MWRender
         osg::ref_ptr<AtmosphereNightUpdater> mAtmosphereNightUpdater;
 
         osg::ref_ptr<AtmosphereUpdater> mAtmosphereUpdater;
+        osg::ref_ptr<ReflectedClouds> mReflectedClouds;
 
         std::unique_ptr<Sun> mSun;
         std::unique_ptr<Moon> mMasser;

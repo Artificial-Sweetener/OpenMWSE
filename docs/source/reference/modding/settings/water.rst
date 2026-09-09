@@ -34,6 +34,10 @@ Water Settings
    RTT is an acronym for Render To Texture which allows rendering of the scene to be saved as a texture.
    Higher values produces better visuals and result in a marginally lower frame rate depending on your graphics hardware.
 
+   Water reflections of broad atmospheric cloud cover use half the texture's width and height for cloud lighting
+   and opacity. Reflected geometry, sky colors and the sun use the full texture size.
+   Sparse cloud cover is rendered directly into the reflection texture.
+
    This setting has no effect if the shader setting is false.
    In the Water tab of the Video panel of the Options menu, the choices are Low (512), Medium (1024) and High (2048).
    It is recommended to use values that are a power of two because this results in more efficient use of video hardware.

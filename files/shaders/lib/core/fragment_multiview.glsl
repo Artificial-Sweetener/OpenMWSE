@@ -7,10 +7,17 @@
 #include "lib/core/fragment.h.glsl"
 
 uniform sampler2DArray reflectionMap;
+uniform sampler2DArray reflectedCloudTexture;
 
 vec4 sampleReflectionMap(vec2 uv)
 {
     return texture(reflectionMap, vec3((uv), gl_ViewID_OVR));
+}
+
+/// Reconstruct reflected cloud transport from the current eye's linear target.
+vec4 sampleReflectedCloudTexture(vec2 uv)
+{
+    return texture(reflectedCloudTexture, vec3(uv, gl_ViewID_OVR));
 }
 
 uniform sampler2DArray lastShader;

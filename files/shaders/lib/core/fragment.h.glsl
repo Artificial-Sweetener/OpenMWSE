@@ -10,6 +10,8 @@
 #include "lib/material/struct.glsl"
 
 vec4 sampleReflectionMap(vec2 uv);
+/// Sample current reflected cloud radiance and transmittance for this view.
+vec4 sampleReflectedCloudTexture(vec2 uv);
 vec4 samplerLastShader(vec2 uv);
 
 #if @skyBlending

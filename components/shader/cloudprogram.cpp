@@ -46,7 +46,16 @@ namespace Shader
         for (const char* value : { "0", "1" })
         {
             defines.currentDefines[sSteadyCloudDefine] = { value, osg::StateAttribute::ON };
-            osg::Program::compileGLObjects(state);
+            if (getShaderDefines().count(sReflectedCloudModeDefine) != 0)
+            {
+                for (const char* mode : { "0", "1", "2" })
+                {
+                    defines.currentDefines[sReflectedCloudModeDefine] = { mode, osg::StateAttribute::ON };
+                    osg::Program::compileGLObjects(state);
+                }
+            }
+            else
+                osg::Program::compileGLObjects(state);
         }
     }
 }

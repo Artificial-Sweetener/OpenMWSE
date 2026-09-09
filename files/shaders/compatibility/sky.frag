@@ -1,8 +1,13 @@
 #version 120
 
-#pragma import_defines(OPENMWSE_CLOUD_STEADY)
+#pragma import_defines(OPENMWSE_CLOUD_STEADY, OPENMWSE_REFLECTED_CLOUD_MODE)
+
+#ifndef OPENMWSE_REFLECTED_CLOUD_MODE
+#define OPENMWSE_REFLECTED_CLOUD_MODE 0
+#endif
 
 #include "lib/sky/cloud_lighting.h.glsl"
+#include "lib/core/fragment.h.glsl"
 
 #include "lib/sky/passes.glsl"
 
@@ -22,20 +27,29 @@ varying vec2 diffuseMapUV;
 varying vec4 passColor;
 varying vec3 passViewDirection;
 
-/// Composite the directional sky with reflected clouds using scene-uniform local illumination.
+/// Render independent cloud transport or composite it with the full-resolution directional sky.
 void paintAtmosphere(inout vec4 color)
 {
     color = diffuseColor;
     vec3 viewDirection = normalize(passViewDirection);
     vec3 worldDirection = atmosphereWorldDirection(viewDirection);
     vec3 skyRadiance = atmosphereSkyColor(viewDirection);
+#if OPENMWSE_REFLECTED_CLOUD_MODE == 1
+    color = atmosphereCloudScattering(worldDirection, skyRadiance,
+        OpenMWSEVolumeIllumination(skyLowCloudSolarIrradiance, skyLowCloudDiffuseRadiance));
+#else
+#if OPENMWSE_REFLECTED_CLOUD_MODE == 2
+    vec4 clouds = sampleReflectedCloudTexture(gl_FragCoord.xy / screenRes);
+#else
     vec4 clouds
         = isReflection ? atmosphereCloudScattering(worldDirection, skyRadiance,
             OpenMWSEVolumeIllumination(skyLowCloudSolarIrradiance, skyLowCloudDiffuseRadiance)) : vec4(0.0, 0.0, 0.0, 1.0);
+#endif
     color.xyz = skyRadiance * clouds.a + clouds.rgb;
     color.xyz += atmosphereSunDisc(worldDirection) * clouds.a;
     color.xyz += openmwseTriangularDither(gl_FragCoord.xy) * (0.5 / 255.0);
     color.a = 1.0;
+#endif
 }
 
 void paintAtmosphereNight(inout vec4 color)
@@ -113,6 +127,9 @@ void main()
 {
     vec4 color = vec4(0.0);
 
+#if OPENMWSE_REFLECTED_CLOUD_MODE != 0
+    paintAtmosphere(color);
+#else
     if (pass == PASS_ATMOSPHERE)
         paintAtmosphere(color);
     else if (pass == PASS_ATMOSPHERE_NIGHT)
@@ -130,6 +147,7 @@ void main()
         processSunflashQuery();
         return;
     }
+#endif
 
     gl_FragData[0] = color;
 }

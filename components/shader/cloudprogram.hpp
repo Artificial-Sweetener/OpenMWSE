@@ -1,7 +1,7 @@
 #ifndef OPENMW_COMPONENTS_SHADER_CLOUDPROGRAM_H
 #define OPENMW_COMPONENTS_SHADER_CLOUDPROGRAM_H
 
-/// @file Prepare both optical weather variants when a cloud-tracing program is compiled.
+/// @file Prepare optical weather states and reflected cloud passes before their first draw.
 
 #include <osg/Program>
 
@@ -9,8 +9,10 @@ namespace Shader
 {
     /// Identify the imported define that removes an incoming episode with zero optical weight.
     inline constexpr char sSteadyCloudDefine[] = "OPENMWSE_CLOUD_STEADY";
+    /// Separate direct sky drawing, reflected cloud transport, and its full-resolution composition.
+    inline constexpr char sReflectedCloudModeDefine[] = "OPENMWSE_REFLECTED_CLOUD_MODE";
 
-    /// Compile steady and transitioning cloud programs together; unrelated programs retain ordinary compilation.
+    /// Compile cloud weather states and reflection passes together; unrelated programs retain ordinary compilation.
     class CloudProgram : public osg::Program
     {
     public:
@@ -25,7 +27,7 @@ namespace Shader
 
         META_Object(Shader, CloudProgram)
 
-        /// Prepare both cloud variants before returning to the first draw, preserving the caller's define state.
+        /// Prepare imported cloud weather and reflection variants while preserving the caller's define state.
         void compileGLObjects(osg::State& state) const override;
     };
 }

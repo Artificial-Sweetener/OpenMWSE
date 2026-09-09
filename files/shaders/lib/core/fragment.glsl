@@ -3,11 +3,18 @@
 #include "lib/core/fragment.h.glsl"
 
 uniform sampler2D reflectionMap;
+uniform sampler2D reflectedCloudTexture;
 uniform Material material;
 
 vec4 sampleReflectionMap(vec2 uv)
 {
     return texture2D(reflectionMap, uv);
+}
+
+/// Reconstruct premultiplied reflected cloud transport from its independent linear target.
+vec4 sampleReflectedCloudTexture(vec2 uv)
+{
+    return texture2D(reflectedCloudTexture, uv);
 }
 
 uniform sampler2D lastShader;

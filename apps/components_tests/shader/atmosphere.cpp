@@ -2014,16 +2014,9 @@ void main()
         EXPECT_GT(transported.y(), transported.z());
     }
 
+    /// Compile each reflected cloud pass and verify that its active samplers cannot alias ordinary sky textures.
     TEST(AtmosphereShaderTest, compilesAndLinksSkyProgramInGraphicsContext)
     {
-        Shader::ShaderManager manager;
-        manager.setShaderPath(std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/shaders");
-        auto defines = getAtmosphereTestDefines();
-        manager.setGlobalDefines(defines);
-
-        const osg::ref_ptr<osg::Program> program = manager.getProgram("compatibility/sky");
-        ASSERT_TRUE(program);
-
         osg::ref_ptr<osg::GraphicsContext::Traits> traits = new osg::GraphicsContext::Traits;
         traits->width = 1;
         traits->height = 1;
@@ -2036,12 +2029,38 @@ void main()
         if (!context || !context->realize() || !context->makeCurrent())
             GTEST_SKIP() << "No offscreen compatibility OpenGL context is available";
 
-        program->compileGLObjects(*context->getState());
-
-        const osg::Program::PerContextProgram* compiled = program->getPCP(*context->getState());
-        std::string infoLog;
-        compiled->getInfoLog(infoLog);
-        EXPECT_TRUE(compiled->isLinked()) << infoLog;
+        for (const bool skyBlending : { false, true })
+            for (const bool gpuShader4 : { false, true })
+            {
+                SCOPED_TRACE(testing::Message() << "skyBlending=" << skyBlending << " gpuShader4=" << gpuShader4);
+                Shader::ShaderManager manager;
+                manager.setShaderPath(std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/shaders");
+                auto defines = getAtmosphereTestDefines();
+                defines["skyBlending"] = skyBlending ? "1" : "0";
+                defines["useGPUShader4"] = gpuShader4 ? "1" : "0";
+                manager.setGlobalDefines(defines);
+                const osg::ref_ptr<osg::Program> program = manager.getProgram("compatibility/sky");
+                ASSERT_TRUE(program);
+                osg::State& state = *context->getState();
+                for (const char* mode : { "0", "1", "2" })
+                {
+                    SCOPED_TRACE(testing::Message() << "reflectedCloudMode=" << mode);
+                    osg::ref_ptr<osg::StateSet> passState = new osg::StateSet;
+                    passState->setDefine(Shader::sReflectedCloudModeDefine, mode, osg::StateAttribute::ON);
+                    state.pushStateSet(passState);
+                    program->compileGLObjects(state);
+                    const osg::Program::PerContextProgram* compiled = program->getPCP(state);
+                    std::string infoLog;
+                    compiled->getInfoLog(infoLog);
+                    EXPECT_TRUE(compiled->isLinked()) << infoLog;
+                    const auto& uniforms = compiled->getActiveUniforms();
+                    EXPECT_EQ(
+                        uniforms.count(osg::Uniform::getNameID("reflectedCloudTexture")), mode[0] == '2' ? 1u : 0u);
+                    for (const char* name : { "diffuseMap", "maskMap" })
+                        EXPECT_EQ(uniforms.count(osg::Uniform::getNameID(name)), mode[0] == '0' ? 1u : 0u) << name;
+                    state.popStateSet();
+                }
+            }
 
         context->releaseContext();
         context->close();
@@ -4173,7 +4192,7 @@ void main()
         EXPECT_FLOAT_EQ(maximumBaseDifference, 0.f);
     }
 
-    /// Prepare both weather programs at first compilation while preserving stacked and directly applied defines.
+    /// Prepare weather and reflection passes at first compilation without changing caller define state.
     TEST(AtmosphereShaderTest, cloudProgramsPrecompileWeatherVariants)
     {
         osg::ref_ptr<osg::GraphicsContext::Traits> traits = new osg::GraphicsContext::Traits;
@@ -4191,14 +4210,19 @@ void main()
                 new osg::Shader(osg::Shader::VERTEX, "#version 120\nvoid main() { gl_Position = gl_Vertex; }\n"));
             program->addShader(new osg::Shader(osg::Shader::FRAGMENT, R"glsl(
                 #version 120
-                #pragma import_defines(OPENMWSE_CLOUD_STEADY, TEST_UNRELATED)
+                #pragma import_defines(OPENMWSE_CLOUD_STEADY, OPENMWSE_REFLECTED_CLOUD_MODE, TEST_UNRELATED)
                 #ifndef OPENMWSE_CLOUD_STEADY
                 #define OPENMWSE_CLOUD_STEADY 0
                 #endif
-                void main() { gl_FragColor = vec4(float(OPENMWSE_CLOUD_STEADY)); }
+                #ifndef OPENMWSE_REFLECTED_CLOUD_MODE
+                #define OPENMWSE_REFLECTED_CLOUD_MODE 0
+                #endif
+                void main() { gl_FragColor = vec4(float(OPENMWSE_CLOUD_STEADY),
+                    float(OPENMWSE_REFLECTED_CLOUD_MODE), 0.0, 1.0); }
             )glsl"));
             osg::ref_ptr<osg::StateSet> initial = new osg::StateSet;
             initial->setDefine(Shader::sSteadyCloudDefine, "0", osg::StateAttribute::ON);
+            initial->setDefine(Shader::sReflectedCloudModeDefine, "2", osg::StateAttribute::ON);
             initial->setDefine("TEST_UNRELATED", "7", osg::StateAttribute::ON);
             if (stacked)
                 state.pushStateSet(initial);
@@ -4211,10 +4235,14 @@ void main()
             {
                 auto& defines = state.getDefineMap();
                 defines.currentDefines[Shader::sSteadyCloudDefine] = { variant, osg::StateAttribute::ON };
-                const auto* compiled = program->getPCP(state);
-                ASSERT_NE(compiled, nullptr);
-                EXPECT_FALSE(compiled->needsLink());
-                EXPECT_TRUE(compiled->isLinked());
+                for (const char* mode : { "2", "0", "1" })
+                {
+                    defines.currentDefines[Shader::sReflectedCloudModeDefine] = { mode, osg::StateAttribute::ON };
+                    const auto* compiled = program->getPCP(state);
+                    ASSERT_NE(compiled, nullptr);
+                    EXPECT_FALSE(compiled->needsLink());
+                    EXPECT_TRUE(compiled->isLinked());
+                }
             }
             if (stacked)
                 state.popStateSet();
