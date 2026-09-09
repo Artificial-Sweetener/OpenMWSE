@@ -80,6 +80,14 @@ namespace
         return difference / static_cast<double>(first.pixels.size() * 3);
     }
 
+    /// Select the production height guard or an independent comparison of the condensate's skylight contribution.
+    enum class CloudHeightReference
+    {
+        Production,
+        Unconditional,
+        Omitted,
+    };
+
     /// Describe deterministic textures, atmosphere state, and camera history for a native pass execution.
     struct NativePassInputs
     {
@@ -168,6 +176,7 @@ namespace
         bool usePerSampleCloudIntervalReference = false;
         bool useUnculledLowCloudReference = false;
         bool useSeparateCloudFogReference = false;
+        CloudHeightReference cloudHeightReference = CloudHeightReference::Production;
         bool useUncachedLocalLighting = false;
         bool resolveReprojectedVolume = false;
     };
@@ -547,6 +556,23 @@ namespace
                     "lowCloudLighting = openmwseLocalVolumeIllumination(omw.atmosphereSolarRadiance, "
                     "omw.atmosphereGroundIrradiance, omw.waterHeight + referenceLowParameters.z "
                     "+ referenceLowParameters.w * 0.5, atmosphere);\n");
+                shader->setShaderSource(source);
+            }
+        }
+        if (inputs.cloudHeightReference != CloudHeightReference::Production)
+        {
+            auto* program = dynamic_cast<osg::Program*>(state->getAttribute(osg::StateAttribute::PROGRAM));
+            if (!program)
+                throw std::runtime_error("Cloud height reference has no production shader");
+            for (unsigned index = 0; index < program->getNumShaders(); ++index)
+            {
+                osg::Shader* shader = program->getShader(index);
+                if (shader->getType() != osg::Shader::FRAGMENT)
+                    continue;
+                std::string source = shader->getShaderSource();
+                replaceUniqueShaderText(source, "if (lowDensity > 0.0 && mainDensity > 0.0)",
+                    inputs.cloudHeightReference == CloudHeightReference::Unconditional ? "if (lowDensity > 0.0)"
+                                                                                       : "if (false)");
                 shader->setShaderSource(source);
             }
         }
@@ -3510,6 +3536,76 @@ void main()
                         }
                     }
         EXPECT_GT(maximumOpacity, .05f);
+    }
+
+    /// Preserve mixed-deck skylight and independent condensate radiance when omitting unused terrain height.
+    TEST(AtmosphereShaderTest, unusedCloudHeightPreservesStratumLighting)
+    {
+        std::array<float, 2> maximumOpacity{};
+        float maximumMixedHeightContribution = 0.f;
+        for (const auto& [weather, phase] :
+            { std::pair{ "Foggy", "Day" }, std::pair{ "Cloudy", "Sunset" }, std::pair{ "Clear", "Day" } })
+            for (const int quality : { 0, 1, 2, 3 })
+                for (const bool mainDeck : { false, true })
+                    for (const float altitude : { 9000.f, 22000.f })
+                    {
+                        SCOPED_TRACE(::testing::Message() << weather << " quality=" << quality
+                                                          << " mainDeck=" << mainDeck << " altitude=" << altitude);
+                        NativePassInputs inputs = makePackagedAtmosphereInputs(weather, phase);
+                        inputs.width = 12;
+                        inputs.height = 8;
+                        inputs.quality = quality;
+                        inputs.useUniformBuffer = quality == 3;
+                        inputs.exponentialFog = true;
+                        inputs.mistParameters = {};
+                        inputs.fogVolumeParameters = {};
+                        inputs.cloudParameters = mainDeck ? osg::Vec4f(.8f, .7f, 5000.f, 25000.f) : osg::Vec4f();
+                        inputs.lowCloudParameters = { .8f, .7f, 5000.f, 25000.f };
+                        inputs.cloudModel.mCoverageMinimum = .8f;
+                        inputs.environmentalCloudModel.mCoverageMinimum = .8f;
+                        inputs.mediumReferenceParameters = { 1500.f, .6f, 6000.f, 0.f };
+                        inputs.orographicParameters = { 0.f, 0.f, .08f, -.03f };
+                        inputs.eyePosition = { 150000.f, -70000.f, altitude };
+                        inputs.viewDirection = { .92f, .25f, altitude < 40000.f ? .2f : -.2f };
+                        inputs.viewDirection.normalize();
+                        inputs.fogNear = 5000.f;
+                        inputs.fogFar = 150000.f;
+                        inputs.farPlane = 229376.f;
+                        PassImage sharedMetadata;
+                        const PassImage shared
+                            = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs, &sharedMetadata);
+                        inputs.cloudHeightReference = CloudHeightReference::Unconditional;
+                        PassImage referenceMetadata;
+                        const PassImage reference
+                            = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs, &referenceMetadata);
+                        if (mainDeck)
+                        {
+                            inputs.cloudHeightReference = CloudHeightReference::Omitted;
+                            const PassImage omitted = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                            ASSERT_EQ(omitted.pixels.size(), reference.pixels.size());
+                            for (std::size_t pixel = 0; pixel < reference.pixels.size(); ++pixel)
+                                for (int channel = 0; channel < 3; ++channel)
+                                    maximumMixedHeightContribution = std::max(maximumMixedHeightContribution,
+                                        std::abs(omitted.pixels[pixel][channel] - reference.pixels[pixel][channel]));
+                        }
+                        ASSERT_EQ(shared.pixels.size(), reference.pixels.size());
+                        ASSERT_FALSE(reference.pixels.empty());
+                        for (std::size_t pixel = 0; pixel < reference.pixels.size(); ++pixel)
+                        {
+                            maximumOpacity[mainDeck]
+                                = std::max(maximumOpacity[mainDeck], 1.f - reference.pixels[pixel].a());
+                            for (int channel = 0; channel < 4; ++channel)
+                            {
+                                EXPECT_NEAR(shared.pixels[pixel][channel], reference.pixels[pixel][channel], 1e-6f);
+                                EXPECT_NEAR(sharedMetadata.pixels[pixel][channel],
+                                    referenceMetadata.pixels[pixel][channel], 1e-6f);
+                            }
+                        }
+                    }
+        EXPECT_GT(maximumOpacity[0], .05f);
+        EXPECT_GT(maximumOpacity[1], .05f);
+        EXPECT_GT(maximumMixedHeightContribution, 1e-6f);
+        RecordProperty("maximum_mixed_height_contribution", maximumMixedHeightContribution);
     }
 
     /// Compare a uniform cloud's fogged radiance with numerical front-to-back transport at each physical distance.

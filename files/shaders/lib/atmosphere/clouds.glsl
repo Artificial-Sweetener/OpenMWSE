@@ -925,7 +925,8 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
                             * clamp((mainFieldHeight - incomingHeightRange.x) / incomingHeightRange.y, 0.0, 1.0);
                     }
                 }
-                if (lowDensity > 0.0)
+                // Relative height lights only the main deck; condensate uses its own diffuse illumination.
+                if (lowDensity > 0.0 && mainDensity > 0.0)
                 {
                     vec2 lowHeightRange = openmwseCloudLocalLayer(samplePosition, lowLayer);
                     relativeHeight += lowDensity
