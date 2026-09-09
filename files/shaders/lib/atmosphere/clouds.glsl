@@ -368,18 +368,6 @@ float openmwseMainCloudPresentationWeight(float distanceFromEye)
         distanceFromEye);
 }
 
-/// Use the source weather and typed-height rejection before requesting three-dimensional noise samples.
-bool openmwseCloudPotentialDensity(vec3 worldPosition, OpenMWSECloudLayer layer)
-{
-    vec3 fieldPosition = openmwseCloudFieldPosition(worldPosition, layer);
-    float heightFraction = openmwseCloudHeightFraction(fieldPosition.z,
-        openmwseCloudNominalBaseHeight(fieldPosition, layer), layer.parameters.w);
-    if (heightFraction < 0.0 || heightFraction > 1.0)
-        return false;
-    vec3 weather = cloudModelSampleWeather(openmwseCloudModelPosition(fieldPosition, layer), heightFraction, layer.model);
-    return cloudModelValidDensity(heightFraction, weather, layer.model);
-}
-
 /// Carry density and independently authored precipitation optics from one cloud sample.
 struct OpenMWSECloudDensitySample
 {
@@ -551,8 +539,6 @@ vec3 openmwseCloudSunOpticalDepth(vec3 samplePosition, vec3 sunDirection, int qu
         // lattice to the shell exit changes self-shadowing as a cloud surface crosses the light ray.
         float sampleDistance = lightPathLength * sampleFraction;
         vec3 shadowPosition = samplePosition + sunDirection * sampleDistance;
-        if (!openmwseCloudPotentialDensity(shadowPosition, layer))
-            continue;
         // Empty samples do not change the spatial footprint of later light samples.
         float shadowLodBias = 0.5 * float(sampleIndex + 1);
         float shadowDensity = openmwseCloudDensity(
