@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <iosfwd>
 #include <span>
+#include <string_view>
 
 namespace osgViewer
 {
@@ -13,6 +14,9 @@ namespace osgViewer
 namespace OMW
 {
     struct DiagnosticRouteFrame;
+
+    /// Identify performance reports and advertise the same version in diagnostic manifests.
+    inline constexpr std::string_view diagnosticPerformanceProvider = "performance@16";
 
     /// Summarizes one bounded series without hiding unavailable samples.
     struct DiagnosticDistribution
@@ -30,7 +34,7 @@ namespace OMW
     /// Emit the renderer interval for each consumed route state so loading draws retain their actual identities.
     void reportDiagnosticRouteFrames(std::span<const DiagnosticRouteFrame> frames, std::ostream& output);
 
-    /// Emit bounded performance@15 query lifecycles, presentation, camera, light-state, and retained OSG statistics.
+    /// Emit bounded query lifecycles, presentation, camera-owned render bins, light state, and retained OSG statistics.
     void reportDiagnosticPerformance(
         unsigned firstFrame, unsigned lastFrame, osgViewer::Viewer& viewer, std::ostream& output);
 }

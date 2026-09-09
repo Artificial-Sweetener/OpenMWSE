@@ -226,14 +226,16 @@ The versioned providers expose these evidence domains:
   cloud-field offset used by procedural density and shadow evaluation. Readers also accept ``gameplay@4``, ``gameplay@5``,
   ``gameplay@6``, and ``gameplay@7`` capsules.
   The replay controller checks stable save fields before applying any explicit atmosphere scenario and advancing the simulation.
-* ``performance@15`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
+* ``performance@16`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
   scopes for scripts, Lua, mechanics, physics, world, and UI, resource caches and work queues, navigation and paging activity,
   scene statistics, delayed per-camera GPU/render timing, and camera-owned GPU passes for the main scene, shadow maps, water
   reflection, sky render target, post-processing, precipitation occlusion, ripples, and terrain-composite generation. It divides
   draw traversal wall time into
   camera-covered work and the intervals before, between, and after camera stages. Each surrounding interval is also attributed
   to its adjacent named camera boundaries, while aggregate and per-camera timing reports camera work outside the versioned
-  named passes. The GPU timeline reports elapsed GPU-clock spans across instrumented cameras, their union, and named intervals
+  named passes. Render-bin reports collect reflected-sky GPU and CPU time from reflection cameras separately from the
+  primary-camera bins; missing reflected-sky samples remain unavailable. The GPU timeline reports elapsed GPU-clock spans across
+  instrumented cameras, their union, and named intervals
   between adjacent camera boundaries. These intervals may include time awaiting CPU submission and therefore do not by themselves
   measure GPU utilization. Unclassified cameras report both GPU and CPU time, and the report identifies the viewer threading
   model used for the capture. On Windows, camera passes also report render-thread hardware cycles so active execution can be

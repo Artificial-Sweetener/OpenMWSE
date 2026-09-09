@@ -359,6 +359,14 @@ namespace OMW
             return values;
         }
 
+        /// Collect render-bin timing from the primary camera or its explicitly named dependent camera.
+        std::vector<double> collectRenderBinStatistic(const DiagnosticRenderBinPass& pass, std::string_view statistic,
+            unsigned firstFrame, unsigned lastFrame, osgViewer::Viewer& viewer)
+        {
+            return pass.mCameraName ? collectCameraPass(*pass.mCameraName, statistic, firstFrame, lastFrame)
+                                    : collectPrimaryCameraStatistic(statistic, firstFrame, lastFrame, viewer);
+        }
+
         /// Divide the OSG draw traversal into camera-covered intervals and named surrounding transitions.
         DrawAttribution collectDrawAttribution(unsigned firstFrame, unsigned lastFrame, osgViewer::Viewer& viewer)
         {
@@ -578,7 +586,7 @@ namespace OMW
         forEachUserStatsValue(
             [&](const UserStats& value) { metrics.push_back({ value.mTaken, Metric::Owner::Viewer }); });
 
-        output << std::setprecision(17) << "provider: performance@15\n"
+        output << std::setprecision(17) << "provider: " << diagnosticPerformanceProvider << '\n'
                << "threading-model: " << threadingModelName(viewer.getThreadingModel()) << '\n'
                << "first-sampled-frame: " << firstFrame << '\n'
                << "last-sampled-frame: " << lastFrame << '\n'
@@ -737,7 +745,7 @@ namespace OMW
         {
             const Metric metric{ std::string(pass.mName), Metric::Owner::PrimaryCamera };
             reportDistribution(
-                output, metric, collectPrimaryCameraStatistic(pass.mGpuStatistic, firstFrame, lastFrame, viewer));
+                output, metric, collectRenderBinStatistic(pass, pass.mGpuStatistic, firstFrame, lastFrame, viewer));
         }
 
         output << "cpu-render-bins:\n";
@@ -745,7 +753,7 @@ namespace OMW
         {
             const Metric metric{ std::string(pass.mName), Metric::Owner::PrimaryCamera };
             reportDistribution(
-                output, metric, collectPrimaryCameraStatistic(pass.mCpuStatistic, firstFrame, lastFrame, viewer));
+                output, metric, collectRenderBinStatistic(pass, pass.mCpuStatistic, firstFrame, lastFrame, viewer));
         }
 
         output << "work-counters:\n";

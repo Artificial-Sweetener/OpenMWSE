@@ -50,6 +50,68 @@ TEST(DiagnosticPerformanceTest, CalculatesStableTailQuantiles)
     EXPECT_DOUBLE_EQ(result.mWorst, 100.0);
 }
 
+/// Attribute reflected sky to its dependent cameras without borrowing primary-camera timing or unrelated passes.
+TEST(DiagnosticPerformanceTest, ReportsReflectedSkyFromItsOwningCameras)
+{
+    constexpr unsigned frame = 42;
+    osgViewer::Viewer viewer;
+    viewer.setViewerStats(new osg::Stats("viewer"));
+    SceneUtil::enableDiagnosticGpuPassStatistics(*viewer.getCamera());
+    const std::string gpuStatistic = "OpenMW diagnostic GPU render bin reflected sky";
+    const std::string cpuStatistic = "OpenMW diagnostic CPU render bin reflected sky";
+    viewer.getCamera()->getStats()->setAttribute(frame, gpuStatistic, .9);
+    viewer.getCamera()->getStats()->setAttribute(frame, cpuStatistic, .8);
+    viewer.getCamera()->getStats()->setAttribute(frame, "OpenMW diagnostic GPU render bin scene root", .012);
+
+    std::array<osg::ref_ptr<osg::Camera>, 3> cameras;
+    for (std::size_t index = 0; index < cameras.size(); ++index)
+    {
+        cameras[index] = new osg::Camera;
+        cameras[index]->setName(index < 2 ? std::string(SceneUtil::reflectionCameraName) : "UnrelatedCamera");
+        SceneUtil::enableDiagnosticGpuPassStatistics(*cameras[index]);
+        cameras[index]->getStats()->setAttribute(frame, gpuStatistic, index == 0 ? .003 : .002);
+        cameras[index]->getStats()->setAttribute(frame, cpuStatistic, index == 0 ? .0002 : .0003);
+    }
+
+    std::ostringstream output;
+    OMW::reportDiagnosticPerformance(frame, frame, viewer, output);
+    const std::string report = output.str();
+    const auto gpuStart = report.find("gpu-render-bins:\n");
+    const auto cpuStart = report.find("cpu-render-bins:\n");
+    ASSERT_NE(gpuStart, std::string::npos);
+    ASSERT_NE(cpuStart, std::string::npos);
+    const std::string gpu = report.substr(gpuStart, cpuStart - gpuStart);
+    const std::string cpu = report.substr(cpuStart);
+    EXPECT_NE(gpu.find("  reflected-sky:\n    available: true\n    count: 1\n    median: 0.005"), std::string::npos)
+        << gpu;
+    EXPECT_NE(cpu.find("  reflected-sky:\n    available: true\n    count: 1\n    median: 0.0005"), std::string::npos)
+        << cpu;
+    EXPECT_NE(gpu.find("  scene-root:\n    available: true\n    count: 1\n    median: 0.012"), std::string::npos)
+        << gpu;
+}
+
+/// Preserve missing reflected-sky measurements even when a primary-camera statistic has the same name.
+TEST(DiagnosticPerformanceTest, ReportsMissingReflectedSkyWithoutPrimaryCameraFallback)
+{
+    constexpr unsigned frame = 42;
+    osgViewer::Viewer viewer;
+    viewer.setViewerStats(new osg::Stats("viewer"));
+    SceneUtil::enableDiagnosticGpuPassStatistics(*viewer.getCamera());
+    viewer.getCamera()->getStats()->setAttribute(frame, "OpenMW diagnostic GPU render bin reflected sky", .9);
+    viewer.getCamera()->getStats()->setAttribute(frame, "OpenMW diagnostic CPU render bin reflected sky", .8);
+    std::ostringstream output;
+    OMW::reportDiagnosticPerformance(frame, frame, viewer, output);
+    const std::string report = output.str();
+    const auto gpuStart = report.find("gpu-render-bins:\n");
+    const auto cpuStart = report.find("cpu-render-bins:\n");
+    ASSERT_NE(gpuStart, std::string::npos);
+    ASSERT_NE(cpuStart, std::string::npos);
+    EXPECT_NE(
+        report.substr(gpuStart, cpuStart - gpuStart).find("  reflected-sky:\n    available: false"), std::string::npos)
+        << report;
+    EXPECT_NE(report.substr(cpuStart).find("  reflected-sky:\n    available: false"), std::string::npos) << report;
+}
+
 TEST(DiagnosticPerformanceTest, RejectsMissingAndNonFiniteSamples)
 {
     EXPECT_THROW(OMW::summarizeDiagnosticSamples({}), std::invalid_argument);
@@ -219,7 +281,7 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     OMW::reportDiagnosticPerformance(frame, frame, viewer, output);
     const std::string report = output.str();
 
-    EXPECT_NE(report.find("provider: performance@15"), std::string::npos);
+    EXPECT_NE(report.find("provider: performance@16"), std::string::npos);
     EXPECT_NE(report.find("threading-model: automatic-selection"), std::string::npos);
     EXPECT_NE(report.find("presentation:\n  swap-buffers:\n    available: true\n    count: 1"), std::string::npos)
         << report;
