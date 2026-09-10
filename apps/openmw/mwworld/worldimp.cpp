@@ -1861,6 +1861,16 @@ namespace MWWorld
         mWeatherManager->setDiagnosticEnvironmentState(std::move(environment));
     }
 
+    std::string World::captureAtmosphereRuntimeState() const
+    {
+        return mWeatherManager->captureAtmosphereRuntimeState();
+    }
+
+    void World::restoreAtmosphereRuntimeState(std::string_view state)
+    {
+        mWeatherManager->restoreAtmosphereRuntimeState(state);
+    }
+
     void World::setDiagnosticGameHour(double hour)
     {
         if (!std::isfinite(hour) || hour < 0.0 || hour >= 24.0)

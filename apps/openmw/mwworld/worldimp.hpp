@@ -329,6 +329,11 @@ namespace MWWorld
         /// Apply exact environment evidence used only by the isolated diagnostic child.
         void setDiagnosticEnvironmentState(AtmosphereEnvironmentState environment);
 
+        /// Capture the weather owner's transient regional atmosphere trajectory for a diagnostic capsule.
+        std::string captureAtmosphereRuntimeState() const;
+        /// Restore the captured regional trajectory before advancing an isolated diagnostic world.
+        void restoreAtmosphereRuntimeState(std::string_view state);
+
         /// Apply an exact game hour used only by the isolated diagnostic child.
         void setDiagnosticGameHour(double hour);
 

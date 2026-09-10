@@ -348,8 +348,13 @@ namespace MWWorld
         /// Replace classified environment evidence for the lifetime of an isolated diagnostic child.
         void setDiagnosticEnvironmentState(AtmosphereEnvironmentState environment);
 
+        /// Capture transient atmosphere history that is deliberately absent from ordinary saves.
+        std::string captureAtmosphereRuntimeState() const;
+        /// Continue recorded environment blending, terrain sampling, and moisture history in an isolated replay.
+        void restoreAtmosphereRuntimeState(std::string_view state);
+
         /** Advance weather transitions and publish scene-linear atmosphere lighting and fixed world terrain samples.
- *
+         *
          * @param duration Unscaled frame interval in seconds.
          * @param paused Whether simulation-owned weather state must remain fixed.
          * @param time Current game

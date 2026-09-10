@@ -4,10 +4,12 @@
 #include <array>
 #include <cctype>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -708,6 +710,56 @@ namespace MWWorld
             }
         }
 
+        /// Visit the complete transient regional trajectory with stable, named diagnostic fields.
+        template <class Self, class Visitor>
+        static void visitRuntime(Self& self, Visitor&& visit)
+        {
+            const auto palette = [&](const std::string& prefix, auto& value) {
+                visit(prefix + "-in-scattering", value.mInScattering);
+                visit(prefix + "-out-scattering", value.mOutScattering);
+                for (std::size_t i = 0; i < value.mWeather.size(); ++i)
+                {
+                    auto& weather = value.mWeather[i];
+                    const std::string base = prefix + "-" + std::string(sWeatherNames[i]);
+                    const auto cycle = [&](const std::string& name, auto& colors) {
+                        visit(name + "-sunrise", colors.mSunrise);
+                        visit(name + "-day", colors.mDay);
+                        visit(name + "-sunset", colors.mSunset);
+                        visit(name + "-night", colors.mNight);
+                    };
+                    cycle(base + "-sky", weather.mSky);
+                    cycle(base + "-fog", weather.mFog);
+                    cycle(base + "-ambient", weather.mAmbient);
+                    cycle(base + "-sun", weather.mSun);
+                    visit(base + "-sun-disc", weather.mSunDiscSunset);
+                }
+            };
+            const auto volumes = [&](const std::string& prefix, auto& value) {
+                visit(prefix + "-cloud-density", value.mCloudDensityMultiplier);
+                visit(prefix + "-cloud-altitude", value.mCloudAltitudeOffsetWorldUnits);
+                visit(prefix + "-cloud-thickness", value.mCloudThicknessMultiplier);
+                visit(prefix + "-low-occurrence", value.mLowCloudOccurrenceMultiplier);
+                visit(prefix + "-low-density", value.mLowCloudDensityMultiplier);
+                visit(prefix + "-low-altitude", value.mLowCloudAltitudeOffsetWorldUnits);
+                visit(prefix + "-low-thickness", value.mLowCloudThicknessMultiplier);
+                visit(prefix + "-mist-density", value.mMistDensityMultiplier);
+                visit(prefix + "-mist-altitude", value.mMistAltitudeOffsetWorldUnits);
+                visit(prefix + "-mist-thickness", value.mMistThicknessMultiplier);
+            };
+            palette("applied", self.mApplied);
+            palette("target", self.mTarget);
+            volumes("applied-volumes", self.mAppliedVolumes);
+            volumes("target-volumes", self.mTargetVolumes);
+            visit("applied-terrain-height", self.mAppliedTerrainHeightWorldUnits);
+            visit("applied-terrain-center", self.mAppliedTerrainSampleCenterWorldUnits);
+            visit("applied-terrain-gradient", self.mAppliedTerrainGradient);
+            visit("applied-valley-depth", self.mAppliedValleyDepthWorldUnits);
+            visit("target-terrain-height", self.mTargetTerrainHeightWorldUnits);
+            visit("target-terrain-center", self.mTargetTerrainSampleCenterWorldUnits);
+            visit("target-terrain-gradient", self.mTargetTerrainGradient);
+            visit("target-valley-depth", self.mTargetValleyDepthWorldUnits);
+        }
+
         std::unordered_map<std::string, Palette> mPresets;
         std::map<std::string, EnvironmentProfile, std::less<>> mEnvironments;
         std::array<VolumeProfile, sWeatherNames.size()> mVolumes;
@@ -754,6 +806,70 @@ namespace MWWorld
     void AtmospherePalette::update(float elapsedSeconds, bool paused, std::span<Weather> weather)
     {
         mImpl->update(elapsedSeconds, paused, weather);
+    }
+
+    std::string AtmospherePalette::captureRuntimeState() const
+    {
+        YAML::Node state;
+        state["runtime-version"] = 1;
+        Impl::visitRuntime(std::as_const(*mImpl), [&](const std::string& name, const auto& value) {
+            if constexpr (std::is_arithmetic_v<std::remove_cvref_t<decltype(value)>>)
+                state[name] = value;
+            else
+                for (unsigned i = 0; i < value.num_components; ++i)
+                    state[name].push_back(value[i]);
+        });
+        state["diagnostic-environment"] = mImpl->mDiagnosticEnvironmentActive;
+        YAML::Emitter output;
+        output.SetFloatPrecision(std::numeric_limits<float>::max_digits10);
+        output << state;
+        return output.c_str();
+    }
+
+    void AtmospherePalette::restoreRuntimeState(std::string_view text)
+    {
+        const YAML::Node state = YAML::Load(std::string(text));
+        if (!state.IsMap() || state["runtime-version"].as<unsigned>() != 1)
+            throw std::invalid_argument("unsupported atmosphere palette runtime state");
+        const bool diagnosticEnvironment = state["diagnostic-environment"].as<bool>();
+        // Validate the entire snapshot before replacing any part of the regional trajectory.
+        for (const bool apply : { false, true })
+        {
+            std::size_t fieldCount = 2;
+            Impl::visitRuntime(*mImpl, [&](const std::string& name, auto& value) {
+                ++fieldCount;
+                const YAML::Node source = state[name];
+                const auto read = [&](const YAML::Node& node) {
+                    const float result = node.as<float>();
+                    if (!std::isfinite(result))
+                        throw std::invalid_argument("non-finite atmosphere runtime field: " + name);
+                    return result;
+                };
+                if constexpr (std::is_arithmetic_v<std::remove_cvref_t<decltype(value)>>)
+                {
+                    const float restored = read(source);
+                    if (name.find("-volumes-") != std::string::npos && name.find("altitude") == std::string::npos
+                        && (restored < 0.f || restored > 4.f))
+                        throw std::invalid_argument("invalid atmosphere volume multiplier: " + name);
+                    if (apply)
+                        value = restored;
+                }
+                else
+                {
+                    if (!source.IsSequence() || source.size() != value.num_components)
+                        throw std::invalid_argument("invalid atmosphere runtime vector: " + name);
+                    for (unsigned i = 0; i < value.num_components; ++i)
+                    {
+                        const float restored = read(source[i]);
+                        if (apply)
+                            value[i] = restored;
+                    }
+                }
+            });
+            if (state.size() != fieldCount)
+                throw std::invalid_argument("unexpected atmosphere runtime fields");
+        }
+        mImpl->mDiagnosticEnvironmentActive = diagnosticEnvironment;
     }
 
     std::uint32_t AtmospherePalette::createCloudScenarioIdentity(std::string_view weather,

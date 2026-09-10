@@ -1155,6 +1155,30 @@ namespace MWRender
                 (resumed.mOffsetWorldUnits - paused.mOffsetWorldUnits).y(), resumed.mFrameDeltaWorldUnits.y(), 0.002f);
         }
 
+        /// Continue captured changing-speed wind without resetting the density field or publishing a false jump.
+        TEST(MWRenderAtmosphereTest, restoredCloudAdvectionContinuesTheCapturedField)
+        {
+            CloudAdvectionController live;
+            live.update(91.25f, false, 1.25f, 30.f);
+            live.update(27.5f, false, 2.1f, 100.f);
+            CloudAdvectionController replay;
+            replay.restore(live.getAccumulatedOffsetWorldUnits());
+            EXPECT_EQ(replay.getState().mOffsetWorldUnits, live.getState().mOffsetWorldUnits);
+            EXPECT_EQ(replay.getState().mFrameDeltaWorldUnits, osg::Vec2f());
+            for (float elapsed : { .016f, .041f, .2f, .033f })
+            {
+                live.update(elapsed, false, .75f, 100.f);
+                replay.update(elapsed, false, .75f, 100.f);
+                EXPECT_EQ(replay.getAccumulatedOffsetWorldUnits(), live.getAccumulatedOffsetWorldUnits());
+                EXPECT_EQ(replay.getState().mOffsetWorldUnits, live.getState().mOffsetWorldUnits);
+                EXPECT_EQ(replay.getState().mFrameDeltaWorldUnits, live.getState().mFrameDeltaWorldUnits);
+            }
+            const auto original = replay.getAccumulatedOffsetWorldUnits();
+            EXPECT_THROW(replay.restore({ std::numeric_limits<double>::infinity(), 0. }), std::invalid_argument);
+            EXPECT_THROW(replay.restore({ 0., std::numeric_limits<double>::quiet_NaN() }), std::invalid_argument);
+            EXPECT_EQ(replay.getAccumulatedOffsetWorldUnits(), original);
+        }
+
         TEST(MWRenderAtmosphereTest, reservedSuspendedMediumIsOpticallyNeutralByDefault)
         {
             const AtmosphereState atmosphere;

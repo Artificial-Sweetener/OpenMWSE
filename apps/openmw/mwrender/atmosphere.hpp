@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
 
 #include <osg/Vec2d>
 #include <osg/Vec2f>
@@ -216,6 +218,22 @@ namespace MWRender
 
         /// Return the canonical cloud displacement shared by volume, reflection, shadow, and reprojection paths.
         const CloudAdvectionState& getState() const { return mState; }
+
+        /// Capture the integration precision needed to continue a recorded wind trajectory.
+        const osg::Vec2d& getAccumulatedOffsetWorldUnits() const { return mAccumulatedOffsetWorldUnits; }
+
+        /// Restore wind travel without treating the restored displacement as motion in the next frame.
+        void restore(const osg::Vec2d& offsetWorldUnits)
+        {
+            if (!std::isfinite(offsetWorldUnits.x()) || !std::isfinite(offsetWorldUnits.y())
+                || std::abs(offsetWorldUnits.x()) > std::numeric_limits<float>::max()
+                || std::abs(offsetWorldUnits.y()) > std::numeric_limits<float>::max())
+                throw std::invalid_argument("cloud wind displacement must fit finite shader coordinates");
+            mAccumulatedOffsetWorldUnits = offsetWorldUnits;
+            mState.mOffsetWorldUnits.set(
+                static_cast<float>(offsetWorldUnits.x()), static_cast<float>(offsetWorldUnits.y()));
+            mState.mFrameDeltaWorldUnits.set(0.f, 0.f);
+        }
 
     private:
         osg::Vec2d mAccumulatedOffsetWorldUnits{ 0.0, 0.0 };

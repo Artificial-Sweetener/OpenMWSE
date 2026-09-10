@@ -5,6 +5,7 @@
 #include <iosfwd>
 #include <memory>
 #include <span>
+#include <string>
 #include <string_view>
 
 #include "../mwrender/atmosphere.hpp"
@@ -37,6 +38,11 @@ namespace MWWorld
         void setDiagnosticEnvironment(const AtmosphereEnvironmentState& environment);
         /// Smooth environment changes and publish the resulting weather color cycles.
         void update(float elapsedSeconds, bool paused, std::span<Weather> weather);
+
+        /// Capture the applied regional blend and its target so replay can continue the same atmosphere trajectory.
+        std::string captureRuntimeState() const;
+        /// Restore a validated regional blend without forcing it immediately to the current region's target.
+        void restoreRuntimeState(std::string_view state);
 
         /// Select a stable episode using authored weights, weather trajectory, and meteorological context.
         std::uint32_t createCloudScenarioIdentity(std::string_view weather, std::string_view originWeather,

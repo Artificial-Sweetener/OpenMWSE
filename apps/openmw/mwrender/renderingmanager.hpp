@@ -247,9 +247,21 @@ namespace MWRender
         /// Select distance-atmosphere fog for an isolated diagnostic without changing volumetric media.
         void setAtmosphereDiagnosticDistanceFogEnabled(bool enabled);
 
-
         /// Return the atmosphere values actually applied during the latest rendered frame.
         const AtmosphereDiagnosticState& getAtmosphereDiagnosticState() const { return mAtmosphereDiagnosticState; }
+
+        /// Capture wind travel independently of simulation time and the current weather's speed.
+        const osg::Vec2d& getCloudAdvectionOffsetWorldUnits() const
+        {
+            return mCloudAdvection.getAccumulatedOffsetWorldUnits();
+        }
+
+        /// Restore the recorded cloud realization before an isolated replay advances its first frame.
+        void restoreCloudAdvectionOffsetWorldUnits(const osg::Vec2d& offset)
+        {
+            mCloudAdvection.restore(offset);
+            invalidateAtmosphereHistory();
+        }
 
         Animation* getAnimation(const MWWorld::Ptr& ptr);
         const Animation* getAnimation(const MWWorld::ConstPtr& ptr) const;

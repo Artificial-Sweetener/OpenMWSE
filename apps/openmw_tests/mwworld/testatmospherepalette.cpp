@@ -613,6 +613,47 @@ namespace MWWorld
                 EXPECT_GT(count, 0u) << "Terrain may favor a cloud structure but must not remove sky variety";
         }
 
+        /// Continue a partially blended regional sky instead of restarting its low clouds from the default palette.
+        TEST(MWWorldAtmospherePaletteTest, runtimeRestoreContinuesRegionalCloudCoverageAndLighting)
+        {
+            const auto live = paletteWithVolumes(authoredVolumeProfiles());
+            const auto replay = paletteWithVolumes(authoredVolumeProfiles());
+            auto liveWeather = makeWeatherDefinitions();
+            auto replayWeather = makeWeatherDefinitions();
+            AtmosphereEnvironmentState wetland;
+            wetland.mTraits.emplace("wetland", 1.f);
+            wetland.mTerrainHeightWorldUnits = 600.f;
+            wetland.mTerrainSampleCenterWorldUnits.set(12000.f, -3000.f);
+            wetland.mTerrainGradient.set(.07f, -.12f);
+            wetland.mValleyDepthWorldUnits = 90.f;
+            live->setEnvironment(wetland);
+            live->update(7.f, false, liveWeather);
+            const auto before = live->getState("Cloudy", "Clear", .35f, 5, 2).mVolumes;
+            const auto neutral = replay->getState("Cloudy", "Clear", .35f, 5, 2).mVolumes;
+            EXPECT_NE(before.mLowCloudCoverage, neutral.mLowCloudCoverage);
+            replay->restoreRuntimeState(live->captureRuntimeState());
+            for (float elapsed : { 0.f, .016f, .2f, 2.5f })
+            {
+                live->update(elapsed, false, liveWeather);
+                replay->update(elapsed, false, replayWeather);
+                const auto a = live->getState("Cloudy", "Clear", .35f, 5, 2);
+                const auto b = replay->getState("Cloudy", "Clear", .35f, 5, 2);
+                EXPECT_EQ(a.mInScattering, b.mInScattering);
+                EXPECT_EQ(a.mOutScattering, b.mOutScattering);
+                EXPECT_FLOAT_EQ(a.mVolumes.mLowCloudCoverage, b.mVolumes.mLowCloudCoverage);
+                EXPECT_FLOAT_EQ(a.mVolumes.mLowCloudDensity, b.mVolumes.mLowCloudDensity);
+                EXPECT_FLOAT_EQ(a.mVolumes.mLowCloudBaseAltitudeWorldUnits, b.mVolumes.mLowCloudBaseAltitudeWorldUnits);
+                EXPECT_EQ(SceneUtil::packCloudLayer(a.mVolumes.mEnvironmentalCloudLayer),
+                    SceneUtil::packCloudLayer(b.mVolumes.mEnvironmentalCloudLayer));
+                EXPECT_EQ(live->captureRuntimeState(), replay->captureRuntimeState());
+            }
+            const auto original = replay->captureRuntimeState();
+            auto invalid = YAML::Load(original);
+            invalid["target-volumes-low-density"] = -.1f;
+            EXPECT_THROW(replay->restoreRuntimeState(YAML::Dump(invalid)), std::invalid_argument);
+            EXPECT_EQ(replay->captureRuntimeState(), original);
+        }
+
         /// Reject invalid authored episode weights instead of silently changing selection probabilities.
         TEST(MWWorldAtmospherePaletteTest, rejectsInvalidCloudEpisodeWeights)
         {

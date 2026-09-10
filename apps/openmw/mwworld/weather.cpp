@@ -31,6 +31,8 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
+#include <yaml-cpp/yaml.h>
 
 namespace MWWorld
 {
@@ -780,6 +782,82 @@ namespace MWWorld
     {
         mCondensateFormation.setRecentPrecipitation(weight);
         mLastAtmosphereFormationTimeHours.reset();
+    }
+
+    std::string WeatherManager::captureAtmosphereRuntimeState() const
+    {
+        YAML::Node state;
+        state["runtime-version"] = 1;
+        state["palette"] = YAML::Load(mAtmospherePalette->captureRuntimeState());
+        const auto environment = [](const AtmosphereEnvironmentState& value) {
+            YAML::Node node;
+            node["traits"] = YAML::Node(YAML::NodeType::Map);
+            for (const auto& [trait, weight] : value.mTraits)
+                node["traits"][trait] = weight;
+            node["terrain"] = std::vector<float>{ value.mTerrainHeightWorldUnits,
+                value.mTerrainSampleCenterWorldUnits.x(), value.mTerrainSampleCenterWorldUnits.y(),
+                value.mTerrainGradient.x(), value.mTerrainGradient.y(), value.mValleyDepthWorldUnits };
+            return node;
+        };
+        state["environment"] = environment(mCurrentEnvironment);
+        state["orography"] = environment(mCachedOrography);
+        state["orography-valid"] = mOrographyCacheValid;
+        state["orography-worldspace"] = mCachedOrographyWorldspace.serializeText();
+        state["recent-precipitation"] = mCondensateFormation.getRecentPrecipitation();
+        if (mLastAtmosphereFormationTimeHours)
+            state["formation-time-hours"] = *mLastAtmosphereFormationTimeHours;
+        YAML::Emitter output;
+        output.SetFloatPrecision(std::numeric_limits<float>::max_digits10);
+        output.SetDoublePrecision(std::numeric_limits<double>::max_digits10);
+        output << state;
+        return output.c_str();
+    }
+
+    void WeatherManager::restoreAtmosphereRuntimeState(std::string_view text)
+    {
+        const YAML::Node state = YAML::Load(std::string(text));
+        if (!state.IsMap() || state["runtime-version"].as<unsigned>() != 1
+            || state.size() != (state["formation-time-hours"] ? 8u : 7u))
+            throw std::invalid_argument("unsupported weather atmosphere runtime state");
+        const auto environment = [](const YAML::Node& node) {
+            if (!node.IsMap() || node.size() != 2 || !node["traits"].IsMap() || node["traits"].size() > 128)
+                throw std::invalid_argument("invalid atmosphere environment runtime state");
+            AtmosphereEnvironmentState value;
+            for (const auto& trait : node["traits"])
+            {
+                const auto name = trait.first.as<std::string>();
+                const float weight = trait.second.as<float>();
+                if (name.empty() || !std::isfinite(weight) || weight < 0.f || weight > 1.f)
+                    throw std::invalid_argument("invalid captured atmosphere environment trait");
+                value.mTraits.emplace(name, weight);
+            }
+            const auto terrain = node["terrain"].as<std::vector<float>>();
+            if (terrain.size() != 6 || !std::ranges::all_of(terrain, [](float v) { return std::isfinite(v); }))
+                throw std::invalid_argument("invalid captured atmosphere terrain plane");
+            value.mTerrainHeightWorldUnits = terrain[0];
+            value.mTerrainSampleCenterWorldUnits.set(terrain[1], terrain[2]);
+            value.mTerrainGradient.set(terrain[3], terrain[4]);
+            value.mValleyDepthWorldUnits = terrain[5];
+            return value;
+        };
+        auto currentEnvironment = environment(state["environment"]);
+        auto orography = environment(state["orography"]);
+        const bool orographyValid = state["orography-valid"].as<bool>();
+        const auto worldspace = ESM::RefId::deserializeText(state["orography-worldspace"].as<std::string>());
+        const float moisture = state["recent-precipitation"].as<float>();
+        std::optional<double> formationTime;
+        if (state["formation-time-hours"])
+            formationTime = state["formation-time-hours"].as<double>();
+        if (!std::isfinite(moisture) || moisture < 0.f || moisture > 1.f
+            || (formationTime && !std::isfinite(*formationTime)))
+            throw std::invalid_argument("invalid captured atmosphere moisture history");
+        mAtmospherePalette->restoreRuntimeState(YAML::Dump(state["palette"]));
+        mCurrentEnvironment = std::move(currentEnvironment);
+        mCachedOrography = std::move(orography);
+        mOrographyCacheValid = orographyValid;
+        mCachedOrographyWorldspace = worldspace;
+        mCondensateFormation.setRecentPrecipitation(moisture);
+        mLastAtmosphereFormationTimeHours = formationTime;
     }
 
     void WeatherManager::setDiagnosticEnvironmentState(AtmosphereEnvironmentState environment)

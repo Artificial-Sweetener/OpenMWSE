@@ -763,7 +763,7 @@ namespace
         const YAML::Node actual = YAML::Load(payloadText(actualBytes));
         const std::string provider = actual["provider"].as<std::string>("");
         if (provider != "gameplay@4" && provider != "gameplay@5" && provider != "gameplay@6" && provider != "gameplay@7"
-            && provider != "gameplay@8")
+            && provider != "gameplay@8" && provider != "gameplay@9")
             throw std::runtime_error("replay state was reported by an incompatible gameplay provider");
         for (const char* key : { "cell", "weather" })
         {
@@ -805,6 +805,29 @@ namespace
         if (std::abs(expected["game-time-seconds"].as<double>() - actual["game-time-seconds"].as<double>()) > 0.01
             || std::abs(expected["simulation-time"].as<double>() - actual["simulation-time"].as<double>()) > 0.01)
             throw std::runtime_error("replay clocks do not match their capsule");
+        if (const auto cloudTravel = expected["cloud-advection-world-units"])
+        {
+            const auto restoredTravel = actual["cloud-advection-world-units"];
+            if (!cloudTravel.IsSequence() || cloudTravel.size() != 2 || !restoredTravel.IsSequence()
+                || restoredTravel.size() != 2)
+                throw std::runtime_error("replay cloud wind displacement is missing or invalid");
+            for (std::size_t axis = 0; axis < 2; ++axis)
+            {
+                if (cloudTravel[axis].as<double>() != restoredTravel[axis].as<double>())
+                    throw std::runtime_error("replay cloud wind displacement does not match its capsule");
+            }
+            std::cout << "cloud-advection-parity: true\n";
+        }
+        else
+            std::cout << "cloud-advection-parity: unavailable (capture predates wind-state recording)\n";
+        if (const auto atmosphereRuntime = expected["atmosphere-runtime"])
+        {
+            if (YAML::Dump(atmosphereRuntime) != YAML::Dump(actual["atmosphere-runtime"]))
+                throw std::runtime_error("replay regional atmosphere history does not match its capsule");
+            std::cout << "atmosphere-runtime-parity: true\n";
+        }
+        else
+            std::cout << "atmosphere-runtime-parity: unavailable (capture predates regional history recording)\n";
     }
 
     /// Execute a single command against an already enabled live session.
@@ -1229,6 +1252,8 @@ namespace
                 waitForGraphicsCapture(endpoint, requestId);
             }
         }
+        requireSuccessfulResponse(Diagnostics::transact(
+            endpoint, { requestId++, Diagnostics::CommandType::CaptureCapsule, textPayload("completed.omwdiag") }));
         const Diagnostics::Response finalGameplay
             = Diagnostics::transact(endpoint, { requestId++, Diagnostics::CommandType::TraceGameplay, {} });
         requireSuccessfulResponse(finalGameplay);

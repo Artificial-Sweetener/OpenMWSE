@@ -157,7 +157,9 @@ Atmosphere bundles include ``atmosphere-cloud-models-v2``, a 14 by 3 RGBA attach
 outgoing, incoming, and environmental model controls in ``SceneUtil::packCloudLayer`` order. It records the actual
 post-processing uniform snapshot, including gradients, deformation, noise scale, and optical coefficients.
 
-Every isolated run writes its final ``gameplay.yaml`` evidence. Use ``--skip-graphics-capture`` for state or
+Every isolated run writes its final ``gameplay.yaml`` evidence and a ``completed.omwdiag`` capsule.
+When the game remains running, that capsule includes a resumable world snapshot and its atmosphere state.
+Use ``--skip-graphics-capture`` for state or
 performance-only runs that do not need production attachments. Use ``--normal-only-graphics-capture`` for deterministic
 morphology sweeps that need the normal production frame but not every shader-route comparison. Full visual qualification uses
 the default comparison capture or exact route-frame bundles.
@@ -218,7 +220,12 @@ The versioned providers expose these evidence domains:
 * ``graphics@3`` captures scene color and depth, resolved atmospheric volumes and metadata, shafts, and the final composite over
   normal and diagnostic-isolation stages. It also supports native-resolution route composites;
   ``graphics@1`` supports 1024-pixel route previews.
-* ``gameplay@8`` records the cell, camera position and angles, first-person and underwater state, current and next weather,
+* ``gameplay@9`` records accumulated cloud wind displacement, regional palette and volume blending,
+  cached local terrain evidence, and moisture history in capsules and restores them before replay.
+  Replay reports ``cloud-advection-parity: true`` after checking the restored displacement. Older capsules omit this
+  transient state and report wind parity as unavailable; they cannot establish the original cloud placement.
+  ``atmosphere-runtime-parity`` independently reports whether regional history was preserved.
+  The provider records the cell, camera position and angles, first-person and underwater state, current and next weather,
   weather-transition progress, game hour, game and simulation clocks, state, continuous terrain-derived environment traits,
   sparse terrain sample center, local gradient, valley depth,
   and the applied fog range and resolved cloud, low-cloud, mist, fog, and terrain-atmosphere parameters. It also records the

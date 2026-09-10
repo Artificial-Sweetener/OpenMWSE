@@ -17,6 +17,7 @@
 
 #include <cmath>
 #include <iomanip>
+#include <limits>
 
 #include "mwrender/camera.hpp"
 #include "mwrender/postprocessor.hpp"
@@ -66,6 +67,16 @@ namespace
         return result;
     }
 
+    /// Nest a complete YAML document without changing its scalar precision or collection styles.
+    std::string indentDiagnosticYaml(const std::string& document)
+    {
+        std::istringstream input(document);
+        std::ostringstream output;
+        for (std::string line; std::getline(input, line);)
+            output << "  " << line << '\n';
+        return output.str();
+    }
+
     /// Format the repository's 128-bit content identity without ambiguous variable-width fields.
     std::string formatDiagnosticHash(const std::array<std::uint64_t, 2>& hash)
     {
@@ -96,7 +107,7 @@ Diagnostics::Capsule OMW::Engine::createDiagnosticCapsule(unsigned frameNumber)
     manifest << "capsule-version: " << Diagnostics::capsuleVersion << '\n'
              << "build: " << quoteDiagnosticYaml(Version::getOpenmwVersionDescription()) << '\n'
              << "frame: " << frameNumber << '\n'
-             << "providers: [core@2, graphics@3, gameplay@8, " << OMW::diagnosticPerformanceProvider << "]\n"
+             << "providers: [core@2, graphics@3, gameplay@9, " << OMW::diagnosticPerformanceProvider << "]\n"
              << "content:\n";
     for (const std::string& content : mContentFiles)
     {
@@ -119,6 +130,8 @@ Diagnostics::Capsule OMW::Engine::createDiagnosticCapsule(unsigned frameNumber)
     }
 
     std::ostringstream world;
+    const auto& cloudTravel = mWorld->getRenderingManager()->getCloudAdvectionOffsetWorldUnits();
+    const auto atmosphereRuntime = indentDiagnosticYaml(mWorld->captureAtmosphereRuntimeState());
     world << "cell: " << quoteDiagnosticYaml(mWorld->getCellName()) << '\n'
           << "frame: " << frameNumber << '\n'
           << "camera: [" << cameraPosition.x() << ", " << cameraPosition.y() << ", " << cameraPosition.z() << "]\n"
@@ -134,7 +147,11 @@ Diagnostics::Capsule OMW::Engine::createDiagnosticCapsule(unsigned frameNumber)
           << "game-hour: " << time.getTimeStamp().getHour() << '\n'
           << "game-time-seconds: " << time.getGameTime() << '\n'
           << "simulation-time: " << time.getSimulationTime() << '\n'
-          << "rendering-time: " << time.getRenderingSimulationTime() << '\n';
+          << "rendering-time: " << time.getRenderingSimulationTime() << '\n'
+          << std::setprecision(std::numeric_limits<double>::max_digits10) << "cloud-advection-world-units: ["
+          << cloudTravel.x() << ", " << cloudTravel.y() << "]\n"
+          << "atmosphere-runtime:\n"
+          << atmosphereRuntime;
     capsule.add({ "state/world.yaml", Diagnostics::CapsuleEntryType::GameplayTrace, diagnosticBytes(world.str()) });
 
     if (mStateManager->getState() == MWBase::StateManager::State_Running)
@@ -267,7 +284,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << '\n'
                            << "performance-capture: " << (mDiagnosticCollection->active() ? "collecting" : "idle")
                            << '\n'
-                           << "providers: [core@2, graphics@3, gameplay@8, " << OMW::diagnosticPerformanceProvider
+                           << "providers: [core@2, graphics@3, gameplay@9, " << OMW::diagnosticPerformanceProvider
                            << "]\n";
                     response.mPayload = diagnosticBytes(output.str());
                     break;
@@ -392,7 +409,9 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                     const MWRender::AtmosphereDiagnosticState& atmosphere
                         = mWorld->getRenderingManager()->getAtmosphereDiagnosticState();
                     const MWRender::AtmosphereVolumeState& volumes = atmosphere.mVolumes;
-                    output << "provider: gameplay@8\nframe: " << frameNumber << '\n'
+                    const auto& cloudTravel = mWorld->getRenderingManager()->getCloudAdvectionOffsetWorldUnits();
+                    const auto atmosphereRuntime = indentDiagnosticYaml(mWorld->captureAtmosphereRuntimeState());
+                    output << "provider: gameplay@9\nframe: " << frameNumber << '\n'
                            << "state: " << static_cast<int>(mStateManager->getState()) << '\n'
                            << "cell: " << quoteDiagnosticYaml(mWorld->getCellName()) << '\n'
                            << "camera: [" << cameraPosition.x() << ", " << cameraPosition.y() << ", "
@@ -412,7 +431,10 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << "game-hour: " << time.getTimeStamp().getHour() << '\n'
                            << "game-time-seconds: " << time.getGameTime() << '\n'
                            << "simulation-time: " << time.getSimulationTime() << '\n'
-                           << "atmosphere:\n"
+                           << std::setprecision(std::numeric_limits<double>::max_digits10)
+                           << "cloud-advection-world-units: [" << cloudTravel.x() << ", " << cloudTravel.y() << "]\n"
+                           << "atmosphere-runtime:\n"
+                           << atmosphereRuntime << std::setprecision(6) << "atmosphere:\n"
                            << "  enabled: " << (atmosphere.mEnabled ? "true" : "false") << '\n'
                            << "  fog-range-world-units: [" << atmosphere.mFogStartWorldUnits << ", "
                            << atmosphere.mFogEndWorldUnits << "]\n"
@@ -540,6 +562,15 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                         break;
                     }
                     const YAML::Node state = YAML::Load(diagnosticText(command.mPayload));
+                    if (const auto cloudTravel = state["cloud-advection-world-units"])
+                    {
+                        if (!cloudTravel.IsSequence() || cloudTravel.size() != 2)
+                            throw std::invalid_argument("diagnostic cloud wind displacement requires two coordinates");
+                        mWorld->getRenderingManager()->restoreCloudAdvectionOffsetWorldUnits(
+                            { cloudTravel[0].as<double>(), cloudTravel[1].as<double>() });
+                    }
+                    if (const auto atmosphereRuntime = state["atmosphere-runtime"])
+                        mWorld->restoreAtmosphereRuntimeState(YAML::Dump(atmosphereRuntime));
                     mViewer->getFrameStamp()->setFrameNumber(state["frame"].as<unsigned>());
                     time.setSimulationTime(state["simulation-time"].as<double>());
                     time.setRenderingSimulationTime(state["rendering-time"].as<double>());
