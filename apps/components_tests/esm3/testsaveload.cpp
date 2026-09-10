@@ -510,6 +510,32 @@ namespace ESM
             EXPECT_EQ(result.mRegions.begin()->second.mChances, record.mRegions.begin()->second.mChances);
         }
 
+        /// Preserve a cloud-only transition without inventing an incoming coarse weather on reload.
+        TEST_P(Esm3SaveLoadRecordTest, sameWeatherCloudRenewalShouldNotChange)
+        {
+            WeatherState record{};
+            record.mCurrentRegion = RefId::stringRefId("molag amur region");
+            record.mCurrentWeather = 1;
+            record.mNextWeather = -1;
+            record.mQueuedWeather = -1;
+            record.mCurrentCloudScenario = 41;
+            record.mNextCloudScenario = 42;
+            record.mTransitionFactor = .35f;
+            record.mWeatherUpdateTime = 5.5f;
+            record.mCloudScenarioSequence = 19;
+            WeatherState result{};
+            saveAndLoadRecord(record, GetParam(), result);
+            EXPECT_EQ(result.mCurrentWeather, 1);
+            EXPECT_EQ(result.mNextWeather, -1);
+            EXPECT_EQ(result.mQueuedWeather, -1);
+            EXPECT_EQ(result.mCurrentCloudScenario, 41u);
+            EXPECT_EQ(result.mNextCloudScenario, 42u);
+            EXPECT_EQ(result.mQueuedCloudScenario, 0u);
+            EXPECT_FLOAT_EQ(result.mTransitionFactor, .35f);
+            EXPECT_FLOAT_EQ(result.mWeatherUpdateTime, 5.5f);
+            EXPECT_EQ(result.mCloudScenarioSequence, 19u);
+        }
+
         TEST_P(Esm3SaveLoadRecordTest, dialogueShouldNotChange)
         {
             Dialogue record;

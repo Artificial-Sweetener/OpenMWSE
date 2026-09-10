@@ -798,8 +798,26 @@ namespace MWWorld
         }
         if (target == weatherIndex("Clear") && (wetOrigin || retainedMoisture > 0.45f))
             slot = contextualSlot({ 1u, 3u, 5u, 6u });
-        else if (target == weatherIndex("Cloudy") && (humidEnvironment > 0.5f || environment.get("highland") > 0.55f))
-            slot = contextualSlot({ 1u, 2u, 4u, 6u });
+        else if (target == weatherIndex("Cloudy"))
+        {
+            const float influence = std::max(humidEnvironment, std::clamp(environment.get("highland"), 0.f, 1.f));
+            if (influence > 0.f)
+            {
+                // Climate favors clustered, broken, layered, and ragged clouds without excluding other skies.
+                std::array<float, 8> climateWeights{};
+                float totalWeight = 0.f;
+                for (std::size_t i = 0; i < weights.size(); ++i)
+                {
+                    const bool favored = i == 1 || i == 2 || i == 4 || i == 6;
+                    climateWeights[i] = weights[i] * (favored ? 1.f + influence : 1.f);
+                    totalWeight += climateWeights[i];
+                }
+                float selection = static_cast<float>(identity >> 8u) / 16777216.f * totalWeight;
+                slot = 0;
+                while (slot + 1 < climateWeights.size() && selection >= climateWeights[slot])
+                    selection -= climateWeights[slot++];
+            }
+        }
         else if (target == weatherIndex("Foggy") && (humidEnvironment > 0.4f || dawnCooling > 0.5f))
             slot = contextualSlot({ 0u, 4u, 5u, 6u });
         else if (target == weatherIndex("Overcast") && (wetOrigin || retainedMoisture > 0.55f))

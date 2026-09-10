@@ -661,11 +661,7 @@ namespace MWWorld
         , mTimePassed(0)
         , mFastForward(false)
         , mWeatherUpdateTime(mHoursBetweenWeatherChanges)
-        , mTransitionFactor(0)
         , mNightDayMode(Default)
-        , mCurrentWeather(0)
-        , mNextWeather(0)
-        , mQueuedWeather(0)
         , mRegions()
         , mResult()
     {
@@ -754,15 +750,15 @@ namespace MWWorld
         if (!next && transition != 0.f)
             throw std::invalid_argument("steady diagnostic weather cannot have transition progress");
 
-        mCurrentWeather = findWeatherIndex(current);
-        mNextWeather = next ? findWeatherIndex(*next) : invalidWeatherID;
-        mCurrentCloudScenario = cloudScenarioIdentity;
-        mNextCloudScenario = next ? cloudScenarioIdentity + 1u : 0u;
-        if (next && mNextCloudScenario == 0)
-            mNextCloudScenario = 1u;
-        mTransitionFactor = next ? 1.f - transition : 0.f;
-        mQueuedWeather = invalidWeatherID;
-        mQueuedCloudScenario = 0;
+        mWeatherTransition.mCurrentWeather = findWeatherIndex(current);
+        mWeatherTransition.mNextWeather = next ? findWeatherIndex(*next) : invalidWeatherID;
+        mWeatherTransition.mCurrentCloudScenario = cloudScenarioIdentity;
+        mWeatherTransition.mNextCloudScenario = next ? cloudScenarioIdentity + 1u : 0u;
+        if (next && mWeatherTransition.mNextCloudScenario == 0)
+            mWeatherTransition.mNextCloudScenario = 1u;
+        mWeatherTransition.mRemaining = next ? 1.f - transition : 0.f;
+        mWeatherTransition.mQueuedWeather = invalidWeatherID;
+        mWeatherTransition.mQueuedCloudScenario = 0;
         mFastForward = false;
         mTimePassed = 0.f;
         mWeatherUpdateTime = mHoursBetweenWeatherChanges;
@@ -901,7 +897,7 @@ namespace MWWorld
 
         if (!mDiagnosticWeatherLocked && (!paused || mFastForward))
         {
-            // Add new transitions when either the player's current external region changes.
+            // Renew cloud episodes at weather-period boundaries even when the coarse weather repeats.
             const bool timeChanged = updateWeatherTime();
             const bool regionChanged = updateWeatherRegion(player.getCell()->getCell()->getRegion());
             if (timeChanged || regionChanged)
@@ -909,7 +905,7 @@ namespace MWWorld
                 auto it = mRegions.find(mCurrentRegion);
                 if (it != mRegions.end())
                 {
-                    addWeatherTransition(it->second.getWeather());
+                    addWeatherTransition(it->second.getWeather(), timeChanged);
                 }
             }
 
@@ -988,7 +984,7 @@ namespace MWWorld
         bool isDay = time.getHour() >= mSunriseTime && time.getHour() <= mTimeSettings.mNightStart;
         if (isExterior && !isDay)
             mNightDayMode = ExteriorNight;
-        else if (!isExterior && isDay && mWeatherSettings[mCurrentWeather].mGlareView >= 0.5f)
+        else if (!isExterior && isDay && mWeatherSettings[mWeatherTransition.mCurrentWeather].mGlareView >= 0.5f)
             mNightDayMode = InteriorDay;
         else
             mNightDayMode = Default;
@@ -1005,10 +1001,12 @@ namespace MWWorld
 
         calculateWeatherResult(time.getHour(), duration, paused);
 
-        const float transition = inTransition() ? 1.f - mTransitionFactor : 0.f;
-        const float currentPrecipitation = precipitationMoistureWeight(mWeatherSettings[mCurrentWeather]);
-        const float nextPrecipitation
-            = inTransition() ? precipitationMoistureWeight(mWeatherSettings[mNextWeather]) : currentPrecipitation;
+        const float transition = inTransition() ? 1.f - mWeatherTransition.mRemaining : 0.f;
+        const float currentPrecipitation
+            = precipitationMoistureWeight(mWeatherSettings[mWeatherTransition.mCurrentWeather]);
+        const float nextPrecipitation = inTransition()
+            ? precipitationMoistureWeight(mWeatherSettings[mWeatherTransition.mNextWeather])
+            : currentPrecipitation;
         const double currentFormationTimeHours
             = static_cast<double>(time.getDay()) * 24.0 + static_cast<double>(time.getHour());
         float elapsedGameHours = 0.f;
@@ -1157,12 +1155,12 @@ namespace MWWorld
         }
         mPlayingRainSoundID = ESM::RefId();
 
-        for (ESM::RefId soundId : mWeatherSettings[mCurrentWeather].mThunderSoundID)
+        for (ESM::RefId soundId : mWeatherSettings[mWeatherTransition.mCurrentWeather].mThunderSoundID)
             if (!soundId.empty() && sndMgr->getSoundPlaying(MWWorld::ConstPtr(), soundId))
                 sndMgr->stopSound3D(MWWorld::ConstPtr(), soundId);
 
         if (inTransition())
-            for (ESM::RefId soundId : mWeatherSettings[mNextWeather].mThunderSoundID)
+            for (ESM::RefId soundId : mWeatherSettings[mWeatherTransition.mNextWeather].mThunderSoundID)
                 if (!soundId.empty() && sndMgr->getSoundPlaying(MWWorld::ConstPtr(), soundId))
                     sndMgr->stopSound3D(MWWorld::ConstPtr(), soundId);
     }
@@ -1215,13 +1213,15 @@ namespace MWWorld
 
     float WeatherManager::getSunVisibility() const
     {
-        if (inTransition() && mTransitionFactor < mWeatherSettings[mNextWeather].mCloudsMaximumPercent)
+        if (inTransition()
+            && mWeatherTransition.mRemaining < mWeatherSettings[mWeatherTransition.mNextWeather].mCloudsMaximumPercent)
         {
-            float t = mTransitionFactor / mWeatherSettings[mNextWeather].mCloudsMaximumPercent;
-            return (1.f - t) * mWeatherSettings[mCurrentWeather].mGlareView
-                + t * mWeatherSettings[mNextWeather].mGlareView;
+            float t = mWeatherTransition.mRemaining
+                / mWeatherSettings[mWeatherTransition.mNextWeather].mCloudsMaximumPercent;
+            return (1.f - t) * mWeatherSettings[mWeatherTransition.mCurrentWeather].mGlareView
+                + t * mWeatherSettings[mWeatherTransition.mNextWeather].mGlareView;
         }
-        return mWeatherSettings[mCurrentWeather].mGlareView;
+        return mWeatherSettings[mWeatherTransition.mCurrentWeather].mGlareView;
     }
 
     void WeatherManager::write(ESM::ESMWriter& writer, Loading::Listener& progress)
@@ -1231,13 +1231,13 @@ namespace MWWorld
         state.mTimePassed = mTimePassed;
         state.mFastForward = mFastForward;
         state.mWeatherUpdateTime = mWeatherUpdateTime;
-        state.mTransitionFactor = mTransitionFactor;
-        state.mCurrentWeather = mCurrentWeather;
-        state.mNextWeather = mNextWeather;
-        state.mQueuedWeather = mQueuedWeather;
-        state.mCurrentCloudScenario = mCurrentCloudScenario;
-        state.mNextCloudScenario = mNextCloudScenario;
-        state.mQueuedCloudScenario = mQueuedCloudScenario;
+        state.mTransitionFactor = mWeatherTransition.mRemaining;
+        state.mCurrentWeather = mWeatherTransition.mCurrentWeather;
+        state.mNextWeather = mWeatherTransition.mNextWeather;
+        state.mQueuedWeather = mWeatherTransition.mQueuedWeather;
+        state.mCurrentCloudScenario = mWeatherTransition.mCurrentCloudScenario;
+        state.mNextCloudScenario = mWeatherTransition.mNextCloudScenario;
+        state.mQueuedCloudScenario = mWeatherTransition.mQueuedCloudScenario;
         state.mCloudScenarioSequence = mCloudScenarioSequence;
 
         auto it = mRegions.begin();
@@ -1262,20 +1262,23 @@ namespace MWWorld
             mTimePassed = state.mTimePassed;
             mFastForward = state.mFastForward;
             mWeatherUpdateTime = state.mWeatherUpdateTime;
-            mTransitionFactor = state.mTransitionFactor;
-            mCurrentWeather = state.mCurrentWeather;
-            mNextWeather = state.mNextWeather;
-            mQueuedWeather = state.mQueuedWeather;
-            mCurrentCloudScenario = state.mCurrentCloudScenario;
-            mNextCloudScenario = state.mNextCloudScenario;
-            mQueuedCloudScenario = state.mQueuedCloudScenario;
+            mWeatherTransition.mRemaining = state.mTransitionFactor;
+            mWeatherTransition.mCurrentWeather = state.mCurrentWeather;
+            mWeatherTransition.mNextWeather = state.mNextWeather;
+            mWeatherTransition.mQueuedWeather = state.mQueuedWeather;
+            mWeatherTransition.mCurrentCloudScenario = state.mCurrentCloudScenario;
+            mWeatherTransition.mNextCloudScenario = state.mNextCloudScenario;
+            mWeatherTransition.mQueuedCloudScenario = state.mQueuedCloudScenario;
             mCloudScenarioSequence = state.mCloudScenarioSequence;
-            if (mCurrentCloudScenario == 0)
-                mCurrentCloudScenario = createCloudScenarioIdentity(mCurrentWeather, invalidWeatherID);
-            if (mNextWeather != invalidWeatherID && mNextCloudScenario == 0)
-                mNextCloudScenario = createCloudScenarioIdentity(mNextWeather, mCurrentWeather);
-            if (mQueuedWeather != invalidWeatherID && mQueuedCloudScenario == 0)
-                mQueuedCloudScenario = createCloudScenarioIdentity(mQueuedWeather, mNextWeather);
+            if (mWeatherTransition.mCurrentCloudScenario == 0)
+                mWeatherTransition.mCurrentCloudScenario
+                    = createCloudScenarioIdentity(mWeatherTransition.mCurrentWeather, invalidWeatherID);
+            if (mWeatherTransition.mNextWeather != invalidWeatherID && mWeatherTransition.mNextCloudScenario == 0)
+                mWeatherTransition.mNextCloudScenario
+                    = createCloudScenarioIdentity(mWeatherTransition.mNextWeather, mWeatherTransition.mCurrentWeather);
+            if (mWeatherTransition.mQueuedWeather != invalidWeatherID && mWeatherTransition.mQueuedCloudScenario == 0)
+                mWeatherTransition.mQueuedCloudScenario
+                    = createCloudScenarioIdentity(mWeatherTransition.mQueuedWeather, mWeatherTransition.mNextWeather);
 
             mRegions.clear();
             importRegions();
@@ -1375,66 +1378,15 @@ namespace MWWorld
 
     inline void WeatherManager::updateWeatherTransitions(const float elapsedRealSeconds)
     {
-        // When a player chooses to train, wait, or serves jail time, any transitions will be fast forwarded to the last
-        // weather type set, regardless of the remaining transition time.
-        if (!mFastForward && inTransition())
-        {
-            const float delta = mWeatherSettings[mNextWeather].transitionDelta();
-            mTransitionFactor -= elapsedRealSeconds * delta;
-            if (mTransitionFactor <= 0.0f)
-            {
-                mCurrentWeather = mNextWeather;
-                mNextWeather = mQueuedWeather;
-                mQueuedWeather = invalidWeatherID;
-                mCurrentCloudScenario = mNextCloudScenario;
-                mNextCloudScenario = mQueuedCloudScenario;
-                mQueuedCloudScenario = 0;
-
-                // We may have begun processing the queued transition, so we need to apply the remaining time towards
-                // it.
-                if (inTransition())
-                {
-                    const float newDelta = mWeatherSettings[mNextWeather].transitionDelta();
-                    const float remainingSeconds = -(mTransitionFactor / delta);
-                    mTransitionFactor = 1.0f - (remainingSeconds * newDelta);
-                }
-                else
-                {
-                    mTransitionFactor = 0.0f;
-                }
-            }
-        }
-        else
-        {
-            if (mQueuedWeather != invalidWeatherID)
-            {
-                mCurrentWeather = mQueuedWeather;
-                mCurrentCloudScenario = mQueuedCloudScenario;
-            }
-            else if (mNextWeather != invalidWeatherID)
-            {
-                mCurrentWeather = mNextWeather;
-                mCurrentCloudScenario = mNextCloudScenario;
-            }
-
-            mNextWeather = invalidWeatherID;
-            mQueuedWeather = invalidWeatherID;
-            mNextCloudScenario = 0;
-            mQueuedCloudScenario = 0;
-            mFastForward = false;
-        }
+        mWeatherTransition.advance(elapsedRealSeconds, mFastForward,
+            [this](int weather) { return mWeatherSettings[weather].transitionDelta(); });
+        mFastForward = false;
     }
 
     inline void WeatherManager::forceWeather(const int weatherID)
     {
-        mTransitionFactor = 0.0f;
-        const int originWeatherID = mCurrentWeather;
-        mCurrentWeather = weatherID;
-        mNextWeather = invalidWeatherID;
-        mQueuedWeather = invalidWeatherID;
-        mCurrentCloudScenario = createCloudScenarioIdentity(weatherID, originWeatherID);
-        mNextCloudScenario = 0;
-        mQueuedCloudScenario = 0;
+        const auto scenario = createCloudScenarioIdentity(weatherID, mWeatherTransition.mCurrentWeather);
+        mWeatherTransition.force(weatherID, scenario);
     }
 
     std::uint32_t WeatherManager::createCloudScenarioIdentity(int weatherID, int originWeatherID)
@@ -1450,27 +1402,14 @@ namespace MWWorld
 
     inline bool WeatherManager::inTransition() const
     {
-        return mNextWeather != invalidWeatherID;
+        return mWeatherTransition.weatherActive();
     }
 
-    inline void WeatherManager::addWeatherTransition(const int weatherID)
+    inline void WeatherManager::addWeatherTransition(const int weatherID, bool renewCloudEpisode)
     {
-        // In order to work like ChangeWeather expects, this method begins transitioning to the new weather immediately
-        // if no transition is in progress, otherwise it queues it to be transitioned.
-
         assert(weatherID >= 0 && static_cast<size_t>(weatherID) < mWeatherSettings.size());
-
-        if (!inTransition() && (weatherID != mCurrentWeather))
-        {
-            mNextWeather = weatherID;
-            mNextCloudScenario = createCloudScenarioIdentity(weatherID, mCurrentWeather);
-            mTransitionFactor = 1.0f;
-        }
-        else if (inTransition() && (weatherID != mNextWeather))
-        {
-            mQueuedWeather = weatherID;
-            mQueuedCloudScenario = createCloudScenarioIdentity(weatherID, mNextWeather);
-        }
+        mWeatherTransition.request(weatherID, renewCloudEpisode,
+            [this](int weather, int origin) { return createCloudScenarioIdentity(weather, origin); });
     }
 
     inline void WeatherManager::calculateWeatherResult(
@@ -1479,19 +1418,20 @@ namespace MWWorld
         float flash = 0.0f;
         if (!inTransition())
         {
-            calculateResult(mCurrentWeather, gameHour);
+            calculateResult(mWeatherTransition.mCurrentWeather, gameHour);
             if (mDiagnosticLightningEnabled)
-                flash = mWeatherSettings[mCurrentWeather].calculateThunder(1.0f, elapsedSeconds, isPaused);
+                flash = mWeatherSettings[mWeatherTransition.mCurrentWeather].calculateThunder(
+                    1.0f, elapsedSeconds, isPaused);
         }
         else
         {
-            calculateTransitionResult(1 - mTransitionFactor, gameHour);
+            calculateTransitionResult(1 - mWeatherTransition.mRemaining, gameHour);
             if (mDiagnosticLightningEnabled)
             {
-                float currentFlash
-                    = mWeatherSettings[mCurrentWeather].calculateThunder(mTransitionFactor, elapsedSeconds, isPaused);
-                float nextFlash
-                    = mWeatherSettings[mNextWeather].calculateThunder(1 - mTransitionFactor, elapsedSeconds, isPaused);
+                float currentFlash = mWeatherSettings[mWeatherTransition.mCurrentWeather].calculateThunder(
+                    mWeatherTransition.mRemaining, elapsedSeconds, isPaused);
+                float nextFlash = mWeatherSettings[mWeatherTransition.mNextWeather].calculateThunder(
+                    1 - mWeatherTransition.mRemaining, elapsedSeconds, isPaused);
                 flash = currentFlash + nextFlash;
             }
         }
@@ -1508,11 +1448,13 @@ namespace MWWorld
             mResult.mParticleEffect.clear();
         }
 
-        const std::string_view nextWeather
-            = inTransition() ? std::string_view(mWeatherSettings[mNextWeather].mName) : std::string_view();
-        const float weatherTransition = inTransition() ? 1.f - mTransitionFactor : 0.f;
-        mResult.mAtmosphere = mAtmospherePalette->getState(mWeatherSettings[mCurrentWeather].mName, nextWeather,
-            weatherTransition, mCurrentCloudScenario, mNextCloudScenario);
+        const std::string_view nextWeather = mWeatherTransition.active()
+            ? std::string_view(mWeatherSettings[mWeatherTransition.targetWeather()].mName)
+            : std::string_view();
+        const float weatherTransition = mWeatherTransition.active() ? 1.f - mWeatherTransition.mRemaining : 0.f;
+        mResult.mAtmosphere
+            = mAtmospherePalette->getState(mWeatherSettings[mWeatherTransition.mCurrentWeather].mName, nextWeather,
+                weatherTransition, mWeatherTransition.mCurrentCloudScenario, mWeatherTransition.mNextCloudScenario);
         mResult.mAtmosphere.mLighting
             = MWRender::makeAtmosphereLightingState(mResult.mSunColor, mResult.mAmbientColor, mResult.mFogColor);
     }
@@ -1603,9 +1545,9 @@ namespace MWWorld
 
     inline void WeatherManager::calculateTransitionResult(const float factor, const float gameHour)
     {
-        calculateResult(mCurrentWeather, gameHour);
+        calculateResult(mWeatherTransition.mCurrentWeather, gameHour);
         const MWRender::WeatherResult current = mResult;
-        calculateResult(mNextWeather, gameHour);
+        calculateResult(mWeatherTransition.mNextWeather, gameHour);
         const MWRender::WeatherResult other = mResult;
 
         mResult.mStormDirection = current.mStormDirection;
@@ -1613,7 +1555,7 @@ namespace MWWorld
 
         mResult.mCloudTexture = current.mCloudTexture;
         mResult.mNextCloudTexture = other.mCloudTexture;
-        mResult.mCloudBlendFactor = mWeatherSettings[mNextWeather].cloudBlendFactor(factor);
+        mResult.mCloudBlendFactor = mWeatherSettings[mWeatherTransition.mNextWeather].cloudBlendFactor(factor);
 
         mResult.mFogColor = lerp(current.mFogColor, other.mFogColor, factor);
         mResult.mSunColor = lerp(current.mSunColor, other.mSunColor, factor);
@@ -1625,8 +1567,8 @@ namespace MWWorld
         mResult.mDLFogFactor = lerp(current.mDLFogFactor, other.mDLFogFactor, factor);
         mResult.mDLFogOffset = lerp(current.mDLFogOffset, other.mDLFogOffset, factor);
 
-        mResult.mCurrentWindSpeed = calculateWindSpeed(mCurrentWeather, mCurrentWindSpeed);
-        mResult.mNextWindSpeed = calculateWindSpeed(mNextWeather, mNextWindSpeed);
+        mResult.mCurrentWindSpeed = calculateWindSpeed(mWeatherTransition.mCurrentWeather, mCurrentWindSpeed);
+        mResult.mNextWindSpeed = calculateWindSpeed(mWeatherTransition.mNextWeather, mNextWindSpeed);
         mResult.mBaseWindSpeed = lerp(current.mBaseWindSpeed, other.mBaseWindSpeed, factor);
 
         mResult.mWindSpeed = lerp(mResult.mCurrentWindSpeed, mResult.mNextWindSpeed, factor);
@@ -1636,7 +1578,7 @@ namespace MWWorld
 
         mResult.mNight = current.mNight;
 
-        float threshold = mWeatherSettings[mNextWeather].mRainThreshold;
+        float threshold = mWeatherSettings[mWeatherTransition.mNextWeather].mRainThreshold;
         if (threshold <= 0.f)
             threshold = 0.5f;
 

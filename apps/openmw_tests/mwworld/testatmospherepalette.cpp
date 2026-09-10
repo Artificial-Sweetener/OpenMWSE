@@ -574,6 +574,45 @@ namespace MWWorld
             EXPECT_FLOAT_EQ(almostClear.mCloudLayer.mCoverageMinimum, 0.f);
         }
 
+        /// Exercise recurring Cloudy periods through the production transition owner and climate-conditioned selector.
+        TEST(MWWorldAtmospherePaletteTest, repeatedCloudyWeatherRenewsAcrossAllFamiliesInHumidTerrain)
+        {
+            const auto palette = paletteWithVolumes(authoredVolumeProfiles());
+            AtmosphereEnvironmentState environment;
+            environment.mTraits.emplace("wetland", 1.f);
+            environment.mTraits.emplace("highland", .8f);
+            WeatherTransition transition;
+            std::uint32_t sequence = 0;
+            const auto select = [&](int weather, int origin) {
+                EXPECT_EQ(weather, 1);
+                EXPECT_EQ(origin, 1);
+                return palette->createCloudScenarioIdentity(
+                    "Cloudy", "Cloudy", ++sequence, .7f, 12.f, 6.f, environment);
+            };
+            transition.force(1, select(1, 1));
+            std::array<unsigned, 8> familyCounts{};
+            for (unsigned episode = 0; episode < 512; ++episode)
+            {
+                const auto outgoing = transition.mCurrentCloudScenario;
+                transition.request(1, true, select);
+                ASSERT_TRUE(transition.active());
+                EXPECT_FALSE(transition.weatherActive());
+                transition.advance(5.f, false, [](int) { return .1f; });
+                const auto sky = palette->getState(
+                    "Cloudy", "Cloudy", 1.f - transition.mRemaining, outgoing, transition.mNextCloudScenario);
+                EXPECT_EQ(sky.mOutgoingCloudVolumes.mCloudScenarioIdentity, outgoing);
+                EXPECT_EQ(sky.mIncomingCloudVolumes.mCloudScenarioIdentity, transition.mNextCloudScenario);
+                EXPECT_FLOAT_EQ(sky.mCloudScenarioTransition, .5f);
+                transition.advance(5.f, false, [](int) { return .1f; });
+                ASSERT_FALSE(transition.active());
+                EXPECT_EQ(transition.mCurrentWeather, 1);
+                ++familyCounts[transition.mCurrentCloudScenario & 7u];
+            }
+            EXPECT_EQ(sequence, 513u);
+            for (const auto count : familyCounts)
+                EXPECT_GT(count, 0u) << "Terrain may favor a cloud structure but must not remove sky variety";
+        }
+
         /// Reject invalid authored episode weights instead of silently changing selection probabilities.
         TEST(MWWorldAtmospherePaletteTest, rejectsInvalidCloudEpisodeWeights)
         {

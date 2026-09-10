@@ -4,11 +4,89 @@
 
 #include "apps/openmw/mwworld/timestamp.hpp"
 #include "apps/openmw/mwworld/weather.hpp"
+#include "apps/openmw/mwworld/weathertransition.hpp"
 
 namespace MWWorld
 {
     namespace
     {
+        /// Renew the sky at an expired weather episode without changing the coarse weather exposed to gameplay.
+        TEST(MWWorldWeatherTest, repeatedWeatherStartsAContinuousCloudEpisode)
+        {
+            WeatherTransition transition;
+            transition.force(1, 41);
+            unsigned selections = 0;
+            const auto select = [&](int weather, int origin) {
+                EXPECT_EQ(weather, 1);
+                EXPECT_EQ(origin, 1);
+                return 42u + selections++;
+            };
+            transition.request(1, false, select);
+            EXPECT_EQ(selections, 0u);
+            EXPECT_FALSE(transition.active());
+            transition.request(1, true, select);
+            ASSERT_TRUE(transition.active());
+            EXPECT_FALSE(transition.weatherActive());
+            EXPECT_EQ(transition.mCurrentCloudScenario, 41u);
+            EXPECT_EQ(transition.mNextCloudScenario, 42u);
+            EXPECT_FLOAT_EQ(transition.mRemaining, 1.f);
+            const auto rate = [](int) { return .1f; };
+            transition.advance(4.f, false, rate);
+            EXPECT_NEAR(transition.mRemaining, .6f, 1e-6f);
+            transition.request(1, false, select);
+            EXPECT_EQ(selections, 1u);
+            EXPECT_EQ(transition.mCurrentCloudScenario, 41u);
+            transition.advance(6.f, false, rate);
+            EXPECT_FALSE(transition.active());
+            EXPECT_EQ(transition.mCurrentWeather, 1);
+            EXPECT_EQ(transition.mNextWeather, -1);
+            EXPECT_EQ(transition.mCurrentCloudScenario, 42u);
+        }
+
+        /// Finish a cloud renewal before blending a newly selected weather, preserving both cloud fields at each
+        /// boundary.
+        TEST(MWWorldWeatherTest, weatherChangesQueueBehindCloudRenewal)
+        {
+            WeatherTransition transition;
+            transition.force(1, 11);
+            unsigned scenario = 12;
+            const auto select = [&](int, int) { return scenario++; };
+            const auto rate = [](int weather) { return weather == 1 ? .1f : .05f; };
+            transition.request(1, true, select);
+            transition.advance(5.f, false, rate);
+            transition.request(4, false, select);
+            EXPECT_EQ(transition.mCurrentCloudScenario, 11u);
+            EXPECT_EQ(transition.mNextCloudScenario, 12u);
+            EXPECT_EQ(transition.mQueuedCloudScenario, 13u);
+            transition.advance(7.f, false, rate);
+            EXPECT_EQ(transition.mCurrentWeather, 1);
+            EXPECT_EQ(transition.mCurrentCloudScenario, 12u);
+            EXPECT_EQ(transition.mNextWeather, 4);
+            EXPECT_EQ(transition.mNextCloudScenario, 13u);
+            EXPECT_NEAR(transition.mRemaining, .9f, 1e-6f);
+            transition.advance(18.f, false, rate);
+            EXPECT_FALSE(transition.active());
+            EXPECT_EQ(transition.mCurrentWeather, 4);
+            EXPECT_EQ(transition.mCurrentCloudScenario, 13u);
+        }
+
+        /// Preserve the complete renewal trajectory through save-state copies, pauses, and waiting.
+        TEST(MWWorldWeatherTest, cloudRenewalSurvivesRestoreAndFastForward)
+        {
+            WeatherTransition transition;
+            transition.force(0, 17);
+            transition.request(0, true, [](int, int) { return 18u; });
+            transition.advance(3.f, false, [](int) { return .1f; });
+            WeatherTransition restored = transition;
+            restored.advance(0.f, false, [](int) { return .1f; });
+            EXPECT_FLOAT_EQ(restored.mRemaining, transition.mRemaining);
+            restored.advance(0.f, true, [](int) { return .1f; });
+            EXPECT_FALSE(restored.active());
+            EXPECT_EQ(restored.mCurrentWeather, 0);
+            EXPECT_EQ(restored.mCurrentCloudScenario, 18u);
+            EXPECT_EQ(restored.mNextCloudScenario, 0u);
+        }
+
         TEST(MWWorldWeatherTest, moonPhasesHaveMwscriptCompatibleValues)
         {
             using Phase = MWRender::MoonState::Phase;

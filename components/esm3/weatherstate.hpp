@@ -30,6 +30,7 @@ namespace ESM
         int32_t mQueuedWeather;
         /// Preserve realized cloud episodes and the next deterministic selection sequence in saves.
         std::uint32_t mCurrentCloudScenario = 0;
+        /// A nonzero incoming identity with mNextWeather == -1 renews the current weather's cloud episode.
         std::uint32_t mNextCloudScenario = 0;
         std::uint32_t mQueuedCloudScenario = 0;
         std::uint32_t mCloudScenarioSequence = 0;

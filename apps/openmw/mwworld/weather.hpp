@@ -22,6 +22,7 @@
 #include "../mwrender/skyutil.hpp"
 
 #include "atmosphereenvironment.hpp"
+#include "weathertransition.hpp"
 
 namespace ESM
 {
@@ -371,7 +372,8 @@ namespace MWWorld
 
         const std::vector<Weather>& getAllWeather() { return mWeatherSettings; }
 
-        const Weather& getWeather() { return mWeatherSettings[mCurrentWeather]; }
+        /// Return the current coarse weather throughout a cloud-only renewal.
+        const Weather& getWeather() { return mWeatherSettings[mWeatherTransition.mCurrentWeather]; }
 
         const Weather* getWeather(size_t index) const;
 
@@ -380,18 +382,25 @@ namespace MWWorld
         /// Return the continuous terrain-derived environment evidence used by atmosphere rendering.
         const AtmosphereEnvironmentState& getAtmosphereEnvironmentState() const { return mCurrentEnvironment; }
 
-        int getWeatherID() const { return mCurrentWeather; }
+        /// Preserve the gameplay weather identity while its sky renews.
+        int getWeatherID() const { return mWeatherTransition.mCurrentWeather; }
 
+        /// Expose an incoming weather only when the coarse weather changes.
         const Weather* getNextWeather()
         {
-            if (mNextWeather > -1)
-                return &mWeatherSettings[mNextWeather];
+            if (mWeatherTransition.mNextWeather > -1)
+                return &mWeatherSettings[mWeatherTransition.mNextWeather];
             return nullptr;
         }
 
-        int getNextWeatherID() const { return mNextWeather; }
+        /// Return -1 during a same-weather cloud renewal.
+        int getNextWeatherID() const { return mWeatherTransition.mNextWeather; }
 
-        float getTransitionFactor() const { return mTransitionFactor; }
+        /// Report only coarse-weather progress through the gameplay weather interface.
+        float getTransitionFactor() const
+        {
+            return mWeatherTransition.weatherActive() ? mWeatherTransition.mRemaining : 0.f;
+        }
 
         bool useTorches(float hour) const;
 
@@ -453,15 +462,9 @@ namespace MWWorld
         float mTimePassed;
         bool mFastForward;
         float mWeatherUpdateTime;
-        float mTransitionFactor;
         NightDayMode mNightDayMode;
-        int mCurrentWeather;
-        int mNextWeather;
-        int mQueuedWeather;
-        /// Persist the realized cloud episodes and monotonic selector independently of frame updates.
-        std::uint32_t mCurrentCloudScenario = 0;
-        std::uint32_t mNextCloudScenario = 0;
-        std::uint32_t mQueuedCloudScenario = 0;
+        WeatherTransition mWeatherTransition;
+        /// Persist the deterministic scenario selector independently of frame updates.
         std::uint32_t mCloudScenarioSequence = 0;
         /// Cache the latest game hour for meteorological episode selection at weather boundaries.
         float mCloudScenarioHour = 12.f;
@@ -484,14 +487,18 @@ namespace MWWorld
         void regionalWeatherChanged(const ESM::RefId& regionID, RegionWeather& region);
         bool updateWeatherTime();
         bool updateWeatherRegion(const ESM::RefId& playerRegion);
+        /// Advance weather or cloud renewal and preserve queued episode identity.
         void updateWeatherTransitions(const float elapsedRealSeconds);
+        /// Reset weather and cloud trajectories to an explicitly forced episode.
         void forceWeather(const int weatherID);
 
         /// Create a persistent episode identity conditioned by the weather trajectory.
         std::uint32_t createCloudScenarioIdentity(int weatherID, int originWeatherID);
 
+        /// Report coarse-weather transitions independently of same-weather sky renewal.
         bool inTransition() const;
-        void addWeatherTransition(const int weatherID);
+        /// Request regional weather, renewing a steady sky only when its weather period expires.
+        void addWeatherTransition(const int weatherID, bool renewCloudEpisode = false);
 
         void calculateWeatherResult(const float gameHour, const float elapsedSeconds, const bool isPaused);
         void calculateResult(const int weatherID, const float gameHour);
