@@ -25,7 +25,6 @@ DETAIL_TEXTURE_SIZE = 32
 WEATHER_TEXTURE_SIZE = 1024
 CURL_TEXTURE_SIZE = 128
 BLUE_NOISE_TEXTURE_SIZE = 128
-CLOUD_VOLUME_MIP_COUNT = 6
 RANDOM_SEED = 0x4F4D5753
 
 def lerp(first: float, second: float, amount: float) -> float:
@@ -513,8 +512,9 @@ def volume_mip_chain_rgba8(voxels: bytes, size: int, mip_count: int) -> bytes:
     return b"".join(levels)
 
 
-def dds_volume(voxels: bytes, size: int, mip_count: int = CLOUD_VOLUME_MIP_COUNT) -> bytes:
-    """Encode an uncompressed RGBA8 volume with the mip chain required by explicit LOD sampling."""
+def dds_volume(voxels: bytes, size: int) -> bytes:
+    """Encode an RGBA8 volume with a complete mip chain through its final 1x1x1 level."""
+    mip_count = size.bit_length()
     mip_chain = volume_mip_chain_rgba8(voxels, size, mip_count)
     pixel_format = struct.pack(
         "<8I",

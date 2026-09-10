@@ -170,6 +170,8 @@ namespace
         int cloudDensitySliceAxis = 0;
         int cloudDensitySliceQuantity = 0;
         bool renderCloudDensitySlice = false;
+        bool renderCloudSkyReference = false;
+        bool fullPrecisionCapture = false;
         int cloudTransportReferenceSubdivisions = 1;
         bool measureCloudMarchProgress = false;
         bool useLegacyCloudMarchReference = false;
@@ -492,7 +494,9 @@ namespace
         osg::ref_ptr<osg::Image> capture = new osg::Image;
         capture->allocateImage(width, height, 1, GL_RGBA, GL_FLOAT);
         capture->setInternalTextureFormat(
-            inputs.renderCloudDensitySlice && inputs.cloudDensitySliceQuantity == 2 ? GL_RGBA32F : GL_RGBA16F);
+            inputs.fullPrecisionCapture || (inputs.renderCloudDensitySlice && inputs.cloudDensitySliceQuantity == 2)
+                ? GL_RGBA32F
+                : GL_RGBA16F);
         camera->attach(osg::Camera::COLOR_BUFFER0, capture);
         osg::ref_ptr<osg::Image> secondaryCapture;
         if (!(*passIt)->getSecondaryTarget().empty())
@@ -589,10 +593,12 @@ namespace
                 std::string source = shader->getShaderSource();
                 replaceUniqueShaderText(source,
                     "openmwseCloudSegmentAtmosphericContribution(radiance * mainFraction, mainContribution,\n"
-                    "                    cloudAtmosphericTarget, max(fogVisibility, mainCloudMinimumVisibility))",
+                    "                    cloudAtmosphericTarget, max(fogVisibility, mainCloudMinimumVisibility) * "
+                    "mainPresentationWeight)",
+                    "mix(cloudAtmosphericTarget * mainContribution, "
                     "openmwseApplyAerialPerspectiveTowardTargetWithScale(radiance * mainFraction, "
                     "cloudAtmosphericTarget * mainContribution, worldDirection, sampleDistance, "
-                    "1.0, mainCloudOpticalDistanceLimit, atmosphere)");
+                    "1.0, mainCloudOpticalDistanceLimit, atmosphere), mainPresentationWeight)");
                 replaceUniqueShaderText(source,
                     "openmwseCloudSegmentAtmosphericContribution(lowAlbedo * lowFraction\n"
                     "                    * primaryContribution * (lowPrimaryLight + lowSecondaryLight), "
@@ -692,6 +698,20 @@ void main()
     omw_FragColor1 = metadata;
 }
 )glsl";
+                if (inputs.renderCloudSkyReference)
+                {
+                    const auto referenceMain = source.rfind("void main()");
+                    source.erase(referenceMain);
+                    source += R"glsl(
+void main()
+{
+    vec2 uv = gl_FragCoord.xy / openmwseTestRayGridDimensions;
+    vec3 direction = normalize(omw_GetWorldPosFromUV(uv) - omw.eyePos.xyz);
+    omw_FragColor = vec4(openmwseAtmosphereSkyRadiance(direction, aerialPerspectiveParameters()), 1.0);
+    omw_FragColor1 = vec4(0.0);
+}
+)glsl";
+                }
                 if (inputs.cloudTransportReferenceSubdivisions > 1)
                 {
                     const std::string subdivisions = std::to_string(inputs.cloudTransportReferenceSubdivisions);
@@ -797,6 +817,14 @@ void main()
     OpenMWSECloudLayer mainLayer = openmwseMainCloudLayer();
     OpenMWSECloudLayer incomingLayer = openmwseIncomingCloudLayer();
     OpenMWSECloudLayer lowLayer = openmwseLowCloudLayer();
+    if (openmwseTestCloudDensitySliceQuantity == 40)
+    {
+        float boundary = 15000.0 * 69.99125109 * mainLayer.model.physicalScale;
+        float before = openmwseCloudDensity(samplePosition, boundary - 1.0, 0.0, mainLayer);
+        float after = openmwseCloudDensity(samplePosition, boundary + 1.0, 0.0, mainLayer);
+        omw_FragColor = vec4(before, after, abs(before - after), 1.0);
+        return;
+    }
     if (openmwseTestCloudDensitySliceQuantity == 27)
     {
         float opticalDepth = openmwseCloudShadowColumnOpticalDepth(samplePosition,
@@ -2673,6 +2701,55 @@ void main()
                 << "Distant clouds must not survive an opaque scene termination before shell entry";
     }
 
+    /// Hide the finite render boundary even when a dense cloud stays optically thick throughout the fade region.
+    TEST(AtmosphereShaderTest, distantOpaqueCloudsConvergeToTheAtmosphericSky)
+    {
+        NativePassInputs inputs;
+        inputs.width = 8;
+        inputs.height = 4;
+        inputs.verticalFov = .02f;
+        inputs.farPlane = 1000000.f;
+        inputs.fogNear = 20000.f;
+        inputs.fogFar = 200000.f;
+        inputs.eyePosition = { 0.f, 0.f, 8000.f };
+        inputs.cloudParameters = { 1.f, 1.f, 60000.f, 160000.f };
+        inputs.cloudModel.mCoverageMinimum = 1.f;
+        inputs.cloudModel.mTypeMinimum = 1.f;
+        inputs.cloudModel.mTypeAmount = 0.f;
+        inputs.cloudModel.mGradientLarge = { .01f, .02f, .7f, .95f };
+        inputs.cloudModel.mAnvilLarge = {};
+        inputs.cloudModel.mAlbedo = {};
+        inputs.mistParameters = {};
+        for (const bool exponential : { false, true })
+        {
+            inputs.exponentialFog = exponential;
+            for (const float elevation : { .09f, .064f })
+            {
+                SCOPED_TRACE(::testing::Message() << "exponential=" << exponential << " elevation=" << elevation);
+                inputs.viewDirection = { 1.f, 0.f, elevation };
+                inputs.renderCloudSkyReference = true;
+                const PassImage sky = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                inputs.renderCloudSkyReference = false;
+                const PassImage clouds = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                ASSERT_EQ(sky.pixels.size(), 32u);
+                ASSERT_EQ(clouds.pixels.size(), sky.pixels.size());
+                double contrast = 0.0;
+                for (std::size_t i = 0; i < sky.pixels.size(); ++i)
+                {
+                    const float background = sky.pixels[i].y();
+                    ASSERT_GT(background, .01f);
+                    const float composite = clouds.pixels[i].y() + background * clouds.pixels[i].w();
+                    contrast += std::abs(composite - background) / background;
+                }
+                contrast /= sky.pixels.size();
+                if (elevation > .08f)
+                    EXPECT_GT(contrast, .08) << "Nearby clouds must retain their atmospheric contrast";
+                else
+                    EXPECT_LT(contrast, .035) << "An opaque deck must not expose the radial render boundary";
+            }
+        }
+    }
+
     /// Apply the same practical cloud range while flying within or above the main shell.
     TEST(AtmosphereShaderTest, flyingCloudTransportUsesMorrowindPresentationRange)
     {
@@ -3257,7 +3334,41 @@ void main()
         EXPECT_LE(maximumError, .0001f);
     }
 
-    /// Preserve the source's sampling footprint when cloud size and viewing distance are compressed together.
+    /// Keep fixed cloud points continuous as observer distance crosses a texture-detail boundary.
+    TEST(AtmosphereShaderTest, cloudDensityDoesNotJumpAtDistanceMipBoundaries)
+    {
+        NativePassInputs inputs;
+        inputs.width = inputs.height = 64;
+        inputs.renderCloudDensitySlice = true;
+        inputs.cloudDensitySliceQuantity = 40;
+        inputs.cloudParameters = { 1.f, 1.f, 0.f, 70000.f };
+        inputs.cloudDensitySliceExtent = { 800000.f, 800000.f };
+        inputs.eyePosition = { 43333.f, 236667.f, 21000.f };
+        inputs.cloudModel.mCoverageMinimum = .6f;
+        inputs.cloudModel.mCoverageAmount = .4f;
+        inputs.cloudModel.mTypeAmount = 0.f;
+        inputs.cloudModel.mTypeMinimum = 1.f;
+        inputs.cloudModel.mAnvilLarge = {};
+        for (const float scale : { .18f, .5f })
+        {
+            inputs.cloudModel.mPhysicalScale = scale;
+            const auto density = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            float maximumChange = 0.f;
+            float minimumDensity = 1.f;
+            float maximumDensity = 0.f;
+            for (const auto& sample : density.pixels)
+            {
+                maximumChange = std::max(maximumChange, sample.z());
+                minimumDensity = std::min(minimumDensity, sample.x());
+                maximumDensity = std::max(maximumDensity, sample.x());
+            }
+            EXPECT_GT(maximumDensity - minimumDensity, .1f);
+            EXPECT_LT(maximumChange, .001f) << "A two-world-unit observer movement must not reshape the cloud";
+            RecordProperty("maximum_mip_boundary_density_jump", std::to_string(maximumChange));
+        }
+    }
+
+    /// Preserve physical distance scaling while continuously selecting the cloud texture footprint.
     TEST(AtmosphereShaderTest, scaledCloudsRetainSourceNoiseSamplingFootprint)
     {
         NativePassInputs inputs;
@@ -3265,6 +3376,7 @@ void main()
         inputs.height = 1;
         inputs.renderCloudDensitySlice = true;
         inputs.cloudDensitySliceQuantity = 22;
+        inputs.fullPrecisionCapture = true;
         for (float featureScale : { 0.25f, 0.5f, 1.f })
         {
             inputs.cloudModel.mPhysicalScale = featureScale;
@@ -3277,8 +3389,7 @@ void main()
                     inputs.cloudDensitySliceAxis = shadowStep;
                     const PassImage lod = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
                     ASSERT_EQ(lod.pixels.size(), 1u);
-                    const float expected
-                        = std::min(std::round(distanceRatio), 3.f) + static_cast<float>(shadowStep) * .5f;
+                    const float expected = std::min(distanceRatio, 3.f) + static_cast<float>(shadowStep) * .5f;
                     EXPECT_NEAR(lod.pixels.front().x(), expected, .001f)
                         << "scale=" << featureScale << " distance=" << distanceRatio << " shadow=" << shadowStep;
                 }
@@ -3515,6 +3626,7 @@ void main()
                         SCOPED_TRACE(::testing::Message() << weather << " quality=" << quality << " exponential="
                                                           << exponential << " altitude=" << altitude);
                         NativePassInputs inputs = makePackagedAtmosphereInputs(weather, phase);
+                        inputs.fullPrecisionCapture = true;
                         inputs.width = 12;
                         inputs.height = 8;
                         inputs.quality = quality;

@@ -375,11 +375,11 @@ struct OpenMWSECloudDensitySample
     float precipitation;
 };
 
-/// Retain the nearest view mip before adding the independent light-ray mip offset.
+/// Prefilter continuously with view distance so Morrowind's compressed layers do not cross discrete density shells.
 float openmwseCloudNoiseLod(float distanceFromEye, float additionalLodBias, OpenMWSECloudLayer layer)
 {
     float featureScale = layer.model.physicalScale;
-    float viewLod = floor(max(distanceFromEye, 0.0) / (openmwseCloudNoiseLodDistance * featureScale) + 0.5);
+    float viewLod = max(distanceFromEye, 0.0) / (openmwseCloudNoiseLodDistance * featureScale);
     return clamp(viewLod, 0.0, 3.0) + additionalLodBias;
 }
 
@@ -965,8 +965,10 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
                 float lowContribution = dot(primaryContribution * lowFraction, vec3(1.0 / 3.0));
                 float fogVisibility = openmwseFogVisibility(
                     openmwseFogOpticalDistance(sampleDistance, worldDirection, atmosphere), atmosphere);
+                // Density fading alone leaves thick paths opaque until the radial cutoff. Converge their
+                // radiance to the same atmospheric sky as the background before that finite boundary.
                 mainScatteredLight += openmwseCloudSegmentAtmosphericContribution(radiance * mainFraction, mainContribution,
-                    cloudAtmosphericTarget, max(fogVisibility, mainCloudMinimumVisibility));
+                    cloudAtmosphericTarget, max(fogVisibility, mainCloudMinimumVisibility) * mainPresentationWeight);
                 vec3 lowPrimaryLight = lowIllumination.diffuseRadiance
                     + lowIllumination.solarIrradiance * (sunTransmittance.primary * primaryPhase);
                 vec3 lowSecondaryLight = lowIllumination.solarIrradiance * (sunTransmittance.secondary * secondaryPhase);
