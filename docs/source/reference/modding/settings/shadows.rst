@@ -10,7 +10,8 @@ Shadows Settings
 
    Allows textured or volumetric clouds to shade direct sunlight on terrain and objects independently of geometry
    shadow maps. Textured shadows sample the active weather assets, including their transitions and animation, through
-   a virtual world-space layer. The visible textured sky retains its camera-relative dome placement. Volumetric cloud self-shading remains active independently.
+   a continuous world-space projection at every terrain altitude. The visible textured sky retains its camera-relative
+   dome placement. Volumetric cloud self-shading remains active independently.
    Applies immediately.
 
 .. omw-setting::

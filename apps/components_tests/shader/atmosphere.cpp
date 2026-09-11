@@ -184,6 +184,7 @@ namespace
         bool renderCloudDensitySlice = false;
         bool renderCloudSkyReference = false;
         bool renderTexturedCloudProjection = false;
+        bool renderTexturedCloudTransmission = false;
         bool renderTexturedCloudDome = false;
         bool renderAuthoredCloudPass = false;
         bool renderFogTransport = false;
@@ -734,9 +735,20 @@ void main()
                     source += R"glsl(
 void main()
 {
-    vec3 point = vec3(0.0);
-    bool hit = openmwseTexturedCloudShadowIntersection(omw.eyePos.xyz, normalize(omw.eyeVec.xyz), point);
-    omw_FragColor = vec4(point / 16000.0, hit ? 1.0 : 0.0);
+    vec3 point = openmwseTexturedCloudShadowProjection(omw.eyePos.xyz, normalize(omw.eyeVec.xyz));
+    omw_FragColor = vec4(point / 16000.0, 1.0);
+    omw_FragColor1 = vec4(0.0);
+}
+)glsl";
+                }
+                if (inputs.renderTexturedCloudTransmission)
+                {
+                    source.erase(source.rfind("void main()"));
+                    source += R"glsl(
+void main()
+{
+    float transmission = openmwseTexturedCloudTransmittance(omw.eyePos.xyz, normalize(omw.eyeVec.xyz));
+    omw_FragColor = vec4(transmission);
     omw_FragColor1 = vec4(0.0);
 }
 )glsl";
@@ -8714,33 +8726,56 @@ void main()
     /// Keep the virtual shadow projection stable across mainland cells without positioning visible clouds.
     TEST(AtmosphereShaderTest, texturedCloudShadowProjectionPreservesWorldPosition)
     {
-        constexpr double radius = 6360000.0 * 69.99125109;
         for (float worldX : { 0.f, 600000.f, 2000000.f })
+            for (float altitude : { 1200.f, 11999.f, 12000.f, 12001.f, 22000.f })
+            {
+                NativePassInputs inputs;
+                inputs.width = inputs.height = 1;
+                inputs.fullPrecisionCapture = true;
+                inputs.renderTexturedCloudProjection = true;
+                inputs.eyePosition = { worldX, 0.f, altitude };
+                inputs.viewDirection = { 0.2f, 0.3f, 1.f };
+                inputs.viewDirection.normalize();
+                const osg::Vec3d origin(inputs.eyePosition);
+                osg::Vec3d direction(inputs.viewDirection);
+                direction.normalize();
+                const double distance = (12000.0 - origin.z()) / direction.z();
+                const auto expected = origin + direction * distance;
+                const auto initial = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                ASSERT_EQ(initial.pixels.size(), 1u);
+                EXPECT_EQ(initial.pixels[0].w(), 1.f);
+                for (int channel = 0; channel < 3; ++channel)
+                    EXPECT_NEAR(initial.pixels[0][channel] * 16000.f, expected[channel], 2.0);
+                inputs.eyePosition += inputs.viewDirection * 1000.f;
+                const auto approached = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                ASSERT_EQ(approached.pixels.size(), 1u);
+                for (int channel = 0; channel < 4; ++channel)
+                    EXPECT_NEAR(approached.pixels[0][channel], initial.pixels[0][channel], 0.000125f);
+            }
+    }
+
+    /// Keep surface sunlight attenuation continuous as terrain crosses the shadow projection datum.
+    TEST(AtmosphereShaderTest, texturedCloudShadowTransmissionHasNoAltitudeCutoff)
+    {
+        NativePassInputs inputs;
+        inputs.width = inputs.height = 1;
+        inputs.fullPrecisionCapture = true;
+        inputs.renderTexturedCloudTransmission = true;
+        inputs.texturedClouds.mEnabled = true;
+        inputs.texturedClouds.mWeights = { 1.f, 0.f };
+        inputs.texturedClouds.mOpacity
+            = makeColorTexture(4, 4, [](int, int) { return osg::Vec4f(0.5f, 0.f, 0.f, 1.f); });
+        for (const osg::Vec3f direction : { osg::Vec3f(0.2f, 0.3f, 1.f), osg::Vec3f(1.f, 0.f, 0.011f) })
         {
-            NativePassInputs inputs;
-            inputs.width = inputs.height = 1;
-            inputs.fullPrecisionCapture = true;
-            inputs.renderTexturedCloudProjection = true;
-            inputs.eyePosition = { worldX, 0.f, 1200.f };
-            inputs.viewDirection = { 0.2f, 0.3f, 1.f };
-            inputs.viewDirection.normalize();
-            const osg::Vec3d origin(inputs.eyePosition);
-            osg::Vec3d direction(inputs.viewDirection);
-            direction.normalize();
-            const double b = origin.x() * direction.x() + (origin.z() + radius) * direction.z();
-            const double c = origin.x() * origin.x() + (origin.z() - 12000.0) * (origin.z() + 12000.0 + 2.0 * radius);
-            const double distance = -c / (b + std::sqrt(b * b - c));
-            const auto expected = origin + direction * distance;
-            const auto initial = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-            ASSERT_EQ(initial.pixels.size(), 1u);
-            EXPECT_EQ(initial.pixels[0].w(), 1.f);
-            for (int channel = 0; channel < 3; ++channel)
-                EXPECT_NEAR(initial.pixels[0][channel] * 16000.f, expected[channel], 2.0);
-            inputs.eyePosition += inputs.viewDirection * 1000.f;
-            const auto approached = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-            ASSERT_EQ(approached.pixels.size(), 1u);
-            for (int channel = 0; channel < 4; ++channel)
-                EXPECT_NEAR(approached.pixels[0][channel], initial.pixels[0][channel], 0.000125f);
+            inputs.viewDirection = direction;
+            for (const float altitude : { 0.f, 11999.f, 12000.f, 12001.f, 22000.f, 1000000.f })
+            {
+                SCOPED_TRACE(altitude);
+                inputs.eyePosition = { 30000.f, 24000.f, altitude };
+                const auto actual = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                ASSERT_EQ(actual.pixels.size(), 1u);
+                EXPECT_NEAR(actual.pixels[0].x(), 0.0625f, 0.00001f);
+            }
         }
     }
 

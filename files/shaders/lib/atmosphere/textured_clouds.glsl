@@ -3,27 +3,12 @@
 
 #include "textured_clouds.h.glsl"
 
-/// Intersect a world ray with the surface-shadow shell using a cancellation-resistant quadratic.
-bool openmwseTexturedCloudShadowIntersection(vec3 origin, vec3 direction, out vec3 point)
+/// Project along sunlight onto a world-space UV datum; direction.z must exceed 0.01.
+vec3 openmwseTexturedCloudShadowProjection(vec3 origin, vec3 direction)
 {
-    float radialHeight = origin.z + openmwseAtmospherePlanetRadiusWorldUnits;
-    float b = dot(origin.xy, direction.xy) + radialHeight * direction.z;
-    float c = dot(origin.xy, origin.xy) + (origin.z - openmwseTexturedCloudHeight)
-        * (origin.z + openmwseTexturedCloudHeight + 2.0 * openmwseAtmospherePlanetRadiusWorldUnits);
-    float discriminant = b * b - c;
-    if (discriminant < 0.0)
-        return false;
-    float root = sqrt(discriminant);
-    float q = -b - (b < 0.0 ? -root : root);
-    float first = abs(q) > 0.0001 ? c / q : -b;
-    float second = q;
-    float distance = min(first, second);
-    if (distance < 0.0)
-        distance = max(first, second);
-    if (distance < 0.0)
-        return false;
-    point = origin + direction * distance;
-    return true;
+    // Signed travel keeps terrain above the datum in the same continuous shadow field.
+    float distance = (openmwseTexturedCloudProjectionHeight - origin.z) / direction.z;
+    return origin + direction * distance;
 }
 
 /// Apply the weather layer's storm orientation and continuous UV advection to a world position.
@@ -45,9 +30,7 @@ float openmwseTexturedCloudTransmittance(vec3 origin, vec3 direction)
 {
     if (!openmwseTexturedCloudsEnabled)
         return 1.0;
-    vec3 point;
-    if (!openmwseTexturedCloudShadowIntersection(origin, direction, point))
-        return 1.0;
+    vec3 point = openmwseTexturedCloudShadowProjection(origin, direction);
     float outgoing = texture2D(openmwseTexturedCloudOpacity,
         openmwseTexturedCloudShadowUv(point, openmwseTexturedCloudTransforms[0])).r;
     float incoming = texture2D(openmwseTexturedCloudOpacity,
