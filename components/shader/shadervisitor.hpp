@@ -115,6 +115,7 @@ namespace Shader
 
         std::string mDefaultShaderPrefix;
 
+        /// Build the material program and propagate its lighting specialization to every linked shader stage.
         void createProgram(const ShaderRequirements& reqs);
         bool adjustGeometry(osg::Geometry& sourceGeometry, const ShaderRequirements& reqs);
 

@@ -6,7 +6,6 @@
 
 #include "lib/core/vertex.h.glsl"
 
-#define GROUNDCOVER
 
 attribute vec4 aOffset;
 attribute vec3 aRotation;

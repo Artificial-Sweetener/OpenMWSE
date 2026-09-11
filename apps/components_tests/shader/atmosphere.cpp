@@ -2269,6 +2269,76 @@ void main()
         context->close();
     }
 
+    /// Exercise both linked lighting stages with reversed grass normals and ordinary one-sided surfaces.
+    TEST(AtmosphereShaderTest, linkedGroundcoverLightingIlluminatesBothSides)
+    {
+        osg::ref_ptr<osg::GraphicsContext::Traits> traits = new osg::GraphicsContext::Traits;
+        traits->width = traits->height = 1;
+        traits->pbuffer = true;
+        traits->doubleBuffer = false;
+        traits->alpha = 8;
+        osg::ref_ptr<osg::GraphicsContext> context = osg::GraphicsContext::createGraphicsContext(traits);
+        ASSERT_TRUE(context && context->realize() && context->makeCurrent());
+        for (const bool clustered : { false, true })
+            for (const bool grass : { false, true })
+            {
+                Shader::ShaderManager manager;
+                manager.setShaderPath(std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/shaders");
+                auto defines = getAtmosphereTestDefines();
+                defines["lightingMethodClustered"] = clustered ? "1" : "0";
+                defines["groundcover"] = grass ? "1" : "0";
+                manager.setGlobalDefines(defines);
+                osg::ref_ptr<osg::Program> program = new osg::Program;
+                program->addShader(new osg::Shader(osg::Shader::VERTEX, R"glsl(
+                    #version 130
+                    float lambert(vec3 n, vec3 l, vec3 v);
+                    varying float vertexLight;
+                    void main() {
+                        vertexLight = lambert(vec3(0,0,-1), vec3(0,0,1), vec3(1,0,0));
+                        gl_Position = gl_Vertex;
+                    }
+                )glsl"));
+                program->addShader(new osg::Shader(osg::Shader::FRAGMENT, R"glsl(
+                    #version 130
+                    float lambert(vec3 n, vec3 l, vec3 v);
+                    varying float vertexLight;
+                    void main() {
+                        gl_FragColor = vec4(lambert(vec3(0,0,-1), vec3(0,0,1), vec3(1,0,0)),
+                            vertexLight, lambert(vec3(0,0,1), vec3(0,0,1), vec3(1,0,0)),
+                            lambert(vec3(0,0,-1), vec3(0,0,1), vec3(0,0,1)));
+                    }
+                )glsl"));
+                for (const auto stage : { osg::Shader::VERTEX, osg::Shader::FRAGMENT })
+                {
+                    const std::string name = stage == osg::Shader::VERTEX ? "vertex" : "fragment";
+                    auto lighting = manager.getShader(
+                        "lib/core/lighting_" + name + (clustered ? ".glsl" : "_legacy.glsl"), defines, stage);
+                    ASSERT_TRUE(lighting);
+                    program->addShader(lighting);
+                }
+                program->compileGLObjects(*context->getState());
+                const auto* compiled = program->getPCP(*context->getState());
+                std::string info;
+                compiled->getInfoLog(info);
+                ASSERT_TRUE(compiled->isLinked()) << info;
+                program->apply(*context->getState());
+                glViewport(0, 0, 1, 1);
+                glBegin(GL_TRIANGLES);
+                glVertex2f(-1.f, -1.f);
+                glVertex2f(3.f, -1.f);
+                glVertex2f(-1.f, 3.f);
+                glEnd();
+                osg::Vec4f pixel;
+                glReadPixels(0, 0, 1, 1, GL_RGBA, GL_FLOAT, pixel.ptr());
+                EXPECT_NEAR(pixel.x(), grass ? 1.f : 0.f, 0.01f);
+                EXPECT_NEAR(pixel.y(), grass ? 1.f : 0.f, 0.01f);
+                EXPECT_NEAR(pixel.z(), 1.f, 0.01f);
+                EXPECT_NEAR(pixel.w(), grass ? 0.3f : 0.f, 0.01f);
+            }
+        context->releaseContext();
+        context->close();
+    }
+
     TEST(AtmosphereShaderTest, compilesAndLinksCloudShadowSurfaceProgramsInGraphicsContext)
     {
         Shader::ShaderManager manager;

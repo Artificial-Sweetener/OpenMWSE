@@ -884,6 +884,7 @@ namespace Shader
             { "distorionRTRatio", "0" },
             { "numViews", "1" },
             { "particle", "0" },
+            { "groundcover", "0" },
             { "particlePointLighting", "1" },
         };
     }

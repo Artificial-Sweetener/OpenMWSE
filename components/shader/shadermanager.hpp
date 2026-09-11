@@ -149,6 +149,7 @@ namespace Shader
         const ShaderManager::DefineMap& defines, const ShaderManager::DefineMap& globalDefines,
         const std::string& templateName);
 
+    /// Supply shared shader defaults, including one-sided lighting for ordinary scene surfaces.
     ShaderManager::DefineMap getDefaultDefines();
 }
 

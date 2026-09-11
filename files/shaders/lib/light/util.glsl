@@ -13,10 +13,11 @@ float fade(float x)
     return x;
 }
 
+/// Light grass from either face while preserving one-sided diffuse lighting for ordinary surfaces.
 float lambert(vec3 viewNormal, vec3 lightDir, vec3 viewDir)
 {
     float lambert = dot(viewNormal, lightDir);
-#ifndef GROUNDCOVER
+#if !@groundcover
     lambert = max(lambert, 0.0);
 #else
     float eyeCosine = dot(viewNormal, viewDir);

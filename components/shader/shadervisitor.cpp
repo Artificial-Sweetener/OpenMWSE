@@ -657,6 +657,7 @@ namespace Shader
         std::string shaderPrefix;
         if (!node.getUserValue("shaderPrefix", shaderPrefix))
             shaderPrefix = mDefaultShaderPrefix;
+        defineMap["groundcover"] = shaderPrefix == "groundcover" ? "1" : "0";
 
         ShaderManager::SamplerBindingMap samplers;
         for (const auto& [unit, name] : reqs.mTextures)

@@ -6,7 +6,6 @@
 
 #include "lib/core/fragment.h.glsl"
 
-#define GROUNDCOVER
 
 #if @diffuseMap
 uniform sampler2D diffuseMap;

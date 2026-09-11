@@ -12,6 +12,7 @@ Groundcover Settings
    Groundcover objects are static and come from ESP files registered via "groundcover" entries in `openmw.cfg`,
    not via "content". These objects are assumed to have no collision and cannot be interacted with,
    allowing them to be merged and animated efficiently regardless of player distance.
+   Grass receives two-sided diffuse lighting, including meshes with downward-facing blade normals.
 
 .. omw-setting::
    :title: density
