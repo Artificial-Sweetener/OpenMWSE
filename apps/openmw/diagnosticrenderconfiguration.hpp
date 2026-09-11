@@ -16,7 +16,15 @@ namespace OMW
         float mFieldOfView = 0.f;
         bool mReverseZ = false;
         bool mAtmosphericEffects = false;
+        bool mAtmosphericScattering = false;
+        bool mVolumetricClouds = false;
+        bool mCloudShadows = false;
+        bool mReflectClouds = false;
         int mAtmosphericQuality = 0;
+        int mAtmosphereAppearance = 0;
+        bool mGodrays = false;
+        bool mSunGlare = false;
+        bool mCloudSunOcclusion = false;
         bool mShadowsEnabled = false;
         int mShadowMapCount = 0;
         float mMaximumShadowMapDistance = 0.f;

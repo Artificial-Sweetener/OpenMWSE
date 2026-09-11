@@ -1,3 +1,4 @@
+@link "lib/atmosphere/textured_clouds_fragment.glsl"
 @link "lib/atmosphere/cloud_model_fragment.glsl"
 #ifndef OPENMW_FRAGMENT_H_GLSL
 #define OPENMW_FRAGMENT_H_GLSL

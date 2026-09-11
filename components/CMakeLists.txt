@@ -141,7 +141,7 @@ add_component_dir (sceneutil
     lightmanager lightutil positionattitudetransform workqueue pathgridutil waterutil writescene serialize optimizer
     detourdebugdraw navmesh agentpath animblendrules shadow mwshadowtechnique recastmesh shadowsbin osgacontroller rtt
     screencapture depth color riggeometryosgaextension extradata unrefqueue lightcommon clearcolor offscreencontext optimizeroptions
-    cullsafeboundsvisitor keyframe nodecallback textkeymap glextensions fog texmat material cloudadvection cloudlayer cloudshaderstate atmosphereterraingrid
+    cullsafeboundsvisitor keyframe nodecallback textkeymap glextensions fog texmat material cloudadvection cloudlayer cloudshaderstate atmosphereterraingrid texturedclouds
     )
 
 add_component_dir (nif
@@ -324,7 +324,7 @@ add_component_dir (files
     )
 
 add_component_dir (diagnostics
-    protocol commandqueue capsule gameplayroute localtransport session fixedstepscheduler atmospherescenario
+    protocol commandqueue capsule gameplayroute localtransport session fixedstepscheduler atmospherescenario atmospheresettings
     )
 
 if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")

@@ -49,6 +49,128 @@ namespace MWWorld
             return std::make_unique<AtmospherePalette>(colors, source);
         }
 
+        /// Match the regional assignments and every weather color cycle from parity revision 15ee5e5d84.
+        TEST(MWWorldAtmospherePaletteTest, originalRegionalColorsMatchParityAssignments)
+        {
+            const YAML::Node data = YAML::LoadFile(
+                (std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/data-mw/openmwse/atmosphere.json").string());
+            const std::array<std::pair<std::string_view, std::string_view>, 18> assignments{
+                { { "Thirsk Region", "Solstheim-Necro" }, { "Red Mountain Region", "BC-Necro" },
+                    { "Brodir Grove Region", "Solstheim-Necro" }, { "Mournhold Region", "BC-Necro" },
+                    { "West Gash Region", "WG-Necro" }, { "BITTER COAST REGION", "BC-Necro" },
+                    { "Felsaad Coast Region", "Solstheim-Necro" }, { "Azura's Coast Region", "AC-Necro" },
+                    { "Moesring Mountains Region", "Solstheim-Necro" }, { "Sheogorad", "SG-Necro" },
+                    { "Grazelands Region", "BC-Necro" }, { "Firemoth Region", "BC-Necro" },
+                    { "Hirstaang Forest Region", "Solstheim-Necro" }, { "Ashlands Region", "AL-Necro" },
+                    { "Molag Mar Region", "BC-Necro" }, { "Ascadian Isles Region", "AI-Necro" },
+                    { "Isinfier Plains Region", "Solstheim-Necro" }, { "mod-added region", "default" } }
+            };
+            auto palette = paletteWithVolumes(authoredVolumeProfiles());
+            auto weather = makeWeatherDefinitions();
+            palette->setColorSource(AtmosphereColorSource::Region);
+            for (const auto& [region, name] : assignments)
+            {
+                SCOPED_TRACE(region);
+                palette->setRegion(region);
+                palette->update(20.f, false, weather);
+                const YAML::Node expected = data["presets"][std::string(name)];
+                for (const auto& definition : weather)
+                {
+                    const auto colors = expected[definition.mName];
+                    const auto checkCycle = [&](const auto& actual, const std::string& prefix) {
+                        const std::array values{ actual.getSunriseValue(), actual.getDayValue(),
+                            actual.getSunsetValue(), actual.getNightValue() };
+                        const std::array names{ "SunriseColor", "DayColor", "SunsetColor", "NightColor" };
+                        for (std::size_t phase = 0; phase < values.size(); ++phase)
+                            for (unsigned channel = 0; channel < 3; ++channel)
+                                EXPECT_FLOAT_EQ(
+                                    values[phase][channel], colors[prefix + names[phase]][channel].as<float>());
+                    };
+                    checkCycle(definition.mSkyColor, "sky");
+                    checkCycle(definition.mFogColor, "fog");
+                    checkCycle(definition.mAmbientColor, "ambient");
+                    checkCycle(definition.mSunColor, "sun");
+                }
+                const auto state = palette->getState("Clear", {}, 0.f);
+                for (unsigned channel = 0; channel < 3; ++channel)
+                {
+                    EXPECT_FLOAT_EQ(state.mInScattering[channel], expected["inscatter"][channel].as<float>());
+                    EXPECT_FLOAT_EQ(state.mOutScattering[channel], expected["outscatter"][channel].as<float>());
+                }
+            }
+        }
+
+        /// Preserve regional transition timing, pause behavior, and cloud state across live color changes and replay.
+        TEST(MWWorldAtmospherePaletteTest, regionalColorsSwitchLiveWithoutChangingCloudFormation)
+        {
+            auto palette = paletteWithVolumes(authoredVolumeProfiles());
+            auto weather = makeWeatherDefinitions();
+            AtmosphereEnvironmentState environment;
+            environment.mTraits = { { "coastal", .6f }, { "wetland", .4f } };
+            palette->setDiagnosticEnvironment(environment);
+            palette->update(0.f, false, weather);
+            const auto enhanced = palette->getState("Cloudy", {}, 0.f, 3u);
+            const auto enhancedSky = weather.front().mSkyColor.getDayValue();
+            palette->setColorSource(AtmosphereColorSource::Region);
+            palette->update(0.f, false, weather);
+            const auto from = weather.front().mSkyColor.getDayValue();
+            palette->setRegion("Ascadian Isles Region");
+            palette->update(10.f, false, weather);
+            const auto midpoint = weather.front().mSkyColor.getDayValue();
+            palette->update(5.f, true, weather);
+            EXPECT_EQ(midpoint, weather.front().mSkyColor.getDayValue());
+            auto replay = paletteWithVolumes(authoredVolumeProfiles());
+            replay->restoreRuntimeState(palette->captureRuntimeState());
+            replay->setColorSource(AtmosphereColorSource::Region);
+            palette->update(10.f, false, weather);
+            const auto endpoint = weather.front().mSkyColor.getDayValue();
+            for (unsigned channel = 0; channel < 4; ++channel)
+                EXPECT_NEAR(midpoint[channel], (from[channel] + endpoint[channel]) * .5f, 1e-6f);
+            replay->update(10.f, false, weather);
+            EXPECT_EQ(endpoint, weather.front().mSkyColor.getDayValue());
+            EXPECT_EQ(palette->captureRuntimeState(), replay->captureRuntimeState());
+            const auto regional = palette->getState("Cloudy", {}, 0.f, 3u);
+            EXPECT_EQ(SceneUtil::packCloudLayer(enhanced.mVolumes.mCloudLayer),
+                SceneUtil::packCloudLayer(regional.mVolumes.mCloudLayer));
+            EXPECT_EQ(enhanced.mVolumes.mCloudBaseAltitudeWorldUnits, regional.mVolumes.mCloudBaseAltitudeWorldUnits);
+            palette->setColorSource(AtmosphereColorSource::Environment);
+            palette->update(0.f, true, weather);
+            EXPECT_EQ(enhancedSky, weather.front().mSkyColor.getDayValue());
+        }
+
+        /// Accept pre-regional captures and reject malformed newer trajectories without partial mutation.
+        TEST(MWWorldAtmospherePaletteTest, regionalRuntimeMigratesOldCapturesAtomically)
+        {
+            auto palette = paletteWithVolumes(authoredVolumeProfiles());
+            auto weather = makeWeatherDefinitions();
+            palette->setRegion("West Gash Region");
+            palette->update(7.f, false, weather);
+            const std::string original = palette->captureRuntimeState();
+            auto invalid = YAML::Load(original);
+            invalid["regional-colors"]["transition"] = 2.f;
+            EXPECT_THROW(palette->restoreRuntimeState(YAML::Dump(invalid)), std::invalid_argument);
+            EXPECT_EQ(original, palette->captureRuntimeState());
+            invalid = YAML::Load(original);
+            invalid["regional-colors"]["target"] = "missing";
+            EXPECT_THROW(palette->restoreRuntimeState(YAML::Dump(invalid)), std::invalid_argument);
+            EXPECT_EQ(original, palette->captureRuntimeState());
+            auto old = YAML::Load(original);
+            std::vector<std::string> regionalFields;
+            for (const auto& entry : old)
+                if (entry.first.as<std::string>().starts_with("regional-"))
+                    regionalFields.push_back(entry.first.as<std::string>());
+            for (const auto& name : regionalFields)
+                old.remove(name);
+            old["runtime-version"] = 1;
+            auto restored = paletteWithVolumes(authoredVolumeProfiles());
+            EXPECT_NO_THROW(restored->restoreRuntimeState(YAML::Dump(old)));
+            const auto upgraded = YAML::Load(restored->captureRuntimeState());
+            EXPECT_EQ(upgraded["runtime-version"].as<int>(), 2);
+            for (const auto& entry : old)
+                if (entry.first.as<std::string>() != "runtime-version")
+                    EXPECT_EQ(YAML::Dump(entry.second), YAML::Dump(upgraded[entry.first.as<std::string>()]));
+        }
+
         /// Publish custom secondary-layer controls through the normal palette boundary.
         TEST(MWWorldAtmospherePaletteTest, loadsCompleteAuthoredSourceLayer)
         {
@@ -248,7 +370,7 @@ namespace MWWorld
 
             EXPECT_FLOAT_EQ(clear.mVolumes.mTerrainReferenceHeightWorldUnits, 12000.f);
             EXPECT_FLOAT_EQ(clear.mVolumes.mMistDensity, 0.0432f);
-            EXPECT_FLOAT_EQ(clear.mVolumes.mShaftIntensity, 0.75f);
+            EXPECT_FLOAT_EQ(clear.mVolumes.mShaftIntensity, 1.f);
 
             EXPECT_FLOAT_EQ(palette.getState("Foggy", {}, 0.f).mWeatherWeight, 0.f);
             EXPECT_FLOAT_EQ(palette.getState("Clear", "Foggy", 0.5f).mWeatherWeight, 0.25f);

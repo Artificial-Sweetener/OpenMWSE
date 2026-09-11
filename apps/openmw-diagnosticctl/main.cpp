@@ -1,5 +1,6 @@
 #include <components/debug/debugging.hpp>
 #include <components/diagnostics/atmospherescenario.hpp>
+#include <components/diagnostics/atmospheresettings.hpp>
 #include <components/diagnostics/capsule.hpp>
 #include <components/diagnostics/gameplayroute.hpp>
 #include <components/diagnostics/localtransport.hpp>
@@ -9,6 +10,7 @@
 
 #include "gameplayrouteexecution.hpp"
 #include "isolatedsettings.hpp"
+#include "replaystate.hpp"
 
 #include <yaml-cpp/yaml.h>
 
@@ -692,6 +694,8 @@ namespace
                   "      [--bypass-route-shadows]\n"
                   "      [--route-shadow-casters terrain|objects]\n"
                   "      [--headed]\n"
+                  "      [--atmosphere-settings-sequence sequence.yaml]\n"
+                  "      [--video-settings-page atmosphere|water|shadows]\n"
                   "      [--setting \"Section:name=value\"]...\n"
                   "  openmw-diagnosticctl inspect-capsule --capsule capture.omwdiag [--entry name]\n"
                   "  openmw-diagnosticctl add-route --capsule capture.omwdiag --route route.yaml --output "
@@ -822,8 +826,8 @@ namespace
             std::cout << "cloud-advection-parity: unavailable (capture predates wind-state recording)\n";
         if (const auto atmosphereRuntime = expected["atmosphere-runtime"])
         {
-            if (YAML::Dump(atmosphereRuntime) != YAML::Dump(actual["atmosphere-runtime"]))
-                throw std::runtime_error("replay regional atmosphere history does not match its capsule");
+            DiagnosticCtl::validateAtmosphereRuntimeParity(
+                YAML::Dump(atmosphereRuntime), YAML::Dump(actual["atmosphere-runtime"]));
             std::cout << "atmosphere-runtime-parity: true\n";
         }
         else
@@ -983,6 +987,8 @@ namespace
             childArguments.insert(childArguments.end(), { "--load-savegame", isolatedSave->string(), "--skip-menu" });
         if (captureRouteNativeFrames && gameplayRoute.empty())
             throw std::runtime_error("native route capture requires a capsule containing a gameplay route");
+        if (findOption(arguments, "--atmosphere-settings-sequence") && gameplayRoute.empty())
+            throw std::invalid_argument("live atmosphere settings require a capsule containing a gameplay route");
 
         ChildProcess child(executable, childArguments);
         Diagnostics::Command hello{ 1, Diagnostics::CommandType::Hello, std::move(replayManifest) };
@@ -1158,10 +1164,34 @@ namespace
                 if (payloadText(capabilities.mPayload).find("graphics@3") == std::string::npos)
                     throw std::runtime_error("native route capture requires graphics@3");
             }
+            std::vector<Diagnostics::AtmosphereSettings> settingsSequence;
+            if (const auto sequencePath = findOption(arguments, "--atmosphere-settings-sequence"))
+            {
+                const YAML::Node sequence = YAML::LoadFile(*sequencePath);
+                const std::size_t segmentCount
+                    = (routePlan.mFrameCount + routePlan.mSegmentFrameCount - 1) / routePlan.mSegmentFrameCount;
+                if (!sequence.IsSequence() || sequence.size() != segmentCount || sequence.size() > 64)
+                    throw std::invalid_argument(
+                        "atmosphere settings sequence requires one entry per route segment, at most 64");
+                for (const auto& entry : sequence)
+                    settingsSequence.push_back(Diagnostics::deserializeAtmosphereSettings(YAML::Dump(entry)));
+                std::filesystem::copy_file(*sequencePath, artifacts / "atmosphere-settings-sequence.yaml");
+            }
             std::size_t completedFrames = 0;
             unsigned segmentIndex = 0;
             while (completedFrames < routePlan.mFrameCount)
             {
+                if (!settingsSequence.empty())
+                {
+                    const auto& requested = settingsSequence.at(segmentIndex);
+                    const auto applied = Diagnostics::transact(endpoint,
+                        { requestId++, Diagnostics::CommandType::SetAtmosphereSettings,
+                            textPayload(Diagnostics::serializeAtmosphereSettings(requested)) });
+                    requireSuccessfulResponse(applied);
+                    if (Diagnostics::deserializeAtmosphereSettings(payloadText(applied.mPayload)) != requested)
+                        throw std::runtime_error("live atmosphere settings did not match the requested preferences");
+                    std::cout << "live-atmosphere-settings-parity: " << segmentIndex << " true\n";
+                }
                 const std::uint32_t segmentFrames = static_cast<std::uint32_t>(
                     std::min<std::size_t>(routePlan.mSegmentFrameCount, routePlan.mFrameCount - completedFrames));
                 Diagnostics::Command runSegment{ requestId++, Diagnostics::CommandType::RunGameplayRouteSegment, {} };
@@ -1262,6 +1292,15 @@ namespace
             static_cast<std::streamsize>(finalGameplay.mPayload.size()));
         if (!gameplayFile)
             throw std::runtime_error("failed writing final gameplay evidence");
+        if (const auto page = findOption(arguments, "--video-settings-page"))
+        {
+            requireSuccessfulResponse(Diagnostics::transact(
+                endpoint, { requestId++, Diagnostics::CommandType::ShowVideoSettings, textPayload(*page) }));
+            Diagnostics::Command settle{ requestId++, Diagnostics::CommandType::StepFrames,
+                { std::byte{ 8 }, std::byte{ 0 }, std::byte{ 0 }, std::byte{ 0 } } };
+            requireSuccessfulResponse(Diagnostics::transact(endpoint, settle));
+            waitForScheduledFrames(endpoint, requestId, completedFixedFrames + 8);
+        }
         if (!headed)
             child.requireNonDisruptiveWindowState();
         requireSuccessfulResponse(

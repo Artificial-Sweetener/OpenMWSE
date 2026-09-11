@@ -85,6 +85,7 @@ namespace Shader
             OpaqueColorTexture,
             AtmosphereNoise,
             SkyTexture,
+            TexturedCloudOpacity,
             ShadowMaps,
             SLOT_COUNT
         };

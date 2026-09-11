@@ -323,14 +323,14 @@ namespace MWRender
 
             node.mRootStateSet->setTextureAttribute(PostProcessor::Unit_Depth, mTextureDepth);
 
-            if (mAvgLum)
+            if (mAvgLum && !atmospherePass)
                 node.mRootStateSet->setTextureAttribute(PostProcessor::TextureUnits::Unit_EyeAdaptation,
                     mLuminanceCalculator->getLuminanceTexture(frameId));
 
-            if (mTextureNormals)
+            if (mTextureNormals && !atmospherePass)
                 node.mRootStateSet->setTextureAttribute(PostProcessor::TextureUnits::Unit_Normals, mTextureNormals);
 
-            if (mTextureDistortion)
+            if (mTextureDistortion && !atmospherePass)
                 node.mRootStateSet->setTextureAttribute(
                     PostProcessor::TextureUnits::Unit_Distortion, mTextureDistortion);
 

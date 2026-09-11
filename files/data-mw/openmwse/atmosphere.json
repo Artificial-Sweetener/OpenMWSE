@@ -1,4 +1,23 @@
 {
+  "regions": {
+    "Thirsk Region": "Solstheim-Necro",
+    "Red Mountain Region": "BC-Necro",
+    "Brodir Grove Region": "Solstheim-Necro",
+    "Mournhold Region": "BC-Necro",
+    "West Gash Region": "WG-Necro",
+    "Bitter Coast Region": "BC-Necro",
+    "Felsaad Coast Region": "Solstheim-Necro",
+    "Azura's Coast Region": "AC-Necro",
+    "Moesring Mountains Region": "Solstheim-Necro",
+    "Sheogorad": "SG-Necro",
+    "Grazelands Region": "BC-Necro",
+    "Firemoth Region": "BC-Necro",
+    "Hirstaang Forest Region": "Solstheim-Necro",
+    "Ashlands Region": "AL-Necro",
+    "Molag Mar Region": "BC-Necro",
+    "Ascadian Isles Region": "AI-Necro",
+    "Isinfier Plains Region": "Solstheim-Necro"
+  },
   "environments": {
     "wetland": { "palette": "BC-Necro", "cloudDensityMultiplier": 1.04, "cloudAltitudeOffset": -3500.0, "cloudThicknessMultiplier": 1.05, "lowCloudOccurrenceMultiplier": 1.8, "lowCloudDensityMultiplier": 1.3, "lowCloudAltitudeOffset": -800.0, "lowCloudThicknessMultiplier": 1.2, "mistDensityMultiplier": 1.65, "mistAltitudeOffset": -250.0, "mistThicknessMultiplier": 1.25 },
     "cultivated": { "palette": "AI-Necro", "cloudDensityMultiplier": 1.0, "cloudAltitudeOffset": 0.0, "cloudThicknessMultiplier": 1.0, "lowCloudOccurrenceMultiplier": 1.0, "lowCloudDensityMultiplier": 1.0, "lowCloudAltitudeOffset": 0.0, "lowCloudThicknessMultiplier": 1.0, "mistDensityMultiplier": 1.08, "mistAltitudeOffset": 0.0, "mistThicknessMultiplier": 1.08 },

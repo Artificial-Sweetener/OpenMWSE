@@ -283,6 +283,7 @@ namespace MWRender
 
         void rebuildPtr(const MWWorld::Ptr& ptr);
 
+        /// Apply renderer preferences and rebuild affected atmosphere resources while rendering threads are stopped.
         void processChangedSettings(const Settings::CategorySettingVector& settings);
 
         float getNearClipDistance() const { return mNearClip; }

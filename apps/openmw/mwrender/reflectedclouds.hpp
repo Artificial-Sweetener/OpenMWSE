@@ -40,12 +40,16 @@ namespace MWRender
         /// Retain depth rejection for sparse cloud cover and buffer broad decks with hysteresis during transitions.
         void updateCloudCover(float mainCoverage, float lowCoverage);
 
+        /// Suspend cloud transport and release its targets while rendering is stopped.
+        void setEnabled(bool enabled);
+
         /// Match the current reflection viewport and schedule its rays before binding their radiance and transmittance.
         void operator()(osg::Node* node, osgUtil::CullVisitor* visitor);
 
     private:
         // Keep array cloud textures separate from the ordinary diffuse and moon-mask sampler units.
         static constexpr int sTextureUnit = 2;
+        bool mEnabled = true;
         bool mUseCloudTarget = false;
         osg::ref_ptr<osg::Node> mAtmosphere;
         osg::ref_ptr<SceneUtil::RTTNode> mClouds;

@@ -26,11 +26,6 @@ struct OpenMWSECloudLayer
     float terrainWeight;
 };
 
-// Use an Earth-scale 6360 km cloud datum. Only the main cloud shell and its optical paths
-// use this sphere; Morrowind terrain and the deterministic horizontal density field remain uncurved.
-const float openmwseCloudVirtualPlanetRadius
-    = 6360000.0 * openmwseAtmosphereWorldUnitsPerMeter;
-
 // Use reduced extinction for the second-order solar path.
 const float openmwseCloudSecondaryExtinctionScale = 0.1;
 
@@ -85,7 +80,7 @@ OpenMWSECloudLayer openmwseLowCloudLayer()
 /// Return the fixed virtual-planet center for OpenMW's world-space tangent frame.
 vec3 openmwseCloudVirtualPlanetCenter()
 {
-    return vec3(0.0, 0.0, openmwseCloudWaterHeight() - openmwseCloudVirtualPlanetRadius);
+    return vec3(0.0, 0.0, openmwseCloudWaterHeight() - openmwseAtmospherePlanetRadiusWorldUnits);
 }
 
 /// Convert a physical world position to altitude above the virtual spherical cloud datum.
@@ -319,9 +314,9 @@ vec2 openmwseCloudSphereIntersection(vec3 origin, vec3 direction, float height)
     float altitude = origin.z - openmwseCloudWaterHeight();
     float shellHeight = height - openmwseCloudWaterHeight();
     float projectedOrigin = dot(origin.xy, direction.xy)
-        + (openmwseCloudVirtualPlanetRadius + altitude) * direction.z;
+        + (openmwseAtmospherePlanetRadiusWorldUnits + altitude) * direction.z;
     float radiusDifference = dot(origin.xy, origin.xy)
-        + (altitude - shellHeight) * (2.0 * openmwseCloudVirtualPlanetRadius + altitude + shellHeight);
+        + (altitude - shellHeight) * (2.0 * openmwseAtmospherePlanetRadiusWorldUnits + altitude + shellHeight);
     float discriminant = projectedOrigin * projectedOrigin - radiusDifference;
     if (discriminant < 0.0)
         return vec2(1.0, 0.0);

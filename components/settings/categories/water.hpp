@@ -18,6 +18,8 @@ namespace Settings
     {
         using WithIndex::WithIndex;
 
+        /// Include the active cloud field in water reflections.
+        SettingValue<bool> mReflectClouds{ mIndex, "Water", "reflect clouds" };
         SettingValue<bool> mShader{ mIndex, "Water", "shader" };
         SettingValue<int> mRttSize{ mIndex, "Water", "rtt size", makeMaxSanitizerInt(1) };
         SettingValue<bool> mRefraction{ mIndex, "Water", "refraction" };

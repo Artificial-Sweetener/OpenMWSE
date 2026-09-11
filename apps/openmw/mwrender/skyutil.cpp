@@ -446,16 +446,15 @@ namespace MWRender
     {
         stateset->addUniform(new osg::Uniform("opacity", 0.f));
         stateset->addUniform(new osg::Uniform("pass", static_cast<int>(Pass::Atmosphere_Night)));
-        if (mBlendMode == StarBlendMode::EmissiveRadiance)
-        {
-            stateset->setAttributeAndModes(new osg::BlendFunc(osg::BlendFunc::SRC_ALPHA, osg::BlendFunc::ONE,
-                                               osg::BlendFunc::ZERO, osg::BlendFunc::ONE),
-                osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE);
-        }
+        stateset->setAttributeAndModes(new osg::BlendFunc, osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE);
     }
 
     void AtmosphereNightUpdater::apply(osg::StateSet* stateset, osg::NodeVisitor* /*nv*/)
     {
+        auto* blend = static_cast<osg::BlendFunc*>(stateset->getAttribute(osg::StateAttribute::BLENDFUNC));
+        blend->setFunction(osg::BlendFunc::SRC_ALPHA,
+            mBlendMode == StarBlendMode::EmissiveRadiance ? osg::BlendFunc::ONE : osg::BlendFunc::ONE_MINUS_SRC_ALPHA,
+            osg::BlendFunc::ZERO, osg::BlendFunc::ONE);
         stateset->getUniform("opacity")->set(mColor.a());
     }
 
@@ -652,17 +651,11 @@ namespace MWRender
         mTransform->setNodeMask(visible ? mVisibleMask : 0);
     }
 
-    Sun::Sun(osg::Group* parentNode, Resource::SceneManager& sceneManager, bool useLegacyRendering)
+    Sun::Sun(osg::Group* parentNode, Resource::SceneManager& sceneManager)
         : CelestialBody(parentNode, 1.0f, 1, Mask_Sun)
         , mUpdater(new SunUpdater)
     {
         mTransform->addUpdateCallback(mUpdater);
-
-        if (!useLegacyRendering)
-        {
-            mTransform->removeChild(mGeom);
-            return;
-        }
 
         Resource::ImageManager& imageManager = *sceneManager.getImageManager();
 
@@ -676,6 +669,10 @@ namespace MWRender
         mGeom->getOrCreateStateSet()->setTextureAttribute(
             0, new SceneUtil::TextureType("diffuseMap"), osg::StateAttribute::ON);
         mGeom->getOrCreateStateSet()->addUniform(new osg::Uniform("pass", static_cast<int>(Pass::Sun)));
+        // Composite celestial radiance after the cloud meshes inside the surrounding sky render bin.
+        mGeom->getOrCreateStateSet()->setRenderBinDetails(RenderBin_SkySun, "RenderBin");
+        mGeom->getOrCreateStateSet()->setAttributeAndModes(
+            new osg::BlendFunc(GL_ONE, GL_ONE, GL_ZERO, GL_ONE), osg::StateAttribute::ON);
 
         osg::ref_ptr<osg::Group> queryNode = new osg::Group;
         // Need to render after the world geometry so we can correctly test for occlusions
@@ -745,6 +742,8 @@ namespace MWRender
 
     void Sun::setSunglare(bool enabled)
     {
+        mOcclusionQueryVisiblePixels->setNodeMask(enabled ? ~0u : 0u);
+        mOcclusionQueryTotalPixels->setNodeMask(enabled ? ~0u : 0u);
         if (mSunGlareNode)
             mSunGlareNode->setNodeMask(enabled ? ~0u : 0);
         if (mSunFlashNode)

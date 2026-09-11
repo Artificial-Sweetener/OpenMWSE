@@ -100,7 +100,9 @@ namespace
         std::function<osg::Vec4f(int, int)> passInput = [](int, int) { return osg::Vec4f(0.f, 0.f, 0.f, 1.f); };
         std::function<osg::Vec4f(int, int)> volumeHistoryInput;
         std::function<osg::Vec4f(int, int)> volumeMetadataInput;
-        std::function<osg::Vec4f(int, int)> shaftInput;
+        std::function<osg::Vec4f(int, int)> shaftInput = [](int, int) { return osg::Vec4f(); };
+        int passWidth = 0;
+        int passHeight = 0;
         int rawVolumeWidth = 0;
         int rawVolumeHeight = 0;
         int volumeHistoryWidth = 0;
@@ -153,6 +155,16 @@ namespace
         int pointLightCount = 0;
         bool historyValid = false;
         bool atmosphereEnabled = true;
+        bool scatteringEnabled = true;
+        bool volumetricCloudsEnabled = true;
+        int atmosphereAppearance = 0;
+        bool sunlightEnabled = false;
+        bool godraysEnabled = true;
+        bool sunGlareEnabled = false;
+        bool sunGlareAllowed = true;
+        bool cloudSunOcclusion = true;
+        SceneUtil::TexturedCloudState texturedClouds;
+        osg::ref_ptr<osg::Texture2D> sunGlareTexture;
         bool reverseZ = false;
         std::optional<bool> exponentialFog;
         bool useUniformBuffer = false;
@@ -171,6 +183,10 @@ namespace
         int cloudDensitySliceQuantity = 0;
         bool renderCloudDensitySlice = false;
         bool renderCloudSkyReference = false;
+        bool renderTexturedCloudProjection = false;
+        bool renderTexturedCloudDome = false;
+        bool renderAuthoredCloudPass = false;
+        bool renderFogTransport = false;
         bool fullPrecisionCapture = false;
         int cloudTransportReferenceSubdivisions = 1;
         bool measureCloudMarchProgress = false;
@@ -712,6 +728,81 @@ void main()
 }
 )glsl";
                 }
+                if (inputs.renderTexturedCloudProjection)
+                {
+                    source.erase(source.rfind("void main()"));
+                    source += R"glsl(
+void main()
+{
+    vec3 point = vec3(0.0);
+    bool hit = openmwseTexturedCloudShadowIntersection(omw.eyePos.xyz, normalize(omw.eyeVec.xyz), point);
+    omw_FragColor = vec4(point / 16000.0, hit ? 1.0 : 0.0);
+    omw_FragColor1 = vec4(0.0);
+}
+)glsl";
+                }
+                if (inputs.renderTexturedCloudDome)
+                {
+                    source.erase(source.rfind("void main()"));
+                    source += R"glsl(
+void main()
+{
+    vec3 direction = normalize(omw.eyeVec.xyz);
+    vec3 dome = openmwseTexturedCloudDomeSample(direction, openmwseTexturedCloudTransforms[0]);
+    omw_FragColor = vec4(dome, openmwseTexturedCloudViewTransmittance(direction));
+    omw_FragColor1 = vec4(0.0);
+}
+)glsl";
+                }
+                if (inputs.renderAuthoredCloudPass)
+                {
+                    std::ifstream skyFile(
+                        std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/shaders/compatibility/sky.frag");
+                    const std::string skySource{ std::istreambuf_iterator<char>(skyFile),
+                        std::istreambuf_iterator<char>() };
+                    const auto start = skySource.find("void paintClouds");
+                    const auto end = skySource.find("void paintMoon", start);
+                    if (start == std::string::npos || end == std::string::npos)
+                        throw std::runtime_error("Missing production textured cloud pass");
+                    std::string clouds = skySource.substr(start, end - start);
+                    replaceUniqueShaderText(clouds, "atmosphere.cloudsEnabled", "false");
+                    replaceUniqueShaderText(clouds, "isReflection", "false");
+                    replaceUniqueShaderText(clouds, "atmosphere.cloudReflectionsEnabled", "true");
+                    replaceUniqueShaderText(clouds, "texture2D(diffuseMap,", "omw_Texture2D(omw_SamplerLastShader,");
+                    source.erase(source.rfind("void main()"));
+                    source += R"glsl(
+vec2 diffuseMapUV;
+vec4 passColor;
+vec4 diffuseColor;
+float opacity;
+)glsl" + clouds + R"glsl(
+void main()
+{
+    diffuseMapUV = (gl_FragCoord.yx / openmwseTestRayGridDimensions.yx) * 0.5 + vec2(0.2, 0.1);
+    passColor = vec4(1.0, 1.0, 1.0, 0.25);
+    diffuseColor = vec4(0.7, 0.8, 0.9, 1.0);
+    opacity = 0.6;
+    vec4 clouds = vec4(0.0);
+    paintClouds(clouds);
+    omw_FragColor = clouds;
+    omw_FragColor1 = vec4(0.0);
+}
+)glsl";
+                }
+                if (inputs.renderFogTransport)
+                {
+                    source.erase(source.rfind("void main()"));
+                    source += R"glsl(
+void main()
+{
+    OpenMWSEAerialPerspectiveParameters parameters = aerialPerspectiveParameters();
+    float distance = omw.fogFar * 0.5;
+    float optical = openmwseFogOpticalDistance(distance, normalize(omw.eyeVec.xyz), parameters);
+    omw_FragColor = vec4(optical, openmwseFogVisibility(optical, parameters), 0.0, 1.0);
+    omw_FragColor1 = vec4(0.0);
+}
+)glsl";
+                }
                 if (inputs.cloudTransportReferenceSubdivisions > 1)
                 {
                     const std::string subdivisions = std::to_string(inputs.cloudTransportReferenceSubdivisions);
@@ -808,7 +899,7 @@ void main()
     {
         vec3 planetCenter = openmwseCloudVirtualPlanetCenter();
         vec2 horizontalPosition = omw.eyePos.xy + sliceCoordinates * openmwseTestCloudDensitySliceExtent;
-        float shellRadius = openmwseCloudVirtualPlanetRadius + omw.eyePos.z - openmwseCloudWaterHeight();
+        float shellRadius = openmwseAtmospherePlanetRadiusWorldUnits + omw.eyePos.z - openmwseCloudWaterHeight();
         vec2 horizontalOffset = horizontalPosition - planetCenter.xy;
         float physicalHeight = planetCenter.z
             + sqrt(max(shellRadius * shellRadius - dot(horizontalOffset, horizontalOffset), 0.0));
@@ -1162,8 +1253,8 @@ void main()
             if (inputName.empty())
                 continue;
             const std::function<osg::Vec4f(int, int)>* input = &inputs.passInput;
-            int inputWidth = width;
-            int inputHeight = height;
+            int inputWidth = inputs.passWidth > 0 ? inputs.passWidth : width;
+            int inputHeight = inputs.passHeight > 0 ? inputs.passHeight : height;
             if (inputName == "AtmosphereVolumeRaw")
             {
                 inputWidth = inputs.rawVolumeWidth > 0 ? inputs.rawVolumeWidth : width;
@@ -1267,6 +1358,16 @@ void main()
         updater.setAtmosphereTerrain(terrain);
         updater.setCloudLayers(
             SceneUtil::packCloudLayers(inputs.cloudModel, inputs.incomingCloudModel, inputs.environmentalCloudModel));
+        updater.setAtmosphereScatteringEnabled(inputs.scatteringEnabled);
+        updater.setVolumetricCloudsEnabled(inputs.volumetricCloudsEnabled);
+        updater.setAtmosphereAppearance(inputs.atmosphereAppearance);
+        updater.setSunlightEnabled(inputs.sunlightEnabled);
+        updater.setGodraysEnabled(inputs.godraysEnabled);
+        updater.setSunGlareEnabled(inputs.sunGlareEnabled);
+        updater.setSunGlareAllowed(inputs.sunGlareAllowed);
+        updater.setCloudSunOcclusion(inputs.cloudSunOcclusion);
+        updater.setTexturedClouds(inputs.texturedClouds);
+        updater.setSunGlareTexture(inputs.sunGlareTexture);
         updater.setAtmosphere(inputs.inScattering, inputs.outScattering, inputs.cloudParameters,
             inputs.incomingCloudParameters, inputs.cloudScenarioParameters, inputs.lowCloudParameters,
             inputs.lowCloudEnvironmentInfluence, inputs.mistParameters, inputs.fogVolumeParameters,
@@ -1372,12 +1473,12 @@ void main()
         const float volumeScale = MWRender::getAtmosphereVolumeResolutionScale(requestedInputs.quality);
         const int volumeWidth = std::max(1, static_cast<int>(sceneWidth * volumeScale));
         const int volumeHeight = std::max(1, static_cast<int>(sceneHeight * volumeScale));
-        const int shaftWidth = std::max(1, static_cast<int>(sceneWidth * volumeScale * 0.5f));
-        const int shaftHeight = std::max(1, static_cast<int>(sceneHeight * volumeScale * 0.5f));
+        const int rawWidth = std::max(1, static_cast<int>(sceneWidth * volumeScale * 0.5f));
+        const int rawHeight = std::max(1, static_cast<int>(sceneHeight * volumeScale * 0.5f));
 
         NativePassInputs volumeInputs = requestedInputs;
-        volumeInputs.width = shaftWidth;
-        volumeInputs.height = shaftHeight;
+        volumeInputs.width = rawWidth;
+        volumeInputs.height = rawHeight;
         volumeInputs.sceneWidth = sceneWidth;
         volumeInputs.sceneHeight = sceneHeight;
         volumeInputs.volumeResolutionScale = volumeScale;
@@ -1388,13 +1489,13 @@ void main()
         NativePassInputs resolveInputs = volumeInputs;
         resolveInputs.width = volumeWidth;
         resolveInputs.height = volumeHeight;
-        resolveInputs.rawVolumeWidth = shaftWidth;
-        resolveInputs.rawVolumeHeight = shaftHeight;
+        resolveInputs.rawVolumeWidth = rawWidth;
+        resolveInputs.rawVolumeHeight = rawHeight;
         resolveInputs.historyValid = requestedInputs.historyValid && previousFrame != nullptr;
         resolveInputs.passInput = [&frame](int x, int y) { return frame.mRawVolume.at(x, y); };
         resolveInputs.volumeMetadataInput = [&frame](int x, int y) { return frame.mRawMetadata.at(x, y); };
-        resolveInputs.volumeMetadataWidth = shaftWidth;
-        resolveInputs.volumeMetadataHeight = shaftHeight;
+        resolveInputs.volumeMetadataWidth = rawWidth;
+        resolveInputs.volumeMetadataHeight = rawHeight;
         if (previousFrame != nullptr)
         {
             resolveInputs.atmosphereHistory
@@ -1408,6 +1509,31 @@ void main()
         return frame;
     }
 
+    /// Execute the complete depth-mask, source-filter, radial-integration, and ray-filter chain at native resolutions.
+    PassImage renderProductionShafts(const NativePassInputs& requested)
+    {
+        const int width = requested.sceneWidth > 0 ? requested.sceneWidth : requested.width;
+        const int height = requested.sceneHeight > 0 ? requested.sceneHeight : requested.height;
+        NativePassInputs inputs = requested;
+        inputs.sceneWidth = width;
+        inputs.sceneHeight = height;
+        inputs.width = std::max(1, width / 2);
+        inputs.height = std::max(1, height / 2);
+        const auto mask = renderNativeAtmospherePass("prepareShaftSource", inputs);
+        inputs.passInput = [&mask](int x, int y) { return mask.at(x, y); };
+        const auto filtered = renderNativeAtmospherePass("filterShaftSource", inputs);
+        inputs.passWidth = inputs.width;
+        inputs.passHeight = inputs.height;
+        inputs.width = width;
+        inputs.height = height;
+        inputs.passInput = [&filtered](int x, int y) { return filtered.at(x, y); };
+        const auto rays = renderNativeAtmospherePass("integrateShafts", inputs);
+        inputs.passWidth = width;
+        inputs.passHeight = height;
+        inputs.passInput = [&rays](int x, int y) { return rays.at(x, y); };
+        return renderNativeAtmospherePass("filterShaftRays", inputs);
+    }
+
     /// Execute the complete native atmosphere technique at its production render-target resolutions.
     ProductionAtmosphereFrame renderProductionAtmosphereFrame(
         const NativePassInputs& requestedInputs, const ProductionAtmosphereFrame* previousFrame = nullptr)
@@ -1417,8 +1543,8 @@ void main()
         const float volumeScale = MWRender::getAtmosphereVolumeResolutionScale(requestedInputs.quality);
         const int volumeWidth = std::max(1, static_cast<int>(sceneWidth * volumeScale));
         const int volumeHeight = std::max(1, static_cast<int>(sceneHeight * volumeScale));
-        const int shaftWidth = std::max(1, static_cast<int>(sceneWidth * volumeScale * 0.5f));
-        const int shaftHeight = std::max(1, static_cast<int>(sceneHeight * volumeScale * 0.5f));
+        const int shaftWidth = sceneWidth;
+        const int shaftHeight = sceneHeight;
         ProductionAtmosphereFrame frame = renderProductionAtmosphereVolumeFrame(requestedInputs, previousFrame);
 
         NativePassInputs shaftInputs = requestedInputs;
@@ -1430,7 +1556,7 @@ void main()
         shaftInputs.volumeHistoryInput = [&frame](int x, int y) { return frame.mResolvedVolume.at(x, y); };
         shaftInputs.volumeHistoryWidth = volumeWidth;
         shaftInputs.volumeHistoryHeight = volumeHeight;
-        frame.mShafts = renderNativeAtmospherePass("integrateShafts", shaftInputs);
+        frame.mShafts = renderProductionShafts(shaftInputs);
 
         NativePassInputs compositeInputs = requestedInputs;
         compositeInputs.sceneWidth = sceneWidth;
@@ -1766,6 +1892,10 @@ void main()
         state->addUniform(new osg::Uniform("fog.start", inputs.fogNear));
         state->addUniform(new osg::Uniform("fog.end", inputs.fogFar));
         state->addUniform(new osg::Uniform("atmosphere.enabled", true));
+        state->addUniform(new osg::Uniform("atmosphere.scatteringEnabled", true));
+        state->addUniform(new osg::Uniform("atmosphere.cloudsEnabled", true));
+        state->addUniform(new osg::Uniform("atmosphere.cloudShadowsEnabled", true));
+        state->addUniform(new osg::Uniform("atmosphere.cloudReflectionsEnabled", true));
         state->addUniform(new osg::Uniform("atmosphere.skyColor", inputs.skyColor));
         state->addUniform(new osg::Uniform("atmosphere.inScattering", inputs.inScattering));
         state->addUniform(new osg::Uniform("atmosphere.outScattering", inputs.outScattering));
@@ -1976,8 +2106,9 @@ void main()
         const std::size_t moonPass = sky->getShaderSource().find("void paintMoon");
         ASSERT_NE(legacyCloudPass, std::string::npos);
         ASSERT_NE(moonPass, std::string::npos);
-        EXPECT_NE(
-            sky->getShaderSource().substr(legacyCloudPass, moonPass - legacyCloudPass).find("if (atmosphere.enabled)"),
+        EXPECT_NE(sky->getShaderSource()
+                      .substr(legacyCloudPass, moonPass - legacyCloudPass)
+                      .find("if (atmosphere.cloudsEnabled ||"),
             std::string::npos);
         EXPECT_NE(sky->getShaderSource().find("color.a = 1.0;"), std::string::npos);
         EXPECT_NE(sky->getShaderSource().find("normalize(atmosphere.sunDirection)"), std::string::npos);
@@ -1987,7 +2118,8 @@ void main()
         EXPECT_NE(terrain->getShaderSource().find("atmosphereScatter"), std::string::npos);
         EXPECT_NE(terrain->getShaderSource().find("openmwseAtmosphereScatteredLight"), std::string::npos);
         EXPECT_NE(terrain->getShaderSource().find("sampleSkyColor"), std::string::npos);
-        EXPECT_EQ(terrain->getShaderSource().find("!atmosphere.enabled"), std::string::npos);
+        EXPECT_NE(terrain->getShaderSource().find("parameters.scatteringEnabled = atmosphere.scatteringEnabled"),
+            std::string::npos);
         EXPECT_NE(objects->getShaderSource().find("atmosphereScatter"), std::string::npos);
         EXPECT_NE(groundcover->getShaderSource().find("atmosphereScatter"), std::string::npos);
         EXPECT_NE(sky->getShaderSource().find("if (isReflection)"), std::string::npos);
@@ -2001,7 +2133,9 @@ void main()
         EXPECT_NE(objects->getShaderSource().find("vec3 waterInScatteringColor()"), std::string::npos);
         EXPECT_NE(objects->getShaderSource().find("colorOffset += waterInScatteringColor()"), std::string::npos);
         EXPECT_NE(objects->getShaderSource().find("float airEuclideanDistance = euclideanDist"), std::string::npos);
-        EXPECT_NE(objects->getShaderSource().find("if (atmosphere.enabled && !cameraBelowWater && fog.depth < 0.0)"),
+        EXPECT_NE(
+            objects->getShaderSource().find(
+                "if (atmosphere.enabled && atmosphere.scatteringEnabled && !cameraBelowWater && fog.depth < 0.0)"),
             std::string::npos);
         EXPECT_EQ(objects->getShaderSource().find("!cameraBelowWater && !useWaterDepthFog"), std::string::npos);
         EXPECT_EQ(objects->getShaderSource().find("WATER_COLOR * length(sun.ambient.xyz)"), std::string::npos);
@@ -2084,8 +2218,9 @@ void main()
                     const auto& uniforms = compiled->getActiveUniforms();
                     EXPECT_EQ(
                         uniforms.count(osg::Uniform::getNameID("reflectedCloudTexture")), mode[0] == '2' ? 1u : 0u);
-                    for (const char* name : { "diffuseMap", "maskMap" })
-                        EXPECT_EQ(uniforms.count(osg::Uniform::getNameID(name)), mode[0] == '0' ? 1u : 0u) << name;
+                    EXPECT_EQ(uniforms.count(osg::Uniform::getNameID("maskMap")), mode[0] == '0' ? 1u : 0u);
+                    // The reflected composite also draws the fallback solar texture after its cloud layers.
+                    EXPECT_EQ(uniforms.count(osg::Uniform::getNameID("diffuseMap")), mode[0] != '1' ? 1u : 0u);
                     state.popStateSet();
                 }
             }
@@ -2368,12 +2503,13 @@ void main()
         Fx::Technique technique(vfs, imageManager, VFS::Path::NormalizedView("shaders/internal_atmosphere.omwfx"),
             "internal_atmosphere", 128, 128, false, true);
         ASSERT_TRUE(technique.compile()) << technique.getLastError();
-        ASSERT_EQ(technique.getPasses().size(), 5);
+        ASSERT_EQ(technique.getPasses().size(), 8);
         EXPECT_EQ(technique.getPasses().front()->getSecondaryTarget(), "AtmosphereVolumeMetadataRaw");
         EXPECT_TRUE(technique.getLights());
         EXPECT_NE(technique.getFlags() & Fx::Technique::Flag_Disable_Interiors, 0u);
         EXPECT_NE(technique.getFlags() & Fx::Technique::Flag_Disable_Underwater, 0u);
-        EXPECT_NE(technique.getFlags() & Fx::Technique::Flag_Disable_SunGlare, 0u);
+        // Native glare follows its live preference; the owning effect must not disable its own response.
+        EXPECT_EQ(technique.getFlags() & Fx::Technique::Flag_Disable_SunGlare, 0u);
 
         osg::ref_ptr<osg::GraphicsContext::Traits> traits = new osg::GraphicsContext::Traits;
         traits->width = 1;
@@ -2497,6 +2633,30 @@ void main()
         ASSERT_EQ(disabled.pixels.size(), clear.pixels.size());
         EXPECT_NEAR(disabled.at(disabled.width / 2, disabled.height / 2).x(), 0.f, 1e-6f);
         EXPECT_FLOAT_EQ(disabled.at(disabled.width / 2, disabled.height / 2).w(), 1.f);
+    }
+
+    TEST(AtmosphereShaderTest, cloudsRemainVisibleWithoutEnhancedScattering)
+    {
+        NativePassInputs inputs;
+        inputs.cloudParameters = { 0.58f, 0.9f, 48000.f, 22000.f };
+        inputs.mistParameters = {};
+        inputs.scatteringEnabled = false;
+        for (const bool useUBO : { false, true })
+        {
+            inputs.useUniformBuffer = useUBO;
+            const PassImage clouds = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            double opacity = 0.0;
+            double radiance = 0.0;
+            for (const auto& pixel : clouds.pixels)
+            {
+                ASSERT_TRUE(std::isfinite(pixel.x()) && std::isfinite(pixel.y()) && std::isfinite(pixel.z()));
+                opacity += 1.0 - pixel.w();
+                radiance += pixel.x() + pixel.y() + pixel.z();
+            }
+            ASSERT_FALSE(clouds.pixels.empty());
+            EXPECT_GT(opacity / clouds.pixels.size(), 0.005);
+            EXPECT_GT(radiance / clouds.pixels.size(), 0.01);
+        }
     }
 
     TEST(AtmosphereShaderTest, integratesCloudsBehindOpenSkyAndRespectsSceneDepth)
@@ -8553,51 +8713,437 @@ void main()
             << "Fresh reconstruction must retain the current field independently of rejected history";
     }
 
-    /// Ensure screen-space shafts cannot originate behind geometry, cloud extinction, or the camera.
-    TEST(AtmosphereShaderTest, sunShaftsRequireVisibleUnextinguishedSunSource)
+    /// Keep the virtual shadow projection stable across mainland cells without positioning visible clouds.
+    TEST(AtmosphereShaderTest, texturedCloudShadowProjectionPreservesWorldPosition)
     {
-        NativePassInputs visibleInputs;
-        visibleInputs.lastShader = [](int x, int y) {
-            if (std::abs(x - 32) <= 2 && std::abs(y - 32) <= 2)
-                return osg::Vec4f(4.f, 3.4f, 2.6f, 1.f);
-            return osg::Vec4f(0.3f, 0.4f, 0.55f, 1.f);
-        };
-        visibleInputs.passInput = [](int, int) { return osg::Vec4f(0.f, 0.f, 0.f, 1.f); };
-        const PassImage visible = renderNativeAtmospherePass("integrateShafts", visibleInputs);
-        ASSERT_FALSE(visible.pixels.empty());
+        constexpr double radius = 6360000.0 * 69.99125109;
+        for (float worldX : { 0.f, 600000.f, 2000000.f })
+        {
+            NativePassInputs inputs;
+            inputs.width = inputs.height = 1;
+            inputs.fullPrecisionCapture = true;
+            inputs.renderTexturedCloudProjection = true;
+            inputs.eyePosition = { worldX, 0.f, 1200.f };
+            inputs.viewDirection = { 0.2f, 0.3f, 1.f };
+            inputs.viewDirection.normalize();
+            const osg::Vec3d origin(inputs.eyePosition);
+            osg::Vec3d direction(inputs.viewDirection);
+            direction.normalize();
+            const double b = origin.x() * direction.x() + (origin.z() + radius) * direction.z();
+            const double c = origin.x() * origin.x() + (origin.z() - 12000.0) * (origin.z() + 12000.0 + 2.0 * radius);
+            const double distance = -c / (b + std::sqrt(b * b - c));
+            const auto expected = origin + direction * distance;
+            const auto initial = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            ASSERT_EQ(initial.pixels.size(), 1u);
+            EXPECT_EQ(initial.pixels[0].w(), 1.f);
+            for (int channel = 0; channel < 3; ++channel)
+                EXPECT_NEAR(initial.pixels[0][channel] * 16000.f, expected[channel], 2.0);
+            inputs.eyePosition += inputs.viewDirection * 1000.f;
+            const auto approached = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            ASSERT_EQ(approached.pixels.size(), 1u);
+            for (int channel = 0; channel < 4; ++channel)
+                EXPECT_NEAR(approached.pixels[0][channel], initial.pixels[0][channel], 0.000125f);
+        }
+    }
 
-        NativePassInputs occludedInputs = visibleInputs;
-        occludedInputs.depth = [](int, int) { return SceneUtil::AutoDepth::isReversed() ? 1.f : 0.f; };
-        const PassImage occluded = renderNativeAtmospherePass("integrateShafts", occludedInputs);
-        NativePassInputs sourceOccludedInputs = visibleInputs;
-        sourceOccludedInputs.depth = [](int x, int y) {
-            const bool coversSun = std::abs(x - 32) <= 2 && std::abs(y - 32) <= 2;
-            if (coversSun)
-                return SceneUtil::AutoDepth::isReversed() ? 1.f : 0.f;
-            return SceneUtil::AutoDepth::isReversed() ? 0.f : 1.f;
-        };
-        const PassImage sourceOccluded = renderNativeAtmospherePass("integrateShafts", sourceOccludedInputs);
-        NativePassInputs cloudExtinguishedInputs = visibleInputs;
-        cloudExtinguishedInputs.volumeHistoryInput = [](int x, int y) {
-            const bool coversSun = std::abs(x - 32) <= 2 && std::abs(y - 32) <= 2;
-            return osg::Vec4f(0.f, 0.f, 0.f, coversSun ? 0.f : 1.f);
-        };
-        const PassImage cloudExtinguished = renderNativeAtmospherePass("integrateShafts", cloudExtinguishedInputs);
-        NativePassInputs behindInputs = visibleInputs;
-        behindInputs.sunDirection = { -1.f, 0.f, 0.f, 0.f };
-        const PassImage behind = renderNativeAtmospherePass("integrateShafts", behindInputs);
+    /// The production textured cloud pass must preserve mesh UVs and vertex fade at ground and flying altitudes.
+    TEST(AtmosphereShaderTest, texturedCloudsPreserveAuthoredUvAndVertexFade)
+    {
+        NativePassInputs inputs;
+        inputs.renderAuthoredCloudPass = true;
+        inputs.fullPrecisionCapture = true;
+        inputs.lastShader = [](int x, int y) { return osg::Vec4f((x + 0.5f) / 64, (y + 0.5f) / 64, 0.4f, 0.8f); };
+        for (float altitude : { 0.f, 8000.f, 12000.f, 100000.f })
+        {
+            inputs.eyePosition = { 600000.f, -300000.f, altitude };
+            auto actual = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            ASSERT_EQ(actual.pixels.size(), 64u * 64u);
+            for (int x : { 8, 32, 55 })
+                for (int y : { 8, 32, 55 })
+                {
+                    const auto pixel = actual.at(x, y);
+                    EXPECT_NEAR(pixel.x(), (0.2f + 0.5f * (y + 0.5f) / 64) * 0.7f, 0.0005f);
+                    EXPECT_NEAR(pixel.y(), (0.1f + 0.5f * (x + 0.5f) / 64) * 0.8f, 0.0005f);
+                    EXPECT_NEAR(pixel.z(), 0.4f * 0.9f, 0.0005f);
+                    EXPECT_NEAR(pixel.w(), 0.8f * 0.25f * 0.6f, 0.0005f);
+                }
+        }
+    }
 
-        const auto energy = [](const PassImage& image) {
+    /// Sunlight follows authored dome UVs and weather animation at every observer position and altitude.
+    TEST(AtmosphereShaderTest, texturedCloudDomeMappingIsCameraRelative)
+    {
+        NativePassInputs inputs;
+        inputs.width = inputs.height = 1;
+        inputs.fullPrecisionCapture = true;
+        inputs.renderTexturedCloudDome = true;
+        inputs.texturedClouds.mEnabled = true;
+        inputs.texturedClouds.mDomeMapping = makeColorTexture(
+            64, 64, [](int x, int y) { return osg::Vec4f((x + 0.5f) / 64 * 0.5f, (y + 0.5f) / 64 * 0.5f, 0.5f, 1.f); });
+        inputs.texturedClouds.mDomeMapping->setInternalFormat(GL_RGBA32F);
+        inputs.texturedClouds.mOpacity = makeColorTexture(4, 4, [](int, int) { return osg::Vec4f(0.5f, 0, 0, 1); });
+        inputs.viewDirection = { 0.6f, 0.f, 0.8f };
+        std::optional<osg::Vec4f> reference;
+        for (const osg::Vec3f position :
+            { osg::Vec3f(0, 0, 0), osg::Vec3f(600000, -400000, 8000), osg::Vec3f(-800000, 2000000, 100000) })
+        {
+            inputs.eyePosition = position;
+            auto actual = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+            ASSERT_EQ(actual.pixels.size(), 1u);
+            if (reference)
+                EXPECT_EQ(actual.pixels[0], *reference);
+            reference = actual.pixels[0];
+            EXPECT_NEAR(actual.pixels[0].x(), 2.f / 3.f, 0.0001f);
+            EXPECT_NEAR(actual.pixels[0].y(), 0.5f, 0.0001f);
+            EXPECT_NEAR(actual.pixels[0].z(), 0.5f, 0.0001f);
+            EXPECT_NEAR(actual.pixels[0].w(), std::pow(0.75f, 4.f), 0.0001f);
+        }
+        inputs.texturedClouds.mTransforms[0] = { 0.f, 1.f, 0.f, 0.2f };
+        auto rotated = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_EQ(rotated.pixels.size(), 1u);
+        EXPECT_NEAR(rotated.pixels[0].x(), 0.5f, 0.0001f);
+        EXPECT_NEAR(rotated.pixels[0].y(), 1.f / 3.f + 0.2f, 0.0001f);
+        inputs.viewDirection = { 0.f, 0.f, -1.f };
+        auto below = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_EQ(below.pixels.size(), 1u);
+        EXPECT_EQ(below.pixels[0].z(), 0.f);
+        EXPECT_EQ(below.pixels[0].w(), 1.f);
+    }
+
+    /// Compare the selectable MGE response against the original parity equation from commit 15ee5e5d84.
+    TEST(AtmosphereShaderTest, mgeAppearancePreservesOriginalParitySkyEquation)
+    {
+        const auto reference = [](const NativePassInputs& inputs) {
+            osg::Vec3d direction(inputs.viewDirection);
+            direction.normalize();
+            osg::Vec3d sun(inputs.sunDirection.x(), inputs.sunDirection.y(), inputs.sunDirection.z());
+            sun.normalize();
+            const double cosine = direction * sun;
+            const double altitude = std::pow(std::max(1.0 + sun.z(), 1e-4), 10.0);
+            const double brightness = std::clamp(1.0 - std::exp2(-1.9 * altitude), 0.0, 1.0);
+            const double horizon = std::clamp(std::exp(-4.0 * sun.z()), 0.0, 1.0) * std::clamp(altitude, 0.0, 1.0);
+            const double forward = 1.58 / std::max(1.24 - cosine, 0.02) * horizon;
+            const double depth = 1.33 * std::exp(-2.0 * std::clamp(direction.z(), 0.0, 1.0));
+            const double skyAmount
+                = 1.0 - std::pow(std::clamp(1.0 - 2.22 * std::clamp(direction.z() - 0.075, 0.0, 1.0), 0.0, 1.0), 1.15);
+            const osg::Vec3d blueSky(0.371, 0.637, 1.108);
+            osg::Vec3d result;
+            for (int channel = 0; channel < 3; ++channel)
+            {
+                const double directional = std::lerp(static_cast<double>(inputs.inScattering[channel]),
+                    static_cast<double>(inputs.outScattering[channel]), 0.5 * (1.0 + cosine));
+                const double extinction = depth * directional * (2.8 + 4.3 / std::max(altitude, 1e-4) + 0.7 * forward);
+                const double integral = -std::expm1(-extinction) / std::max(extinction, 1e-4);
+                const double sky = std::lerp(static_cast<double>(inputs.skyColor[channel]), blueSky[channel], 0.44);
+                const double scattering
+                    = (0.125 * forward + sky * (1.0 - 0.09 * forward)) * integral * (1.17 * depth + 0.89) * brightness;
+                const double background = std::lerp(static_cast<double>(inputs.fogColor[channel]),
+                    static_cast<double>(inputs.skyColor[channel]), skyAmount);
+                result[channel] = std::lerp(background, scattering, static_cast<double>(inputs.weatherWeight));
+            }
+            return result;
+        };
+        for (bool useBuffer : { false, true })
+            for (float sunHeight : { -0.2f, -0.05f, 0.f, 0.2f, 0.8f })
+            {
+                NativePassInputs inputs;
+                inputs.width = 1;
+                inputs.height = 1;
+                inputs.atmosphereAppearance = 1;
+                inputs.useUniformBuffer = useBuffer;
+                inputs.renderCloudSkyReference = true;
+                inputs.weatherWeight = 0.65f;
+                inputs.sunDirection = { std::sqrt(1.f - sunHeight * sunHeight), 0.f, sunHeight, 0.f };
+                inputs.viewDirection = { 0.8f, 0.2f, 0.4f };
+                const auto actual = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                ASSERT_EQ(actual.pixels.size(), 1u);
+                const auto expected = reference(inputs);
+                for (int channel = 0; channel < 3; ++channel)
+                    EXPECT_NEAR(actual.pixels[0][channel], expected[channel], 0.002);
+            }
+    }
+
+    /// Match parity commit 15ee5e5d84's distance transfer at all observer heights, including linear fog.
+    TEST(AtmosphereShaderTest, mgeAppearancePreservesOriginalFogTransport)
+    {
+        NativePassInputs inputs;
+        inputs.width = inputs.height = 1;
+        inputs.fullPrecisionCapture = true;
+        inputs.renderFogTransport = true;
+        inputs.atmosphereAppearance = 1;
+        for (bool exponential : { false, true })
+        {
+            inputs.exponentialFog = exponential;
+            const double scale = exponential ? 4.4 : 1.0;
+            const double start = inputs.fogNear / scale;
+            const double range = (inputs.fogFar - start) / scale;
+            const double expected = (inputs.fogFar * 0.5 - start) / range;
+            for (float height : { 0.f, 10000.f, 100000.f })
+                for (float slope : { -0.5f, 0.f, 0.5f })
+                {
+                    inputs.eyePosition.z() = height;
+                    inputs.viewDirection = { 1.f, 0.f, slope };
+                    const auto actual = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                    ASSERT_EQ(actual.pixels.size(), 1u);
+                    EXPECT_NEAR(actual.pixels[0].x(), expected, 0.00001);
+                    EXPECT_NEAR(actual.pixels[0].y(), exponential ? std::exp(-expected) : 1.0 - expected, 0.00001);
+                }
+        }
+    }
+
+    /// Compare MGE XE Sunshafts.fx v0.02a's twenty-sample ray response for a completely exposed solar source.
+    TEST(AtmosphereShaderTest, sunShaftsMatchMgeRadialResponse)
+    {
+        NativePassInputs inputs;
+        inputs.fullPrecisionCapture = true;
+        // The filtered source is fully visible; foreground destination pixels may receive scattered light.
+        inputs.passInput = [](int, int) { return osg::Vec4f(0, 0, 0, 1); };
+        for (float weatherWeight : { 0.f, .25f, 1.f })
+            for (float sunVisibility : { 0.3f, 1.f })
+            {
+                inputs.sunVisibility = sunVisibility;
+                inputs.weatherWeight = weatherWeight;
+                for (bool foreground : { false, true })
+                {
+                    inputs.depth = [foreground](int, int) {
+                        return foreground ? normalizedDepthForViewDistance(3000.f, false)
+                                          : (SceneUtil::AutoDepth::isReversed() ? 0.f : 1.f);
+                    };
+                    const auto actual = renderNativeAtmospherePass("integrateShafts", inputs);
+                    ASSERT_EQ(actual.pixels.size(), 64u * 64u);
+                    for (const int x : { 3, 12, 24, 40, 60 })
+                    {
+                        const double dx = (x + 0.5) / 64.0 - 0.5;
+                        const double dy = 0.5 / 64.0;
+                        const double radius = std::hypot(dx, dy);
+                        double integral = 0;
+                        for (int sample = 1; sample <= 20; ++sample)
+                        {
+                            const double offset = sample / 20.0 * std::min(0.25, radius);
+                            integral += std::exp(-1.10 * (radius - offset) / (0.125 + offset))
+                                * std::pow(1.0 - offset / 0.25, 1.5);
+                        }
+                        // DistantLand::updatePostShader raises post-process sun visibility in fair weather.
+                        const double postVisibility = std::lerp(double(sunVisibility), 1.0, .333 * weatherWeight);
+                        const double strength = 1.7 * (1.0 - std::pow(1.0 - postVisibility, 2.0));
+                        const double opacity = integral / 20.0 * strength * (radius / 0.25 * 0.7 + 0.3);
+                        const double enhancement = 1.0 + 1.25 * std::pow(opacity, 3.0);
+                        const auto pixel = actual.at(x, 32);
+                        EXPECT_NEAR(pixel.a(), opacity, 0.0005);
+                        EXPECT_NEAR(pixel.r(), inputs.sunColor.r() * enhancement, 0.001);
+                        EXPECT_NEAR(pixel.g(), 0.8 * inputs.sunColor.g() * enhancement, 0.001);
+                        EXPECT_NEAR(pixel.b(), 0.8 * inputs.sunColor.b() * enhancement, 0.001);
+                    }
+                }
+            }
+    }
+
+    /// A finite foreground occluder shapes the complete source/filter/ray chain without extinguishing its surrounding
+    /// gaps.
+    TEST(AtmosphereShaderTest, sunShaftsSurvivePartialSolarOcclusion)
+    {
+        NativePassInputs inputs;
+        inputs.depth = [](int x, int y) {
+            return std::abs(x - 32) <= 5 && std::abs(y - 32) <= 5 ? normalizedDepthForViewDistance(3000.f, false)
+                                                                  : (SceneUtil::AutoDepth::isReversed() ? 0.f : 1.f);
+        };
+        const auto occluded = renderProductionShafts(inputs);
+        ASSERT_FALSE(occluded.pixels.empty());
+        inputs.depth = [](int, int) { return SceneUtil::AutoDepth::isReversed() ? 0.f : 1.f; };
+        const auto exposed = renderProductionShafts(inputs);
+        ASSERT_EQ(exposed.pixels.size(), occluded.pixels.size());
+        double remaining = 0.0;
+        double removed = 0.0;
+        for (size_t index = 0; index < exposed.pixels.size(); ++index)
+        {
+            remaining += occluded.pixels[index].a();
+            removed += exposed.pixels[index].a() - occluded.pixels[index].a();
+        }
+        EXPECT_GT(remaining / exposed.pixels.size(), 0.01);
+        EXPECT_GT(removed / exposed.pixels.size(), 0.01);
+    }
+
+    /// Attenuate the finite emitter through native volumes while retaining MGE's textured-sky depth source.
+    TEST(AtmosphereShaderTest, sunShaftSourceRespectsVolumeTransmittanceAndCloudMode)
+    {
+        for (bool useBuffer : { false, true })
+        {
+            NativePassInputs inputs;
+            inputs.useUniformBuffer = useBuffer;
+            inputs.volumeHistoryInput = [](int, int) { return osg::Vec4f(0, 0, 0, 1); };
+            const auto exposed = renderProductionShafts(inputs);
+            ASSERT_FALSE(exposed.pixels.empty());
+            for (float transmittance : { 0.f, .2f, .75f })
+            {
+                inputs.volumeHistoryInput
+                    = [transmittance](int, int) { return osg::Vec4f(.3f, .4f, .5f, transmittance); };
+                const auto throughVolume = renderProductionShafts(inputs);
+                ASSERT_EQ(exposed.pixels.size(), throughVolume.pixels.size());
+                for (std::size_t pixel = 0; pixel < exposed.pixels.size(); ++pixel)
+                    EXPECT_NEAR(throughVolume.pixels[pixel].a(), exposed.pixels[pixel].a() * transmittance, .0005f);
+            }
+            inputs.volumeHistoryInput = [](int, int) { return osg::Vec4f(0, 0, 0, 0); };
+            inputs.volumetricCloudsEnabled = false;
+            const auto textured = renderProductionShafts(inputs);
+            EXPECT_EQ(exposed.pixels, textured.pixels);
+            inputs.volumetricCloudsEnabled = true;
+            inputs.cloudSunOcclusion = false;
+            const auto independent = renderProductionShafts(inputs);
+            ASSERT_FALSE(independent.pixels.empty());
+            for (const auto& pixel : independent.pixels)
+                EXPECT_EQ(pixel.a(), 0.f);
+        }
+    }
+
+    /// Keep mod-authored ray strength functional without tying source visibility to the mist concentration.
+    TEST(AtmosphereShaderTest, sunShaftStrengthIsIndependentOfMistDensity)
+    {
+        NativePassInputs inputs;
+        inputs.mistParameters = { 0.f, 800.f, 4500.f, 1.f };
+        const auto clear = renderProductionShafts(inputs);
+        ASSERT_FALSE(clear.pixels.empty());
+        inputs.mistParameters.x() = 3.f;
+        const auto mist = renderProductionShafts(inputs);
+        ASSERT_EQ(clear.pixels.size(), mist.pixels.size());
+        EXPECT_EQ(clear.pixels, mist.pixels);
+        inputs.mistParameters.w() = .5f;
+        const auto dimmed = renderProductionShafts(inputs);
+        ASSERT_EQ(clear.pixels.size(), dimmed.pixels.size());
+        for (std::size_t pixel = 0; pixel < clear.pixels.size(); ++pixel)
+            EXPECT_NEAR(dimmed.pixels[pixel].a(), .5f * clear.pixels[pixel].a(), .0005f);
+        inputs.mistParameters.w() = 0.f;
+        const auto dark = renderProductionShafts(inputs);
+        ASSERT_EQ(clear.pixels.size(), dark.pixels.size());
+        for (const auto& pixel : dark.pixels)
+            EXPECT_EQ(pixel.a(), 0.f);
+    }
+
+    /// Match MGE's light-veil composition on foreground geometry while preserving the engine's scene alpha.
+    TEST(AtmosphereShaderTest, sunShaftCompositeMatchesMgeBlend)
+    {
+        NativePassInputs inputs;
+        const osg::Vec4f landscape(0.12f, 0.08f, 0.04f, 0.7f);
+        const osg::Vec4f ray(0.7f, 0.5f, 0.3f, 0.4f);
+        inputs.depth = [](int, int) { return normalizedDepthForViewDistance(3000.f, false); };
+        inputs.lastShader = [landscape](int, int) { return landscape; };
+        inputs.volumeHistoryInput = [](int, int) { return osg::Vec4f(0.f, 0.f, 0.f, 1.f); };
+        inputs.shaftInput = [ray](int, int) { return ray; };
+        const auto composed = renderNativeAtmospherePass("composite", inputs);
+        ASSERT_FALSE(composed.pixels.empty());
+        const auto center = composed.at(composed.width / 2, composed.height / 2);
+        for (int channel = 0; channel < 3; ++channel)
+            EXPECT_NEAR(center[channel], landscape[channel] * (1.f - 0.75f * ray.a()) + ray[channel] * ray.a(), 0.001f);
+        EXPECT_NEAR(center.a(), landscape.a(), 0.001f);
+        inputs.godraysEnabled = false;
+        const auto disabled = renderNativeAtmospherePass("composite", inputs);
+        ASSERT_FALSE(disabled.pixels.empty());
+        for (int channel = 0; channel < 4; ++channel)
+            EXPECT_NEAR(disabled.at(32, 32)[channel], landscape[channel], 0.001f);
+    }
+
+    /// Preserve MGE's off-screen emitter range and independent toggle while an opaque source or a rearward sun
+    /// contributes nothing.
+    TEST(AtmosphereShaderTest, sunShaftsRespectMgeVisibilityAndToggle)
+    {
+        const auto opacity = [](const PassImage& image) {
             double result = 0.0;
-            for (const osg::Vec4f& pixel : image.pixels)
-                result += pixel.x() + pixel.y() + pixel.z();
-            return result / static_cast<double>(image.pixels.size());
+            for (const auto& pixel : image.pixels)
+                result += pixel.a();
+            return result / image.pixels.size();
         };
-        EXPECT_GT(energy(visible), 0.002);
-        EXPECT_LT(energy(occluded), energy(visible) * 0.02);
-        EXPECT_LT(energy(sourceOccluded), 1e-6);
-        EXPECT_LT(energy(cloudExtinguished), 1e-6);
-        EXPECT_LT(energy(behind), 1e-6);
+        NativePassInputs inputs;
+        inputs.atmosphereEnabled = false;
+        inputs.sunlightEnabled = true;
+        inputs.sunDirection = { 1.f, -1.f, 0.f, 0.f };
+        const auto offscreen = renderProductionShafts(inputs);
+        ASSERT_FALSE(offscreen.pixels.empty());
+        EXPECT_GT(opacity(offscreen), 0.001);
+        inputs.godraysEnabled = false;
+        const auto disabled = renderProductionShafts(inputs);
+        ASSERT_FALSE(disabled.pixels.empty());
+        EXPECT_LT(opacity(disabled), 1e-6);
+        inputs.godraysEnabled = true;
+        inputs.sunDirection = { -1.f, 0.f, 0.f, 0.f };
+        const auto behind = renderProductionShafts(inputs);
+        ASSERT_FALSE(behind.pixels.empty());
+        EXPECT_LT(opacity(behind), 1e-6);
+        inputs.sunDirection = { 1.f, 0.f, 0.f, 0.f };
+        inputs.depth = [](int, int) { return SceneUtil::AutoDepth::isReversed() ? 1.f : 0.f; };
+        const auto landscape = renderProductionShafts(inputs);
+        ASSERT_FALSE(landscape.pixels.empty());
+        EXPECT_LT(opacity(landscape), 1e-6);
+    }
+
+    /// The solar disc responds to actual texture opacity and to its toggle in both GL uniform binding modes.
+    TEST(AtmosphereShaderTest, texturedCloudsOccludeSunIndependentlyOfScattering)
+    {
+        for (bool useBuffer : { false, true })
+        {
+            NativePassInputs inputs;
+            inputs.useUniformBuffer = useBuffer;
+            inputs.atmosphereEnabled = false;
+            inputs.scatteringEnabled = false;
+            inputs.sunlightEnabled = true;
+            inputs.sunDirection = { 1.f, 0.f, 1.f, 0.f };
+            inputs.viewDirection = { 1.f, 0.f, 1.f };
+            inputs.lastShader = [](int, int) { return osg::Vec4f(0.1f, 0.1f, 0.1f, 0.6f); };
+            inputs.texturedClouds.mEnabled = true;
+            inputs.texturedClouds.mDomeMapping
+                = makeColorTexture(4, 4, [](int, int) { return osg::Vec4f(0.5f, 0.5f, 1, 1); });
+            inputs.texturedClouds.mOpacity = makeColorTexture(4, 4, [](int, int) { return osg::Vec4f(1, 0, 0, 1); });
+            const auto blocked = renderNativeAtmospherePass("composite", inputs);
+            ASSERT_FALSE(blocked.pixels.empty());
+            const auto blockedSun = blocked.at(32, 32);
+            EXPECT_NEAR(blockedSun.x(), 0.1f, 0.001f);
+            EXPECT_NEAR(blockedSun.w(), 0.6f, 0.001f);
+            inputs.cloudSunOcclusion = false;
+            const auto bypassed = renderNativeAtmospherePass("composite", inputs);
+            ASSERT_FALSE(bypassed.pixels.empty());
+            EXPECT_GT(bypassed.at(32, 32).x(), 2.f);
+            inputs.cloudSunOcclusion = true;
+            inputs.texturedClouds.mOpacity = makeColorTexture(4, 4, [](int, int) { return osg::Vec4f(0, 0, 0, 1); });
+            const auto clear = renderNativeAtmospherePass("composite", inputs);
+            ASSERT_FALSE(clear.pixels.empty());
+            EXPECT_NEAR(clear.at(32, 32).x(), bypassed.at(32, 32).x(), 0.002f);
+        }
+    }
+
+    /// Thin cloud illumination and the authored glare texture are independent and never cross landscape depth.
+    TEST(AtmosphereShaderTest, cloudBloomAndSunGlareStayInTheSky)
+    {
+        NativePassInputs inputs;
+        inputs.atmosphereEnabled = false;
+        inputs.sunlightEnabled = true;
+        inputs.sunDirection = { 1.f, 0.10f, 1.f, 0.f };
+        inputs.viewDirection = { 1.f, 0.f, 1.f };
+        inputs.lastShader = [](int, int) { return osg::Vec4f(0.1f, 0.1f, 0.1f, 0.6f); };
+        inputs.texturedClouds.mEnabled = true;
+        inputs.texturedClouds.mDomeMapping
+            = makeColorTexture(4, 4, [](int, int) { return osg::Vec4f(0.5f, 0.5f, 1, 1); });
+        inputs.texturedClouds.mOpacity = makeColorTexture(4, 4, [](int, int) { return osg::Vec4f(0.3f, 0, 0, 1); });
+        const auto bloom = renderNativeAtmospherePass("composite", inputs);
+        ASSERT_FALSE(bloom.pixels.empty());
+        EXPECT_GT(bloom.at(32, 32).x(), 0.2f);
+        inputs.cloudSunOcclusion = false;
+        const auto noBloom = renderNativeAtmospherePass("composite", inputs);
+        ASSERT_FALSE(noBloom.pixels.empty());
+        EXPECT_NEAR(noBloom.at(32, 32).x(), 0.1f, 0.002f);
+        inputs.sunGlareTexture = makeColorTexture(4, 4, [](int, int) { return osg::Vec4f(1, 1, 1, 1); });
+        inputs.sunGlareEnabled = true;
+        const auto glare = renderNativeAtmospherePass("composite", inputs);
+        ASSERT_FALSE(glare.pixels.empty());
+        EXPECT_GT(glare.at(32, 32).x(), noBloom.at(32, 32).x() + 0.01f);
+        inputs.sunGlareAllowed = false;
+        const auto replacedGlare = renderNativeAtmospherePass("composite", inputs);
+        ASSERT_FALSE(replacedGlare.pixels.empty());
+        EXPECT_NEAR(replacedGlare.at(32, 32).x(), noBloom.at(32, 32).x(), 0.002f);
+        inputs.sunGlareAllowed = true;
+        inputs.cloudSunOcclusion = true;
+        inputs.depth = [](int, int) { return normalizedDepthForViewDistance(3000.f, false); };
+        const auto landscape = renderNativeAtmospherePass("composite", inputs);
+        ASSERT_FALSE(landscape.pixels.empty());
+        EXPECT_NEAR(landscape.at(32, 32).x(), 0.1f, 0.001f);
+        EXPECT_NEAR(landscape.at(32, 32).w(), 0.6f, 0.001f);
     }
 
     TEST(AtmosphereShaderTest, compositeCombinesHdrMistTransmittanceAndShafts)
@@ -8610,9 +9156,10 @@ void main()
         const PassImage composite = renderNativeAtmospherePass("composite", inputs);
         ASSERT_FALSE(composite.pixels.empty());
         const osg::Vec4f& center = composite.at(composite.width / 2, composite.height / 2);
-        EXPECT_NEAR(center.x(), 0.8f, 0.002f);
-        EXPECT_NEAR(center.y(), 1.3f, 0.002f);
-        EXPECT_NEAR(center.z(), 1.85f, 0.002f);
+        // MGE applies its alpha-weighted veil after the volume's radiance and transmittance.
+        EXPECT_NEAR(center.x(), (1.f * .5f + .2f) * .25f + .1f, 0.002f);
+        EXPECT_NEAR(center.y(), (2.f * .5f + .1f) * .25f + .2f, 0.002f);
+        EXPECT_NEAR(center.z(), (3.f * .5f + .05f) * .25f + .3f, 0.002f);
         EXPECT_NEAR(center.w(), 0.8f, 0.002f);
         for (const osg::Vec4f& pixel : composite.pixels)
             for (int channel = 0; channel < 4; ++channel)
@@ -8708,7 +9255,7 @@ void main()
 
         NativePassInputs shaftInputs = inputs;
         shaftInputs.volumeHistoryInput = [&resolved](int x, int y) { return resolved.at(x, y); };
-        const PassImage shafts = renderNativeAtmospherePass("integrateShafts", shaftInputs);
+        const PassImage shafts = renderProductionShafts(shaftInputs);
         ASSERT_EQ(shafts.pixels.size(), raw.pixels.size());
 
         NativePassInputs compositeInputs = inputs;

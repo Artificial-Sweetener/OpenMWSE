@@ -45,10 +45,27 @@ namespace Settings
         SettingValue<bool> mAdjustCoverageForAlphaTest{ mIndex, "Shaders", "adjust coverage for alpha test" };
         SettingValue<bool> mSoftParticles{ mIndex, "Shaders", "soft particles" };
         SettingValue<bool> mWeatherParticleOcclusion{ mIndex, "Shaders", "weather particle occlusion" };
-        SettingValue<bool> mAtmosphericEffects{ mIndex, "Shaders", "atmospheric effects" };
+        /// Select enhanced aerial perspective independently of the cloud renderer.
+        SettingValue<bool> mAtmosphericScattering{ mIndex, "Shaders", "atmospheric scattering" };
+        /// Select current color response (0) or the original MGE XE-equivalent response (1).
+        SettingValue<int> mAtmosphereAppearance{ mIndex, "Shaders", "atmosphere appearance",
+            makeClampSanitizerInt(0, 1) };
+        /// Enable depth-occluded sunlight shafts independently of atmospheric color response.
+        SettingValue<bool> mGodrays{ mIndex, "Shaders", "godrays" };
+        /// Display the authored solar glare texture without a fullscreen color overlay.
+        SettingValue<bool> mSunGlare{ mIndex, "Shaders", "sun glare" };
+        /// Attenuate the solar disc through cloud optical depth and illuminate textured cloud edges.
+        SettingValue<bool> mCloudSunOcclusion{ mIndex, "Shaders", "cloud sun occlusion" };
+        /// Select volumetric sky and low clouds while retaining the current weather episode.
+        SettingValue<bool> mVolumetricClouds{ mIndex, "Shaders", "volumetric clouds" };
         SettingValue<int> mAtmosphericQuality{ mIndex, "Shaders", "atmospheric quality", makeClampSanitizerInt(0, 3) };
         SettingValue<float> mWeatherParticleOcclusionSmallFeatureCullingPixelSize{ mIndex, "Shaders",
             "weather particle occlusion small feature culling pixel size" };
+        /// Require native composition for any independently selected atmosphere or solar effect.
+        bool useNativeAtmosphere() const
+        {
+            return mAtmosphericScattering || mVolumetricClouds || mGodrays || mSunGlare || mCloudSunOcclusion;
+        }
     };
 }
 

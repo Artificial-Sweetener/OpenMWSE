@@ -144,6 +144,9 @@ namespace MWRender
 
         void resize();
 
+        /// Reconfigure internal volume targets and history while render traversal is stopped.
+        void updateAtmosphereSettings();
+
         Status enableTechnique(std::shared_ptr<Fx::Technique> technique, std::optional<int> location = std::nullopt);
 
         Status disableTechnique(std::shared_ptr<Fx::Technique> technique, bool dirty = true);
@@ -241,6 +244,9 @@ namespace MWRender
         void advanceAtmosphereDiagnosticComparison();
 
     private:
+        /// Populate the internal atmosphere effect and target sizes before dispatch construction.
+        void configureAtmosphereTechnique();
+
         void populateTechniqueFiles();
 
         size_t frame() const { return mViewer->getFrameStamp()->getFrameNumber(); }

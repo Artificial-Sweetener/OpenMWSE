@@ -33,6 +33,17 @@ sampler_2d openmwseCloudWeatherTexture {
 }
 
 shared {
+    #include "lib/atmosphere/textured_clouds.glsl"
+    #include "lib/atmosphere/solar.glsl"
+    uniform sampler2D openmwseSunGlareTexture;
+
+    /// Reconstruct a normalized world direction independently of the sampled scene depth.
+    vec3 sunlightWorldDirection(vec2 uv)
+    {
+        vec4 view = omw.invProjectionMatrix * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+        return normalize((omw.invViewMatrix * vec4(normalize(view.xyz), 0.0)).xyz);
+    }
+
     // World reconstruction and linear depth helpers abstract the active depth convention. Distances are world units;
     // lighting and pass outputs remain scene-linear HDR until the normal post-processing tonemap.
     /// Expose canonical cloud controls to the shared cloud implementation.
@@ -138,6 +149,8 @@ shared {
     OpenMWSEAerialPerspectiveParameters aerialPerspectiveParameters()
     {
         OpenMWSEAerialPerspectiveParameters parameters;
+        parameters.scatteringEnabled = omw.atmosphereScatteringEnabled;
+        parameters.appearance = omw.atmosphereAppearance;
         parameters.inScattering = omw.atmosphereInScattering;
         parameters.outScattering = omw.atmosphereOutScattering;
         parameters.skyColor = omw.skyColor.rgb;
@@ -243,7 +256,7 @@ shared {
     /// Project the world-space sun direction into post-process texture coordinates.
     vec2 projectedSun()
     {
-        vec4 viewSun = omw.viewMatrix * vec4(normalize(omw.sunPos.xyz), 0.0);
+        vec4 viewSun = omw.viewMatrix * vec4(openmwseApparentSunDirection(normalize(omw.sunPos.xyz)), 0.0);
         vec4 clipSun = omw_ProjectionMatrix() * viewSun;
         return clipSun.xy / max(clipSun.w, 0.0001) * 0.5 + 0.5;
     }
@@ -582,16 +595,52 @@ render_target AtmosphereVolumeMetadataReprojected {
     clear_color = vec4(1.0, 0.0, 1.0, 0.0);
 }
 
-render_target AtmosphereShafts {
-    width_ratio = 0.25;
-    height_ratio = 0.25;
-    internal_format = rgb16f;
+render_target AtmosphereShaftMask {
+    width_ratio = 0.5;
+    height_ratio = 0.5;
+    internal_format = rgba16f;
     source_type = half_float;
-    source_format = rgb;
+    source_format = rgba;
     mipmaps = false;
     min_filter = linear;
     mag_filter = linear;
-    clear_color = vec4(0.0, 0.0, 0.0, 1.0);
+    clear_color = vec4(0.0, 0.0, 0.0, 0.0);
+}
+
+render_target AtmosphereShaftSource {
+    width_ratio = 0.5;
+    height_ratio = 0.5;
+    internal_format = rgba16f;
+    source_type = half_float;
+    source_format = rgba;
+    mipmaps = false;
+    min_filter = linear;
+    mag_filter = linear;
+    clear_color = vec4(0.0, 0.0, 0.0, 0.0);
+}
+
+render_target AtmosphereShaftRays {
+    width_ratio = 1.0;
+    height_ratio = 1.0;
+    internal_format = rgba16f;
+    source_type = half_float;
+    source_format = rgba;
+    mipmaps = false;
+    min_filter = linear;
+    mag_filter = linear;
+    clear_color = vec4(0.0, 0.0, 0.0, 0.0);
+}
+
+render_target AtmosphereShafts {
+    width_ratio = 1.0;
+    height_ratio = 1.0;
+    internal_format = rgba16f;
+    source_type = half_float;
+    source_format = rgba;
+    mipmaps = false;
+    min_filter = linear;
+    mag_filter = linear;
+    clear_color = vec4(0.0, 0.0, 0.0, 0.0);
 }
 
 vertex integrateAtmosphereVolume {
@@ -913,65 +962,119 @@ fragment resolveAtmosphereVolumeHistory(
     }
 }
 
-fragment integrateShafts(target=AtmosphereShafts, rt1=AtmosphereVolumeHistory) {
+fragment prepareShaftSource(target=AtmosphereShaftMask, rt1=AtmosphereVolumeHistory) {
     omw_In vec2 omw_TexCoord;
 
+    /// Extend the reference depth source through native volumetric clouds without changing textured-sky behavior.
+    float shaftSourceVisibility(vec2 uv)
+    {
+        if (!atmosphereDepthIsClear(uv))
+            return 0.0;
+        if (omw.atmosphereEnabled && omw.volumetricCloudsEnabled)
+            return clamp(omw_Texture2D(AtmosphereVolumeHistory, uv).a, 0.0, 1.0);
+        return 1.0;
+    }
+
+    /// Downsample the scene's clear-depth mask over the same four source pixels used by MGE XE.
     void main()
     {
         vec4 viewSun = omw.viewMatrix * vec4(normalize(omw.sunPos.xyz), 0.0);
+        float visible = 0.0;
+        if (omw.godraysEnabled && (omw.atmosphereEnabled || omw.sunlightEnabled) && viewSun.z < 0.0)
+        {
+            vec2 corner = omw_TexCoord - 0.5 * omw.rcpResolution;
+            visible += 0.25 * shaftSourceVisibility(corner);
+            visible += 0.25 * shaftSourceVisibility(corner + vec2(omw.rcpResolution.x, 0.0));
+            visible += 0.25 * shaftSourceVisibility(corner + vec2(0.0, omw.rcpResolution.y));
+            visible += 0.25 * shaftSourceVisibility(corner + omw.rcpResolution);
+        }
+        omw_FragColor = vec4(0.0, 0.0, 0.0, visible);
+    }
+}
+
+fragment filterShaftSource(target=AtmosphereShaftSource, rt1=AtmosphereShaftMask) {
+    omw_In vec2 omw_TexCoord;
+
+    /// Apply MGE's radial five-tap source filter in full-frame UV coordinates.
+    void main()
+    {
+        vec2 offset = omw_TexCoord - projectedSun();
+        vec2 radial = offset / max(length(offset), 0.000001) * 2.0 * omw.rcpResolution.yx;
+        float visibility = omw_Texture2D(AtmosphereShaftMask, omw_TexCoord).a * 0.3333;
+        visibility += (omw_Texture2D(AtmosphereShaftMask, omw_TexCoord + radial).a
+            + omw_Texture2D(AtmosphereShaftMask, omw_TexCoord - radial).a) * 0.2222;
+        visibility += (omw_Texture2D(AtmosphereShaftMask, omw_TexCoord + 2.0 * radial).a
+            + omw_Texture2D(AtmosphereShaftMask, omw_TexCoord - 2.0 * radial).a) * 0.1111;
+        omw_FragColor = vec4(0.0, 0.0, 0.0, visibility);
+    }
+}
+
+fragment integrateShafts(target=AtmosphereShaftRays, rt1=AtmosphereShaftSource) {
+    omw_In vec2 omw_TexCoord;
+
+    /// Reconstruct MGE XE's finite solar emitter, radial falloff, off-screen fade, and unassociated ray color.
+    void main()
+    {
+        vec4 viewSun = omw.viewMatrix * vec4(normalize(omw.sunPos.xyz), 0.0);
+        if (!omw.godraysEnabled || !(omw.atmosphereEnabled || omw.sunlightEnabled) || viewSun.z >= 0.0)
+        {
+            omw_FragColor = vec4(0.0);
+            return;
+        }
         vec2 sunUv = projectedSun();
-        bool sunOnScreen = sunUv.x >= 0.0 && sunUv.x <= 1.0
-            && sunUv.y >= 0.0 && sunUv.y <= 1.0;
-        float shaftIntensity = omw.atmosphereMistParameters.w * omw.sunVis;
-        if (!omw.atmosphereEnabled || viewSun.z >= 0.0 || !sunOnScreen || shaftIntensity <= 0.001)
+        vec2 screenMargin = vec2(0.5) - abs(sunUv - vec2(0.5));
+        vec2 edgeVisibility = smoothstep(vec2(-0.5), vec2(0.0), screenMargin);
+        // MGE's engine lifts post-process sun visibility in fair weather before running Sunshafts.fx.
+        float visibility = mix(clamp(omw.sunVis, 0.0, 1.0), 1.0,
+            0.333 * clamp(omw.atmosphereWeatherWeight, 0.0, 1.0));
+        float strength = 1.7 * visibility * (2.0 - visibility) * edgeVisibility.x * edgeVisibility.y
+            * max(omw.atmosphereMistParameters.w, 0.0);
+        if (strength <= 0.000001)
         {
             omw_FragColor = vec4(0.0);
             return;
         }
-
-        float sourceTransmittance = omw_Texture2D(AtmosphereVolumeHistory, sunUv).a;
-        if (!atmosphereDepthIsClear(sunUv) || sourceTransmittance <= 0.001)
+        vec2 offset = omw_TexCoord - sunUv;
+        float distance = length(offset * vec2(1.0, omw.resolution.y / omw.resolution.x));
+        vec2 direction = offset / max(distance, 0.000001);
+        float emitterRadius = min(0.25, distance);
+        float illumination = 0.0;
+        for (int sampleIndex = 1; sampleIndex <= 20; ++sampleIndex)
         {
-            omw_FragColor = vec4(0.0);
-            return;
+            float radius = emitterRadius * (float(sampleIndex) / 20.0);
+            vec2 sourceUv = clamp(sunUv + direction * radius, vec2(0.0), vec2(1.0));
+            float sourceVisibility = omw_Texture2D(AtmosphereShaftSource, sourceUv).a;
+            float attenuation = exp(-1.10 * (distance - radius) / (0.125 + radius));
+            float emitterFalloff = pow(max(1.0 - radius / 0.25, 0.0), 1.5);
+            illumination += sourceVisibility * attenuation * emitterFalloff;
         }
+        float opacity = illumination * (strength / 20.0) * (0.3 + 0.7 * distance / 0.25);
+        vec3 color = omw.sunColor.rgb * vec3(1.0, 0.8, 0.8) * (1.0 + 1.25 * opacity * opacity * opacity);
+        omw_FragColor = vec4(color, opacity);
+    }
+}
 
-        const int maximumSampleCount = 36;
-        int sampleCount = 12 + omw.atmosphereQuality * 8;
-        vec2 radialStep = (sunUv - omw_TexCoord) / float(sampleCount);
-        float sampleJitter = openmwseRayMarchDither(gl_FragCoord.xy);
-        vec2 sampleUv = omw_TexCoord + radialStep * sampleJitter;
-        float visibility = 0.0;
-        float weight = 1.0;
-        float weightSum = 0.0;
-        for (int sampleIndex = 0; sampleIndex < maximumSampleCount; ++sampleIndex)
-        {
-            if (sampleIndex >= sampleCount)
-                break;
-            sampleUv += radialStep;
-            float openSky = atmosphereDepthIsClear(sampleUv) ? 1.0 : 0.0;
-            float volumeTransmittance = omw_Texture2D(AtmosphereVolumeHistory, sampleUv).a;
-            visibility += openSky * volumeTransmittance * weight;
-            weightSum += weight;
-            weight *= 0.94;
-        }
+fragment filterShaftRays(target=AtmosphereShafts, rt1=AtmosphereShaftRays) {
+    omw_In vec2 omw_TexCoord;
 
-        float sunSignal = clamp(
-            (luminance(omw_GetLastShader(sunUv).rgb)
-                - luminance(omw.skyColor.rgb) * 0.35) * 0.65,
-            0.0, 1.0);
-        sunSignal *= sourceTransmittance;
-        float distanceFade = 1.0 - smoothstep(0.15, 1.15, length(omw_TexCoord - sunUv));
-        float rayStrength
-            = visibility / max(weightSum, 0.001) * sunSignal * shaftIntensity * distanceFade * 0.16;
-        vec3 rayColor = omw.atmosphereSolarRadiance;
-        omw_FragColor = vec4(rayColor * rayStrength, 1.0);
+    /// Smooth ray edges tangentially with MGE's full-resolution five-tap filter.
+    void main()
+    {
+        vec2 offset = omw_TexCoord - projectedSun();
+        vec2 tangent = offset.yx / max(length(offset), 0.000001) * vec2(omw.rcpResolution.y, -omw.rcpResolution.x);
+        vec4 rays = omw_Texture2D(AtmosphereShaftRays, omw_TexCoord) * 0.3333;
+        rays += (omw_Texture2D(AtmosphereShaftRays, omw_TexCoord + tangent)
+            + omw_Texture2D(AtmosphereShaftRays, omw_TexCoord - tangent)) * 0.2222;
+        rays += (omw_Texture2D(AtmosphereShaftRays, omw_TexCoord + 2.0 * tangent)
+            + omw_Texture2D(AtmosphereShaftRays, omw_TexCoord - 2.0 * tangent)) * 0.1111;
+        omw_FragColor = rays;
     }
 }
 
 fragment composite(rt1=AtmosphereVolumeHistory, rt2=AtmosphereShafts, rt3=AtmosphereVolumeMetadataHistory) {
     omw_In vec2 omw_TexCoord;
 
+    /// Compose scene-linear media and independent solar effects while preserving full-resolution geometry and alpha.
     void main()
     {
         vec4 baseColor = omw_GetLastShader(omw_TexCoord);
@@ -1021,19 +1124,60 @@ fragment composite(rt1=AtmosphereVolumeHistory, rt2=AtmosphereShafts, rt3=Atmosp
         if (!finiteVolume || missingVolume)
             volume = vec4(0.0, 0.0, 0.0, 1.0);
 
-        vec3 shafts = omw_Texture2D(AtmosphereShafts, omw_TexCoord).rgb;
-        vec3 composedColor = baseColor.rgb * volume.a + volume.rgb + shafts;
+        vec3 composedColor = baseColor.rgb * volume.a + volume.rgb;
+        vec4 shafts = omw_Texture2D(AtmosphereShafts, omw_TexCoord);
+        if (omw.godraysEnabled && shafts.a > 0.000001)
+            composedColor = clamp(composedColor * clamp(1.0 - 0.75 * shafts.a, 0.0, 1.0)
+                + shafts.rgb * shafts.a, vec3(0.0), vec3(1.0));
+        if (centerOpenSky && omw.sunlightEnabled)
+        {
+            vec3 direction = sunlightWorldDirection(omw_TexCoord);
+            float texturedTransmission = openmwseTexturedCloudViewTransmittance(direction);
+            float solarTransmission = omw.cloudSunOcclusion ? volume.a * texturedTransmission : 1.0;
+            composedColor += openmwseSolarDisc(direction, omw.sunPos.xyz, omw.atmosphereSunDiscColor)
+                * solarTransmission;
+            if (omw.cloudSunOcclusion && openmwseTexturedCloudsEnabled)
+                composedColor += openmwseTexturedCloudBloom(direction,
+                    normalize(omw.sunPos.xyz), omw.atmosphereSunDiscColor) * volume.a;
+            if (omw.sunGlareEnabled)
+            {
+                vec2 sunUv = projectedSun();
+                vec4 viewSun = omw.viewMatrix * vec4(normalize(omw.sunPos.xyz), 0.0);
+                vec2 angularOffset = (omw_TexCoord - sunUv) * vec2(omw.resolution.x / omw.resolution.y, 1.0);
+                vec2 glareUv = angularOffset / 0.22 + 0.5;
+                if (viewSun.z < 0.0 && all(greaterThanEqual(glareUv, vec2(0.0)))
+                    && all(lessThanEqual(glareUv, vec2(1.0))))
+                {
+                    float sourceVisibility = 0.0;
+                    for (int sampleIndex = 0; sampleIndex < 9; ++sampleIndex)
+                    {
+                        float angle = float(sampleIndex - 1) * 0.785398163;
+                        vec2 offset = sampleIndex == 0 ? vec2(0.0) : vec2(cos(angle), sin(angle));
+                        mat4 projection = omw_ProjectionMatrix();
+                        vec2 sourceUv = sunUv + offset * vec2(projection[0][0], projection[1][1]) * 0.012;
+                        if (all(greaterThanEqual(sourceUv, vec2(0.0))) && all(lessThanEqual(sourceUv, vec2(1.0)))
+                            && atmosphereDepthIsClear(sourceUv))
+                            sourceVisibility += omw_Texture2D(AtmosphereVolumeHistory, sourceUv).a
+                                * openmwseTexturedCloudViewTransmittance(sunlightWorldDirection(sourceUv));
+                    }
+                    vec4 glare = texture2D(openmwseSunGlareTexture, glareUv);
+                    composedColor += glare.rgb * glare.a * omw.atmosphereSunDiscColor.rgb
+                        * omw.atmosphereSunDiscColor.a * (sourceVisibility / 9.0)
+                        * texturedTransmission * volume.a;
+                }
+            }
+        }
         omw_FragColor = vec4(composedColor, baseColor.a);
     }
 }
 
 technique {
     passes = integrateAtmosphereVolume, reprojectAtmosphereVolume, resolveAtmosphereVolumeHistory,
-        integrateShafts, composite;
+        prepareShaftSource, filterShaftSource, integrateShafts, filterShaftRays, composite;
     description = "Native OpenMWSE atmospheric clouds, mist, and sun shafts";
     version = "1.0";
     author = "OpenMWSE contributors";
-    flags = disable_interiors, disable_underwater, disable_sunglare, hidden;
+    flags = disable_interiors, disable_underwater, hidden;
     glsl_extensions = GL_EXT_gpu_shader4;
     pass_lights = true;
 }

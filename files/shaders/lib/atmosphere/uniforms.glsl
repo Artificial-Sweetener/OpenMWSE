@@ -10,6 +10,13 @@ struct Atmosphere
     vec4 terrainOriginSpacing;
     vec2 terrainHeightBounds;
     bool enabled;
+    bool scatteringEnabled;
+    int appearance;
+    bool sunlightEnabled;
+    bool cloudSunOcclusion;
+    bool cloudsEnabled;
+    bool cloudShadowsEnabled;
+    bool cloudReflectionsEnabled;
     vec4 skyColor;
     vec3 inScattering;
     vec3 outScattering;

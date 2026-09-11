@@ -19,7 +19,7 @@ namespace SceneUtil
     StateUpdater::StateUpdater(osg::Texture3D* atmosphereNoiseTexture, int atmosphereNoiseTextureUnit,
         osg::Texture3D* atmosphereDetailNoiseTexture, int atmosphereDetailNoiseTextureUnit,
         osg::Texture2D* atmosphereCurlNoiseTexture, int atmosphereCurlNoiseTextureUnit,
-        osg::Texture2D* atmosphereWeatherTexture, int atmosphereWeatherTextureUnit)
+        osg::Texture2D* atmosphereWeatherTexture, int atmosphereWeatherTextureUnit, int texturedCloudTextureUnit)
         : mAtmosphereNoiseTexture(atmosphereNoiseTexture)
         , mAtmosphereNoiseTextureUnit(atmosphereNoiseTextureUnit)
         , mAtmosphereDetailNoiseTexture(atmosphereDetailNoiseTexture)
@@ -28,6 +28,7 @@ namespace SceneUtil
         , mAtmosphereCurlNoiseTextureUnit(atmosphereCurlNoiseTextureUnit)
         , mAtmosphereWeatherTexture(atmosphereWeatherTexture)
         , mAtmosphereWeatherTextureUnit(atmosphereWeatherTextureUnit)
+        , mTexturedCloudTextureUnit(texturedCloudTextureUnit)
     {
     }
 
@@ -202,6 +203,14 @@ namespace SceneUtil
         stateset->addUniform(terrainHeights);
         stateset->addUniform(new osg::Uniform("atmosphere.terrainOriginSpacing", mAtmosphereTerrain.mOriginSpacing));
         stateset->addUniform(new osg::Uniform("atmosphere.terrainHeightBounds", mAtmosphereTerrain.mHeightBounds));
+        stateset->addUniform(new osg::Uniform("atmosphere.scatteringEnabled", mAtmosphereScatteringEnabled));
+        stateset->addUniform(new osg::Uniform("atmosphere.appearance", mAtmosphereAppearance));
+        stateset->addUniform(new osg::Uniform("atmosphere.sunlightEnabled", mSunlightEnabled));
+        stateset->addUniform(new osg::Uniform("atmosphere.cloudSunOcclusion", mCloudSunOcclusion));
+        stateset->addUniform(new osg::Uniform("atmosphere.cloudsEnabled", mAtmosphereCloudsEnabled));
+        stateset->addUniform(new osg::Uniform("atmosphere.cloudShadowsEnabled", mAtmosphereCloudShadowsEnabled));
+        stateset->addUniform(
+            new osg::Uniform("atmosphere.cloudReflectionsEnabled", mAtmosphereCloudReflectionsEnabled));
         stateset->addUniform(new osg::Uniform("atmosphere.enabled", mAtmosphereEnabled));
         stateset->addUniform(new osg::Uniform("atmosphere.skyColor", mAtmosphereSkyColor));
         stateset->addUniform(new osg::Uniform("atmosphere.inScattering", mAtmosphereInScattering));
@@ -255,6 +264,16 @@ namespace SceneUtil
         SceneUtil::updateUnderwaterFogStart(*stateset, mUnderwaterFogStart);
         SceneUtil::updateUnderwaterFogEnd(*stateset, mUnderwaterFogEnd);
 
+        stateset->getUniform("atmosphere.scatteringEnabled")->set(mAtmosphereScatteringEnabled);
+        stateset->getUniform("atmosphere.appearance")->set(mAtmosphereAppearance);
+        stateset->getUniform("atmosphere.sunlightEnabled")->set(mSunlightEnabled);
+        stateset->getUniform("atmosphere.cloudSunOcclusion")->set(mCloudSunOcclusion);
+        if (mTexturedCloudTextureUnit >= 0)
+            applyTexturedCloudState(
+                *stateset, mTexturedClouds, mTexturedCloudTextureUnit, mTexturedCloudTextureUnit + 1);
+        stateset->getUniform("atmosphere.cloudsEnabled")->set(mAtmosphereCloudsEnabled);
+        stateset->getUniform("atmosphere.cloudShadowsEnabled")->set(mAtmosphereCloudShadowsEnabled);
+        stateset->getUniform("atmosphere.cloudReflectionsEnabled")->set(mAtmosphereCloudReflectionsEnabled);
         stateset->getUniform("atmosphere.enabled")->set(mAtmosphereEnabled);
         stateset->getUniform("atmosphere.skyColor")->set(mAtmosphereSkyColor);
         stateset->getUniform("atmosphere.inScattering")->set(mAtmosphereInScattering);
@@ -309,6 +328,14 @@ namespace SceneUtil
     void StateUpdater::setFogEnd(float end)
     {
         mFogEnd = end;
+    }
+
+    void StateUpdater::setAtmosphereFeatures(bool scattering, bool clouds, bool shadows, bool reflections)
+    {
+        mAtmosphereScatteringEnabled = scattering;
+        mAtmosphereCloudsEnabled = clouds;
+        mAtmosphereCloudShadowsEnabled = shadows;
+        mAtmosphereCloudReflectionsEnabled = reflections;
     }
 
     void StateUpdater::setAtmosphere(bool enabled, const osg::Vec4f& skyColor, const osg::Vec3f& inScattering,

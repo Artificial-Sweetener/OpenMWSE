@@ -3,6 +3,7 @@
 
 #include "atmosphereterraingrid.hpp"
 #include "cloudlayer.hpp"
+#include "texturedclouds.hpp"
 
 #include <osg/Matrixf>
 #include <osg/Texture2D>
@@ -92,7 +93,8 @@ namespace SceneUtil
         StateUpdater(osg::Texture3D* atmosphereNoiseTexture = nullptr, int atmosphereNoiseTextureUnit = -1,
             osg::Texture3D* atmosphereDetailNoiseTexture = nullptr, int atmosphereDetailNoiseTextureUnit = -1,
             osg::Texture2D* atmosphereCurlNoiseTexture = nullptr, int atmosphereCurlNoiseTextureUnit = -1,
-            osg::Texture2D* atmosphereWeatherTexture = nullptr, int atmosphereWeatherTextureUnit = -1);
+            osg::Texture2D* atmosphereWeatherTexture = nullptr, int atmosphereWeatherTextureUnit = -1,
+            int texturedCloudTextureUnit = -1);
 
         /// Initialize scene uniforms, including independent shape motion derived from the coverage phase.
         void setDefaults(osg::StateSet* stateset) override;
@@ -115,6 +117,22 @@ namespace SceneUtil
         /// Publish fixed world terrain samples to all cloud consumers, including reflected views.
         void setAtmosphereTerrain(const AtmosphereTerrainGrid& terrain) { mAtmosphereTerrain = terrain; }
 
+        /// Select atmospheric rendering features without changing the shared weather field.
+        void setAtmosphereFeatures(bool scattering, bool clouds, bool shadows, bool reflections);
+
+        /// Publish the authored cloud field without sharing mutable frame state.
+        void setTexturedClouds(const TexturedCloudState& clouds) { mTexturedClouds = clouds; }
+
+        /// Select native solar compositing independently of scattering and volume rendering.
+        void setSunlightEnabled(bool enabled) { mSunlightEnabled = enabled; }
+
+        /// Select solar transmission through both cloud representations.
+        void setCloudSunOcclusion(bool enabled) { mCloudSunOcclusion = enabled; }
+
+        /// Select the shared atmosphere color response without changing extinction or weather.
+        void setAtmosphereAppearance(int appearance) { mAtmosphereAppearance = appearance; }
+
+        /// Publish the current exterior atmosphere and volume lighting.
         void setAtmosphere(bool enabled, const osg::Vec4f& skyColor, const osg::Vec3f& inScattering,
             const osg::Vec3f& outScattering, float weatherWeight, const osg::Vec3f& sunDirection,
             const osg::Vec4f& cloudParameters, const osg::Vec4f& incomingCloudParameters,
@@ -149,11 +167,20 @@ namespace SceneUtil
         int mAtmosphereCurlNoiseTextureUnit = -1;
         osg::ref_ptr<osg::Texture2D> mAtmosphereWeatherTexture;
         int mAtmosphereWeatherTextureUnit = -1;
+        int mTexturedCloudTextureUnit = -1;
+        TexturedCloudState mTexturedClouds;
+        bool mSunlightEnabled = false;
+        bool mCloudSunOcclusion = true;
         osg::Vec4f mAmbientColor;
         osg::Vec4f mFogColor;
         float mFogStart = 0.f;
         float mFogEnd = 0.f;
         bool mAtmosphereEnabled = false;
+        bool mAtmosphereScatteringEnabled = true;
+        int mAtmosphereAppearance = 0;
+        bool mAtmosphereCloudsEnabled = true;
+        bool mAtmosphereCloudShadowsEnabled = true;
+        bool mAtmosphereCloudReflectionsEnabled = true;
         osg::Vec4f mAtmosphereSkyColor;
         osg::Vec3f mAtmosphereInScattering;
         osg::Vec3f mAtmosphereOutScattering;

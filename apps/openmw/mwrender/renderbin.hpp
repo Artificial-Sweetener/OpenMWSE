@@ -16,8 +16,9 @@ namespace MWRender
         RenderBin_FirstPerson = 12,
         RenderBin_SunGlare = 13,
         RenderBin_Distortion = 14,
+        // Nested within the sky bin, after the cloud meshes' transparent bins.
+        RenderBin_SkySun = 20,
     };
-
 }
 
 #endif

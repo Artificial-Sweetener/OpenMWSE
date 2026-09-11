@@ -11,6 +11,15 @@ Water Settings
    and some deep water visible from your location to test deep water visibility.
 
 .. omw-setting::
+   :title: reflect clouds
+   :type: boolean
+   :range: true, false
+   :default: true
+   :location: :bdg-info:`In Game > Settings > Video > Water`
+
+   Includes clouds in water reflections without disabling reflected sky or landscape. Applies immediately and requires water shaders.
+
+.. omw-setting::
    :title: shader
    :type: boolean
    :range: true, false

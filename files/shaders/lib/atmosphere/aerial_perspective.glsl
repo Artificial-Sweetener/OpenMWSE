@@ -6,6 +6,8 @@
 /// Carry canonical scene-linear atmosphere state into shared aerial-perspective equations.
 struct OpenMWSEAerialPerspectiveParameters
 {
+    bool scatteringEnabled;
+    int appearance;
     vec3 inScattering;
     vec3 outScattering;
     vec3 skyColor;
@@ -188,6 +190,10 @@ vec2 openmwseAtmosphereMeanLayerDensities(float startHeight, float endHeight)
 float openmwseFogOpticalDistance(float distanceFromEye, vec3 worldDirection,
     OpenMWSEAerialPerspectiveParameters parameters)
 {
+    if (!parameters.scatteringEnabled || parameters.appearance == 1)
+        return parameters.exponentialFog > 0.5
+            ? openmwseExponentialFogOpticalDistance(distanceFromEye, parameters.fogStart, parameters.fogEnd)
+            : openmwseLinearFogOpticalDistance(distanceFromEye, parameters.fogStart, parameters.fogEnd);
     float exponential = step(0.5, parameters.exponentialFog);
     float curveStart = parameters.fogStart / mix(1.0, 4.4, exponential);
     float curveRange = max((parameters.fogEnd - curveStart) / mix(1.0, 4.4, exponential), 1e-4);
@@ -215,10 +221,12 @@ float openmwseFogVisibility(float opticalDistance, OpenMWSEAerialPerspectivePara
     return mix(linearVisibility, exponentialVisibility, step(0.5, parameters.exponentialFog));
 }
 
-/// Evaluate MGE-derived in-scattering with cool upper twilight, a warm horizon, and bounded diffuse highlights.
+/// Evaluate the original MGE-style color response or its native twilight and highlight refinements.
 vec3 openmwseAtmosphereScatteredLight(vec3 worldDirection, float opticalDistance, float visibility,
     vec3 baseColor, OpenMWSEAerialPerspectiveParameters parameters)
 {
+    if (!parameters.scatteringEnabled)
+        return baseColor * (1.0 - visibility);
     worldDirection = normalize(worldDirection);
     vec3 sunDirection = normalize(parameters.sunDirection);
     float sunCosine = dot(worldDirection, sunDirection);
@@ -240,6 +248,9 @@ vec3 openmwseAtmosphereScatteredLight(vec3 worldDirection, float opticalDistance
     vec3 diffuseSkyColor = mix(parameters.skyColor, vec3(0.371, 0.637, 1.108), 0.44);
     vec3 scatteredColor = vec3(0.125 * forwardScatter) + diffuseSkyColor * diffuseScatter;
     scatteredColor *= integratedAttenuation * (1.17 * atmosphereDepth + 0.89) * altitudeBrightness;
+    // Preserve the original parity response from 15ee5e5d84 before the native color refinements.
+    if (parameters.appearance == 1)
+        return mix(baseColor * (1.0 - visibility), scatteredColor, parameters.weatherWeight);
     if (sunHeight < 0.34)
     {
         // Long horizontal paths redden the horizon; upper twilight retains the diffuse sky chromaticity.
@@ -337,6 +348,10 @@ vec3 openmwseAtmosphereSkyRadiance(
     float skyAmount = 1.0 - pow(
         clamp(1.0 - 2.22 * clamp(worldDirection.z - 0.075, 0.0, 1.0), 0.0, 1.0), 1.15);
     vec3 directionalSky = mix(parameters.fogColor, parameters.skyColor, skyAmount);
+    if (!parameters.scatteringEnabled)
+        return directionalSky;
+    if (parameters.appearance == 1)
+        return openmwseAtmosphereScatteredLight(worldDirection, 1.0, 0.0, directionalSky, parameters);
     float clearAirRecovery = openmwseClearAirRecovery(parameters);
     parameters.solarRadiance = openmwseClearAirSolarRadiance(parameters.solarRadiance, parameters);
     parameters.skyIrradiance = openmwseClearAirSkyIrradiance(parameters.skyIrradiance, parameters);

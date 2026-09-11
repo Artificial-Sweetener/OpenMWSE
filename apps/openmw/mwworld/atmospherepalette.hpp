@@ -20,6 +20,14 @@ namespace MWWorld
     struct AtmosphereEnvironmentState;
     class Weather;
 
+    /// Select the environmental colors or the original regional MGE XE parity palettes.
+    enum class AtmosphereColorSource
+    {
+        Environment,
+        Region
+    };
+
+    /// Own weather colors independently of environment-driven cloud formation.
     class AtmospherePalette
     {
     public:
@@ -31,6 +39,11 @@ namespace MWWorld
 
         AtmospherePalette(const AtmospherePalette&) = delete;
         AtmospherePalette& operator=(const AtmospherePalette&) = delete;
+
+        /// Select the color family without resetting either palette trajectory or cloud state.
+        void setColorSource(AtmosphereColorSource source);
+        /// Advance toward the original palette assigned to this content region, or the default for unknown regions.
+        void setRegion(std::string_view regionId);
 
         /// Select a continuous environment-derived palette and volume target.
         void setEnvironment(const AtmosphereEnvironmentState& environment);

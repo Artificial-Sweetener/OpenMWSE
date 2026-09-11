@@ -18,8 +18,16 @@ namespace OMW
             .mViewingDistance = Settings::camera().mViewingDistance,
             .mFieldOfView = Settings::camera().mFieldOfView,
             .mReverseZ = Settings::camera().mReverseZ,
-            .mAtmosphericEffects = Settings::shaders().mAtmosphericEffects,
+            .mAtmosphericEffects = Settings::shaders().mAtmosphericScattering || Settings::shaders().mVolumetricClouds,
+            .mAtmosphericScattering = Settings::shaders().mAtmosphericScattering,
+            .mVolumetricClouds = Settings::shaders().mVolumetricClouds,
+            .mCloudShadows = shadows.mCloudShadows,
+            .mReflectClouds = Settings::water().mReflectClouds,
             .mAtmosphericQuality = Settings::shaders().mAtmosphericQuality,
+            .mAtmosphereAppearance = Settings::shaders().mAtmosphereAppearance,
+            .mGodrays = Settings::shaders().mGodrays,
+            .mSunGlare = Settings::shaders().mSunGlare,
+            .mCloudSunOcclusion = Settings::shaders().mCloudSunOcclusion,
             .mShadowsEnabled = shadows.mEnableShadows,
             .mShadowMapCount = shadows.mNumberOfShadowMaps,
             .mMaximumShadowMapDistance = shadows.mMaximumShadowMapDistance,
@@ -52,7 +60,15 @@ namespace OMW
                << "\n  field-of-view: " << configuration.mFieldOfView
                << "\n  reverse-z: " << boolean(configuration.mReverseZ)
                << "\nshaders:\n  atmospheric-effects: " << boolean(configuration.mAtmosphericEffects)
+               << "\n  atmospheric-scattering: " << boolean(configuration.mAtmosphericScattering)
+               << "\n  volumetric-clouds: " << boolean(configuration.mVolumetricClouds)
+               << "\n  cloud-shadows: " << boolean(configuration.mCloudShadows)
+               << "\n  reflect-clouds: " << boolean(configuration.mReflectClouds)
                << "\n  atmospheric-quality: " << configuration.mAtmosphericQuality
+               << "\n  atmosphere-appearance: " << configuration.mAtmosphereAppearance
+               << "\n  godrays: " << boolean(configuration.mGodrays)
+               << "\n  sun-glare: " << boolean(configuration.mSunGlare)
+               << "\n  cloud-sun-occlusion: " << boolean(configuration.mCloudSunOcclusion)
                << "\nshadows:\n  enabled: " << boolean(configuration.mShadowsEnabled)
                << "\n  map-count: " << configuration.mShadowMapCount
                << "\n  maximum-distance: " << configuration.mMaximumShadowMapDistance

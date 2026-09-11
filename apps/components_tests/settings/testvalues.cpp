@@ -1,6 +1,14 @@
+#include "components/files/configurationmanager.hpp"
 #include "components/misc/strings/conversion.hpp"
+#include "components/settings/atmospheremigration.hpp"
 #include "components/settings/parser.hpp"
 #include "components/settings/values.hpp"
+#include "components/testing/util.hpp"
+
+#include <boost/program_options/options_description.hpp>
+#include <boost/program_options/variables_map.hpp>
+
+#include <fstream>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -15,8 +23,112 @@ namespace Settings
     {
         using namespace testing;
 
+        /// Exercise startup and persistence against the installed defaults with isolated user configuration layers.
+        struct SettingsStartupTest : Test
+        {
+            std::filesystem::path mDirectory;
+            CategorySettingValueMap mSavedDefaults;
+            CategorySettingValueMap mSavedUserSettings;
+            CategorySettingVector mSavedChanges;
+
+            /// Keep every writable configuration path inside the test directory.
+            void SetUp() override
+            {
+                mSavedDefaults = Manager::mDefaultSettings;
+                mSavedUserSettings = Manager::mUserSettings;
+                mSavedChanges = Manager::mChangedSettings;
+                Manager::clear();
+                mDirectory = TestingOpenMW::currentTestDirPath();
+                std::ofstream(mDirectory / "openmw.cfg");
+            }
+
+            /// Restore the process-wide settings used by subsequent rendering tests, including their static index.
+            void TearDown() override
+            {
+                Manager::clear();
+                Manager::mDefaultSettings = std::move(mSavedDefaults);
+                StaticValues::initDefaults();
+                Manager::mUserSettings = std::move(mSavedUserSettings);
+                StaticValues::init();
+                Manager::mChangedSettings = std::move(mSavedChanges);
+            }
+
+            /// Load the same defaults and settings path used by the launcher without reading the personal profile.
+            void load()
+            {
+                Manager::clear();
+                Files::ConfigurationManager config(true);
+                boost::program_options::options_description description;
+                Files::ConfigurationManager::addCommonOptions(description);
+                boost::program_options::variables_map variables;
+                const std::string path = mDirectory.string();
+                const char* args[] = { "settings-startup-test", "--replace", "config", "--config", path.c_str(),
+                    "--user-data", path.c_str() };
+                Files::parseArgs(static_cast<int>(std::size(args)), args, variables, description);
+                config.readConfiguration(variables, description, true);
+                ASSERT_EQ(config.getUserConfigPath(), mDirectory);
+                ASSERT_EQ(Manager::load(config), mDirectory / "settings.cfg");
+            }
+        };
+
+        TEST_F(SettingsStartupTest, loadsExistingConfigurationWithoutAtmospherePreferences)
+        {
+            std::ofstream(mDirectory / "settings.cfg") << "[Camera]\nfield of view = 77\n";
+            ASSERT_NO_FATAL_FAILURE(load());
+            EXPECT_EQ(camera().mFieldOfView.get(), 77);
+            EXPECT_TRUE(shaders().mAtmosphericScattering);
+            EXPECT_TRUE(shaders().mVolumetricClouds);
+            EXPECT_EQ(shaders().mAtmosphericQuality.get(), 2);
+            EXPECT_EQ(shaders().mAtmosphereAppearance.get(), 0);
+            EXPECT_TRUE(shaders().mGodrays);
+            EXPECT_FALSE(shaders().mSunGlare);
+            EXPECT_TRUE(shaders().mCloudSunOcclusion);
+        }
+
+        TEST_F(SettingsStartupTest, migratesLegacyDisabledAtmosphereThroughSaveAndReload)
+        {
+            std::ofstream(mDirectory / "settings.cfg")
+                << "[Shaders]\natmospheric effects = false\natmospheric quality = 1\n";
+            ASSERT_NO_FATAL_FAILURE(load());
+            EXPECT_FALSE(shaders().mAtmosphericScattering);
+            EXPECT_FALSE(shaders().mVolumetricClouds);
+            EXPECT_EQ(shaders().mAtmosphericQuality.get(), 1);
+            Manager::saveUser(mDirectory / "settings.cfg");
+            ASSERT_NO_FATAL_FAILURE(load());
+            EXPECT_FALSE(shaders().mAtmosphericScattering);
+            EXPECT_FALSE(shaders().mVolumetricClouds);
+            EXPECT_EQ(shaders().mAtmosphericQuality.get(), 1);
+        }
+
+        TEST_F(SettingsStartupTest, explicitCloudChoiceOverridesLegacyBundledPreference)
+        {
+            std::ofstream(mDirectory / "settings.cfg")
+                << "[Shaders]\natmospheric effects = false\nvolumetric clouds = true\n";
+            ASSERT_NO_FATAL_FAILURE(load());
+            EXPECT_FALSE(shaders().mAtmosphericScattering);
+            EXPECT_TRUE(shaders().mVolumetricClouds);
+        }
+
+        TEST_F(SettingsStartupTest, preservesUnrecognizedSettingsWhenSavingSharedPreferences)
+        {
+            std::ofstream(mDirectory / "settings.cfg")
+                << "[Camera]\nfield of view = 77\n[Shaders]\natmospheric scattering = false\n"
+                   "volumetric clouds = true\n[Another OpenMW Version]\nretained preference = value\n";
+            ASSERT_NO_FATAL_FAILURE(load());
+            camera().mFieldOfView.set(81);
+            Manager::saveUser(mDirectory / "settings.cfg");
+            ASSERT_NO_FATAL_FAILURE(load());
+            EXPECT_EQ(camera().mFieldOfView.get(), 81);
+            EXPECT_FALSE(shaders().mAtmosphericScattering);
+            EXPECT_TRUE(shaders().mVolumetricClouds);
+            EXPECT_EQ(Manager::getString("retained preference", "Another OpenMW Version"), "value");
+        }
+
         struct SettingsValuesTest : Test
         {
+            CategorySettingValueMap mSavedDefaults = Manager::mDefaultSettings;
+            CategorySettingValueMap mSavedUserSettings = Manager::mUserSettings;
+            CategorySettingVector mSavedChanges = Manager::mChangedSettings;
             const std::filesystem::path mSettingsDefaultPath = std::filesystem::path{ OPENMW_PROJECT_SOURCE_DIR }
                 / "files" / Misc::StringUtils::stringToU8String("settings-default.cfg");
 
@@ -28,7 +140,55 @@ namespace Settings
                 SettingsFileParser parser;
                 parser.loadSettingsFile(mSettingsDefaultPath, Manager::mDefaultSettings);
             }
+
+            /// Keep local value-construction tests from changing later tests' process-wide settings maps.
+            ~SettingsValuesTest() override
+            {
+                Manager::mDefaultSettings = std::move(mSavedDefaults);
+                Manager::mUserSettings = std::move(mSavedUserSettings);
+                Manager::mChangedSettings = std::move(mSavedChanges);
+            }
         };
+
+        TEST_F(SettingsValuesTest, atmosphereChoicesAreIndependentAndDefaultToCurrentQuality)
+        {
+            Index index;
+            Values values(index);
+            EXPECT_TRUE(values.mShaders.mAtmosphericScattering);
+            EXPECT_TRUE(values.mShaders.mVolumetricClouds);
+            EXPECT_EQ(values.mShaders.mAtmosphericQuality.get(), 2);
+            values.mShaders.mAtmosphericScattering.set(false);
+            EXPECT_TRUE(values.mShaders.mVolumetricClouds);
+            values.mShaders.mVolumetricClouds.set(false);
+            values.mShaders.mAtmosphericScattering.set(true);
+            EXPECT_FALSE(values.mShaders.mVolumetricClouds);
+            values.mShaders.mAtmosphericQuality.set(9);
+            EXPECT_EQ(values.mShaders.mAtmosphericQuality.get(), 3);
+            values.mShaders.mAtmosphericQuality.set(-1);
+            EXPECT_EQ(values.mShaders.mAtmosphericQuality.get(), 0);
+        }
+
+        TEST_F(SettingsValuesTest, migrateBundledAtmosphereWithoutOverwritingExplicitChoices)
+        {
+            Manager::mUserSettings
+                = { { { "Shaders", "atmospheric effects" }, "false" }, { { "Shaders", "volumetric clouds" }, "true" } };
+            migrateAtmosphereSettings(Manager::mUserSettings);
+            Index index;
+            Values values(index);
+            EXPECT_FALSE(values.mShaders.mAtmosphericScattering);
+            EXPECT_TRUE(values.mShaders.mVolumetricClouds);
+            EXPECT_EQ(Manager::mUserSettings.count({ "Shaders", "atmospheric effects" }), 0u);
+        }
+
+        TEST_F(SettingsValuesTest, migrateDisabledAtmosphereKeepsBothFeaturesDisabled)
+        {
+            Manager::mUserSettings = { { { "Shaders", "atmospheric effects" }, "false" } };
+            migrateAtmosphereSettings(Manager::mUserSettings);
+            Index index;
+            Values values(index);
+            EXPECT_FALSE(values.mShaders.mAtmosphericScattering);
+            EXPECT_FALSE(values.mShaders.mVolumetricClouds);
+        }
 
         TEST_F(SettingsValuesTest, shouldLoadFromSettingsManager)
         {

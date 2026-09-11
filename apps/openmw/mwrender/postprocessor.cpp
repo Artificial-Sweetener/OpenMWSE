@@ -18,6 +18,7 @@
 #include <components/misc/pathhelpers.hpp>
 #include <components/misc/strings/algorithm.hpp>
 #include <components/misc/strings/lower.hpp>
+#include <components/resource/imagemanager.hpp>
 #include <components/resource/scenemanager.hpp>
 #include <components/sceneutil/color.hpp>
 #include <components/sceneutil/deformationstats.hpp>
@@ -54,6 +55,9 @@
 
 namespace
 {
+    static_assert(Fx::StateUpdater::sTexturedCloudTextureUnit == MWRender::PostProcessor::Unit_Distortion);
+    static_assert(Fx::StateUpdater::sSunGlareTextureUnit == MWRender::PostProcessor::Unit_Normals);
+
     struct ResizedCallback : osg::GraphicsContext::ResizedCallback
     {
         ResizedCallback(MWRender::PostProcessor* postProcessor)
@@ -242,6 +246,15 @@ namespace MWRender
         osg::GraphicsContext* gc = viewer->getCamera()->getGraphicsContext();
         osg::GLExtensions* ext = gc->getState()->get<osg::GLExtensions>();
 
+        osg::ref_ptr<osg::Texture2D> sunGlare
+            = new osg::Texture2D(mRendering.getResourceSystem()->getImageManager()->getImage(
+                VFS::Path::Normalized("textures/tx_sun_flash_grey_05.dds")));
+        sunGlare->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
+        sunGlare->setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
+        sunGlare->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
+        sunGlare->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
+        mStateUpdater->setSunGlareTexture(sunGlare);
+
         mWidth = gc->getTraits()->width;
         mHeight = gc->getTraits()->height;
 
@@ -327,34 +340,11 @@ namespace MWRender
 
         populateTechniqueFiles();
 
-        if (Settings::shaders().mAtmosphericEffects)
-        {
-            auto atmosphere = loadTechnique("internal_atmosphere");
-            const int quality = Settings::shaders().mAtmosphericQuality.get();
-            const float volumeResolutionScale = getAtmosphereVolumeResolutionScale(quality);
-            auto& targets = atmosphere->getRenderTargetsMap();
-            for (const std::string_view name : { "AtmosphereVolumeHistory", "AtmosphereVolumeMetadataHistory",
-                     "AtmosphereVolumeReprojected", "AtmosphereVolumeMetadataReprojected" })
-            {
-                targets[name].mSize.mWidthRatio = volumeResolutionScale;
-                targets[name].mSize.mHeightRatio = volumeResolutionScale;
-            }
-            for (const std::string_view name :
-                { "AtmosphereVolumeRaw", "AtmosphereVolumeMetadataRaw", "AtmosphereShafts" })
-            {
-                targets[name].mSize.mWidthRatio = volumeResolutionScale * 0.5f;
-                targets[name].mSize.mHeightRatio = volumeResolutionScale * 0.5f;
-            }
-            atmosphere->setInternal(true);
-            atmosphere->setLocked(true);
-            atmosphere->setAlwaysEnabled(true);
-            mInternalTechniques.push_back(std::move(atmosphere));
-        }
-
         auto distortion = loadTechnique("internal_distortion");
         distortion->setInternal(true);
         distortion->setLocked(true);
         mInternalTechniques.push_back(std::move(distortion));
+        configureAtmosphereTechnique();
 
         addChild(mHUDCamera);
         addChild(mRootNode);
@@ -368,6 +358,54 @@ namespace MWRender
 
         if (mUsePostProcessing)
             enable();
+    }
+
+    void PostProcessor::configureAtmosphereTechnique()
+    {
+        const bool enabled = Settings::shaders().useNativeAtmosphere();
+        const auto existing = std::find_if(mInternalTechniques.begin(), mInternalTechniques.end(),
+            [](const auto& technique) { return technique->getName() == "internal_atmosphere"; });
+        if (!enabled)
+        {
+            if (existing == mInternalTechniques.end())
+                return;
+            const auto atmosphere = *existing;
+            mInternalTechniques.erase(existing);
+            std::erase(mTechniques, atmosphere);
+        }
+        else
+        {
+            auto atmosphere = existing != mInternalTechniques.end() ? *existing : loadTechnique("internal_atmosphere");
+            const float volumeResolutionScale
+                = getAtmosphereVolumeResolutionScale(Settings::shaders().mAtmosphericQuality);
+            auto& targets = atmosphere->getRenderTargetsMap();
+            for (const std::string_view name : { "AtmosphereVolumeHistory", "AtmosphereVolumeMetadataHistory",
+                     "AtmosphereVolumeReprojected", "AtmosphereVolumeMetadataReprojected" })
+            {
+                targets[name].mSize.mWidthRatio = volumeResolutionScale;
+                targets[name].mSize.mHeightRatio = volumeResolutionScale;
+            }
+            for (const std::string_view name : { "AtmosphereVolumeRaw", "AtmosphereVolumeMetadataRaw" })
+            {
+                targets[name].mSize.mWidthRatio = volumeResolutionScale * 0.5f;
+                targets[name].mSize.mHeightRatio = volumeResolutionScale * 0.5f;
+            }
+            atmosphere->setInternal(true);
+            atmosphere->setLocked(true);
+            atmosphere->setAlwaysEnabled(true);
+            if (existing == mInternalTechniques.end())
+            {
+                mInternalTechniques.insert(mInternalTechniques.begin(), atmosphere);
+                mTechniques.insert(mTechniques.begin(), atmosphere);
+            }
+        }
+    }
+
+    void PostProcessor::updateAtmosphereSettings()
+    {
+        configureAtmosphereTechnique();
+        dirtyTechniques(true);
+        invalidateAtmosphereHistory();
     }
 
     void PostProcessor::setupTransparentBin(const Water* water)
@@ -426,7 +464,7 @@ namespace MWRender
     void PostProcessor::disable()
     {
         mUsePostProcessing = false;
-        mRendering.getSkyManager()->setSunglare(true);
+        mStateUpdater->setSunGlareAllowed(true);
     }
 
     void PostProcessor::traverse(osg::NodeVisitor& nv)
@@ -897,7 +935,7 @@ namespace MWRender
             hud->updateTechniques();
 
         if (mUsePostProcessing)
-            mRendering.getSkyManager()->setSunglare(sunglare);
+            mStateUpdater->setSunGlareAllowed(sunglare);
 
         if (dirtyAttachments)
             mCanvases[frameId]->setDirtyAttachments(attachmentsToDirty);

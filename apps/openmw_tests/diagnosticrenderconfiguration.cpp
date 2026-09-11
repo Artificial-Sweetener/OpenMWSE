@@ -16,6 +16,14 @@ namespace OMW
         configuration.mReverseZ = true;
         configuration.mAtmosphericEffects = true;
         configuration.mAtmosphericQuality = 2;
+        configuration.mAtmosphericScattering = false;
+        configuration.mVolumetricClouds = true;
+        configuration.mCloudShadows = true;
+        configuration.mReflectClouds = false;
+        configuration.mAtmosphereAppearance = 1;
+        configuration.mGodrays = true;
+        configuration.mSunGlare = true;
+        configuration.mCloudSunOcclusion = false;
         configuration.mShadowsEnabled = true;
         configuration.mShadowMapCount = 3;
         configuration.mMaximumShadowMapDistance = 16384.f;
@@ -37,6 +45,14 @@ namespace OMW
 
         EXPECT_NE(serialized.find("resolution: [3440, 1440]"), std::string::npos);
         EXPECT_NE(serialized.find("atmospheric-quality: 2"), std::string::npos);
+        EXPECT_NE(serialized.find("atmospheric-scattering: false"), std::string::npos);
+        EXPECT_NE(serialized.find("volumetric-clouds: true"), std::string::npos);
+        EXPECT_NE(serialized.find("cloud-shadows: true"), std::string::npos);
+        EXPECT_NE(serialized.find("reflect-clouds: false"), std::string::npos);
+        EXPECT_NE(serialized.find("atmosphere-appearance: 1"), std::string::npos);
+        EXPECT_NE(serialized.find("godrays: true"), std::string::npos);
+        EXPECT_NE(serialized.find("sun-glare: true"), std::string::npos);
+        EXPECT_NE(serialized.find("cloud-sun-occlusion: false"), std::string::npos);
         EXPECT_NE(serialized.find("map-count: 3"), std::string::npos);
         EXPECT_NE(serialized.find("maximum-distance: 16384"), std::string::npos);
         EXPECT_NE(serialized.find("scene-bounds: \"bounds\""), std::string::npos);

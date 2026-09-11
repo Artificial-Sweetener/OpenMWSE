@@ -2395,6 +2395,15 @@ namespace MWGui
         updateVisible();
     }
 
+    void WindowManager::showVideoSettings(std::string_view page)
+    {
+        if (page != "atmosphere" && page != "water" && page != "shadows")
+            throw std::invalid_argument("unknown video settings page");
+        if (!mSettingsWindow->isVisible())
+            toggleSettingsWindow();
+        mSettingsWindow->showVideoPage(page);
+    }
+
     void WindowManager::toggleSettingsWindow()
     {
         bool visible = mSettingsWindow->isVisible();

@@ -194,6 +194,9 @@ namespace MWRender
         /// Create the state owner for the night-dome texture, weather fade, and requested star-compositing policy.
         explicit AtmosphereNightUpdater(StarBlendMode blendMode);
 
+        /// Select the sky representation's star blending at the next state update.
+        void setBlendMode(StarBlendMode mode) { mBlendMode = mode; }
+
         void setFade(float fade);
 
     protected:
@@ -203,13 +206,17 @@ namespace MWRender
 
     private:
         osg::Vec4f mColor;
-        const StarBlendMode mBlendMode;
+        StarBlendMode mBlendMode;
     };
 
     class CloudUpdater : public SceneUtil::StateSetUpdater
     {
     public:
+        /// Animate the authored cloud UVs and weather tint on the camera-relative sky dome.
         CloudUpdater();
+
+        /// Retain the source image while the shared opacity field is rebuilt for a weather change.
+        osg::Image* getImage() const { return mTexture ? mTexture->getImage() : nullptr; }
 
         void setTexture(osg::ref_ptr<osg::Texture2D> texture);
 
@@ -293,8 +300,8 @@ namespace MWRender
     class Sun : public CelestialBody
     {
     public:
-        /// Create the legacy textured sun only when unified analytic atmosphere rendering is disabled.
-        Sun(osg::Group* parentNode, Resource::SceneManager& sceneManager, bool useLegacyRendering);
+        /// Retain solar resources and composite reflected sunlight after clouds inside the sky render bin.
+        Sun(osg::Group* parentNode, Resource::SceneManager& sceneManager);
 
         ~Sun();
 
@@ -304,6 +311,7 @@ namespace MWRender
         void setDirection(const osg::Vec3f& direction);
         osg::Vec3f getDirection() const;
         void setGlareTimeOfDayFade(float val);
+        /// Toggle legacy glare and its visibility queries together.
         void setSunglare(bool enabled);
 
     private:

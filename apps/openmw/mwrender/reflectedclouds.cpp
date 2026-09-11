@@ -66,6 +66,16 @@ namespace MWRender
 
     ReflectedClouds::~ReflectedClouds() = default;
 
+    void ReflectedClouds::setEnabled(bool enabled)
+    {
+        mEnabled = enabled;
+        if (!enabled)
+        {
+            mClouds = nullptr;
+            mViewStates.clear();
+        }
+    }
+
     void ReflectedClouds::updateCloudCover(float mainCoverage, float lowCoverage)
     {
         if (!std::isfinite(mainCoverage) || !std::isfinite(lowCoverage))
@@ -82,7 +92,7 @@ namespace MWRender
 
     void ReflectedClouds::operator()(osg::Node* node, osgUtil::CullVisitor* visitor)
     {
-        if (!mUseCloudTarget || visitor->getCurrentCamera()->getName() != SceneUtil::reflectionCameraName)
+        if (!mEnabled || !mUseCloudTarget || visitor->getCurrentCamera()->getName() != SceneUtil::reflectionCameraName)
         {
             traverse(node, visitor);
             return;

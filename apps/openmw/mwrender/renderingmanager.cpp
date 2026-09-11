@@ -359,7 +359,9 @@ namespace MWRender
                 Shader::ShaderManager::Slot::AtmosphereNoise, 4);
         mStateUpdater = new SceneUtil::StateUpdater(atmosphereNoiseTexture, atmosphereNoiseTextureUnit,
             atmosphereDetailNoiseTexture, atmosphereNoiseTextureUnit + 1, atmosphereCurlNoiseTexture,
-            atmosphereNoiseTextureUnit + 2, atmosphereWeatherTexture, atmosphereNoiseTextureUnit + 3);
+            atmosphereNoiseTextureUnit + 2, atmosphereWeatherTexture, atmosphereNoiseTextureUnit + 3,
+            mResourceSystem->getSceneManager()->getShaderManager().reserveGlobalTextureUnits(
+                Shader::ShaderManager::Slot::TexturedCloudOpacity, 2));
         sceneRoot->addUpdateCallback(mStateUpdater);
 
         mSharedUniformStateUpdater = new SceneUtil::SharedUniformStateUpdater(Settings::fog().mSkyBlendingStart);
@@ -826,7 +828,7 @@ namespace MWRender
         AtmosphereVolumeState diagnosticVolumes = atmosphere.mVolumes;
         AtmosphereVolumeState outgoingCloudVolumes = atmosphere.mOutgoingCloudVolumes;
         AtmosphereVolumeState incomingCloudVolumes = atmosphere.mIncomingCloudVolumes;
-        if (!mAtmosphereDiagnosticMedia.mMainClouds)
+        if (!Settings::shaders().mVolumetricClouds || !mAtmosphereDiagnosticMedia.mMainClouds)
         {
             diagnosticVolumes.mCloudDeckCoverage = 0.f;
             diagnosticVolumes.mCloudDensity = 0.f;
@@ -835,19 +837,37 @@ namespace MWRender
             incomingCloudVolumes.mCloudDeckCoverage = 0.f;
             incomingCloudVolumes.mCloudDensity = 0.f;
         }
-        if (!mAtmosphereDiagnosticMedia.mLowClouds)
+        if (!Settings::shaders().mVolumetricClouds || !mAtmosphereDiagnosticMedia.mLowClouds)
         {
             diagnosticVolumes.mLowCloudCoverage = 0.f;
             diagnosticVolumes.mLowCloudDensity = 0.f;
         }
-        if (!mAtmosphereDiagnosticMedia.mMist)
+        if (!Settings::shaders().mAtmosphericScattering || !mAtmosphereDiagnosticMedia.mMist)
             diagnosticVolumes.mMistDensity = 0.f;
-        if (!mAtmosphereDiagnosticMedia.mFog)
+        if (!Settings::shaders().mAtmosphericScattering || !mAtmosphereDiagnosticMedia.mFog)
             diagnosticVolumes.mFogDensity = 0.f;
         const CloudAdvectionState& cloudAdvection = mCloudAdvection.getState();
         const osg::Vec2f cloudFieldOffset = cloudAdvection.mOffsetWorldUnits;
         const bool atmosphereEnabled
-            = Settings::shaders().mAtmosphericEffects && mSky->isEnabled() && atmosphere.mEnabled;
+            = (Settings::shaders().mAtmosphericScattering || Settings::shaders().mVolumetricClouds) && mSky->isEnabled()
+            && atmosphere.mEnabled;
+        const bool sunlightEnabled
+            = mSky->isEnabled() && atmosphere.mEnabled && Settings::shaders().useNativeAtmosphere();
+        const auto texturedClouds = mSky->getTexturedCloudState();
+        mStateUpdater->setTexturedClouds(texturedClouds);
+        mPostProcessor->getStateUpdater()->setTexturedClouds(texturedClouds);
+        mStateUpdater->setSunlightEnabled(sunlightEnabled);
+        mStateUpdater->setCloudSunOcclusion(Settings::shaders().mCloudSunOcclusion);
+        mPostProcessor->getStateUpdater()->setSunlightEnabled(sunlightEnabled);
+        mPostProcessor->getStateUpdater()->setGodraysEnabled(Settings::shaders().mGodrays);
+        mPostProcessor->getStateUpdater()->setSunGlareEnabled(Settings::shaders().mSunGlare);
+        mPostProcessor->getStateUpdater()->setCloudSunOcclusion(Settings::shaders().mCloudSunOcclusion);
+        mStateUpdater->setAtmosphereFeatures(Settings::shaders().mAtmosphericScattering,
+            Settings::shaders().mVolumetricClouds, Settings::shadows().mCloudShadows, Settings::water().mReflectClouds);
+        mPostProcessor->getStateUpdater()->setAtmosphereScatteringEnabled(Settings::shaders().mAtmosphericScattering);
+        mPostProcessor->getStateUpdater()->setVolumetricCloudsEnabled(Settings::shaders().mVolumetricClouds);
+        mStateUpdater->setAtmosphereAppearance(Settings::shaders().mAtmosphereAppearance.get());
+        mPostProcessor->getStateUpdater()->setAtmosphereAppearance(Settings::shaders().mAtmosphereAppearance.get());
         const osg::Vec4f skyColor = mSky->getSkyColor();
         const osg::Vec3f scatteringSunDirection = getScatteringSunDirection(mSky->getSunDirection(), !mNight);
         const auto cloudParameters = [](const AtmosphereVolumeState& volumes) {
@@ -1512,6 +1532,30 @@ namespace MWRender
 
     void RenderingManager::processChangedSettings(const Settings::CategorySettingVector& changed)
     {
+        const bool volumesChanged = std::any_of(changed.begin(), changed.end(), [](const auto& setting) {
+            return setting.first == "Shaders"
+                && (setting.second == "atmospheric scattering" || setting.second == "volumetric clouds"
+                    || setting.second == "atmospheric quality" || setting.second == "atmosphere appearance"
+                    || setting.second == "godrays" || setting.second == "sun glare"
+                    || setting.second == "cloud sun occlusion");
+        });
+        const bool atmosphereChanged
+            = volumesChanged || std::any_of(changed.begin(), changed.end(), [](const auto& setting) {
+                  return (setting.first == "Shadows" && setting.second == "cloud shadows")
+                      || (setting.first == "Water" && setting.second == "reflect clouds");
+              });
+        if (atmosphereChanged)
+        {
+            mViewer->stopThreading();
+            mSky->updateAtmosphereSettings();
+            if (volumesChanged)
+            {
+                mPostProcessor->updateAtmosphereSettings();
+                invalidateAtmosphereHistory();
+            }
+            mViewer->startThreading();
+        }
+
         // Only perform a projection matrix update once if a relevant setting is changed.
         bool updateProjection = false;
 
@@ -1535,7 +1579,7 @@ namespace MWRender
             {
                 updateTextureFiltering();
             }
-            else if (it->first == "Water")
+            else if (it->first == "Water" && it->second != "reflect clouds")
             {
                 mWater->processChangedSettings(changed);
             }
@@ -1595,7 +1639,7 @@ namespace MWRender
                 if (!lightManagersUpdated)
                     mViewer->getSceneData()->accept(visitor);
             }
-            else if (it->first == "Shadows")
+            else if (it->first == "Shadows" && it->second != "cloud shadows")
             {
                 mShadowManager->setupShadowSettings(
                     Settings::shadows(), mResourceSystem->getSceneManager()->getShaderManager());

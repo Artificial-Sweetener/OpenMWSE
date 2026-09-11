@@ -371,6 +371,9 @@ namespace MWGui
         void togglePostProcessorHud() override;
         void toggleSettingsWindow() override;
 
+        /// Display a named video settings page through the ordinary settings window lifecycle.
+        void showVideoSettings(std::string_view page);
+
         /// Cycle to next or previous spell
         void cycleSpell(bool next) override;
         /// Cycle to next or previous weapon

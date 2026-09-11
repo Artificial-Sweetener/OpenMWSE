@@ -1,14 +1,17 @@
 #include <apps/openmw/mwrender/renderbin.hpp>
 #include <apps/openmw/mwrender/skyutil.hpp>
 
+#include <components/resource/resourcesystem.hpp>
 #include <components/sceneutil/depth.hpp>
 #include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/offscreencontext.hpp>
+#include <components/vfs/manager.hpp>
 
 #include <osg/BlendFunc>
 #include <osg/Geode>
 #include <osg/Geometry>
 #include <osg/Image>
+#include <osg/OcclusionQueryNode>
 #include <osgViewer/Viewer>
 
 #include <gtest/gtest.h>
@@ -22,6 +25,26 @@
 
 namespace
 {
+    /// Count visibility queries reachable by normal scene traversal.
+    class CountSunQueries final : public osg::NodeVisitor
+    {
+    public:
+        /// Respect render masks so disabled queries are not counted as submitted work.
+        CountSunQueries()
+            : osg::NodeVisitor(TRAVERSE_ALL_CHILDREN)
+        {
+        }
+
+        /// Count query nodes and continue through the real celestial scene graph.
+        void apply(osg::Group& node) override
+        {
+            if (dynamic_cast<osg::OcclusionQueryNode*>(&node))
+                ++count;
+            traverse(node);
+        }
+
+        unsigned count = 0;
+    };
     /// Record actual draw order while preserving each geometry's normal rendering implementation.
     class RecordDraw final : public osg::Drawable::DrawCallback
     {
@@ -123,6 +146,23 @@ namespace
         result.image = capture->mImage;
         viewer.setDone(true);
         return result;
+    }
+}
+
+/// Suspend legacy occlusion work with glare and restore it when the fallback is selected again.
+TEST(SunTest, SuspendsAndRestartsLegacyVisibilityQueries)
+{
+    VFS::Manager vfs;
+    Resource::ResourceSystem resources(&vfs, 0, nullptr);
+    osg::ref_ptr<osg::Group> root = new osg::Group;
+    MWRender::Sun sun(root, *resources.getSceneManager());
+    sun.setVisible(true);
+    for (bool enabled : { true, false, true })
+    {
+        sun.setSunglare(enabled);
+        CountSunQueries queries;
+        root->accept(queries);
+        EXPECT_EQ(queries.count, enabled ? 2u : 0u);
     }
 }
 

@@ -800,6 +800,7 @@ namespace Shader
                 program->addShader(linkedShader);
     }
 
+    /// Reserve contiguous sampler units for an owned global input, rejecting exhausted hardware capacity.
     int ShaderManager::reserveGlobalTextureUnits(Slot slot, int count)
     {
         // TODO: Reuse units when count increase forces reallocation
@@ -831,6 +832,9 @@ namespace Shader
                 break;
             case Slot::SkyTexture:
                 slotDescr = "sky RTT";
+                break;
+            case Slot::TexturedCloudOpacity:
+                slotDescr = "weather cloud opacity";
                 break;
             case Slot::ShadowMaps:
                 slotDescr = "shadow maps";

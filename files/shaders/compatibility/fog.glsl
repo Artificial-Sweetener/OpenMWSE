@@ -1,3 +1,4 @@
+@link "lib/atmosphere/textured_clouds_fragment.glsl"
 #include "fog.h.glsl"
 #include "lib/atmosphere/diagnostics.glsl"
 
@@ -75,7 +76,7 @@ void computeFog(vec3 pos, float euclideanDist, float linearDist, float near, flo
     opticalDistance = openmwseLinearFogOpticalDistance(dist, start, end);
 #endif
     OpenMWSEAerialPerspectiveParameters atmosphereParameters = openmwseAerialPerspectiveParameters();
-    if (atmosphere.enabled && !cameraBelowWater && fog.depth < 0.0)
+    if (atmosphere.enabled && atmosphere.scatteringEnabled && !cameraBelowWater && fog.depth < 0.0)
     {
         atmosphereParameters.fogStart = start;
         atmosphereParameters.fogEnd = end;
@@ -90,7 +91,7 @@ void computeFog(vec3 pos, float euclideanDist, float linearDist, float near, flo
 #ifdef ADDITIVE_BLENDING
     colorOffset = vec3(0.0);
 #else
-    if (atmosphere.enabled && !cameraBelowWater)
+    if (atmosphere.enabled && atmosphere.scatteringEnabled && !cameraBelowWater)
         colorOffset = atmosphereScatter(normalize(pos), clamp(0.224 * opticalDistance, 0.0, 1.0),
             fogVisibility, fogColor.xyz);
     else

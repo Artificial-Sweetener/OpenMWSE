@@ -318,7 +318,7 @@ namespace MWRender
                 extraMask |= Mask_Player | Mask_Actor;
             if (reflectionDetail >= 5)
                 extraMask |= Mask_Groundcover;
-            return Mask_Scene | Mask_Sky | Mask_Lighting | extraMask;
+            return Mask_Scene | Mask_Sky | Mask_Sun | Mask_Lighting | extraMask;
         }
 
         osg::ref_ptr<ClipCullNode> mClipCullNode;

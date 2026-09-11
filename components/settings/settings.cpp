@@ -1,4 +1,5 @@
 #include "settings.hpp"
+#include "atmospheremigration.hpp"
 #include "parser.hpp"
 #include "values.hpp"
 
@@ -157,7 +158,14 @@ namespace Settings
         {
             const auto additionalDefaults = paths[i] / userSettingsFile;
             if (std::filesystem::exists(additionalDefaults))
-                parser.loadSettingsFile(additionalDefaults, mDefaultSettings, false, true);
+            {
+                CategorySettingValueMap layer;
+                parser.loadSettingsFile(additionalDefaults, layer, false, true);
+                if (!loadEditorSettings)
+                    migrateAtmosphereSettings(layer);
+                for (const auto& [key, value] : layer)
+                    mDefaultSettings.insert_or_assign(key, value);
+            }
         }
 
         if (!loadEditorSettings)
@@ -170,7 +178,10 @@ namespace Settings
             parser.loadSettingsFile(settingspath, mUserSettings, false, false);
 
         if (!loadEditorSettings)
+        {
+            migrateAtmosphereSettings(mUserSettings);
             Settings::StaticValues::init();
+        }
 
         for (const auto& [key, value] : originalDefaultSettings)
             if (!sInitialized.contains(key))

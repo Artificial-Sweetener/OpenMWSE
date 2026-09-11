@@ -191,8 +191,8 @@ namespace MWRender
             return texture;
         }
 
-        /// Evaluate the independently transcribed directional atmosphere reference for one direction.
-        CapturedColor referenceAtmosphereSky(const osg::Vec3f& requestedDirection)
+        /// Evaluate the independent sky reference, optionally stopping at the original 15ee5e5d84 response.
+        CapturedColor referenceAtmosphereSky(const osg::Vec3f& requestedDirection, bool originalParity = false)
         {
             constexpr CapturedColor skyColor{ 0.232298f, 0.361908f, 0.519572f };
             constexpr CapturedColor fogColor{ 0.887052f, 0.638956f, 0.517662f };
@@ -239,6 +239,8 @@ namespace MWRender
                 scattered.mGreen * integrated.mGreen * depthBrightness * altitudeBrightness,
                 scattered.mBlue * integrated.mBlue * depthBrightness * altitudeBrightness,
             };
+            if (originalParity)
+                return result;
             const float integratedLuminance = 0.2126f * result.mRed + 0.7152f * result.mGreen + 0.0722f * result.mBlue;
             const float diffuseLuminance = 0.2126f * farSky.mRed + 0.7152f * farSky.mGreen + 0.0722f * farSky.mBlue;
             const CapturedColor upperSky{
@@ -510,6 +512,9 @@ namespace MWRender
             /// Return whether the off-screen graphics context and production sky program initialized successfully.
             bool isValid() const { return mValid; }
 
+            /// Select the production appearance uniform without changing the scene's cloud or illumination state.
+            void setAtmosphereAppearance(int appearance) { mAtmosphereState->setAtmosphereAppearance(appearance); }
+
             /// Set deterministic integrated world-space cloud displacement.
             void setCloudAdvectionOffset(const osg::Vec2f& offsetWorldUnits)
             {
@@ -583,7 +588,7 @@ namespace MWRender
                 return renderImage(osg::Vec3f(0.f, 1.f, 0.f));
             }
 
-            /// Capture the water-reflected sky from a world-space eye position and direction.
+            /// Capture the water-reflected sky with the native relative camera's reflection-before-view transform.
             CapturedImage renderReflectedImage(
                 const osg::Vec3f& eyePosition, const osg::Vec3f& direction, float waterHeight = 0.f)
             {
@@ -592,7 +597,7 @@ namespace MWRender
                     = osg::Matrixf::lookAt(eyePosition, eyePosition + direction, osg::Vec3f(0.f, 0.f, 1.f));
                 const osg::Matrixf reflection
                     = osg::Matrixf::scale(1.f, 1.f, -1.f) * osg::Matrixf::translate(0.f, 0.f, 2.f * waterHeight);
-                return renderImageWithViewMatrix(view * reflection, true);
+                return renderImageWithViewMatrix(reflection * view, true);
             }
 
             /// Capture the sky from an explicit eye, direction, up vector, and reflection state.
@@ -627,6 +632,25 @@ namespace MWRender
             CapturedColor render(const osg::Vec3f& direction)
             {
                 const CapturedImage image = renderImage(direction);
+                return image.at(mWidth / 2, mHeight / 2);
+            }
+
+            /// Capture the separate reflected solar pass, which shares its disc equation with native post-processing.
+            CapturedImage renderSunImage(const osg::Vec3f& direction)
+            {
+                auto* pass = mCameraRelative->getOrCreateStateSet()->getUniform("pass");
+                pass->set(4);
+                mAtmosphereState->setSunlightEnabled(true);
+                const CapturedImage image = renderReflectedImage({}, direction);
+                pass->set(0);
+                mAtmosphereState->setSunlightEnabled(false);
+                return image;
+            }
+
+            /// Read the central radiance from the production reflected solar pass.
+            CapturedColor renderSun(const osg::Vec3f& direction)
+            {
+                const CapturedImage image = renderSunImage(direction);
                 return image.at(mWidth / 2, mHeight / 2);
             }
 
@@ -1549,6 +1573,7 @@ namespace MWRender
             EXPECT_GT(greatestSubtractedRadiance, 0.1f);
         }
 
+        /// Keep the shared solar disc's angular size independent of reflected viewport dimensions and field of view.
         TEST(MWRenderAtmosphereTest, analyticSunPreservesAngularRadiusAcrossViewportsAndFov)
         {
             const auto measureRadius = [](int width, int height, double verticalFovDegrees) {
@@ -1557,7 +1582,7 @@ namespace MWRender
                     return std::optional<float>{};
 
                 harness.setAtmosphereVolumes({}, {}, { 1.f, 0.82f, 0.62f, 1.f });
-                const CapturedImage image = harness.renderImage({ 1.f, 0.f, 0.08f });
+                const CapturedImage image = harness.renderSunImage({ 1.f, 0.f, 0.08f });
                 const int centerX = width / 2;
                 const int centerY = height / 2;
                 const float background = image.at(centerX, centerY + height / 4).mRed;
@@ -1752,6 +1777,7 @@ namespace MWRender
             EXPECT_GT(difference / static_cast<double>(clear.mPixels.size() * 3), 0.005);
         }
 
+        /// Clip the separate solar pass at each reflected sky ray's horizon crossing.
         TEST(MWRenderAtmosphereTest, analyticSunDiscClipsPerPixelAtTheHorizon)
         {
             AtmosphereRenderHarness harness(createHarnessDome(), 128, 128);
@@ -1760,9 +1786,9 @@ namespace MWRender
 
             const osg::Vec3f horizonDirection(1.f, 0.f, 0.f);
             harness.setSunDirection(horizonDirection, { 1.f, 0.82f, 0.62f, 0.f });
-            const CapturedImage noDisc = harness.renderImage(horizonDirection);
+            const CapturedImage noDisc = harness.renderSunImage(horizonDirection);
             harness.setSunDirection(horizonDirection, { 1.f, 0.82f, 0.62f, 1.f });
-            const CapturedImage clippedDisc = harness.renderImage(horizonDirection);
+            const CapturedImage clippedDisc = harness.renderSunImage(horizonDirection);
 
             const int centerX = clippedDisc.mWidth / 2;
             const int centerY = clippedDisc.mHeight / 2;
@@ -1774,6 +1800,7 @@ namespace MWRender
             EXPECT_LT(std::abs(lowerDiscContribution), 0.02f);
         }
 
+        /// Suppress solar radiance when its complete refracted disc is below the horizon.
         TEST(MWRenderAtmosphereTest, analyticSunDiscIsSuppressedBelowTheHorizon)
         {
             AtmosphereRenderHarness harness(createHarnessDome());
@@ -1782,14 +1809,15 @@ namespace MWRender
 
             const osg::Vec3f belowHorizonDirection(1.f, 0.f, -0.12f);
             harness.setSunDirection(belowHorizonDirection, { 1.f, 0.82f, 0.62f, 0.f });
-            const CapturedColor noDisc = harness.render(belowHorizonDirection);
+            const CapturedColor noDisc = harness.renderSun(belowHorizonDirection);
             harness.setSunDirection(belowHorizonDirection, { 1.f, 0.82f, 0.62f, 1.f });
-            const CapturedColor clippedDisc = harness.render(belowHorizonDirection);
+            const CapturedColor clippedDisc = harness.renderSun(belowHorizonDirection);
             EXPECT_NEAR(clippedDisc.mRed, noDisc.mRed, 0.002f);
             EXPECT_NEAR(clippedDisc.mGreen, noDisc.mGreen, 0.002f);
             EXPECT_NEAR(clippedDisc.mBlue, noDisc.mBlue, 0.002f);
         }
 
+        /// Expose the refracted upper disc after the geometric solar center crosses below the horizon.
         TEST(MWRenderAtmosphereTest, refractedSunDiscRemainsVisibleWithItsGeometricCenterBelowTheHorizon)
         {
             AtmosphereRenderHarness harness(createHarnessDome(), 192, 192, 12.0);
@@ -1799,9 +1827,9 @@ namespace MWRender
             const osg::Vec3f geometricSunDirection(1.f, 0.f, -0.006f);
             const osg::Vec3f apparentHorizonDirection(1.f, 0.f, 0.004f);
             harness.setSunDirection(geometricSunDirection, { 1.f, 0.82f, 0.62f, 0.f });
-            const CapturedColor noDisc = harness.render(apparentHorizonDirection);
+            const CapturedColor noDisc = harness.renderSun(apparentHorizonDirection);
             harness.setSunDirection(geometricSunDirection, { 1.f, 0.82f, 0.62f, 1.f });
-            const CapturedColor refractedDisc = harness.render(apparentHorizonDirection);
+            const CapturedColor refractedDisc = harness.renderSun(apparentHorizonDirection);
 
             EXPECT_GT(refractedDisc.mRed - noDisc.mRed, 0.35f);
             EXPECT_GT(refractedDisc.mGreen - noDisc.mGreen, 0.15f);
@@ -1834,6 +1862,7 @@ namespace MWRender
             EXPECT_GT(illuminatedTwilight.mBlue, astronomicalNight.mBlue + 0.02f);
         }
 
+        /// Preserve solar tint and HDR radiance while rejecting the disc behind the reflected camera.
         TEST(MWRenderAtmosphereTest, analyticSunUsesHdrTintAndDisappearsBehindTheCamera)
         {
             AtmosphereRenderHarness harness(createHarnessDome());
@@ -1842,9 +1871,9 @@ namespace MWRender
 
             const osg::Vec3f sunDirection(1.f, 0.f, 0.08f);
             harness.setAtmosphereVolumes({}, {}, { 1.f, 0.2f, 0.08f, 0.f });
-            const CapturedColor noDisc = harness.render(sunDirection);
+            const CapturedColor noDisc = harness.renderSun(sunDirection);
             harness.setAtmosphereVolumes({}, {}, { 1.f, 0.2f, 0.08f, 1.f });
-            const CapturedColor warmDisc = harness.render(sunDirection);
+            const CapturedColor warmDisc = harness.renderSun(sunDirection);
 
             const float redContribution = warmDisc.mRed - noDisc.mRed;
             const float greenContribution = warmDisc.mGreen - noDisc.mGreen;
@@ -1855,12 +1884,37 @@ namespace MWRender
 
             const osg::Vec3f oppositeView(-1.f, 0.f, 0.08f);
             harness.setAtmosphereVolumes({}, {}, { 1.f, 0.2f, 0.08f, 0.f });
-            const CapturedColor noDiscBehind = harness.render(oppositeView);
+            const CapturedColor noDiscBehind = harness.renderSun(oppositeView);
             harness.setAtmosphereVolumes({}, {}, { 1.f, 0.2f, 0.08f, 1.f });
-            const CapturedColor discBehind = harness.render(oppositeView);
+            const CapturedColor discBehind = harness.renderSun(oppositeView);
             EXPECT_NEAR(discBehind.mRed, noDiscBehind.mRed, 0.002f);
             EXPECT_NEAR(discBehind.mGreen, noDiscBehind.mGreen, 0.002f);
             EXPECT_NEAR(discBehind.mBlue, noDiscBehind.mBlue, 0.002f);
+        }
+
+        /// Preserve the original directional equation through both camera transforms and live appearance changes.
+        TEST(MWRenderAtmosphereTest, originalMgeAppearanceMatchesMainAndReflectedSky)
+        {
+            AtmosphereRenderHarness harness(createHarnessDome());
+            ASSERT_TRUE(harness.isValid());
+            const osg::Vec3f eyePosition(3400.f, -1700.f, 850.f);
+            for (const osg::Vec3f direction :
+                { osg::Vec3f(1.f, 0.f, 0.08f), osg::Vec3f(-1.f, 0.f, 0.08f), osg::Vec3f(0.f, 1.f, 0.6f) })
+            {
+                harness.setAtmosphereAppearance(1);
+                const CapturedColor expected = referenceAtmosphereSky(direction, true);
+                const CapturedColor main = harness.render(direction);
+                const CapturedImage reflected = harness.renderReflectedImage(eyePosition, direction);
+                const CapturedColor reflection = reflected.at(reflected.mWidth / 2, reflected.mHeight / 2);
+                for (const CapturedColor actual : { main, reflection })
+                {
+                    EXPECT_NEAR(actual.mRed, expected.mRed, 0.015f);
+                    EXPECT_NEAR(actual.mGreen, expected.mGreen, 0.015f);
+                    EXPECT_NEAR(actual.mBlue, expected.mBlue, 0.015f);
+                }
+                harness.setAtmosphereAppearance(0);
+                expectAtmosphereReference(harness.render(direction), direction);
+            }
         }
 
         TEST(MWRenderAtmosphereTest, waterReflectionCameraRendersTheProceduralSkyField)

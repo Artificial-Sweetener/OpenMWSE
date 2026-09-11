@@ -11,9 +11,14 @@ namespace MWGui
     class SettingsWindow : public WindowBase
     {
     public:
+        /// Bind video and gameplay controls to their persisted settings.
         SettingsWindow(Files::ConfigurationManager& cfgMgr);
 
+        /// Refresh values, dependencies and the space required by localized tabs.
         void onOpen() override;
+
+        /// Open a named video page using stable layout identities.
+        void showVideoPage(std::string_view page);
 
         void onClose() override;
 
@@ -22,6 +27,8 @@ namespace MWGui
         void updateControlsBox();
 
         void updateLightSettings();
+        /// Show effective atmosphere control states while retaining preferences for temporarily disabled features.
+        void updateAtmosphereSettings();
 
         void updateVSyncModeSettings();
 
@@ -55,6 +62,10 @@ namespace MWGui
         MyGUI::Widget* mMinimumBrightnessText;
         MyGUI::Widget* mMinimumBrightnessScroll;
 
+        MyGUI::Button* mCloudShadowsButton;
+        MyGUI::Button* mReflectCloudsButton;
+        MyGUI::ComboBox* mVolumetricQuality;
+        MyGUI::ComboBox* mAtmosphereAppearance;
         MyGUI::Button* mActorShadowsButton;
         MyGUI::Button* mPlayerShadowsButton;
         MyGUI::Button* mTerrainShadowsButton;
@@ -97,6 +108,10 @@ namespace MWGui
 
         void onWaterTextureSizeChanged(MyGUI::ComboBox* sender, size_t pos);
         void onWaterReflectionDetailChanged(MyGUI::ComboBox* sender, size_t pos);
+        /// Apply the selected quality preset immediately through the standard settings notification path.
+        void onVolumetricQualityChanged(MyGUI::ComboBox* sender, size_t pos);
+        /// Apply the selected atmospheric color response immediately.
+        void onAtmosphereAppearanceChanged(MyGUI::ComboBox* sender, size_t pos);
         void onWaterRainRippleDetailChanged(MyGUI::ComboBox* sender, size_t pos);
 
         void onLightsResetButtonClicked(MyGUI::Widget* sender);
@@ -122,14 +137,17 @@ namespace MWGui
         void onScriptFilterChange(MyGUI::EditBox*);
         void onScriptListSelection(MyGUI::ListBox*, size_t index);
 
+        /// Apply pending preferences live and refresh dependent controls.
         void apply();
 
+        /// Bind or refresh settings widgets, then restore effective states for dependent atmosphere controls.
         void configureWidgets(MyGUI::Widget* widget, bool init);
         MyGUI::TextBox* getSliderLabel(MyGUI::ScrollBar* scroller) const;
 
         void layoutControlsBox();
         void renderScriptSettings();
 
+        /// Fit both the main and nested video tab captions at the current localization.
         void computeMinimumWindowSize();
 
     private:

@@ -18,6 +18,8 @@ namespace Settings
     {
         using WithIndex::WithIndex;
 
+        /// Control cloud occlusion of world lighting independently of geometry shadow maps.
+        SettingValue<bool> mCloudShadows{ mIndex, "Shadows", "cloud shadows" };
         SettingValue<bool> mEnableShadows{ mIndex, "Shadows", "enable shadows" };
         SettingValue<int> mNumberOfShadowMaps{ mIndex, "Shadows", "number of shadow maps",
             makeClampSanitizerInt(1, 8) };

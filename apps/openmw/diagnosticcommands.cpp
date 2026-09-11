@@ -6,19 +6,23 @@
 #include "diagnosticrenderconfiguration.hpp"
 
 #include <components/diagnostics/atmospherescenario.hpp>
+#include <components/diagnostics/atmospheresettings.hpp>
 #include <components/diagnostics/capsule.hpp>
 #include <components/diagnostics/session.hpp>
 #include <components/files/hash.hpp>
 #include <components/sceneutil/shadow.hpp>
+#include <components/settings/values.hpp>
 #include <components/version/version.hpp>
 #include <components/vfs/manager.hpp>
 
+#include <osgViewer/ViewerEventHandlers>
 #include <yaml-cpp/yaml.h>
 
 #include <cmath>
 #include <iomanip>
 #include <limits>
 
+#include "mwgui/windowmanagerimp.hpp"
 #include "mwrender/camera.hpp"
 #include "mwrender/postprocessor.hpp"
 #include "mwrender/renderingmanager.hpp"
@@ -582,6 +586,51 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                     mutableCamera->setYaw(angles[1].as<float>(), true);
                     mutableCamera->setRoll(angles[2].as<float>());
                     mWorld->getRenderingManager()->invalidateAtmosphereHistory();
+                    break;
+                }
+
+                case Diagnostics::CommandType::ShowVideoSettings:
+                    if (!mDiagnosticChild)
+                        response.mError = Diagnostics::ErrorCode::PermissionDenied;
+                    else
+                    {
+                        mWindowManager->showVideoSettings(diagnosticText(command.mPayload));
+                        mWindowManager->setHudVisibility(false);
+                        const auto prefix = (mDiagnosticArtifactRoot / "video-settings").string();
+                        mScreenCaptureHandler->setCaptureOperation(new osgViewer::ScreenCaptureHandler::WriteToFile(
+                            prefix, "png", osgViewer::ScreenCaptureHandler::WriteToFile::OVERWRITE));
+                        // Retain the last framebuffer after MyGUI and asynchronous pixel readback have advanced.
+                        mScreenCaptureHandler->setFramesToCapture(3);
+                        mScreenCaptureHandler->startCapture();
+                    }
+                    break;
+
+                case Diagnostics::CommandType::SetAtmosphereSettings:
+                {
+                    if (!mDiagnosticChild)
+                    {
+                        response.mError = Diagnostics::ErrorCode::PermissionDenied;
+                        break;
+                    }
+                    const auto settings = Diagnostics::deserializeAtmosphereSettings(diagnosticText(command.mPayload));
+                    Settings::shaders().mAtmosphericScattering.set(settings.mScattering);
+                    Settings::shaders().mVolumetricClouds.set(settings.mClouds);
+                    Settings::shaders().mAtmosphericQuality.set(settings.mQuality);
+                    Settings::shaders().mAtmosphereAppearance.set(settings.mAppearance);
+                    Settings::shaders().mGodrays.set(settings.mGodrays);
+                    Settings::shaders().mSunGlare.set(settings.mSunGlare);
+                    Settings::shaders().mCloudSunOcclusion.set(settings.mCloudSunOcclusion);
+                    Settings::shadows().mCloudShadows.set(settings.mShadows);
+                    Settings::water().mReflectClouds.set(settings.mReflections);
+                    const auto changed = Settings::Manager::getPendingChanges();
+                    mWorld->processChangedSettings(changed);
+                    Settings::Manager::resetPendingChanges();
+                    response.mPayload = diagnosticBytes(
+                        Diagnostics::serializeAtmosphereSettings({ Settings::shaders().mAtmosphericScattering,
+                            Settings::shaders().mVolumetricClouds, Settings::shaders().mAtmosphericQuality,
+                            Settings::shadows().mCloudShadows, Settings::water().mReflectClouds,
+                            Settings::shaders().mAtmosphereAppearance, Settings::shaders().mGodrays,
+                            Settings::shaders().mSunGlare, Settings::shaders().mCloudSunOcclusion }));
                     break;
                 }
 

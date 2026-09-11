@@ -3,6 +3,7 @@
 
 #include "lib/atmosphere/uniforms.glsl"
 #include "lib/atmosphere/diagnostics.glsl"
+#include "lib/atmosphere/textured_clouds.h.glsl"
 
 uniform float waterHeight;
 
@@ -26,6 +27,8 @@ float openmwseCloudSunTransmittance(vec3 worldPosition)
         return 1.0;
 
     vec3 sunDirection = normalize(atmosphere.sunDirection);
+    if (openmwseTexturedCloudsEnabled)
+        return sunDirection.z > 0.01 ? openmwseTexturedCloudTransmittance(worldPosition, sunDirection) : 1.0;
     float incomingWeight = clamp(atmosphere.cloudScenarioParameters.z, 0.0, 1.0)
         * step(0.5, atmosphere.cloudScenarioParameters.w);
     float outgoingWeight = 1.0 - incomingWeight;
@@ -68,9 +71,15 @@ float openmwseCloudSunTransmittance(vec3 worldPosition)
 void openmwseApplyCloudLighting(vec3 worldPosition, inout vec3 diffuseLight, inout vec3 ambientLight,
     inout vec3 specularLight)
 {
+    if (!atmosphere.cloudShadowsEnabled
+        || (!openmwseTexturedCloudsEnabled && (!atmosphere.cloudsEnabled || !atmosphere.enabled)))
+        return;
     float sunTransmittance = openmwseCloudSunTransmittance(worldPosition);
     diffuseLight *= sunTransmittance;
     specularLight *= sunTransmittance;
+
+    if (openmwseTexturedCloudsEnabled)
+        return;
 
     float incomingWeight = clamp(atmosphere.cloudScenarioParameters.z, 0.0, 1.0)
         * step(0.5, atmosphere.cloudScenarioParameters.w);

@@ -10,6 +10,7 @@
 #include <components/sceneutil/cloudlayer.hpp>
 #include <components/sceneutil/lightmanager.hpp>
 #include <components/sceneutil/statesetupdater.hpp>
+#include <components/sceneutil/texturedclouds.hpp>
 #include <components/std140/ubo.hpp>
 
 namespace Fx
@@ -140,6 +141,50 @@ namespace Fx
             mData.get<AtmosphereTerrainHeightBounds>() = terrain.mHeightBounds;
         }
 
+        /// Select enhanced scattering independently of volume visibility and lighting.
+        void setAtmosphereScatteringEnabled(bool enabled) { mData.get<AtmosphereScatteringEnabled>() = enabled; }
+
+        /// Select volumetric source transmittance independently of momentary cloud coverage.
+        void setVolumetricCloudsEnabled(bool enabled) { mData.get<VolumetricCloudsEnabled>() = enabled; }
+
+        /// Select the same atmosphere color response used by opaque and sky shaders.
+        void setAtmosphereAppearance(int appearance) { mData.get<AtmosphereAppearance>() = appearance; }
+
+        /// Reserve unused native-pass inputs without increasing the post-process sampler budget.
+        static constexpr int sTexturedCloudTextureUnit = 5;
+        static constexpr int sSunGlareTextureUnit = 4;
+        static constexpr int sTexturedCloudDomeTextureUnit = 3;
+
+        /// Retain the authored opacity field for publication into frame-local state.
+        void setTexturedClouds(const SceneUtil::TexturedCloudState& clouds) { mTexturedClouds = clouds; }
+
+        /// Retain the existing mod-resolved solar glare asset for native sunlight composition.
+        void setSunGlareTexture(osg::Texture2D* texture) { mSunGlareTexture = texture; }
+
+        /// Enable exterior solar composition independently of atmospheric scattering.
+        void setSunlightEnabled(bool enabled) { mData.get<SunlightEnabled>() = enabled; }
+
+        /// Select depth-occluded shafts independently of solar glare.
+        void setGodraysEnabled(bool enabled) { mData.get<GodraysEnabled>() = enabled; }
+
+        /// Select the authored glare texture without a fullscreen overlay.
+        void setSunGlareEnabled(bool enabled)
+        {
+            mSunGlareSelected = enabled;
+            mData.get<SunGlareEnabled>() = enabled && mSunGlareAllowed;
+        }
+
+        /// Honor post-processing effects that provide their own solar glare response.
+        void setSunGlareAllowed(bool allowed)
+        {
+            mSunGlareAllowed = allowed;
+            mData.get<SunGlareEnabled>() = allowed && mSunGlareSelected;
+        }
+
+        /// Select solar-disc attenuation through cloud optical depth.
+        void setCloudSunOcclusion(bool enabled) { mData.get<CloudSunOcclusion>() = enabled; }
+
+        /// Publish canonical weather, lighting, and volume state to both uniform binding paths.
         void setAtmosphere(const osg::Vec3f& inScattering, const osg::Vec3f& outScattering,
             const osg::Vec4f& cloudParameters, const osg::Vec4f& incomingCloudParameters,
             const osg::Vec4f& cloudScenarioParameters, const osg::Vec4f& lowCloudParameters,
@@ -472,10 +517,52 @@ namespace Fx
             static constexpr std::string_view sName = "atmosphereWeatherWeight";
         };
 
+        /// Select enhanced aerial perspective independently of clouds.
+        struct AtmosphereScatteringEnabled : Std140::Bool
+        {
+            static constexpr std::string_view sName = "atmosphereScatteringEnabled";
+        };
+
+        /// Bind the current or original MGE-style color response independently of fog extinction.
+        struct AtmosphereAppearance : Std140::Int
+        {
+            static constexpr std::string_view sName = "atmosphereAppearance";
+        };
+
+        /// Publish the independent sunlightEnabled selection in both uniform binding paths.
+        struct SunlightEnabled : Std140::Bool
+        {
+            static constexpr std::string_view sName = "sunlightEnabled";
+        };
+
+        /// Publish the independent godraysEnabled selection in both uniform binding paths.
+        struct GodraysEnabled : Std140::Bool
+        {
+            static constexpr std::string_view sName = "godraysEnabled";
+        };
+
+        /// Publish the independent sunGlareEnabled selection in both uniform binding paths.
+        struct SunGlareEnabled : Std140::Bool
+        {
+            static constexpr std::string_view sName = "sunGlareEnabled";
+        };
+
+        /// Publish the independent cloudSunOcclusion selection in both uniform binding paths.
+        struct CloudSunOcclusion : Std140::Bool
+        {
+            static constexpr std::string_view sName = "cloudSunOcclusion";
+        };
+
         /// Bind whether the unified atmosphere system contributes to the frame.
         struct AtmosphereEnabled : Std140::Bool
         {
             static constexpr std::string_view sName = "atmosphereEnabled";
+        };
+
+        /// Bind the stable cloud-rendering mode for sunlight transport through the resolved volume.
+        struct VolumetricCloudsEnabled : Std140::Bool
+        {
+            static constexpr std::string_view sName = "volumetricCloudsEnabled";
         };
 
         /// Bind the bounded atmosphere quality tier.
@@ -529,10 +616,15 @@ namespace Fx
             AtmosphereOrographicParameters, AtmosphereSunDiscColor, AtmosphereSolarRadiance, AtmosphereSkyIrradiance,
             AtmosphereGroundIrradiance, AtmosphereCloudAdvectionOffset, AtmosphereCloudAdvectionDelta,
             AtmosphereHistoryLightingWeight, AtmosphereWeatherWeight, AtmosphereQuality,
-            AtmosphereVolumeResolutionScale, AtmosphereEnabled>;
+            AtmosphereVolumeResolutionScale, AtmosphereScatteringEnabled, AtmosphereAppearance, SunlightEnabled,
+            GodraysEnabled, SunGlareEnabled, CloudSunOcclusion, AtmosphereEnabled, VolumetricCloudsEnabled>;
 
         UniformData mData;
         bool mUseUBO;
+        bool mSunGlareAllowed = true;
+        bool mSunGlareSelected = false;
+        SceneUtil::TexturedCloudState mTexturedClouds;
+        osg::ref_ptr<osg::Texture2D> mSunGlareTexture;
 
         static std::string sDefinition;
 

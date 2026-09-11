@@ -1057,6 +1057,11 @@ namespace MWWorld
                 mAtmospherePalette->setEnvironment(mCurrentEnvironment);
             }
         }
+        mAtmospherePalette->setColorSource(Settings::shaders().mAtmosphereAppearance.get() == 1
+                ? AtmosphereColorSource::Region
+                : AtmosphereColorSource::Environment);
+        if (isExterior)
+            mAtmospherePalette->setRegion(player.getCell()->getCell()->getRegion().getRefIdString());
         mAtmospherePalette->update(duration, paused, mWeatherSettings);
 
         bool isDay = time.getHour() >= mSunriseTime && time.getHour() <= mTimeSettings.mNightStart;

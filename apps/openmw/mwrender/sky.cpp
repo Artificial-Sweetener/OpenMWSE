@@ -244,7 +244,6 @@ namespace MWRender
         , mAtmosphereNightRoll(0.f)
         , mCreated(false)
         , mIsStorm(false)
-        , mUseLegacyCloudRendering(!Settings::shaders().mAtmosphericEffects)
         , mTimescaleClouds(Fallback::Map::getBool("Weather_Timescale_Clouds"))
         , mCloudAnimationTimer(0.f)
         , mStormParticleDirection(MWWorld::Weather::defaultDirection())
@@ -265,7 +264,6 @@ namespace MWRender
         , mWindSpeed(0.f)
         , mBaseWindSpeed(0.f)
         , mEnabled(true)
-        , mSunglareEnabled(true)
         , mPrecipitationAlpha(0.f)
         , mDirtyParticlesEffect(false)
     {
@@ -316,7 +314,6 @@ namespace MWRender
         mAtmosphereUpdater = new AtmosphereUpdater;
         mAtmosphereDay->addUpdateCallback(mAtmosphereUpdater);
 
-        if (!mUseLegacyCloudRendering)
         {
             mReflectedClouds = new ReflectedClouds(mAtmosphereDay);
             atmosphereRoot->addCullCallback(mReflectedClouds);
@@ -334,20 +331,19 @@ namespace MWRender
 
         ModVertexAlphaVisitor modStars(ModVertexAlphaVisitor::Stars);
         atmosphereNight->accept(modStars);
-        const AtmosphereNightUpdater::StarBlendMode starBlendMode = mUseLegacyCloudRendering
+        const AtmosphereNightUpdater::StarBlendMode starBlendMode = !Settings::shaders().mAtmosphericScattering
             ? AtmosphereNightUpdater::StarBlendMode::AuthoredTranslucency
             : AtmosphereNightUpdater::StarBlendMode::EmissiveRadiance;
         mAtmosphereNightUpdater = new AtmosphereNightUpdater(starBlendMode);
         atmosphereNight->addUpdateCallback(mAtmosphereNightUpdater);
 
-        mSun = std::make_unique<Sun>(mEarlyRenderBinRoot, *mSceneManager, !Settings::shaders().mAtmosphericEffects);
-        mSun->setSunglare(mSunglareEnabled);
+        mSun = std::make_unique<Sun>(atmosphereRoot, *mSceneManager);
+        mSun->setSunglare(false);
         mMasser = std::make_unique<Moon>(
             mEarlyRenderBinRoot, *mSceneManager, Fallback::Map::getFloat("Moons_Masser_Size") / 125, Moon::Type_Masser);
         mSecunda = std::make_unique<Moon>(mEarlyRenderBinRoot, *mSceneManager,
             Fallback::Map::getFloat("Moons_Secunda_Size") / 125, Moon::Type_Secunda);
 
-        if (mUseLegacyCloudRendering)
         {
             mCloudNode = new osg::Group;
             mEarlyRenderBinRoot->addChild(mCloudNode);
@@ -355,7 +351,7 @@ namespace MWRender
             mCloudMesh = new osg::PositionAttitudeTransform;
             osg::ref_ptr<osg::Node> cloudMeshChild
                 = mSceneManager->getInstance(Settings::models().mSkyclouds.get(), mCloudMesh);
-            mCloudUpdater = new CloudUpdater();
+            mCloudUpdater = new CloudUpdater;
             mCloudUpdater->setOpacity(1.f);
             cloudMeshChild->addUpdateCallback(mCloudUpdater);
             mCloudMesh->addChild(cloudMeshChild);
@@ -363,7 +359,7 @@ namespace MWRender
             mNextCloudMesh = new osg::PositionAttitudeTransform;
             osg::ref_ptr<osg::Node> nextCloudMeshChild
                 = mSceneManager->getInstance(Settings::models().mSkyclouds.get(), mNextCloudMesh);
-            mNextCloudUpdater = new CloudUpdater();
+            mNextCloudUpdater = new CloudUpdater;
             mNextCloudUpdater->setOpacity(0.f);
             nextCloudMeshChild->addUpdateCallback(mNextCloudUpdater);
             mNextCloudMesh->setNodeMask(0);
@@ -375,6 +371,7 @@ namespace MWRender
             ModVertexAlphaVisitor modClouds(ModVertexAlphaVisitor::Clouds);
             mCloudMesh->accept(modClouds);
             mNextCloudMesh->accept(modClouds);
+            mTexturedClouds.setDome(*mCloudMesh);
         }
 
         Shader::ShaderManager::DefineMap defines = {};
@@ -392,6 +389,7 @@ namespace MWRender
         mMoonScriptColor = Fallback::Map::getColour("Moons_Script_Color");
 
         mCreated = true;
+        updateAtmosphereSettings();
     }
 
     void SkyManager::createRain()
@@ -568,7 +566,6 @@ namespace MWRender
 
         const float timeScale = MWBase::Environment::get().getWorld()->getTimeManager()->getGameTimeScale();
 
-        if (mUseLegacyCloudRendering)
         {
             float cloudDelta = duration * mCloudSpeed / 400.f;
             if (mTimescaleClouds)
@@ -599,6 +596,24 @@ namespace MWRender
         mPrecipitationOccluder->update();
     }
 
+    SceneUtil::TexturedCloudState SkyManager::getTexturedCloudState() const
+    {
+        SceneUtil::TexturedCloudState result;
+        result.mOpacity = mTexturedClouds.getOpacity();
+        result.mDomeMapping = mTexturedClouds.getDomeMapping();
+        result.mEnabled = mEnabled && !Settings::shaders().mVolumetricClouds;
+        result.mWeights = { 1.f - mCloudBlendFactor, mNextClouds.empty() ? 0.f : mCloudBlendFactor };
+        const std::array<osg::Vec3f, 2> directions{ mStormDirection, mNextStormDirection };
+        for (size_t layer = 0; layer < directions.size(); ++layer)
+        {
+            osg::Quat rotation;
+            rotation.makeRotate(MWWorld::Weather::defaultDirection(), directions[layer]);
+            const osg::Vec3f rotatedX = rotation * osg::Vec3f(1, 0, 0);
+            result.mTransforms[layer] = { rotatedX.x(), rotatedX.y(), 0.f, mCloudAnimationTimer };
+        }
+        return result;
+    }
+
     void SkyManager::setEnabled(bool enabled)
     {
         if (enabled && !mCreated)
@@ -623,6 +638,19 @@ namespace MWRender
         if (!mCreated)
             return;
         mSecunda->setColor(red ? mMoonScriptColor : osg::Vec4f(1, 1, 1, 1));
+    }
+
+    void SkyManager::updateAtmosphereSettings()
+    {
+        if (!mCreated)
+            return;
+        const bool scattering = Settings::shaders().mAtmosphericScattering;
+        const bool clouds = Settings::shaders().mVolumetricClouds;
+        mCloudNode->setNodeMask(clouds ? 0u : Mask_Sky);
+        mReflectedClouds->setEnabled(clouds && Settings::water().mReflectClouds);
+        mAtmosphereNightUpdater->setBlendMode(scattering ? AtmosphereNightUpdater::StarBlendMode::EmissiveRadiance
+                                                         : AtmosphereNightUpdater::StarBlendMode::AuthoredTranslucency);
+        mSun->setSunglare(false);
     }
 
     void SkyManager::updateRainParameters()
@@ -781,7 +809,7 @@ namespace MWRender
             }
         }
 
-        if (mUseLegacyCloudRendering && mClouds != weather.mCloudTexture)
+        if (mClouds != weather.mCloudTexture)
         {
             mClouds = weather.mCloudTexture;
 
@@ -802,7 +830,7 @@ namespace MWRender
         if (mNextStormDirection != weather.mNextStormDirection)
             mNextStormDirection = weather.mNextStormDirection;
 
-        if (mUseLegacyCloudRendering && mNextClouds != weather.mNextCloudTexture)
+        if (mNextClouds != weather.mNextCloudTexture)
         {
             mNextClouds = weather.mNextCloudTexture;
 
@@ -821,7 +849,10 @@ namespace MWRender
             }
         }
 
-        if (mUseLegacyCloudRendering && mCloudBlendFactor != weather.mCloudBlendFactor)
+        mTexturedClouds.setImages(
+            mCloudUpdater->getImage(), mNextClouds.empty() ? nullptr : mNextCloudUpdater->getImage());
+
+        if (mCloudBlendFactor != weather.mCloudBlendFactor)
         {
             mCloudBlendFactor = std::clamp(weather.mCloudBlendFactor, 0.f, 1.f);
 
@@ -830,7 +861,7 @@ namespace MWRender
             mNextCloudMesh->setNodeMask(mCloudBlendFactor > 0.f ? ~0u : 0);
         }
 
-        if (mUseLegacyCloudRendering && mCloudColour != weather.mFogColor)
+        if (mCloudColour != weather.mFogColor)
         {
             osg::Vec4f clr(weather.mFogColor);
 
@@ -889,14 +920,6 @@ namespace MWRender
             return 0.f;
 
         return mCloudSpeed;
-    }
-
-    void SkyManager::setSunglare(bool enabled)
-    {
-        mSunglareEnabled = enabled;
-
-        if (mSun)
-            mSun->setSunglare(mSunglareEnabled);
     }
 
     void SkyManager::sunEnable()

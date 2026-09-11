@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <MyGUI type="Layout" version="3.2.0">
     <Widget type="Window" skin="MW_Window" position="0 0 400 485" layer="Settings" name="_Main">
         <Property key="MinSize" value="640 550"/>
@@ -289,9 +289,9 @@
                     </Widget>
                 </Widget>
             </Widget>
-            <Widget type="TabItem">
+            <Widget type="TabItem" name="VideoPage">
                 <Property key="Caption" value=" #{OMWEngine:Video} "/>
-                <Widget type="TabControl" skin="TabControlInner" position="4 4 352 390" align="Stretch">
+                <Widget type="TabControl" skin="TabControlInner" position="4 4 352 390" align="Stretch" name="VideoTabs">
                     <Property key="ButtonAutoWidth" value="true"/>
                     <Widget type="TabItem">
                         <Property key="Caption" value=" #{OMWEngine:Video} "/>
@@ -457,7 +457,132 @@
                         </Widget>
 
                     </Widget>
-                    <Widget type="TabItem">
+                    <Widget type="TabItem" name="AtmospherePage">
+                        <Property key="Caption" value=" #{OMWEngine:Atmosphere} "/>
+                        <Widget type="VBox" position_real="0 0 1 1" align="Stretch">
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/>
+                                <UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedButton" skin="MW_Button" name="AtmosphericScatteringButton">
+                                    <UserString key="SettingCategory" value="Shaders"/>
+                                    <UserString key="SettingName" value="atmospheric scattering"/>
+                                    <UserString key="SettingType" value="CheckButton"/>
+                                </Widget>
+                                <Widget type="AutoSizedTextBox" skin="SandText">
+                                    <Property key="Caption" value="#{OMWEngine:AtmosphericScattering}"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:AtmosphericScatteringTooltip}"/>
+                                </Widget>
+                            </Widget>
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/>
+                                <UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedButton" skin="MW_Button" name="VolumetricCloudsButton">
+                                    <UserString key="SettingCategory" value="Shaders"/>
+                                    <UserString key="SettingName" value="volumetric clouds"/>
+                                    <UserString key="SettingType" value="CheckButton"/>
+                                </Widget>
+                                <Widget type="AutoSizedTextBox" skin="SandText">
+                                    <Property key="Caption" value="#{OMWEngine:VolumetricClouds}"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:VolumetricCloudsTooltip}"/>
+                                </Widget>
+                            </Widget>
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/>
+                                <UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedTextBox" skin="SandText">
+                                    <Property key="Caption" value="#{OMWEngine:AtmosphereAppearance}"/>
+                                </Widget>
+                                <Widget type="ComboBox" skin="MW_ComboBox" position="0 0 160 24" align="Left Top" name="AtmosphereAppearance">
+                                    <Property key="AddItem" value="#{OMWEngine:AtmosphereAppearanceOpenMWSE}"/>
+                                    <Property key="AddItem" value="#{OMWEngine:AtmosphereAppearanceMGEXE}"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:AtmosphereAppearanceTooltip}"/>
+                                </Widget>
+                                <Widget type="Spacer"/>
+                            </Widget>
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/>
+                                <UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedButton" skin="MW_Button" name="GodraysButton">
+                                    <UserString key="SettingCategory" value="Shaders"/>
+                                    <UserString key="SettingName" value="godrays"/>
+                                    <UserString key="SettingType" value="CheckButton"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:GodraysTooltip}"/>
+                                </Widget>
+                                <Widget type="AutoSizedTextBox" skin="SandText">
+                                    <Property key="Caption" value="#{OMWEngine:Godrays}"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:GodraysTooltip}"/>
+                                </Widget>
+                            </Widget>
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/>
+                                <UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedButton" skin="MW_Button" name="SunGlareButton">
+                                    <UserString key="SettingCategory" value="Shaders"/>
+                                    <UserString key="SettingName" value="sun glare"/>
+                                    <UserString key="SettingType" value="CheckButton"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:SunGlareTooltip}"/>
+                                </Widget>
+                                <Widget type="AutoSizedTextBox" skin="SandText">
+                                    <Property key="Caption" value="#{OMWEngine:SunGlare}"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:SunGlareTooltip}"/>
+                                </Widget>
+                            </Widget>
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/>
+                                <UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedButton" skin="MW_Button" name="CloudSunOcclusionButton">
+                                    <UserString key="SettingCategory" value="Shaders"/>
+                                    <UserString key="SettingName" value="cloud sun occlusion"/>
+                                    <UserString key="SettingType" value="CheckButton"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:CloudSunOcclusionTooltip}"/>
+                                </Widget>
+                                <Widget type="AutoSizedTextBox" skin="SandText">
+                                    <Property key="Caption" value="#{OMWEngine:CloudSunOcclusion}"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:CloudSunOcclusionTooltip}"/>
+                                </Widget>
+                            </Widget>
+                            <Widget type="TextBox" skin="NormalText" position="0 0 352 24" align="HStretch Top" name="VolumetricQualityLabel">
+                                <Property key="Caption" value="#{OMWEngine:VolumetricQuality}"/>
+                                <UserString key="ToolTipType" value="Layout"/>
+                                <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                <UserString key="Caption_Text" value="#{OMWEngine:VolumetricQualityTooltip}"/>
+                            </Widget>
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/>
+                                <UserString key="VStretch" value="false"/>
+                                <Widget type="ComboBox" skin="MW_ComboBox" position="0 0 200 24" align="Left Top" name="VolumetricQuality">
+                                    <Property key="AddItem" value="#{OMWEngine:QualityLow}"/>
+                                    <Property key="AddItem" value="#{OMWEngine:QualityMedium}"/>
+                                    <Property key="AddItem" value="#{OMWEngine:QualityHigh}"/>
+                                    <Property key="AddItem" value="#{OMWEngine:QualityUltra}"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:VolumetricQualityTooltip}"/>
+                                </Widget>
+                                <Widget type="Spacer"/>
+                            </Widget>
+                            <Widget type="Spacer"/>
+                        </Widget>
+                    </Widget>
+                    <Widget type="TabItem" name="WaterPage">
                         <Property key="Caption" value=" #{OMWEngine:Water} "/>
 
                         <Widget type="VBox" position_real="0 0 1 1" align="Stretch">
@@ -557,6 +682,22 @@
                                     <Property key="AddItem" value="#{OMWEngine:ReflectionShaderDetailGroundcover}"/>
                                 </Widget>
                                 <Widget type="Spacer" />
+                            </Widget>
+
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/>
+                                <UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedButton" skin="MW_Button" name="ReflectCloudsButton">
+                                    <UserString key="SettingCategory" value="Water"/>
+                                    <UserString key="SettingName" value="reflect clouds"/>
+                                    <UserString key="SettingType" value="CheckButton"/>
+                                </Widget>
+                                <Widget type="AutoSizedTextBox" skin="SandText">
+                                    <Property key="Caption" value="#{OMWEngine:ReflectClouds}"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:ReflectCloudsTooltip}"/>
+                                </Widget>
                             </Widget>
 
                             <Widget type="Widget" position="0 0 0 18" align="Top Left HStretch">
@@ -804,7 +945,7 @@
                         </Widget>
                     </Widget>
 
-                    <Widget type="TabItem">
+                    <Widget type="TabItem" name="ShadowsPage">
                         <Property key="Caption" value=" #{OMWEngine:Shadows} "/>
 
                         <Widget type="VBox" position_real="0 0 1 1" align="Stretch">
@@ -869,6 +1010,25 @@
                                     <UserString key="ToolTipType" value="Layout"/>
                                     <UserString key="ToolTipLayout" value="TextToolTip"/>
                                     <UserString key="Caption_Text" value="#{OMWEngine:ObjectShadowsTooltip}"/>
+                                </Widget>
+                            </Widget>
+
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/>
+                                <UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedButton" skin="MW_Button" name="CloudShadowsButton">
+                                    <UserString key="SettingCategory" value="Shadows"/>
+                                    <UserString key="SettingName" value="cloud shadows"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:CloudShadowsTooltip}"/>
+                                    <UserString key="SettingType" value="CheckButton"/>
+                                </Widget>
+                                <Widget type="AutoSizedTextBox" skin="SandText">
+                                    <Property key="Caption" value="#{OMWEngine:CloudShadows}"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:CloudShadowsTooltip}"/>
                                 </Widget>
                             </Widget>
 
@@ -965,7 +1125,7 @@
                         </Widget>
                     </Widget>
 
-                    <Widget name="ScriptBox" type="Widget" align="Stretch" name="ScriptBox">
+                    <Widget name="ScriptBox" type="Widget" align="Stretch">
                         <UserString key="HStretch" value="true"/>
                         <UserString key="VStretch" value="true"/>
 

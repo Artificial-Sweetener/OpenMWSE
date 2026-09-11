@@ -8,6 +8,7 @@
 #include <osg/Vec4f>
 #include <osg/ref_ptr>
 
+#include <components/sceneutil/texturedclouds.hpp>
 #include <components/vfs/pathutil.hpp>
 
 #include "precipitationocclusion.hpp"
@@ -108,11 +109,15 @@ namespace MWRender
         /// Return the active weather's authored cloud-animation speed.
         float getCloudSpeed() const;
 
-        void setSunglare(bool enabled);
+        /// Switch live sky representations while preserving weather, animation, and celestial state.
+        void updateAtmosphereSettings();
 
         SceneUtil::RTTNode* getSkyRTT() { return mSkyRTT.get(); }
 
         osg::Vec4f getSkyColor() const { return mSkyColour; }
+
+        /// Return the authored cloud opacity and current world projection for this weather frame.
+        SceneUtil::TexturedCloudState getTexturedCloudState() const;
 
         /// Return the canonical atmosphere state assembled for the current weather frame.
         const AtmosphereState& getAtmosphereState() const { return mAtmosphere; }
@@ -141,6 +146,7 @@ namespace MWRender
 
         osg::ref_ptr<osg::Group> mCloudNode;
 
+        SceneUtil::TexturedClouds mTexturedClouds;
         osg::ref_ptr<CloudUpdater> mCloudUpdater;
         osg::ref_ptr<CloudUpdater> mNextCloudUpdater;
         osg::ref_ptr<osg::PositionAttitudeTransform> mCloudMesh;
@@ -172,7 +178,6 @@ namespace MWRender
 
         bool mIsStorm;
 
-        bool mUseLegacyCloudRendering;
         bool mTimescaleClouds;
         float mCloudAnimationTimer;
 
@@ -207,7 +212,6 @@ namespace MWRender
         float mBaseWindSpeed;
 
         bool mEnabled;
-        bool mSunglareEnabled;
 
         float mPrecipitationAlpha;
         bool mDirtyParticlesEffect;

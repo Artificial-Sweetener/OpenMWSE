@@ -55,6 +55,7 @@ file(GLOB UNITTEST_SRC_FILES
     shader/shadermanager.cpp
     shader/shadowcasting.cpp
     shader/atmosphere.cpp
+    sceneutil/texturedclouds.cpp
 
     sqlite3/db.cpp
     sqlite3/request.cpp
@@ -70,6 +71,7 @@ file(GLOB UNITTEST_SRC_FILES
 
     diagnostics/protocol.cpp
     diagnostics/atmospherescenario.cpp
+    diagnostics/atmospheresettings.cpp
     diagnostics/commandqueue.cpp
     diagnostics/capsule.cpp
     diagnostics/gameplayroute.cpp

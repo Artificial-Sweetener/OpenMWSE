@@ -15,6 +15,12 @@ namespace Fx
     {
         setCloudLayers(SceneUtil::packCloudLayers({}, {}, {}));
         setAtmosphereTerrain({});
+        setAtmosphereScatteringEnabled(true);
+        setAtmosphereAppearance(0);
+        setSunlightEnabled(false);
+        setGodraysEnabled(true);
+        setSunGlareEnabled(false);
+        setCloudSunOcclusion(true);
     }
 
     std::optional<int> StateUpdater::getPublishedFrameNumber(const osg::StateSet& stateset)
@@ -140,6 +146,11 @@ namespace Fx
     void StateUpdater::apply(osg::StateSet* stateset, osg::NodeVisitor* nv)
     {
         SceneUtil::updateCloudShaderState(*stateset, mData.get<AtmosphereCloudScenarioParameters>());
+        SceneUtil::applyTexturedCloudState(
+            *stateset, mTexturedClouds, sTexturedCloudTextureUnit, sTexturedCloudDomeTextureUnit);
+        stateset->getOrCreateUniform("openmwseSunGlareTexture", osg::Uniform::SAMPLER_2D)->set(sSunGlareTextureUnit);
+        if (mSunGlareTexture)
+            stateset->setTextureAttribute(sSunGlareTextureUnit, mSunGlareTexture, osg::StateAttribute::ON);
         if (mUseUBO)
         {
             osg::UniformBufferBinding* ubb = dynamic_cast<osg::UniformBufferBinding*>(

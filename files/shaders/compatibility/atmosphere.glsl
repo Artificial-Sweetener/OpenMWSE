@@ -7,6 +7,7 @@
 
 #include "lib/util/dither.glsl"
 #include "lib/atmosphere/aerial_perspective.glsl"
+#include "lib/atmosphere/solar.glsl"
 
 #include "lib/atmosphere/uniforms.glsl"
 
@@ -136,6 +137,8 @@ vec3 atmosphereEyePosition()
 OpenMWSEAerialPerspectiveParameters openmwseAerialPerspectiveParameters()
 {
     OpenMWSEAerialPerspectiveParameters parameters;
+    parameters.scatteringEnabled = atmosphere.scatteringEnabled;
+    parameters.appearance = atmosphere.appearance;
     parameters.inScattering = atmosphere.inScattering;
     parameters.outScattering = atmosphere.outScattering;
     parameters.skyColor = atmosphere.skyColor.rgb;
@@ -177,26 +180,17 @@ vec3 atmosphereSkyColor(vec3 viewDirection)
 /// Integrate reflected cloud radiance with the low-cloud lighting supplied by the sky vertices.
 vec4 atmosphereCloudScattering(vec3 worldDirection, vec3 atmosphericTarget, OpenMWSEVolumeIllumination lowLighting)
 {
-    if (atmosphere.enabled == false)
+    if (!atmosphere.enabled || !atmosphere.cloudsEnabled || !atmosphere.cloudReflectionsEnabled)
         return vec4(0.0, 0.0, 0.0, 1.0);
     return openmwseIntegrateCloudsStable(atmosphereEyePosition(), worldDirection, openmwseCloudMaximumRayDistance,
         atmosphere.quality, atmosphere.solarRadiance, atmosphere.skyIrradiance, atmosphere.groundIrradiance,
         lowLighting, atmosphericTarget, openmwseAerialPerspectiveParameters());
 }
 
-/// Draw the refracted scene-linear sun disc while leaving broad glow to atmospheric scattering.
+/// Draw the same refracted solar disc as native post-processing in reflected views.
 vec3 atmosphereSunDisc(vec3 worldDirection)
 {
-    vec3 geometricSunDirection = normalize(atmosphere.sunDirection);
-    vec3 apparentSunDirection = openmwseApparentSunDirection(geometricSunDirection);
-    vec3 geometricViewDirection = openmwseGeometricDirectionFromApparent(worldDirection);
-    float discAngularDistance
-        = sqrt(max(2.0 * (1.0 - dot(geometricViewDirection, geometricSunDirection)), 0.0));
-    float horizonVisibility = smoothstep(-0.034, -0.002, apparentSunDirection.z);
-    float pixelHorizonVisibility = smoothstep(-0.001, 0.002, worldDirection.z);
-    float disc = 1.0 - smoothstep(0.026, 0.03, discAngularDistance);
-    vec3 sunColor = mix(vec3(1.0), atmosphere.sunDiscColor.rgb, 0.78);
-    return sunColor * disc * 3.2 * atmosphere.sunDiscColor.a * horizonVisibility * pixelHorizonVisibility;
+    return openmwseSolarDisc(worldDirection, atmosphere.sunDirection, atmosphere.sunDiscColor);
 }
 
 #endif

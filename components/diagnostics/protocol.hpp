@@ -32,6 +32,8 @@ namespace Diagnostics
         LoadGameplayRoute = 13,
         RunGameplayRouteSegment = 14,
         SetAtmosphereScenario = 15,
+        SetAtmosphereSettings = 16,
+        ShowVideoSettings = 17,
     };
 
     /// Classifies protocol failures so clients can distinguish invalid requests from runtime failures.

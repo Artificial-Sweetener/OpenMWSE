@@ -616,9 +616,40 @@ namespace MWWorld
                 mEnvironments.emplace(trait, std::move(profile));
             }
 
-            mApplied = mTarget = defaultPreset->second;
+            const YAML::Node regions = root["regions"];
+            if (regions && !regions.IsMap())
+                throw std::runtime_error("OpenMWSE atmosphere regions must be a map");
+            for (const auto& entry : regions)
+            {
+                const std::string preset = entry.second.as<std::string>();
+                if (!mPresets.contains(preset))
+                    throw std::runtime_error("OpenMWSE atmosphere region references an unknown preset: " + preset);
+                mRegions.emplace(lowerCase(entry.first.as<std::string>()), preset);
+            }
+            mRegionalFrom = mApplied = mTarget = defaultPreset->second;
         }
 
+        /// Resolve the active color trajectory without affecting weather volume state.
+        Palette colors() const
+        {
+            return mColorSource == AtmosphereColorSource::Region
+                ? blend(mRegionalFrom, mPresets.at(mRegionalTarget), mRegionalTransition)
+                : mApplied;
+        }
+
+        /// Preserve the original fixed-duration interpolation between regional palettes.
+        void setRegion(std::string_view regionId)
+        {
+            const auto region = mRegions.find(lowerCase(regionId));
+            const std::string next = region == mRegions.end() ? "default" : region->second;
+            if (next == mRegionalTarget)
+                return;
+            mRegionalFrom = blend(mRegionalFrom, mPresets.at(mRegionalTarget), mRegionalTransition);
+            mRegionalTarget = next;
+            mRegionalTransition = 0.f;
+        }
+
+        /// Resolve environmental color and volume targets from their shared local evidence.
         void setEnvironment(const AtmosphereEnvironmentState& environment)
         {
             mTargetTerrainHeightWorldUnits = environment.mTerrainHeightWorldUnits;
@@ -668,6 +699,9 @@ namespace MWWorld
         /// Blend regional evidence while expressing both terrain planes relative to the same sampling origin.
         void update(float elapsedSeconds, bool paused, std::span<Weather> weather)
         {
+            if (!paused)
+                mRegionalTransition
+                    = std::min(1.f, mRegionalTransition + std::max(0.f, elapsedSeconds) / sRegionTransitionSeconds);
             if (mDiagnosticEnvironmentActive)
             {
                 mApplied = mTarget;
@@ -696,12 +730,13 @@ namespace MWWorld
                     = std::lerp(mAppliedValleyDepthWorldUnits, mTargetValleyDepthWorldUnits, blendFactor);
             }
 
-            if (weather.size() < mApplied.mWeather.size())
+            const Palette selected = colors();
+            if (weather.size() < selected.mWeather.size())
                 throw std::runtime_error("OpenMWSE atmosphere requires the ten Morrowind weather definitions");
-            for (std::size_t i = 0; i < mApplied.mWeather.size(); ++i)
+            for (std::size_t i = 0; i < selected.mWeather.size(); ++i)
             {
                 Weather& target = weather[i];
-                const WeatherColors& source = mApplied.mWeather[i];
+                const WeatherColors& source = selected.mWeather[i];
                 setCycle(target.mSkyColor, source.mSky);
                 setCycle(target.mFogColor, source.mFog);
                 setCycle(target.mAmbientColor, source.mAmbient);
@@ -712,7 +747,7 @@ namespace MWWorld
 
         /// Visit the complete transient regional trajectory with stable, named diagnostic fields.
         template <class Self, class Visitor>
-        static void visitRuntime(Self& self, Visitor&& visit)
+        static void visitRuntime(Self& self, unsigned version, Visitor&& visit)
         {
             const auto palette = [&](const std::string& prefix, auto& value) {
                 visit(prefix + "-in-scattering", value.mInScattering);
@@ -746,6 +781,11 @@ namespace MWWorld
                 visit(prefix + "-mist-altitude", value.mMistAltitudeOffsetWorldUnits);
                 visit(prefix + "-mist-thickness", value.mMistThicknessMultiplier);
             };
+            if (version >= 2)
+            {
+                palette("regional-from", self.mRegionalFrom);
+                visit("regional-transition", self.mRegionalTransition);
+            }
             palette("applied", self.mApplied);
             palette("target", self.mTarget);
             volumes("applied-volumes", self.mAppliedVolumes);
@@ -765,6 +805,11 @@ namespace MWWorld
         std::array<VolumeProfile, sWeatherNames.size()> mVolumes;
         std::array<std::array<std::optional<CloudScenarioProfile>, 8>, sWeatherNames.size()> mCloudScenarios;
         std::array<std::array<std::uint32_t, 8>, sWeatherNames.size()> mCloudScenarioWeights;
+        AtmosphereColorSource mColorSource = AtmosphereColorSource::Environment;
+        std::unordered_map<std::string, std::string> mRegions;
+        Palette mRegionalFrom;
+        std::string mRegionalTarget = "default";
+        float mRegionalTransition = 1.f;
         Palette mApplied;
         Palette mTarget;
         VolumeModifiers mAppliedVolumes;
@@ -793,6 +838,16 @@ namespace MWWorld
 
     AtmospherePalette::~AtmospherePalette() = default;
 
+    void AtmospherePalette::setColorSource(AtmosphereColorSource source)
+    {
+        mImpl->mColorSource = source;
+    }
+
+    void AtmospherePalette::setRegion(std::string_view regionId)
+    {
+        mImpl->setRegion(regionId);
+    }
+
     void AtmospherePalette::setEnvironment(const AtmosphereEnvironmentState& environment)
     {
         mImpl->setEnvironment(environment);
@@ -811,13 +866,16 @@ namespace MWWorld
     std::string AtmospherePalette::captureRuntimeState() const
     {
         YAML::Node state;
-        state["runtime-version"] = 1;
-        Impl::visitRuntime(std::as_const(*mImpl), [&](const std::string& name, const auto& value) {
+        state["runtime-version"] = 2;
+        state["regional-colors"]["target"] = mImpl->mRegionalTarget;
+        Impl::visitRuntime(std::as_const(*mImpl), 2, [&](const std::string& name, const auto& value) {
+            YAML::Node destination
+                = name.starts_with("regional-") ? state["regional-colors"][name.substr(9)] : state[name];
             if constexpr (std::is_arithmetic_v<std::remove_cvref_t<decltype(value)>>)
-                state[name] = value;
+                destination = value;
             else
                 for (unsigned i = 0; i < value.num_components; ++i)
-                    state[name].push_back(value[i]);
+                    destination.push_back(value[i]);
         });
         state["diagnostic-environment"] = mImpl->mDiagnosticEnvironmentActive;
         YAML::Emitter output;
@@ -829,16 +887,25 @@ namespace MWWorld
     void AtmospherePalette::restoreRuntimeState(std::string_view text)
     {
         const YAML::Node state = YAML::Load(std::string(text));
-        if (!state.IsMap() || state["runtime-version"].as<unsigned>() != 1)
+        if (!state.IsMap())
             throw std::invalid_argument("unsupported atmosphere palette runtime state");
+        const unsigned version = state["runtime-version"].as<unsigned>();
+        if (version != 1 && version != 2)
+            throw std::invalid_argument("unsupported atmosphere palette runtime state");
+        const std::string regionalTarget
+            = version == 2 ? state["regional-colors"]["target"].as<std::string>() : "default";
+        if (!mImpl->mPresets.contains(regionalTarget))
+            throw std::invalid_argument("unknown regional atmosphere runtime palette: " + regionalTarget);
         const bool diagnosticEnvironment = state["diagnostic-environment"].as<bool>();
         // Validate the entire snapshot before replacing any part of the regional trajectory.
         for (const bool apply : { false, true })
         {
-            std::size_t fieldCount = 2;
-            Impl::visitRuntime(*mImpl, [&](const std::string& name, auto& value) {
-                ++fieldCount;
-                const YAML::Node source = state[name];
+            std::size_t fieldCount = version == 2 ? 3 : 2;
+            std::size_t regionalFieldCount = 1;
+            Impl::visitRuntime(*mImpl, version, [&](const std::string& name, auto& value) {
+                const bool regional = name.starts_with("regional-");
+                ++(regional ? regionalFieldCount : fieldCount);
+                const YAML::Node source = regional ? state["regional-colors"][name.substr(9)] : state[name];
                 const auto read = [&](const YAML::Node& node) {
                     const float result = node.as<float>();
                     if (!std::isfinite(result))
@@ -851,6 +918,8 @@ namespace MWWorld
                     if (name.find("-volumes-") != std::string::npos && name.find("altitude") == std::string::npos
                         && (restored < 0.f || restored > 4.f))
                         throw std::invalid_argument("invalid atmosphere volume multiplier: " + name);
+                    if (name == "regional-transition" && (restored < 0.f || restored > 1.f))
+                        throw std::invalid_argument("invalid regional atmosphere transition");
                     if (apply)
                         value = restored;
                 }
@@ -866,8 +935,15 @@ namespace MWWorld
                     }
                 }
             });
-            if (state.size() != fieldCount)
+            if (state.size() != fieldCount || (version == 2 && state["regional-colors"].size() != regionalFieldCount))
                 throw std::invalid_argument("unexpected atmosphere runtime fields");
+        }
+        mImpl->mRegionalTarget = regionalTarget;
+        if (version == 1)
+        {
+            // Older captures predate the regional color trajectory; preserve all recorded environment state.
+            mImpl->mRegionalFrom = mImpl->mPresets.at("default");
+            mImpl->mRegionalTransition = 1.f;
         }
         mImpl->mDiagnosticEnvironmentActive = diagnosticEnvironment;
     }
@@ -969,8 +1045,9 @@ namespace MWWorld
         const VolumeProfile volume = blend(currentVolume, nextVolume, presentation);
 
         MWRender::AtmosphereState result;
-        result.mInScattering = mImpl->mApplied.mInScattering;
-        result.mOutScattering = mImpl->mApplied.mOutScattering;
+        const Palette selected = mImpl->colors();
+        result.mInScattering = selected.mInScattering;
+        result.mOutScattering = selected.mOutScattering;
         result.mWeatherWeight = weatherWeight * weatherWeight;
         result.mEnabled = true;
         const VolumeModifiers& environment = mImpl->mAppliedVolumes;

@@ -2,23 +2,88 @@ Shaders Settings
 ################
 
 .. omw-setting::
-   :title: atmospheric effects
+   :title: atmospheric scattering
    :type: boolean
    :range: true, false
    :default: true
+   :location: :bdg-info:`In Game > Settings > Video > Atmosphere`
 
-   Enables the regional atmospheric sky, analytic sun, procedural clouds, low mist, and depth-occluded sun shafts in exteriors.
-   Water reflections render the same sky and cloud field through the reflection camera.
+   Enables regional sky scattering, aerial perspective, and mist in exteriors.
+   Applies immediately. Ordinary distance fog remains when disabled. Volumetric clouds are controlled independently.
+
+.. omw-setting::
+   :title: atmosphere appearance
+   :type: int
+   :range: 0-1
+   :default: 0
+   :location: :bdg-info:`In Game > Settings > Video > Atmosphere`
+
+   The Atmosphere appearance dropdown selects OpenMWSE (0) or MGE XE (1). OpenMWSE provides the colorful twilight response;
+   MGE XE uses the original regional weather palettes, sky and in-scattering equation, and distance-fog transfer.
+   Region changes blend over 20 seconds; regions without an assignment use the default palette. OpenMWSE uses
+   environmental palette blending and height-dependent aerial perspective. Changing atmosphere appearance preserves the
+   active cloud episode and its formation. Requires atmospheric scattering. Applies immediately.
+
+.. omw-setting::
+   :title: godrays
+   :type: boolean
+   :range: true, false
+   :default: true
+   :location: :bdg-info:`In Game > Settings > Video > Atmosphere`
+
+   Adds MGE XE-style sunlight shafts formed by the scene depth mask. Volumetric clouds also attenuate the source
+   through their resolved transmittance. Rays extend across the scene and fade as the sun moves off screen.
+   Weather controls direct sunlight strength. This control is independent
+   of atmospheric scattering, cloud sun occlusion, and the sun glare texture. Applies immediately.
+
+.. omw-setting::
+   :title: sun glare
+   :type: boolean
+   :range: true, false
+   :default: false
+   :location: :bdg-info:`In Game > Settings > Video > Atmosphere`
+
+   Displays the mod-resolved sun glare texture. Clouds and scenery fade its visibility; landscape depth clips its
+   footprint. Post-processing effects with the ``disable_sunglare`` flag suppress this texture. Applies immediately.
+
+.. omw-setting::
+   :title: cloud sun occlusion
+   :type: boolean
+   :range: true, false
+   :default: true
+   :location: :bdg-info:`In Game > Settings > Video > Atmosphere`
+
+   Attenuates the solar disc through cloud optical depth. Textured skies also receive localized sunlight along thin
+   cloud edges and a small angular bloom around those edges. The cloud response remains in the sky and applies
+   immediately. Godrays, surface cloud shadows, and the glare texture have independent controls.
+
+.. omw-setting::
+   :title: volumetric clouds
+   :type: boolean
+   :range: true, false
+   :default: true
+   :location: :bdg-info:`In Game > Settings > Video > Atmosphere`
+
+   Renders volumetric sky and low clouds using the active weather episode. Disabling this setting selects traditional
+   textured sky clouds with their authored dome placement, texture mapping, and horizon fade. Solar occlusion
+   follows that dome. Changes apply immediately and preserve the weather episode and cloud animation state.
 
 .. omw-setting::
    :title: atmospheric quality
    :type: int
    :range: 0-3
    :default: 2
+   :location: :bdg-info:`In Game > Settings > Video > Atmosphere`
 
-   Controls cloud and mist volume resolution, cloud ray samples, and sun-shaft sample density. Higher values preserve more
-   fine volume detail while using the same weather-driven atmospheric model. Water reflections include the cloud field at
-   every quality level.
+   The Volumetric quality dropdown selects Low (0), Medium (1), High (2), or Ultra (3). It controls cloud and mist volume
+   resolution and cloud ray samples. Changes rebuild the affected targets and reset temporal
+   history immediately. Weather selection, cloud morphology parameters, and animation are preserved.
+
+Existing configurations using ``atmospheric effects`` initialize both scattering and volumetric clouds from that value.
+Explicit independent settings in the same configuration file take precedence.
+These preferences live in the user ``settings.cfg``. OpenMW preserves unrecognized user settings when saving,
+so the atmosphere preferences survive switching between OpenMWSE and upstream OpenMW.
+Each installation uses its own matching executables and ``defaults.bin``.
 
 .. omw-setting::
    :title: force per pixel lighting

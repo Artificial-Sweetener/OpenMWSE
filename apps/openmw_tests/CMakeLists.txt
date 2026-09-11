@@ -13,6 +13,8 @@ file(GLOB UNITTEST_SRC_FILES
     diagnosticworkcounter.cpp
     diagnosticgameplayrouteexecution.cpp
     diagnosticisolatedsettings.cpp
+    diagnosticreplaystate.cpp
+    ../openmw-diagnosticctl/replaystate.cpp
     ../openmw-diagnosticctl/gameplayrouteexecution.cpp
     ../openmw-diagnosticctl/isolatedsettings.cpp
 

@@ -224,7 +224,10 @@ The versioned providers expose these evidence domains:
   cached local terrain evidence, and moisture history in capsules and restores them before replay.
   Replay reports ``cloud-advection-parity: true`` after checking the restored displacement. Older capsules omit this
   transient state and report wind parity as unavailable; they cannot establish the original cloud placement.
-  ``atmosphere-runtime-parity`` independently reports whether regional history was preserved.
+  ``atmosphere-runtime-parity`` independently reports whether recorded atmosphere history was preserved.
+  Palette runtime version 2 adds the original regional color transition. Version 1 captures retain their recorded
+  environmental color and cloud state; their unrecorded regional color transition starts from the default palette.
+  Replay validates every version 1 field after this migration and compares the complete state for version 2 captures.
   The provider records the cell, camera position and angles, first-person and underwater state, current and next weather,
   weather-transition progress, game hour, game and simulation clocks, state, continuous terrain-derived environment traits,
   sparse terrain sample center, local gradient, valley depth,
@@ -344,3 +347,19 @@ tests for malformed, boundary, cancellation, and compatibility behavior. Validat
 replay, and the numerical comparison; do not reproduce production rendering or simulation in a synthetic parallel harness.
 Use focused graphics-context tests for individual shaders, equations, permutations, asset-loading boundaries, and edge cases.
 Use the bridge for full-scene images, cross-pass evidence, production-asset interactions, and performance measurements.
+
+Live atmosphere preferences
+---------------------------
+
+``replay --atmosphere-settings-sequence sequence.yaml`` applies one complete preference entry before each gameplay-route
+segment (``--performance-samples`` frames per segment). The sequence must contain exactly one entry per segment, at most 64.
+Entries use ``settings-version: 2``, boolean ``scattering``, ``clouds``, ``shadows``, ``reflections``, ``godrays``,
+``sun-glare``, and ``cloud-sun-occlusion`` fields, integer ``quality`` from 0 to 3, and integer ``appearance`` (0 for
+OpenMWSE or 1 for MGE XE). Version 1 entries with the original five preferences remain accepted and initialize
+appearance to OpenMWSE, godrays and cloud sun occlusion to enabled, and sun glare to disabled. Updates go through the same settings-change owner as the video menu and preserve weather state.
+The controller verifies requested-versus-observed preferences and retains the sequence with replay evidence.
+``--capture-route-native-frames`` captures the actual rendered transition frames.
+
+``run`` and ``replay`` accept ``--video-settings-page atmosphere|water|shadows`` to display the real video settings page
+inside the isolated child for graphical review. Both preference mutation and menu navigation are rejected by interactive
+sessions; the user's normal profile is not changed.

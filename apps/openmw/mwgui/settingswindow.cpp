@@ -10,6 +10,7 @@
 #include <MyGUI_ScrollBar.h>
 #include <MyGUI_ScrollView.h>
 #include <MyGUI_TabControl.h>
+#include <MyGUI_TabItem.h>
 #include <MyGUI_UString.h>
 #include <MyGUI_Window.h>
 
@@ -236,6 +237,8 @@ namespace MWGui
 
             configureWidgets(current, init);
         }
+        if (!init && widget == mMainWidget)
+            updateAtmosphereSettings();
     }
 
     void SettingsWindow::onFrame(float duration)
@@ -308,6 +311,10 @@ namespace MWGui
         getWidget(mClassicFalloffWidget, "ClassicFalloffWidget");
         getWidget(mMinimumBrightnessText, "MinimumBrightnessText");
         getWidget(mMinimumBrightnessScroll, "MinimumBrightnessScroll");
+        getWidget(mCloudShadowsButton, "CloudShadowsButton");
+        getWidget(mReflectCloudsButton, "ReflectCloudsButton");
+        getWidget(mVolumetricQuality, "VolumetricQuality");
+        getWidget(mAtmosphereAppearance, "AtmosphereAppearance");
         getWidget(mActorShadowsButton, "ActorShadowsButton");
         getWidget(mPlayerShadowsButton, "PlayerShadowsButton");
         getWidget(mTerrainShadowsButton, "TerrainShadowsButton");
@@ -342,6 +349,10 @@ namespace MWGui
             += MyGUI::newDelegate(this, &SettingsWindow::onWaterTextureSizeChanged);
         mWaterReflectionDetail->eventComboChangePosition
             += MyGUI::newDelegate(this, &SettingsWindow::onWaterReflectionDetailChanged);
+        mVolumetricQuality->eventComboChangePosition
+            += MyGUI::newDelegate(this, &SettingsWindow::onVolumetricQualityChanged);
+        mAtmosphereAppearance->eventComboChangePosition
+            += MyGUI::newDelegate(this, &SettingsWindow::onAtmosphereAppearanceChanged);
         mWaterRainRippleDetail->eventComboChangePosition
             += MyGUI::newDelegate(this, &SettingsWindow::onWaterRainRippleDetailChanged);
 
@@ -566,6 +577,22 @@ namespace MWGui
     void SettingsWindow::onWaterReflectionDetailChanged(MyGUI::ComboBox* /*sender*/, size_t pos)
     {
         Settings::water().mReflectionDetail.set(static_cast<int>(pos));
+        apply();
+    }
+
+    void SettingsWindow::onVolumetricQualityChanged(MyGUI::ComboBox* sender, size_t pos)
+    {
+        if (pos >= sender->getItemCount())
+            return;
+        Settings::shaders().mAtmosphericQuality.set(static_cast<int>(pos));
+        apply();
+    }
+
+    void SettingsWindow::onAtmosphereAppearanceChanged(MyGUI::ComboBox* sender, size_t pos)
+    {
+        if (pos >= sender->getItemCount())
+            return;
+        Settings::shaders().mAtmosphereAppearance.set(static_cast<int>(pos));
         apply();
     }
 
@@ -858,6 +885,7 @@ namespace MWGui
         Settings::Manager::resetPendingChanges();
 
         updateLightSettings();
+        updateAtmosphereSettings();
     }
 
     void SettingsWindow::onKeyboardSwitchClicked(MyGUI::Widget* /*sender*/)
@@ -923,6 +951,20 @@ namespace MWGui
         }
 
         layoutControlsBox();
+    }
+
+    void SettingsWindow::updateAtmosphereSettings()
+    {
+        const bool clouds = Settings::shaders().mVolumetricClouds;
+        mCloudShadowsButton->setCaptionWithReplacing(
+            Settings::shadows().mCloudShadows ? "#{Interface:On}" : "#{Interface:Off}");
+        mCloudShadowsButton->setEnabled(true);
+        mReflectCloudsButton->setEnabled(Settings::water().mShader);
+        mVolumetricQuality->setIndexSelected(Settings::shaders().mAtmosphericQuality.get());
+        mVolumetricQuality->setEnabled(
+            clouds || Settings::shaders().mAtmosphericScattering || Settings::shaders().mGodrays);
+        mAtmosphereAppearance->setIndexSelected(Settings::shaders().mAtmosphereAppearance.get());
+        mAtmosphereAppearance->setEnabled(Settings::shaders().mAtmosphericScattering);
     }
 
     void SettingsWindow::updateLightSettings()
@@ -1123,11 +1165,30 @@ namespace MWGui
         updateControlsBox();
     }
 
+    void SettingsWindow::showVideoPage(std::string_view page)
+    {
+        const std::string_view pageWidget = page == "atmosphere" ? "AtmospherePage"
+            : page == "water"                                    ? "WaterPage"
+            : page == "shadows"                                  ? "ShadowsPage"
+                                                                 : "";
+        if (pageWidget.empty())
+            throw std::invalid_argument("unknown video settings page");
+        MyGUI::TabItem* videoPage;
+        MyGUI::TabItem* selectedPage;
+        MyGUI::TabControl* videoTabs;
+        getWidget(videoPage, "VideoPage");
+        getWidget(videoTabs, "VideoTabs");
+        getWidget(selectedPage, pageWidget);
+        mSettingsTab->setItemSelected(videoPage);
+        videoTabs->setItemSelected(selectedPage);
+    }
+
     void SettingsWindow::onOpen()
     {
         highlightCurrentResolution();
         updateControlsBox();
         updateLightSettings();
+        updateAtmosphereSettings();
         updateWindowModeSettings();
         updateVSyncModeSettings();
         resetScrollbars();
@@ -1163,6 +1224,13 @@ namespace MWGui
         // Need to include window margins
         int margins = mMainWidget->getWidth() - mSettingsTab->getWidth();
         int minimumWindowWidth = tabBarWidth + margins;
+        MyGUI::TabControl* videoTabs;
+        getWidget(videoTabs, "VideoTabs");
+        int videoTabWidth = 0;
+        for (uint32_t i = 0; i < videoTabs->getItemCount(); ++i)
+            videoTabWidth += videoTabs->getButtonWidthAt(i);
+        minimumWindowWidth
+            = std::max(minimumWindowWidth, videoTabWidth + mMainWidget->getWidth() - videoTabs->getWidth());
 
         if (minimumWindowWidth > minSize.width)
         {

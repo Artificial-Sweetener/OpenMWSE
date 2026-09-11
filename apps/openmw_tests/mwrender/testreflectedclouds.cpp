@@ -42,6 +42,7 @@ namespace
     struct CloudBufferScene
     {
         bool mBuffered = true;
+        std::array<bool, 4> mEnabled{ true, true, true, true };
         bool mReflection = true;
         int mWidth = 32;
         int mHeight = 16;
@@ -236,6 +237,7 @@ void main()
                 camera->getOrCreateStateSet()->getUniform("screenRes")->set(osg::Vec2f(width / 2, height / 2));
             }
             episode->set(frame == 3 ? 0.75f : 0.25f);
+            reflectedClouds->setEnabled(sceneSettings.mEnabled[frame]);
             reflectedClouds->updateCloudCover(sceneSettings.mMainCoverage[frame], sceneSettings.mLowCoverage[frame]);
             camera->setViewMatrix(osg::Matrix::translate(frame == 3 ? -0.5 : 0.5, 0.25, 0));
             viewer.frame();
@@ -425,4 +427,13 @@ TEST(ReflectedCloudsDeathTest, PreservesReversedDepthComposition)
             std::exit(matches ? EXIT_SUCCESS : EXIT_FAILURE);
         },
         testing::ExitedWithCode(EXIT_SUCCESS), "");
+}
+
+/// Stop offscreen cloud work when disabled and resume it from the current view and weather field.
+TEST(ReflectedCloudsTest, ReleasesAndRestartsTransportAfterLiveToggle)
+{
+    const auto evidence = renderCloudBuffer({ .mEnabled = { true, false, false, true } });
+    ASSERT_EQ(evidence.cloudDrawFrames.size(), 2u);
+    EXPECT_EQ(evidence.cloudDrawFrames.front(), evidence.sceneFrames.front());
+    EXPECT_EQ(evidence.cloudDrawFrames.back(), evidence.sceneFrames.back());
 }
