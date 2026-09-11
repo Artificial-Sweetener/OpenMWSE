@@ -87,6 +87,9 @@ namespace Terrain
         };
         void addChunkManager(ChunkManager*);
 
+        /// Refresh a registered manager's paging limit and invalidate camera views while traversal is stopped.
+        void updateChunkManagerViewDistance(ChunkManager& manager, float distance);
+
     private:
         void ensureQuadTreeBuilt();
         void loadRenderingNode(

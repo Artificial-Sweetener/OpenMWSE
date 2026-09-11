@@ -63,6 +63,10 @@ namespace SceneUtil
                 if (!diagnosticGpuPassStatisticsCollectionEnabled(*camera))
                     return;
 
+                camera->getStats()->setAttribute(state->getFrameStamp()->getFrameNumber(),
+                    std::string(diagnosticShadowTextureWidthStatistic), mTexture->getTextureWidth());
+                camera->getStats()->setAttribute(state->getFrameStamp()->getFrameNumber(),
+                    std::string(diagnosticShadowTextureHeightStatistic), mTexture->getTextureHeight());
                 DiagnosticShadowMap map;
                 map.mFrame = state->getFrameStamp()->getFrameNumber();
                 map.mContext = state->getContextID();

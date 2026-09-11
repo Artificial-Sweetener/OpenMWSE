@@ -271,9 +271,6 @@ namespace MWRender
             globalDefines[itr->first] = itr->second;
 
         // Refactor this at some point - most shaders don't care about these defines
-        const float groundcoverDistance = Settings::groundcover().mRenderingDistance;
-        globalDefines["groundcoverFadeStart"] = std::to_string(groundcoverDistance * 0.9f);
-        globalDefines["groundcoverFadeEnd"] = std::to_string(groundcoverDistance);
         globalDefines["groundcoverStompMode"] = std::to_string(Settings::groundcover().mStompMode);
         globalDefines["groundcoverStompIntensity"] = std::to_string(Settings::groundcover().mStompIntensity);
 
@@ -1574,6 +1571,20 @@ namespace MWRender
             {
                 setViewDistance(Settings::camera().mViewingDistance);
             }
+            else if (it->first == "Groundcover" && it->second == "rendering distance")
+            {
+                mViewer->stopThreading();
+                const float distance = Settings::groundcover().mRenderingDistance;
+                for (auto& [worldspace, chunks] : mWorldspaceChunks)
+                {
+                    if (!chunks.mGroundcover)
+                        continue;
+                    chunks.mGroundcover->updateDistance(distance);
+                    static_cast<Terrain::QuadTreeWorld&>(*chunks.mTerrain)
+                        .updateChunkManagerViewDistance(*chunks.mGroundcover, distance);
+                }
+                mViewer->startThreading();
+            }
             else if (it->first == "General"
                 && (it->second == "texture filter" || it->second == "texture mipmap" || it->second == "anisotropy"))
             {
@@ -1641,6 +1652,7 @@ namespace MWRender
             }
             else if (it->first == "Shadows" && it->second != "cloud shadows")
             {
+                mViewer->stopThreading();
                 mShadowManager->setupShadowSettings(
                     Settings::shadows(), mResourceSystem->getSceneManager()->getShaderManager());
                 mShadowManager->setIndoorShadowCastingMask(getIndoorShadowCastingMask());
@@ -1658,11 +1670,10 @@ namespace MWRender
                         defines.erase(key);
                     for (const auto& [key, value] : shadowDefines)
                         defines[key] = value;
-                    mViewer->stopThreading();
                     mResourceSystem->getSceneManager()->getShaderManager().setGlobalDefines(defines);
-                    mViewer->startThreading();
                     mAppliedShadowDefines = shadowDefines;
                 }
+                mViewer->startThreading();
             }
             else if (it->first == "Post Processing" && it->second == "enabled")
             {

@@ -46,6 +46,12 @@ namespace SceneUtil
         double mCascadeFar = 0.0;
     };
 
+    /// Store the dimensions of shadow textures submitted by completed shadow cameras.
+    inline constexpr std::string_view diagnosticShadowTextureWidthStatistic = "OpenMW diagnostic shadow texture width";
+    /// Store the rendered shadow texture height in pixels.
+    inline constexpr std::string_view diagnosticShadowTextureHeightStatistic
+        = "OpenMW diagnostic shadow texture height";
+
     /// Stores the post-sort render-leaf count for one shadow map and frame.
     inline constexpr std::string_view diagnosticShadowRenderLeafCountStatistic
         = "OpenMW diagnostic shadow render leaves";

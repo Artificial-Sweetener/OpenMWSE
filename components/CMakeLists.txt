@@ -94,6 +94,8 @@ add_component_dir (settings
     categories/video
     categories/water
     categories/windows
+    distance
+    shadowresolution
     gyroscopeaxis
     hrtfmode
     navmeshrendermode
@@ -324,7 +326,7 @@ add_component_dir (files
     )
 
 add_component_dir (diagnostics
-    protocol commandqueue capsule gameplayroute localtransport session fixedstepscheduler atmospherescenario atmospheresettings
+    protocol commandqueue capsule gameplayroute localtransport session fixedstepscheduler atmospherescenario atmospheresettings distancesettings
     )
 
 if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")

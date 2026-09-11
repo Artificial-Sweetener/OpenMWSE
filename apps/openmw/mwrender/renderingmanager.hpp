@@ -283,7 +283,7 @@ namespace MWRender
 
         void rebuildPtr(const MWWorld::Ptr& ptr);
 
-        /// Apply renderer preferences and rebuild affected atmosphere resources while rendering threads are stopped.
+        /// Apply renderer preferences, quiescing threads before changing shared grass state or atmosphere resources.
         void processChangedSettings(const Settings::CategorySettingVector& settings);
 
         float getNearClipDistance() const { return mNearClip; }

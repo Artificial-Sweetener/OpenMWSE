@@ -85,6 +85,9 @@ namespace MWWorld
         bool isTerrainLoaded(const PositionCellGrid& position, double referenceTime) const;
         void setTerrain(Terrain::World* terrain);
 
+        /// Finish background work and discard view selections before grass paging limits change.
+        void invalidateTerrainViews();
+
         void reportStats(unsigned int frameNumber, osg::Stats& stats) const;
 
     private:

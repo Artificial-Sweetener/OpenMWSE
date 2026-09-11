@@ -1,6 +1,7 @@
 #include "groundcover.hpp"
 
 #include "groundcoverbatching.hpp"
+#include "groundcoverdistance.hpp"
 #include "groundcoverinstances.hpp"
 #include "groundcoverlod.hpp"
 #include "groundcovernearfar.hpp"
@@ -9,7 +10,6 @@
 #include <osg/BlendFunc>
 #include <osg/ComputeBoundsVisitor>
 #include <osg/Geometry>
-#include <osg/LOD>
 #include <osg/Program>
 #include <osg/VertexAttribDivisor>
 
@@ -111,19 +111,21 @@ namespace MWRender
         class ViewDistanceCallback : public SceneUtil::NodeCallback<ViewDistanceCallback>
         {
         public:
-            ViewDistanceCallback(float dist, const osg::BoundingBox& box)
-                : mViewDistance(dist)
+            /// Retain the current world-unit distance for this chunk's coarse culling boundary.
+            ViewDistanceCallback(GroundcoverDistance* distance, const osg::BoundingBox& box)
+                : mDistance(distance)
                 , mBox(box)
             {
             }
+            /// Traverse visible chunks using the same limit as batch culling and shader fading.
             void operator()(osg::Node* node, osg::NodeVisitor* nv)
             {
-                if (Terrain::distance(mBox, nv->getEyePoint()) <= mViewDistance)
+                if (mDistance->get() > 0 && Terrain::distance(mBox, nv->getEyePoint()) <= mDistance->get())
                     traverse(node, nv);
             }
 
         private:
-            float mViewDistance;
+            osg::ref_ptr<GroundcoverDistance> mDistance;
             osg::BoundingBox mBox;
         };
 
@@ -169,6 +171,7 @@ namespace MWRender
         : GenericResourceManager<GroundcoverChunkId>(nullptr, Settings::cells().mCacheExpiryDelay)
         , mSceneManager(sceneManager)
         , mDensity(density)
+        , mDistance(new GroundcoverDistance(viewDistance))
         , mStateset(new osg::StateSet)
         , mGroundcoverStore(store)
     {
@@ -190,6 +193,11 @@ namespace MWRender
     }
 
     Groundcover::~Groundcover() = default;
+
+    void Groundcover::updateDistance(float distance)
+    {
+        mDistance->set(distance);
+    }
 
     void Groundcover::collectInstances(InstanceMap& instances, float size, const osg::Vec2f& center)
     {
@@ -274,28 +282,27 @@ namespace MWRender
             osg::ref_ptr<osg::Node> farNode = makeGroundcoverFarLod(*node, farTriangleRatio);
 
             osg::ref_ptr<GroundcoverBatch> detailedBatch
-                = new GroundcoverBatch(batch.mClusters, batch.mTransforms, modelExtent, getViewDistance());
+                = new GroundcoverBatch(batch.mClusters, batch.mTransforms, modelExtent, mDistance);
             InstancingVisitor detailedVisitor(batch, *detailedBatch);
             node->accept(detailedVisitor);
             detailedBatch->attach(*node);
 
             osg::ref_ptr<GroundcoverBatch> farBatch
-                = new GroundcoverBatch(batch.mClusters, batch.mTransforms, modelExtent, getViewDistance());
+                = new GroundcoverBatch(batch.mClusters, batch.mTransforms, modelExtent, mDistance);
             InstancingVisitor farVisitor(batch, *farBatch);
             farNode->accept(farVisitor);
             farBatch->attach(*farNode);
 
-            osg::ref_ptr<osg::LOD> lod = new osg::LOD;
-            const float lodDistance = getGroundcoverFarLodDistance(getViewDistance());
-            lod->addChild(node, 0.f, lodDistance);
-            lod->addChild(farNode, lodDistance, std::numeric_limits<float>::max());
+            osg::ref_ptr<GroundcoverLod> lod = new GroundcoverLod(mDistance);
+            lod->addChild(node);
+            lod->addChild(farNode);
             group->addChild(lod);
         }
 
         osg::ComputeBoundsVisitor cbv;
         group->accept(cbv);
         osg::BoundingBox box = cbv.getBoundingBox();
-        group->addCullCallback(new ViewDistanceCallback(getViewDistance(), box));
+        group->addCullCallback(new ViewDistanceCallback(mDistance, box));
 
         group->setStateSet(mStateset);
         group->setNodeMask(Mask_Groundcover);
@@ -303,6 +310,11 @@ namespace MWRender
             group->addCullCallback(new SceneUtil::LightListCallback);
         mSceneManager->recreateShaders(group, "groundcover", mProgramTemplate);
         mSceneManager->shareState(group);
+        // Keep the editable uniform out of the shared-state cache's value-based ordering.
+        osg::ref_ptr<osg::StateSet> distanceState = new osg::StateSet(*group->getStateSet());
+        distanceState->addUniform(mDistance->getFadeUniform());
+        distanceState->setDataVariance(osg::Object::STATIC);
+        group->setStateSet(distanceState);
         group->getBound();
         return group;
     }

@@ -8,6 +8,7 @@
 #include <components/diagnostics/atmospherescenario.hpp>
 #include <components/diagnostics/atmospheresettings.hpp>
 #include <components/diagnostics/capsule.hpp>
+#include <components/diagnostics/distancesettings.hpp>
 #include <components/diagnostics/session.hpp>
 #include <components/files/hash.hpp>
 #include <components/sceneutil/shadow.hpp>
@@ -604,6 +605,24 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                         mScreenCaptureHandler->startCapture();
                     }
                     break;
+
+                case Diagnostics::CommandType::SetDistanceSettings:
+                {
+                    if (!mDiagnosticChild)
+                    {
+                        response.mError = Diagnostics::ErrorCode::PermissionDenied;
+                        break;
+                    }
+                    const auto settings = Diagnostics::deserializeDistanceSettings(diagnosticText(command.mPayload));
+                    mWindowManager->setVideoDistanceValues(settings.mUseCellEditor, settings.mView, settings.mGrass,
+                        settings.mShadow, settings.mShadowResolution);
+                    response.mPayload = diagnosticBytes(Diagnostics::serializeDistanceSettings(
+                        { Settings::camera().mViewingDistance, Settings::groundcover().mRenderingDistance,
+                            Settings::shadows().mMaximumShadowMapDistance, settings.mUseCellEditor,
+                            settings.mShadowResolution ? std::optional<int>(Settings::shadows().mShadowMapResolution)
+                                                       : std::nullopt }));
+                    break;
+                }
 
                 case Diagnostics::CommandType::SetAtmosphereSettings:
                 {

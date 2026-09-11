@@ -621,10 +621,17 @@ namespace Terrain
     {
         mChunkManagers.push_back(m);
         mTerrainRoot->setNodeMask(mTerrainRoot->getNodeMask() | m->getNodeMask());
-        if (m->getViewDistance())
-            m->setMaxLodLevel(
-                DefaultLodCallback::convertDistanceToLodLevel(m->getViewDistance() + mViewDataMap->getReuseDistance(),
-                    mMinSize, mLodFactor, ESM::getCellSize(mWorldspace)));
+        updateChunkManagerViewDistance(*m, m->getViewDistance());
+    }
+
+    void QuadTreeWorld::updateChunkManagerViewDistance(ChunkManager& manager, float distance)
+    {
+        manager.setViewDistance(distance);
+        manager.setMaxLodLevel(~0u);
+        if (distance)
+            manager.setMaxLodLevel(DefaultLodCallback::convertDistanceToLodLevel(
+                distance + mViewDataMap->getReuseDistance(), mMinSize, mLodFactor, ESM::getCellSize(mWorldspace)));
+        rebuildViews();
     }
 
     void QuadTreeWorld::rebuildViews()

@@ -34,6 +34,7 @@ namespace Diagnostics
         SetAtmosphereScenario = 15,
         SetAtmosphereSettings = 16,
         ShowVideoSettings = 17,
+        SetDistanceSettings = 18,
     };
 
     /// Classifies protocol failures so clients can distinguish invalid requests from runtime failures.

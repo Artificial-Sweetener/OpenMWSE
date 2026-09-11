@@ -42,6 +42,12 @@ Shadows Settings
 
    Maximum distance shadows cover from the camera.
    Set ≤ 0 to disable distance limit.
+   Changes apply immediately. The menu accepts positive distances without an artificial upper limit.
+   Existing configurations with no distance limit are preserved and explained until a positive distance is entered.
+   The two numeric fields show editable world units and cell lengths together, with increment and decrement arrows.
+   Arrows adjust by one world unit or a half cell. Numeric entry accepts finite positive distances. A performance note appears
+   above OpenMW's usual slider maximum of 16384 world units. One Morrowind cell is 8192 world units.
+   This limit controls geometry shadow maps, independently of cloud shadows.
 
 .. omw-setting::
    :title: shadow fade start
@@ -90,9 +96,12 @@ Shadows Settings
    :default: 1024
    :location: :bdg-info:`In Game > Settings > Options > Video > Shadows` :bdg-success:`Launcher > Settings > Visuals > Shadows`
 
-   Size of shadow maps.
-   Higher values improve quality but increase GPU load.
-   Powers of two may perform better on some hardware.
+   Width and height of each shadow map in pixels. The menu accepts positive integer dimensions up to the smaller of
+   the graphics hardware texture-size limit and the renderer's 32767-pixel dimension limit.
+   Arrows adjust each dimension by 256 pixels; direct entry also accepts other whole-pixel sizes.
+   Changes apply immediately and may briefly pause rendering while textures are resized.
+   Higher values improve detail but increase GPU memory use and may reduce performance.
+   Increasing shadow distance spreads the available texture detail over a larger area.
 
 .. omw-setting::
    :title: actor shadows

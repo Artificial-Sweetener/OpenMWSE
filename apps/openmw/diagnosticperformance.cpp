@@ -65,6 +65,8 @@ namespace OMW
 
         constexpr std::array cameraDetailMetrics{
             CameraMetric{ "render-leaves", SceneUtil::diagnosticShadowRenderLeafCountStatistic },
+            CameraMetric{ "texture-width", SceneUtil::diagnosticShadowTextureWidthStatistic },
+            CameraMetric{ "texture-height", SceneUtil::diagnosticShadowTextureHeightStatistic },
             CameraMetric{ "state-graphs", SceneUtil::diagnosticShadowStateGraphCountStatistic },
             CameraMetric{ "light-vertical-magnitude", SceneUtil::diagnosticShadowLightVerticalMagnitudeStatistic },
             CameraMetric{ "light-luminance", SceneUtil::diagnosticShadowLightLuminanceStatistic },

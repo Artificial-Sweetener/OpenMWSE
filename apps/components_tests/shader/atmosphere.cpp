@@ -1986,8 +1986,6 @@ void main()
         defines["maxLights"] = "8";
         defines["shadow_texture_unit_list"] = "";
         defines["shadowNormalOffset"] = "0.0";
-        defines["groundcoverFadeStart"] = "0.0";
-        defines["groundcoverFadeEnd"] = "1.0";
         defines["exponentialFog"] = "1";
         defines["radialFog"] = "1";
         defines["rainRippleDetail"] = "2";

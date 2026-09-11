@@ -70,9 +70,11 @@ Camera Settings
    by loading geometry obscured by fog in the center of the screen.
    See RenderingManager::configureFog for the relevant source code.
 
-   This setting can be adjusted in game from the ridiculously low value of 2500 units to a maximum of 7168 units
-   using the View Distance slider in the Detail tab of the Video panel of the Options menu, unless distant terrain is enabled,
-   in which case the maximum is increased to 81920 units.
+   The in-game View Distance control shows editable world units and fractional cell lengths together.
+   Either field applies immediately. Arrow buttons adjust by one world unit or a half cell, respectively.
+   Numeric entry accepts finite positive distances. One Morrowind cell is 8192 world units.
+   A performance note appears above OpenMW's usual slider maximum: 7168 units, or 81920 with distant terrain enabled.
+   Configuration values remain in world units for compatibility with OpenMW.
 
 .. omw-setting::
    :title: field of view

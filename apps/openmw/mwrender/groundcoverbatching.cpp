@@ -249,9 +249,9 @@ namespace
 
 namespace MWRender
 {
-    GroundcoverBatch::GroundcoverBatch(
-        std::vector<GroundcoverDrawCluster> clusters, osg::Vec4Array* transforms, float modelExtent, float viewDistance)
-        : mVisibility(new GroundcoverVisibility(std::move(clusters), transforms, modelExtent, viewDistance))
+    GroundcoverBatch::GroundcoverBatch(std::vector<GroundcoverDrawCluster> clusters, osg::Vec4Array* transforms,
+        float modelExtent, GroundcoverDistance* distance)
+        : mVisibility(new GroundcoverVisibility(std::move(clusters), transforms, modelExtent, distance))
     {
     }
 

@@ -29,6 +29,9 @@ uniform float near;
 uniform float far;
 uniform float alphaRef;
 
+// World-unit fade interval shared with CPU groundcover visibility.
+uniform vec2 groundcoverFade;
+
 #if PER_PIXEL_LIGHTING
 #include "lib/light/clamp.glsl"
 #else
@@ -56,8 +59,10 @@ void main()
     gl_FragData[0] = vec4(1.0);
 #endif
 
-    if (euclideanDepth > @groundcoverFadeStart)
-        gl_FragData[0].a *= 1.0-smoothstep(@groundcoverFadeStart, @groundcoverFadeEnd, euclideanDepth);
+    if (euclideanDepth >= groundcoverFade.y)
+        discard;
+    if (euclideanDepth > groundcoverFade.x)
+        gl_FragData[0].a *= 1.0-smoothstep(groundcoverFade.x, groundcoverFade.y, euclideanDepth);
 
     gl_FragData[0].a = alphaTest(gl_FragData[0].a, alphaRef);
 

@@ -313,6 +313,11 @@ namespace
 
 namespace MWWorld
 {
+    void Scene::prepareGroundcoverDistanceChange()
+    {
+        mPreloader->invalidateTerrainViews();
+    }
+
     void Scene::removeFromPagedRefs(const Ptr& ptr)
     {
         ESM::RefNum refnum = ptr.getCellRef().getRefNum();

@@ -85,6 +85,20 @@ namespace Settings
             EXPECT_TRUE(shaders().mCloudSunOcclusion);
         }
 
+        TEST_F(SettingsStartupTest, distanceValuesPreserveCanonicalSettingsAcrossSaveAndReload)
+        {
+            std::ofstream(mDirectory / "settings.cfg")
+                << "[Camera]\nviewing distance = 123456.5\n[Groundcover]\nrendering distance = 28672\n"
+                   "[Shadows]\nmaximum shadow map distance = -1\nshadow map resolution = 1537\n";
+            ASSERT_NO_FATAL_FAILURE(load());
+            Manager::saveUser(mDirectory / "settings.cfg");
+            ASSERT_NO_FATAL_FAILURE(load());
+            EXPECT_EQ(camera().mViewingDistance.get(), 123456.5f);
+            EXPECT_EQ(groundcover().mRenderingDistance.get(), 28672.f);
+            EXPECT_EQ(shadows().mMaximumShadowMapDistance.get(), -1.f);
+            EXPECT_EQ(shadows().mShadowMapResolution.get(), 1537);
+        }
+
         TEST_F(SettingsStartupTest, migratesLegacyDisabledAtmosphereThroughSaveAndReload)
         {
             std::ofstream(mDirectory / "settings.cfg")

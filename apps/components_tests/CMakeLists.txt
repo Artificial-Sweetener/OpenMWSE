@@ -48,6 +48,7 @@ file(GLOB UNITTEST_SRC_FILES
     settings/parser.cpp
     settings/shadermanager.cpp
     settings/testvalues.cpp
+    settings/distance.cpp
 
     shader/parsedefines.cpp
     shader/parsefors.cpp
@@ -72,6 +73,7 @@ file(GLOB UNITTEST_SRC_FILES
     diagnostics/protocol.cpp
     diagnostics/atmospherescenario.cpp
     diagnostics/atmospheresettings.cpp
+    diagnostics/distancesettings.cpp
     diagnostics/commandqueue.cpp
     diagnostics/capsule.cpp
     diagnostics/gameplayroute.cpp

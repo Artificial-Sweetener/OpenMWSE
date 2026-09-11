@@ -30,12 +30,15 @@ namespace SceneUtil
 
         static const ShadowManager& instance();
 
+        /// Return the common texture dimension limit of realized graphics contexts, or zero before discovery.
+        static int getMaximumShadowMapResolution();
+
         explicit ShadowManager(osg::ref_ptr<osg::Group> sceneRoot, osg::ref_ptr<osg::Group> rootNode,
             unsigned int outdoorShadowCastingMask, unsigned int indoorShadowCastingMask, unsigned int worldMask,
             const Settings::ShadowsCategory& settings, Shader::ShaderManager& shaderManager);
         ~ShadowManager();
 
-        /// Apply runtime shadow policy and reserve the configured shadow-map texture units.
+        /// Apply shadow policy and texture dimensions while render threads are quiescent.
         void setupShadowSettings(const Settings::ShadowsCategory& settings, Shader::ShaderManager& shaderManager);
         void setOutdoorShadowCastingMask(unsigned int mask);
         void setIndoorShadowCastingMask(unsigned int mask);

@@ -360,6 +360,20 @@ appearance to OpenMWSE, godrays and cloud sun occlusion to enabled, and sun glar
 The controller verifies requested-versus-observed preferences and retains the sequence with replay evidence.
 ``--capture-route-native-frames`` captures the actual rendered transition frames.
 
-``run`` and ``replay`` accept ``--video-settings-page atmosphere|water|shadows`` to display the real video settings page
+``run`` and ``replay`` accept ``--video-settings-page atmosphere|water|shadows|detail`` to display the real video settings page
 inside the isolated child for graphical review. Both preference mutation and menu navigation are rejected by interactive
 sessions; the user's normal profile is not changed.
+
+Live distance controls
+----------------------
+
+``replay --distance-settings-sequence sequence.yaml`` applies one complete preference snapshot through the real video
+distance controls before each route segment. The input-editor flag selects which numeric field to exercise.
+Each entry has ``distance-version: 1``, positive ``view-world-units``,
+non-negative ``grass-world-units``, finite ``shadow-world-units`` (non-positive preserves an imported configuration without a shadow distance limit), and boolean ``use-cell-editor``.
+Version 2 adds a required positive integer ``shadow-resolution`` field and verifies pixel entry and 256-pixel arrow steps.
+Shadow camera work statistics include ``texture-width`` and ``texture-height`` for completed draws.
+Version 1 retains the current shadow resolution. The sequence contains one entry per segment, at most 64. The selected field's arrow steps and performance note are verified, and the requested value is restored.
+Both numeric fields are checked after entry, and the
+controller verifies the resulting canonical settings and records ``distance-settings-<segment>.yaml``.
+This operation is restricted to isolated diagnostic children. The source profile remains unchanged.

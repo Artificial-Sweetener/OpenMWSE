@@ -2395,9 +2395,15 @@ namespace MWGui
         updateVisible();
     }
 
+    void WindowManager::setVideoDistanceValues(
+        bool useCellEditor, float view, float grass, float shadow, std::optional<int> resolution)
+    {
+        mSettingsWindow->setDistanceValues(useCellEditor, view, grass, shadow, resolution);
+    }
+
     void WindowManager::showVideoSettings(std::string_view page)
     {
-        if (page != "atmosphere" && page != "water" && page != "shadows")
+        if (page != "atmosphere" && page != "water" && page != "shadows" && page != "detail")
             throw std::invalid_argument("unknown video settings page");
         if (!mSettingsWindow->isVisible())
             toggleSettingsWindow();

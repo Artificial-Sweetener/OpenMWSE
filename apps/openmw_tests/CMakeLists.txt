@@ -34,6 +34,7 @@ file(GLOB UNITTEST_SRC_FILES
     mwrender/testatmosphere.cpp
     mwrender/testdiagnosticbundle.cpp
     mwrender/testgroundcoverbatching.cpp
+    mwrender/testgroundcoverdistance.cpp
     mwrender/testgroundcoverlod.cpp
     mwrender/testgroundcovernearfar.cpp
     mwrender/testreflectionsky.cpp

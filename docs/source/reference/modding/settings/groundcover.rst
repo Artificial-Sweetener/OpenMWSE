@@ -28,10 +28,18 @@ Groundcover Settings
    :type: float32
    :range: ≥ 0.0
    :default: 6144.0
+   :location: :bdg-info:`In Game > Settings > Video > Detail Level`
    
 
    Sets the distance (in game units) at which grass pages are rendered.
    Larger values may reduce performance.
+   Changes apply immediately to grass visibility, fading, and level of detail, including existing grass chunks.
+   Updating the distance can briefly pause rendering while background work finishes and paging selections refresh.
+   The in-game control shows editable world units and cell lengths together, with increment and decrement arrows.
+   Arrows adjust by one world unit or a half cell. Numeric entry accepts finite non-negative distances.
+   A performance note appears above the default grass distance.
+   Fractional cells are supported; one Morrowind cell is 8192 world units.
+   The configuration value is always stored in world units.
 
 .. omw-setting::
    :title: stomp mode

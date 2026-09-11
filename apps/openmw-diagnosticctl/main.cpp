@@ -2,6 +2,7 @@
 #include <components/diagnostics/atmospherescenario.hpp>
 #include <components/diagnostics/atmospheresettings.hpp>
 #include <components/diagnostics/capsule.hpp>
+#include <components/diagnostics/distancesettings.hpp>
 #include <components/diagnostics/gameplayroute.hpp>
 #include <components/diagnostics/localtransport.hpp>
 #include <components/diagnostics/session.hpp>
@@ -695,7 +696,8 @@ namespace
                   "      [--route-shadow-casters terrain|objects]\n"
                   "      [--headed]\n"
                   "      [--atmosphere-settings-sequence sequence.yaml]\n"
-                  "      [--video-settings-page atmosphere|water|shadows]\n"
+                  "      [--video-settings-page atmosphere|water|shadows|detail]\n"
+                  "      [--distance-settings-sequence <yaml>]\n"
                   "      [--setting \"Section:name=value\"]...\n"
                   "  openmw-diagnosticctl inspect-capsule --capsule capture.omwdiag [--entry name]\n"
                   "  openmw-diagnosticctl add-route --capsule capture.omwdiag --route route.yaml --output "
@@ -989,6 +991,8 @@ namespace
             throw std::runtime_error("native route capture requires a capsule containing a gameplay route");
         if (findOption(arguments, "--atmosphere-settings-sequence") && gameplayRoute.empty())
             throw std::invalid_argument("live atmosphere settings require a capsule containing a gameplay route");
+        if (findOption(arguments, "--distance-settings-sequence") && gameplayRoute.empty())
+            throw std::invalid_argument("live distance settings require a capsule containing a gameplay route");
 
         ChildProcess child(executable, childArguments);
         Diagnostics::Command hello{ 1, Diagnostics::CommandType::Hello, std::move(replayManifest) };
@@ -1179,8 +1183,39 @@ namespace
             }
             std::size_t completedFrames = 0;
             unsigned segmentIndex = 0;
+            std::vector<Diagnostics::DistanceSettings> distanceSequence;
+            if (const auto sequencePath = findOption(arguments, "--distance-settings-sequence"))
+            {
+                const YAML::Node sequence = YAML::LoadFile(*sequencePath);
+                const std::size_t segmentCount
+                    = (routePlan.mFrameCount + routePlan.mSegmentFrameCount - 1) / routePlan.mSegmentFrameCount;
+                if (!sequence.IsSequence() || sequence.size() != segmentCount || sequence.size() > 64)
+                    throw std::invalid_argument(
+                        "distance settings sequence must contain one entry per route segment, at most 64");
+                for (const auto& entry : sequence)
+                    distanceSequence.push_back(Diagnostics::deserializeDistanceSettings(YAML::Dump(entry)));
+                std::filesystem::copy_file(*sequencePath, artifacts / "distance-settings-sequence.yaml");
+            }
             while (completedFrames < routePlan.mFrameCount)
             {
+                if (!distanceSequence.empty())
+                {
+                    const auto& requested = distanceSequence.at(segmentIndex);
+                    const auto applied = Diagnostics::transact(endpoint,
+                        { requestId++, Diagnostics::CommandType::SetDistanceSettings,
+                            textPayload(Diagnostics::serializeDistanceSettings(requested)) });
+                    requireSuccessfulResponse(applied);
+                    const auto observed = Diagnostics::deserializeDistanceSettings(payloadText(applied.mPayload));
+                    if (observed.mView != requested.mView || observed.mGrass != requested.mGrass
+                        || observed.mUseCellEditor != requested.mUseCellEditor
+                        || (requested.mShadow > 0 ? observed.mShadow != requested.mShadow : observed.mShadow > 0))
+                        throw std::runtime_error("live distance controls did not match the requested preferences");
+                    std::ofstream evidence(artifacts / ("distance-settings-" + std::to_string(segmentIndex) + ".yaml"));
+                    evidence << Diagnostics::serializeDistanceSettings(observed);
+                    if (!evidence)
+                        throw std::runtime_error("failed writing live distance settings evidence");
+                    std::cout << "live-distance-settings-parity: " << segmentIndex << " true\n";
+                }
                 if (!settingsSequence.empty())
                 {
                     const auto& requested = settingsSequence.at(segmentIndex);

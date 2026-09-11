@@ -394,68 +394,217 @@
                             <Property key="TextAlign" value="Right"/>
                         </Widget>
                     </Widget>
-                    <Widget type="TabItem">
+                    <Widget type="TabItem" name="DetailPage">
                         <Property key="Caption" value=" #{OMWEngine:DetailLevel} "/>
 
-                        <Widget type="AutoSizedTextBox" skin="NormalText" align="Left Top">
-                            <Property key="Caption" value="#{OMWEngine:TextureFiltering}"/>
-                            <UserString key="VStretch" value="false"/>
-                            <UserString key="HStretch" value="false"/>
-                        </Widget>
-                        <Widget type="ComboBox" align="Left Top" skin="MW_ComboBox" position="0 22 200 24" name="TextureFilteringButton">
-                            <Property key="AddItem" value="#{OMWEngine:TextureFilteringBilinear}"/>
-                            <Property key="AddItem" value="#{OMWEngine:TextureFilteringTrilinear}"/>
-                        </Widget>
+                        <Widget type="ScrollView" skin="MW_ScrollView" position_real="0 0 1 1" align="Stretch" name="DistanceScrollView">
+                            <Property key="CanvasSize" value="352 458"/>
+                            <Property key="CanvasAlign" value="Left Top"/>
+                            <Property key="VisibleHScroll" value="false"/>
+                            <Widget type="AutoSizedTextBox" skin="NormalText" align="Left Top">
+                                <Property key="Caption" value="#{OMWEngine:TextureFiltering}"/>
+                                <UserString key="VStretch" value="false"/>
+                                <UserString key="HStretch" value="false"/>
+                            </Widget>
+                            <Widget type="ComboBox" align="Left Top" skin="MW_ComboBox" position="0 22 200 24" name="TextureFilteringButton">
+                                <Property key="AddItem" value="#{OMWEngine:TextureFilteringBilinear}"/>
+                                <Property key="AddItem" value="#{OMWEngine:TextureFilteringTrilinear}"/>
+                            </Widget>
 
-                        <Widget type="AutoSizedTextBox" skin="NormalText" position="0 52 200 18" name="AnisotropyLabel">
-                            <Property key="Caption" value="#{OMWEngine:Anisotropy}"/>
+                            <Widget type="AutoSizedTextBox" skin="NormalText" position="0 52 200 18" name="AnisotropyLabel">
+                                <Property key="Caption" value="#{OMWEngine:Anisotropy}"/>
+                            </Widget>
+                            <Widget type="ComboBox" skin="MW_ComboBox" position="0 74 200 24" align="Left Top" name="Anisotropy">
+                                <Property key="AddItem" value="#{Interface:Off}"/>
+                                <Property key="AddItem" value="2x"/>
+                                <Property key="AddItem" value="4x"/>
+                                <Property key="AddItem" value="8x"/>
+                                <Property key="AddItem" value="16x"/>
+                            </Widget>
+                            <Widget type="Widget" position="0 110 352 82" align="HStretch Top" name="ViewDistanceRow">
+                                <UserString key="SettingCategory" value="Camera"/>
+                                <UserString key="SettingName" value="viewing distance"/>
+                                <UserString key="DistanceEditor" value="ViewDistanceValue"/>
+                                <UserString key="DistanceWorldEditor" value="ViewDistanceWorldValue"/>
+                                <UserString key="DistanceCellLabel" value="ViewDistanceCellLabel"/>
+                                <UserString key="DistanceWorldLabel" value="ViewDistanceWorldLabel"/>
+                                <UserString key="DistancePerformanceNote" value="ViewDistancePerformanceNote"/>
+                                <UserString key="DistanceExplanation" value="ViewDistanceExplanation"/>
+                                <UserString key="DistanceAllowZero" value="false"/>
+                                <UserString key="DistanceReferenceMax" value="81920"/>
+                                <UserString key="DistanceShortReferenceMax" value="7168"/>
+                                <UserString key="DistanceWorldDecrease" value="ViewDistanceWorldDecrease"/>
+                                <UserString key="DistanceWorldIncrease" value="ViewDistanceWorldIncrease"/>
+                                <UserString key="DistanceCellDecrease" value="ViewDistanceCellDecrease"/>
+                                <UserString key="DistanceCellIncrease" value="ViewDistanceCellIncrease"/>
+                                <Widget type="AutoSizedTextBox" skin="NormalText" position="0 0 200 18">
+                                    <Property key="Caption" value="#{OMWEngine:ViewDistance}"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:ViewDistanceTooltip}"/>
+                                </Widget>
+                                <Widget type="HBox" position="0 24 352 24" align="HStretch Top">
+                                    <Property key="Spacing" value="2"/>
+                                    <Widget type="Widget" skin="MW_Box" position="0 0 18 24">
+                                        <Widget type="Button" skin="MW_ArrowLeft" position="3 5 12 14" name="ViewDistanceWorldDecrease">
+                                            <UserString key="ToolTipType" value="Layout"/>
+                                            <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                            <UserString key="Caption_Text" value="#{OMWEngine:DistanceWorldDecreaseTooltip}"/>
+                                        </Widget>
+                                    </Widget>
+                                    <Widget type="EditBox" skin="MW_TextEdit" position="0 0 104 24" name="ViewDistanceWorldValue">
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:DistanceWorldTooltip}"/>
+                                        <Property key="MaxTextLength" value="64"/>
+                                    </Widget>
+                                    <Widget type="Widget" skin="MW_Box" position="0 0 18 24">
+                                        <Widget type="Button" skin="MW_ArrowRight" position="3 5 12 14" name="ViewDistanceWorldIncrease">
+                                            <UserString key="ToolTipType" value="Layout"/>
+                                            <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                            <UserString key="Caption_Text" value="#{OMWEngine:DistanceWorldIncreaseTooltip}"/>
+                                        </Widget>
+                                    </Widget>
+                                    <Widget type="AutoSizedTextBox" skin="NormalText" name="ViewDistanceWorldLabel">
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:DistanceWorldTooltip}"/>
+                                    </Widget>
+                                </Widget>
+                                <Widget type="HBox" position="0 54 352 24" align="HStretch Top">
+                                    <Property key="Spacing" value="2"/>
+                                    <Widget type="Widget" skin="MW_Box" position="0 0 18 24">
+                                        <Widget type="Button" skin="MW_ArrowLeft" position="3 5 12 14" name="ViewDistanceCellDecrease">
+                                            <UserString key="ToolTipType" value="Layout"/>
+                                            <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                            <UserString key="Caption_Text" value="#{OMWEngine:DistanceCellDecreaseTooltip}"/>
+                                        </Widget>
+                                    </Widget>
+                                    <Widget type="EditBox" skin="MW_TextEdit" position="0 0 104 24" name="ViewDistanceValue">
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:DistanceCellTooltip}"/>
+                                        <Property key="MaxTextLength" value="64"/>
+                                    </Widget>
+                                    <Widget type="Widget" skin="MW_Box" position="0 0 18 24">
+                                        <Widget type="Button" skin="MW_ArrowRight" position="3 5 12 14" name="ViewDistanceCellIncrease">
+                                            <UserString key="ToolTipType" value="Layout"/>
+                                            <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                            <UserString key="Caption_Text" value="#{OMWEngine:DistanceCellIncreaseTooltip}"/>
+                                        </Widget>
+                                    </Widget>
+                                    <Widget type="AutoSizedTextBox" skin="NormalText" name="ViewDistanceCellLabel">
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:DistanceCellTooltip}"/>
+                                    </Widget>
+                                </Widget>
+                            </Widget>
+                            <Widget type="TextBox" skin="SandText" position="0 196 352 40" align="HStretch Top" name="ViewDistanceExplanation">
+                                <Property key="TextAlign" value="Left Top"/>
+                                <Property key="Caption" value="#{OMWEngine:DistanceLinkedExplanation}"/>
+                                <Property key="MultiLine" value="true"/>
+                                <Property key="WordWrap" value="true"/>
+                            </Widget>
+                            <Widget type="TextBox" skin="SandText" position="0 240 352 40" align="HStretch Top" name="ViewDistancePerformanceNote">
+                                <Property key="TextColour" value="1 0.25 0.25"/>
+                                <Property key="TextAlign" value="Left Top"/>
+                                <Property key="Caption" value="#{OMWEngine:DistancePerformanceNote}"/>
+                                <Property key="MultiLine" value="true"/>
+                                <Property key="WordWrap" value="true"/>
+                            </Widget>
+                            <Widget type="Widget" position="0 284 352 82" align="HStretch Top" name="GrassDistanceRow">
+                                <UserString key="SettingCategory" value="Groundcover"/>
+                                <UserString key="SettingName" value="rendering distance"/>
+                                <UserString key="DistanceEditor" value="GrassDistanceValue"/>
+                                <UserString key="DistanceWorldEditor" value="GrassDistanceWorldValue"/>
+                                <UserString key="DistanceCellLabel" value="GrassDistanceCellLabel"/>
+                                <UserString key="DistanceWorldLabel" value="GrassDistanceWorldLabel"/>
+                                <UserString key="DistancePerformanceNote" value="GrassDistancePerformanceNote"/>
+                                <UserString key="DistanceExplanation" value="GrassDistanceExplanation"/>
+                                <UserString key="DistanceAllowZero" value="true"/>
+                                <UserString key="DistanceReferenceDefault" value="true"/>
+                                <UserString key="DistanceWorldDecrease" value="GrassDistanceWorldDecrease"/>
+                                <UserString key="DistanceWorldIncrease" value="GrassDistanceWorldIncrease"/>
+                                <UserString key="DistanceCellDecrease" value="GrassDistanceCellDecrease"/>
+                                <UserString key="DistanceCellIncrease" value="GrassDistanceCellIncrease"/>
+                                <Widget type="AutoSizedTextBox" skin="NormalText" position="0 0 200 18">
+                                    <Property key="Caption" value="#{OMWEngine:GrassDistance}"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:GrassDistanceTooltip}"/>
+                                </Widget>
+                                <Widget type="HBox" position="0 24 352 24" align="HStretch Top">
+                                    <Property key="Spacing" value="2"/>
+                                    <Widget type="Widget" skin="MW_Box" position="0 0 18 24">
+                                        <Widget type="Button" skin="MW_ArrowLeft" position="3 5 12 14" name="GrassDistanceWorldDecrease">
+                                            <UserString key="ToolTipType" value="Layout"/>
+                                            <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                            <UserString key="Caption_Text" value="#{OMWEngine:DistanceWorldDecreaseTooltip}"/>
+                                        </Widget>
+                                    </Widget>
+                                    <Widget type="EditBox" skin="MW_TextEdit" position="0 0 104 24" name="GrassDistanceWorldValue">
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:DistanceWorldTooltip}"/>
+                                        <Property key="MaxTextLength" value="64"/>
+                                    </Widget>
+                                    <Widget type="Widget" skin="MW_Box" position="0 0 18 24">
+                                        <Widget type="Button" skin="MW_ArrowRight" position="3 5 12 14" name="GrassDistanceWorldIncrease">
+                                            <UserString key="ToolTipType" value="Layout"/>
+                                            <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                            <UserString key="Caption_Text" value="#{OMWEngine:DistanceWorldIncreaseTooltip}"/>
+                                        </Widget>
+                                    </Widget>
+                                    <Widget type="AutoSizedTextBox" skin="NormalText" name="GrassDistanceWorldLabel">
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:DistanceWorldTooltip}"/>
+                                    </Widget>
+                                </Widget>
+                                <Widget type="HBox" position="0 54 352 24" align="HStretch Top">
+                                    <Property key="Spacing" value="2"/>
+                                    <Widget type="Widget" skin="MW_Box" position="0 0 18 24">
+                                        <Widget type="Button" skin="MW_ArrowLeft" position="3 5 12 14" name="GrassDistanceCellDecrease">
+                                            <UserString key="ToolTipType" value="Layout"/>
+                                            <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                            <UserString key="Caption_Text" value="#{OMWEngine:DistanceCellDecreaseTooltip}"/>
+                                        </Widget>
+                                    </Widget>
+                                    <Widget type="EditBox" skin="MW_TextEdit" position="0 0 104 24" name="GrassDistanceValue">
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:DistanceCellTooltip}"/>
+                                        <Property key="MaxTextLength" value="64"/>
+                                    </Widget>
+                                    <Widget type="Widget" skin="MW_Box" position="0 0 18 24">
+                                        <Widget type="Button" skin="MW_ArrowRight" position="3 5 12 14" name="GrassDistanceCellIncrease">
+                                            <UserString key="ToolTipType" value="Layout"/>
+                                            <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                            <UserString key="Caption_Text" value="#{OMWEngine:DistanceCellIncreaseTooltip}"/>
+                                        </Widget>
+                                    </Widget>
+                                    <Widget type="AutoSizedTextBox" skin="NormalText" name="GrassDistanceCellLabel">
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:DistanceCellTooltip}"/>
+                                    </Widget>
+                                </Widget>
+                            </Widget>
+                            <Widget type="TextBox" skin="SandText" position="0 370 352 40" align="HStretch Top" name="GrassDistanceExplanation">
+                                <Property key="TextAlign" value="Left Top"/>
+                                <Property key="Caption" value="#{OMWEngine:DistanceLinkedExplanation}"/>
+                                <Property key="MultiLine" value="true"/>
+                                <Property key="WordWrap" value="true"/>
+                            </Widget>
+                            <Widget type="TextBox" skin="SandText" position="0 414 352 40" align="HStretch Top" name="GrassDistancePerformanceNote">
+                                <Property key="TextColour" value="1 0.25 0.25"/>
+                                <Property key="TextAlign" value="Left Top"/>
+                                <Property key="Caption" value="#{OMWEngine:GrassDistancePerformanceNote}"/>
+                                <Property key="MultiLine" value="true"/>
+                                <Property key="WordWrap" value="true"/>
+                            </Widget>
                         </Widget>
-                        <Widget type="ComboBox" skin="MW_ComboBox" position="0 74 200 24" align="Left Top" name="Anisotropy">
-                            <Property key="AddItem" value="#{Interface:Off}"/>
-                            <Property key="AddItem" value="2x"/>
-                            <Property key="AddItem" value="4x"/>
-                            <Property key="AddItem" value="8x"/>
-                            <Property key="AddItem" value="16x"/>
-                        </Widget>
-
-                        <Widget type="AutoSizedTextBox" skin="NormalText" position="0 104 0 18" align="Left Top" name="RenderDistanceLabel">
-                            <Property key="Caption" value="#{OMWEngine:ViewDistance}"/>
-                        </Widget>
-                        <Widget type="ScrollBar" skin="MW_HScroll" position="0 126 352 18" align="HStretch Top" name="RenderingDistanceSlider">
-                            <Property key="Range" value="4669"/>
-                            <Property key="Page" value="128"/>
-                            <Property key="WheelPage" value="128"/>
-                            <UserString key="SettingType" value="Slider"/>
-                            <UserString key="SettingCategory" value="Camera"/>
-                            <UserString key="SettingName" value="viewing distance"/>
-                            <UserString key="SettingValueType" value="Float"/>
-                            <UserString key="SettingMin" value="2500"/>
-                            <UserString key="SettingMax" value="7168"/>
-                            <UserString key="SettingLabelWidget" value="RenderDistanceLabel"/>
-                            <UserString key="SettingLabelCaption" value="ViewDistanceValue"/>
-                        </Widget>
-                        <Widget type="ScrollBar" skin="MW_HScroll" position="0 126 352 18" align="HStretch Top" name="LargeRenderingDistanceSlider">
-                            <Property key="Range" value="79421"/>
-                            <Property key="Page" value="2048"/>
-                            <Property key="WheelPage" value="2048"/>
-                            <UserString key="SettingType" value="Slider"/>
-                            <UserString key="SettingCategory" value="Camera"/>
-                            <UserString key="SettingName" value="viewing distance"/>
-                            <UserString key="SettingValueType" value="Cell"/>
-                            <UserString key="SettingMin" value="2500"/>
-                            <UserString key="SettingMax" value="81920"/>
-                            <UserString key="SettingLabelWidget" value="RenderDistanceLabel"/>
-                            <UserString key="SettingLabelCaption" value="ViewDistanceValueCells"/>
-                        </Widget>
-                        <Widget type="TextBox" skin="SandText" position="0 148 352 18" align="Left Top">
-                            <Property key="Caption" value="#{OMWEngine:DistanceLow}"/>
-                            <Property key="TextAlign" value="Left"/>
-                        </Widget>
-                        <Widget type="TextBox" skin="SandText" position="0 148 352 18" align="Right Top">
-                            <Property key="Caption" value="#{OMWEngine:DistanceHigh}"/>
-                            <Property key="TextAlign" value="Right"/>
-                        </Widget>
-
                     </Widget>
                     <Widget type="TabItem" name="AtmospherePage">
                         <Property key="Caption" value=" #{OMWEngine:Atmosphere} "/>
@@ -1061,37 +1210,130 @@
                             <Widget type="HBox" align="Stretch">
                                 <UserString key="HStretch" value="true"/>
                                 <UserString key="VStretch" value="false"/>
-                                <Widget type="ComboBox" skin="MW_ComboBox" position="0 0 200 24" align="Left Top" name="ShadowMapResolution">
-                                    <Property key="AddItem" value="512"/>
-                                    <Property key="AddItem" value="1024"/>
-                                    <Property key="AddItem" value="2048"/>
-                                    <Property key="AddItem" value="4096"/>
+                                <Property key="Spacing" value="2"/>
+                                <Widget type="Widget" skin="MW_Box" position="0 0 18 24">
+                                    <Widget type="Button" skin="MW_ArrowLeft" position="3 5 12 14" name="ShadowResolutionDecrease">
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:ShadowResolutionDecreaseTooltip}"/>
+                                    </Widget>
+                                </Widget>
+                                <Widget type="EditBox" skin="MW_TextEdit" position="0 0 104 24" name="ShadowMapResolution">
+                                    <Property key="MaxTextLength" value="16"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:ShadowMapResolutionTooltip}"/>
+                                </Widget>
+                                <Widget type="Widget" skin="MW_Box" position="0 0 18 24">
+                                    <Widget type="Button" skin="MW_ArrowRight" position="3 5 12 14" name="ShadowResolutionIncrease">
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:ShadowResolutionIncreaseTooltip}"/>
+                                    </Widget>
+                                </Widget>
+                                <Widget type="AutoSizedTextBox" skin="NormalText">
+                                    <Property key="Caption" value="#{OMWEngine:ShadowResolutionPixels}"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:ShadowMapResolutionTooltip}"/>
                                 </Widget>
                                 <Widget type="Spacer" />
                             </Widget>
 
-                            <Widget type="Widget" position="0 0 0 18" align="Top Left HStretch">
+                            <Widget type="Widget" position="0 0 352 190" align="HStretch Top">
                                 <UserString key="HStretch" value="true"/>
-                                <Widget type="AutoSizedTextBox" skin="NormalText" name="ShadowsMaxDistanceText">
-                                    <UserString key="ToolTipType" value="Layout"/>
-                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
-                                    <UserString key="Caption_Text" value="#{OMWEngine:ShadowsMaxDistanceTooltip}"/>
+                                <Widget type="Widget" position="0 0 352 82" align="HStretch Top" name="ShadowDistanceRow">
+                                    <UserString key="SettingCategory" value="Shadows"/>
+                                    <UserString key="SettingName" value="maximum shadow map distance"/>
+                                    <UserString key="DistanceEditor" value="ShadowDistanceValue"/>
+                                    <UserString key="DistanceWorldEditor" value="ShadowDistanceWorldValue"/>
+                                    <UserString key="DistanceCellLabel" value="ShadowDistanceCellLabel"/>
+                                    <UserString key="DistanceWorldLabel" value="ShadowDistanceWorldLabel"/>
+                                    <UserString key="DistancePerformanceNote" value="ShadowDistancePerformanceNote"/>
+                                    <UserString key="DistanceExplanation" value="ShadowDistanceExplanation"/>
+                                    <UserString key="DistanceAllowZero" value="false"/>
+                                    <UserString key="DistanceReferenceMax" value="16384"/>
+                                    <UserString key="DistanceLegacyUnlimited" value="true"/>
+                                    <UserString key="DistanceWorldDecrease" value="ShadowDistanceWorldDecrease"/>
+                                    <UserString key="DistanceWorldIncrease" value="ShadowDistanceWorldIncrease"/>
+                                    <UserString key="DistanceCellDecrease" value="ShadowDistanceCellDecrease"/>
+                                    <UserString key="DistanceCellIncrease" value="ShadowDistanceCellIncrease"/>
+                                    <Widget type="AutoSizedTextBox" skin="NormalText" position="0 0 200 18">
+                                        <Property key="Caption" value="#{OMWEngine:ShadowDistance}"/>
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:ShadowDistanceTooltip}"/>
+                                    </Widget>
+                                    <Widget type="HBox" position="0 24 352 24" align="HStretch Top">
+                                        <Property key="Spacing" value="2"/>
+                                        <Widget type="Widget" skin="MW_Box" position="0 0 18 24">
+                                            <Widget type="Button" skin="MW_ArrowLeft" position="3 5 12 14" name="ShadowDistanceWorldDecrease">
+                                                <UserString key="ToolTipType" value="Layout"/>
+                                                <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                                <UserString key="Caption_Text" value="#{OMWEngine:DistanceWorldDecreaseTooltip}"/>
+                                            </Widget>
+                                        </Widget>
+                                        <Widget type="EditBox" skin="MW_TextEdit" position="0 0 104 24" name="ShadowDistanceWorldValue">
+                                            <UserString key="ToolTipType" value="Layout"/>
+                                            <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                            <UserString key="Caption_Text" value="#{OMWEngine:DistanceWorldTooltip}"/>
+                                            <Property key="MaxTextLength" value="64"/>
+                                        </Widget>
+                                        <Widget type="Widget" skin="MW_Box" position="0 0 18 24">
+                                            <Widget type="Button" skin="MW_ArrowRight" position="3 5 12 14" name="ShadowDistanceWorldIncrease">
+                                                <UserString key="ToolTipType" value="Layout"/>
+                                                <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                                <UserString key="Caption_Text" value="#{OMWEngine:DistanceWorldIncreaseTooltip}"/>
+                                            </Widget>
+                                        </Widget>
+                                        <Widget type="AutoSizedTextBox" skin="NormalText" name="ShadowDistanceWorldLabel">
+                                            <UserString key="ToolTipType" value="Layout"/>
+                                            <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                            <UserString key="Caption_Text" value="#{OMWEngine:DistanceWorldTooltip}"/>
+                                        </Widget>
+                                    </Widget>
+                                    <Widget type="HBox" position="0 54 352 24" align="HStretch Top">
+                                        <Property key="Spacing" value="2"/>
+                                        <Widget type="Widget" skin="MW_Box" position="0 0 18 24">
+                                            <Widget type="Button" skin="MW_ArrowLeft" position="3 5 12 14" name="ShadowDistanceCellDecrease">
+                                                <UserString key="ToolTipType" value="Layout"/>
+                                                <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                                <UserString key="Caption_Text" value="#{OMWEngine:DistanceCellDecreaseTooltip}"/>
+                                            </Widget>
+                                        </Widget>
+                                        <Widget type="EditBox" skin="MW_TextEdit" position="0 0 104 24" name="ShadowDistanceValue">
+                                            <UserString key="ToolTipType" value="Layout"/>
+                                            <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                            <UserString key="Caption_Text" value="#{OMWEngine:DistanceCellTooltip}"/>
+                                            <Property key="MaxTextLength" value="64"/>
+                                        </Widget>
+                                        <Widget type="Widget" skin="MW_Box" position="0 0 18 24">
+                                            <Widget type="Button" skin="MW_ArrowRight" position="3 5 12 14" name="ShadowDistanceCellIncrease">
+                                                <UserString key="ToolTipType" value="Layout"/>
+                                                <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                                <UserString key="Caption_Text" value="#{OMWEngine:DistanceCellIncreaseTooltip}"/>
+                                            </Widget>
+                                        </Widget>
+                                        <Widget type="AutoSizedTextBox" skin="NormalText" name="ShadowDistanceCellLabel">
+                                            <UserString key="ToolTipType" value="Layout"/>
+                                            <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                            <UserString key="Caption_Text" value="#{OMWEngine:DistanceCellTooltip}"/>
+                                        </Widget>
+                                    </Widget>
                                 </Widget>
-                                <Widget type="Spacer" />
-                            </Widget>
-                            <Widget type="ScrollBar" skin="MW_HScroll" position="0 0 0 18" align="HStretch Top">
-                                <UserString key="HStretch" value="true"/>
-                                <Property key="Range" value="16385"/>
-                                <Property key="Page" value="128"/>
-                                <Property key="WheelPage" value="128"/>
-                                <UserString key="SettingType" value="Slider"/>
-                                <UserString key="SettingMin" value="0"/>
-                                <UserString key="SettingMax" value="16384"/>
-                                <UserString key="SettingCategory" value="Shadows"/>
-                                <UserString key="SettingName" value="maximum shadow map distance"/>
-                                <UserString key="SettingValueType" value="Float"/>
-                                <UserString key="SettingLabelWidget" value="ShadowsMaxDistanceText"/>
-                                <UserString key="SettingLabelCaption" value="ShadowsMaxDistanceValue"/>
+                                <Widget type="TextBox" skin="SandText" position="0 86 352 40" align="HStretch Top" name="ShadowDistanceExplanation">
+                                    <Property key="TextAlign" value="Left Top"/>
+                                    <Property key="Caption" value="#{OMWEngine:DistanceLinkedExplanation}"/>
+                                    <Property key="MultiLine" value="true"/>
+                                    <Property key="WordWrap" value="true"/>
+                                </Widget>
+                                <Widget type="TextBox" skin="SandText" position="0 130 352 58" align="HStretch Top" name="ShadowDistancePerformanceNote">
+                            <Property key="TextColour" value="1 0.25 0.25"/>
+                            <Property key="TextAlign" value="Left Top"/>
+                                    <Property key="Caption" value="#{OMWEngine:DistancePerformanceNote}"/>
+                                    <Property key="MultiLine" value="true"/>
+                                    <Property key="WordWrap" value="true"/>
+                                </Widget>
                             </Widget>
                         </Widget>
                     </Widget>

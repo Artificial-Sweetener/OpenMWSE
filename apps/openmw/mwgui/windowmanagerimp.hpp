@@ -7,6 +7,8 @@
    and retrieving information from the Gui.
 **/
 
+#include <optional>
+
 #include <memory>
 #include <vector>
 
@@ -370,6 +372,10 @@ namespace MWGui
         void toggleDebugWindow() override;
         void togglePostProcessorHud() override;
         void toggleSettingsWindow() override;
+
+        /// Exercise distance and shadow-resolution controls in isolated diagnostic sessions without changing menu visibility.
+        void setVideoDistanceValues(
+            bool useCellEditor, float view, float grass, float shadow, std::optional<int> resolution);
 
         /// Display a named video settings page through the ordinary settings window lifecycle.
         void showVideoSettings(std::string_view page);

@@ -27,9 +27,9 @@ namespace MWRender
     class GroundcoverBatch final : public osg::Referenced
     {
     public:
-        /// Create range submission for one immutable visibility owner.
+        /// Create range submission for immutable instances with a shared live distance owner.
         GroundcoverBatch(std::vector<GroundcoverDrawCluster> clusters, osg::Vec4Array* transforms, float modelExtent,
-            float viewDistance);
+            GroundcoverDistance* distance);
 
         /// Replace supported instanced primitive sets and register the geometry with this model batch.
         bool configure(osg::Geometry& geometry);

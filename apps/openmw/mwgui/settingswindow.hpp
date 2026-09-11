@@ -1,9 +1,12 @@
 #ifndef MWGUI_SETTINGS_H
 #define MWGUI_SETTINGS_H
 
+#include <optional>
+
 #include <components/files/configurationmanager.hpp>
 #include <components/lua_ui/adapter.hpp>
 
+#include "distancesettings.hpp"
 #include "windowbase.hpp"
 
 namespace MWGui
@@ -19,6 +22,10 @@ namespace MWGui
 
         /// Open a named video page using stable layout identities.
         void showVideoPage(std::string_view page);
+
+        /// Apply isolated diagnostic input through the ordinary distance and shadow-resolution controls.
+        void setDistanceValues(
+            bool useCellEditor, float view, float grass, float shadow, std::optional<int> resolution);
 
         void onClose() override;
 
@@ -70,7 +77,9 @@ namespace MWGui
         MyGUI::Button* mPlayerShadowsButton;
         MyGUI::Button* mTerrainShadowsButton;
         MyGUI::Button* mObjectShadowsButton;
-        MyGUI::ComboBox* mShadowMapResolution;
+        MyGUI::EditBox* mShadowMapResolution;
+        MyGUI::Button* mShadowResolutionDecrease;
+        MyGUI::Button* mShadowResolutionIncrease;
 
         MyGUI::ComboBox* mPrimaryLanguage;
         MyGUI::ComboBox* mSecondaryLanguage;
@@ -98,7 +107,14 @@ namespace MWGui
         void onTextureFilteringChanged(MyGUI::ComboBox* sender, size_t pos);
         void onAnisotropyChanged(MyGUI::ComboBox* sender, size_t pos);
         void onShadowsButtonClicked(MyGUI::Widget* sender);
-        void onShadowMapResolutionChanged(MyGUI::ComboBox* sender, size_t pos);
+        /// Apply a supported whole-pixel shadow resolution on Enter.
+        void onShadowMapResolutionChanged(MyGUI::EditBox* sender);
+        /// Commit resolution edits when keyboard focus leaves the field.
+        void onShadowResolutionFocusLost(MyGUI::Widget* sender, MyGUI::Widget* next);
+        /// Adjust both dimensions by 256 pixels within renderer and hardware limits.
+        void onShadowResolutionStep(MyGUI::Widget* sender);
+        /// Synchronize the pixel field and the supported increment boundaries.
+        void refreshShadowResolution();
         void onSliderChangePosition(MyGUI::ScrollBar* scroller, size_t pos);
         void onButtonToggled(MyGUI::Widget* sender);
         void onResolutionSelected(MyGUI::ListBox* sender, size_t index);
@@ -132,6 +148,7 @@ namespace MWGui
         void onKeyboardSwitchClicked(MyGUI::Widget* sender);
         void onControllerSwitchClicked(MyGUI::Widget* sender);
 
+        /// Resize scrollable video content and control lists with the settings window.
         void onWindowResize(MyGUI::Window* sender);
 
         void onScriptFilterChange(MyGUI::EditBox*);
@@ -151,6 +168,7 @@ namespace MWGui
         void computeMinimumWindowSize();
 
     private:
+        std::unique_ptr<DistanceSettings> mDistanceSettings;
         void resetScrollbars();
         Files::ConfigurationManager& mCfgMgr;
     };

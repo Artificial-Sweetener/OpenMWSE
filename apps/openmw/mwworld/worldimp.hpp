@@ -463,6 +463,7 @@ namespace MWWorld
         bool canPlaceObject(float cursorX, float cursorY) override;
         ///< @return true if it is possible to place on object at specified cursor location
 
+        /// Quiesce terrain preloading before forwarding live distance changes to the renderer.
         void processChangedSettings(const Settings::CategorySettingVector& settings) override;
 
         bool isFlying(const MWWorld::Ptr& ptr) const override;

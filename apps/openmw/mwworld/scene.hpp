@@ -203,6 +203,9 @@ namespace MWWorld
         void testInteriorCells();
 
         void reportStats(unsigned int frameNumber, osg::Stats& stats) const;
+
+        /// Quiesce cached terrain work before changing grass paging limits; keep loaded scene geometry intact.
+        void prepareGroundcoverDistanceChange();
     };
 }
 

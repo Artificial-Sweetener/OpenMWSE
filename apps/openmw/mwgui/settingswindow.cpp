@@ -26,6 +26,8 @@
 #include <components/resource/resourcesystem.hpp>
 #include <components/resource/scenemanager.hpp>
 #include <components/sceneutil/lightmanager.hpp>
+#include <components/sceneutil/shadow.hpp>
+#include <components/settings/shadowresolution.hpp>
 #include <components/settings/values.hpp>
 #include <components/vfs/manager.hpp>
 #include <components/vfs/recursivedirectoryiterator.hpp>
@@ -131,24 +133,6 @@ namespace
             box->setIndexSelected(3);
         else
             box->setIndexSelected(4);
-    }
-
-    void updateShadowMapResolutionComboBox(MyGUI::ComboBox* box)
-    {
-        const int resolution = Settings::shadows().mShadowMapResolution;
-        if (resolution == 512)
-            box->setIndexSelected(0);
-        else if (resolution == 1024)
-            box->setIndexSelected(1);
-        else if (resolution == 2048)
-            box->setIndexSelected(2);
-        else if (resolution == 4096)
-            box->setIndexSelected(3);
-        else
-        {
-            box->addItem(std::to_string(resolution), resolution);
-            box->setIndexSelected(4);
-        }
     }
 
     void updateSliderLabel(MyGUI::ScrollBar* scroller, MyGUI::TextBox* textBox,
@@ -269,13 +253,8 @@ namespace MWGui
         , mCurrentPage(static_cast<size_t>(-1))
         , mCfgMgr(cfgMgr)
     {
-        const bool terrain = Settings::terrain().mDistantTerrain;
-        const std::string_view widgetName = terrain ? "RenderingDistanceSlider" : "LargeRenderingDistanceSlider";
-        MyGUI::Widget* unusedSlider;
-        getWidget(unusedSlider, widgetName);
-        unusedSlider->setVisible(false);
-
         configureWidgets(mMainWidget, true);
+        mDistanceSettings = std::make_unique<DistanceSettings>(*this, [this] { apply(); });
 
         setTitle("#{OMWEngine:SettingsWindow}");
 
@@ -320,6 +299,8 @@ namespace MWGui
         getWidget(mTerrainShadowsButton, "TerrainShadowsButton");
         getWidget(mObjectShadowsButton, "ObjectShadowsButton");
         getWidget(mShadowMapResolution, "ShadowMapResolution");
+        getWidget(mShadowResolutionDecrease, "ShadowResolutionDecrease");
+        getWidget(mShadowResolutionIncrease, "ShadowResolutionIncrease");
 
 #ifndef WIN32
         // hide gamma controls since it currently does not work under Linux
@@ -367,8 +348,14 @@ namespace MWGui
             += MyGUI::newDelegate(this, &SettingsWindow::onShadowsButtonClicked);
         mObjectShadowsButton->eventMouseButtonClick
             += MyGUI::newDelegate(this, &SettingsWindow::onShadowsButtonClicked);
-        mShadowMapResolution->eventComboChangePosition
+        mShadowMapResolution->eventEditSelectAccept
             += MyGUI::newDelegate(this, &SettingsWindow::onShadowMapResolutionChanged);
+        mShadowMapResolution->eventKeyLostFocus
+            += MyGUI::newDelegate(this, &SettingsWindow::onShadowResolutionFocusLost);
+        mShadowResolutionDecrease->eventMouseButtonClick
+            += MyGUI::newDelegate(this, &SettingsWindow::onShadowResolutionStep);
+        mShadowResolutionIncrease->eventMouseButtonClick
+            += MyGUI::newDelegate(this, &SettingsWindow::onShadowResolutionStep);
 
         mWindowModeList->eventComboChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onWindowModeChanged);
         mVSyncModeList->eventComboChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onVSyncModeChanged);
@@ -431,7 +418,7 @@ namespace MWGui
 
         updateMaxLightsComboBox(mMaxLights);
 
-        updateShadowMapResolutionComboBox(mShadowMapResolution);
+        refreshShadowResolution();
 
         const Settings::WindowMode windowMode = Settings::video().mWindowMode;
         mWindowBorderButton->setEnabled(
@@ -785,39 +772,51 @@ namespace MWGui
         apply();
     }
 
-    void SettingsWindow::onShadowMapResolutionChanged(MyGUI::ComboBox* sender, size_t pos)
+    void SettingsWindow::refreshShadowResolution()
     {
-        if (pos == MyGUI::ITEM_NONE)
+        const int value = Settings::shadows().mShadowMapResolution;
+        const int maximum = SceneUtil::ShadowManager::getMaximumShadowMapResolution();
+        mShadowMapResolution->setCaption(std::to_string(value));
+        mShadowMapResolution->setTextCursor(0);
+        mShadowResolutionDecrease->setEnabled(maximum > 0 && value > 1);
+        mShadowResolutionIncrease->setEnabled(maximum > 0 && value < maximum);
+    }
+
+    void SettingsWindow::onShadowMapResolutionChanged(MyGUI::EditBox* sender)
+    {
+        auto& setting = Settings::shadows().mShadowMapResolution;
+        const std::string text = sender->getOnlyText();
+        if (text == std::to_string(setting.get()))
             return;
-
-        auto& shadowSettings = Settings::shadows();
-        switch (pos)
+        const int maximum = SceneUtil::ShadowManager::getMaximumShadowMapResolution();
+        const auto value = Settings::parseShadowResolution(text, maximum);
+        if (!value)
         {
-            case 0:
-                shadowSettings.mShadowMapResolution.set(512);
-                break;
-            case 1:
-                shadowSettings.mShadowMapResolution.set(1024);
-                break;
-            case 2:
-                shadowSettings.mShadowMapResolution.set(2048);
-                break;
-            case 3:
-                shadowSettings.mShadowMapResolution.set(4096);
-                break;
-            case 4:
-            {
-                int* resolution = sender->getItemDataAt<int>(4);
-                if (resolution)
-                    shadowSettings.mShadowMapResolution.set(*resolution);
-                break;
-            }
-            default:
-                Log(Debug::Warning) << "Unexpected shadow map resolution pos " << pos;
-                break;
+            refreshShadowResolution();
+            auto l10n = MWBase::Environment::get().getL10nManager()->getContext("OMWEngine");
+            MWBase::Environment::get().getWindowManager()->messageBox(
+                l10n->formatMessage("ShadowResolutionInvalid", { "maximum" }, { maximum }));
+            return;
         }
+        if (*value != setting.get())
+        {
+            setting.set(*value);
+            apply();
+        }
+        refreshShadowResolution();
+    }
 
-        apply();
+    void SettingsWindow::onShadowResolutionFocusLost(MyGUI::Widget* sender, MyGUI::Widget*)
+    {
+        onShadowMapResolutionChanged(sender->castType<MyGUI::EditBox>());
+    }
+
+    void SettingsWindow::onShadowResolutionStep(MyGUI::Widget* sender)
+    {
+        const int value = Settings::stepShadowResolution(Settings::shadows().mShadowMapResolution,
+            sender == mShadowResolutionIncrease, SceneUtil::ShadowManager::getMaximumShadowMapResolution());
+        mShadowMapResolution->setCaption(std::to_string(value));
+        onShadowMapResolutionChanged(mShadowMapResolution);
     }
 
     void SettingsWindow::onResChange(int /*width*/, int /*height*/)
@@ -1168,6 +1167,7 @@ namespace MWGui
     void SettingsWindow::showVideoPage(std::string_view page)
     {
         const std::string_view pageWidget = page == "atmosphere" ? "AtmospherePage"
+            : page == "detail"                                   ? "DetailPage"
             : page == "water"                                    ? "WaterPage"
             : page == "shadows"                                  ? "ShadowsPage"
                                                                  : "";
@@ -1183,8 +1183,37 @@ namespace MWGui
         videoTabs->setItemSelected(selectedPage);
     }
 
+    void SettingsWindow::setDistanceValues(
+        bool useCellEditor, float view, float grass, float shadow, std::optional<int> resolution)
+    {
+        mDistanceSettings->setValues(useCellEditor, view, grass, shadow);
+        if (resolution)
+        {
+            const int maximum = SceneUtil::ShadowManager::getMaximumShadowMapResolution();
+            if (!Settings::parseShadowResolution(std::to_string(*resolution), maximum))
+                throw std::invalid_argument("diagnostic shadow resolution exceeds graphics hardware limits");
+            mShadowMapResolution->setCaption(std::to_string(*resolution));
+            mShadowMapResolution->eventEditSelectAccept(mShadowMapResolution);
+            for (auto* arrow : { mShadowResolutionDecrease, mShadowResolutionIncrease })
+            {
+                const int expected
+                    = Settings::stepShadowResolution(*resolution, arrow == mShadowResolutionIncrease, maximum);
+                arrow->eventMouseButtonClick(arrow);
+                if (Settings::shadows().mShadowMapResolution != expected)
+                    throw std::runtime_error("shadow resolution arrow did not apply the expected pixel step");
+                mShadowMapResolution->setCaption(std::to_string(*resolution));
+                mShadowMapResolution->eventEditSelectAccept(mShadowMapResolution);
+            }
+            if (Settings::shadows().mShadowMapResolution != *resolution)
+                throw std::runtime_error("shadow resolution entry did not retain the requested size");
+        }
+    }
+
     void SettingsWindow::onOpen()
     {
+        mDistanceSettings->refresh();
+        refreshShadowResolution();
+        mDistanceSettings->updateLayout();
         highlightCurrentResolution();
         updateControlsBox();
         updateLightSettings();
@@ -1206,6 +1235,7 @@ namespace MWGui
 
     void SettingsWindow::onWindowResize(MyGUI::Window* /*sender*/)
     {
+        mDistanceSettings->updateLayout();
         layoutControlsBox();
     }
 

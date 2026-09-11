@@ -11,6 +11,9 @@
 attribute vec4 aOffset;
 attribute vec3 aRotation;
 
+// World-unit fade interval shared with CPU groundcover visibility.
+uniform vec2 groundcoverFade;
+
 #if @diffuseMap
 varying vec2 diffuseMapUV;
 uniform mat4 texMat@diffuseMapUV;
@@ -143,7 +146,7 @@ void main(void)
     gl_ClipVertex = viewPos;
     euclideanDepth = length(viewPos.xyz);
 
-    if (length(gl_ModelViewMatrix * vec4(position, 1.0)) > @groundcoverFadeEnd)
+    if (length(gl_ModelViewMatrix * vec4(position, 1.0)) > groundcoverFade.y)
         gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
     else
         gl_Position = viewToClip(viewPos);

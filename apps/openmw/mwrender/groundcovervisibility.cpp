@@ -1,6 +1,7 @@
 #include "groundcovervisibility.hpp"
 
 #include "groundcoverdiagnostics.hpp"
+#include "groundcoverdistance.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -14,19 +15,19 @@
 
 namespace MWRender
 {
-    GroundcoverVisibility::GroundcoverVisibility(
-        std::vector<GroundcoverDrawCluster> clusters, osg::Vec4Array* transforms, float modelExtent, float viewDistance)
+    GroundcoverVisibility::GroundcoverVisibility(std::vector<GroundcoverDrawCluster> clusters,
+        osg::Vec4Array* transforms, float modelExtent, GroundcoverDistance* distance)
         : mClusters(std::move(clusters))
         , mTransforms(transforms)
         , mModelExtent(modelExtent)
-        , mViewDistance(viewDistance)
+        , mDistance(distance)
     {
         if (!mTransforms)
             throw std::invalid_argument("groundcover transforms must not be null");
         if (!std::isfinite(modelExtent) || modelExtent < 0.f)
             throw std::invalid_argument("groundcover model extent must be finite and non-negative");
-        if (!std::isfinite(viewDistance) || viewDistance < 0.f)
-            throw std::invalid_argument("groundcover view distance must be finite and non-negative");
+        if (!mDistance)
+            throw std::invalid_argument("groundcover visibility requires a distance owner");
         if (totalInstances() != mTransforms->size())
             throw std::invalid_argument("groundcover clusters must represent every transform");
     }
@@ -35,11 +36,12 @@ namespace MWRender
     {
         const osg::Matrix modelView = *visitor.getModelViewMatrix();
         const osg::Matrix projection = *visitor.getProjectionMatrix();
+        const float viewDistance = mDistance->get();
         {
             std::scoped_lock lock(mMutex);
             const auto existing = std::find_if(mRecords.rbegin(), mRecords.rend(), [&](const VisibilityRecord& record) {
-                return record.mContextId == contextId && record.mModelView == modelView
-                    && record.mProjection == projection;
+                return record.mDistance == viewDistance && record.mContextId == contextId
+                    && record.mModelView == modelView && record.mProjection == projection;
             });
             if (existing != mRecords.rend())
                 return existing->mVisibleInstances;
@@ -50,15 +52,16 @@ namespace MWRender
         std::size_t visibleInstances = 0;
         for (const GroundcoverDrawCluster& cluster : mClusters)
         {
-            if (Terrain::distance(cluster.mBounds, visitor.getEyePoint()) > mViewDistance
+            if (viewDistance <= 0 || Terrain::distance(cluster.mBounds, visitor.getEyePoint()) > viewDistance
                 || visitor.isCulled(cluster.mBounds))
                 continue;
             visibleRanges.push_back(cluster.mInstances);
             visibleInstances += cluster.mInstances.mCount;
         }
-        recordDiagnosticGroundcoverVisibility(visitor, *mTransforms, mModelExtent, mViewDistance, visibleRanges);
+        recordDiagnosticGroundcoverVisibility(visitor, *mTransforms, mModelExtent, viewDistance, visibleRanges);
 
-        VisibilityRecord record{ modelView, projection, contextId, visibleInstances, std::move(visibleRanges) };
+        VisibilityRecord record{ modelView, projection, contextId, viewDistance, visibleInstances,
+            std::move(visibleRanges) };
         std::scoped_lock lock(mMutex);
         const auto existing = std::find_if(mRecords.begin(), mRecords.end(), [&](const VisibilityRecord& candidate) {
             return candidate.mContextId == record.mContextId && candidate.mModelView == record.mModelView
@@ -81,7 +84,8 @@ namespace MWRender
     {
         std::scoped_lock lock(mMutex);
         const auto record = std::find_if(mRecords.rbegin(), mRecords.rend(), [&](const VisibilityRecord& candidate) {
-            return candidate.mContextId == state.getContextID() && candidate.mModelView == state.getModelViewMatrix()
+            return candidate.mDistance == mDistance->get() && candidate.mContextId == state.getContextID()
+                && candidate.mModelView == state.getModelViewMatrix()
                 && candidate.mProjection == state.getProjectionMatrix();
         });
         if (record == mRecords.rend())

@@ -1,6 +1,9 @@
 #include "shadow.hpp"
 
+#include <components/settings/shadowresolution.hpp>
 #include <limits>
+#include <osg/GLExtensions>
+#include <osg/GraphicsContext>
 
 #include <osgShadow/ShadowSettings>
 #include <osgShadow/ShadowedScene>
@@ -23,6 +26,23 @@ namespace SceneUtil
             return *sInstance;
         else
             throw std::logic_error("No ShadowManager exists yet");
+    }
+
+    int ShadowManager::getMaximumShadowMapResolution()
+    {
+        int maximum = std::numeric_limits<short>::max();
+        bool found = false;
+        for (const auto* context : osg::GraphicsContext::getAllRegisteredGraphicsContexts())
+        {
+            if (!context->isRealized() || !context->getState())
+                continue;
+            const auto* extensions = osg::GLExtensions::Get(context->getState()->getContextID(), false);
+            if (!extensions || extensions->maxTextureSize <= 0)
+                continue;
+            maximum = std::min(maximum, Settings::shadowResolutionLimit(extensions->maxTextureSize));
+            found = true;
+        }
+        return found ? maximum : 0;
     }
 
     void ShadowManager::setupShadowSettings(

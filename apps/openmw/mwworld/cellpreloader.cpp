@@ -456,6 +456,14 @@ namespace MWWorld
         mPreloadCells.clear();
     }
 
+    void CellPreloader::invalidateTerrainViews()
+    {
+        clearAllTasks();
+        mTerrainViews.clear();
+        mTerrainPreloadPositions.clear();
+        mLoadedTerrainPositions.clear();
+    }
+
     void CellPreloader::reportStats(unsigned int frameNumber, osg::Stats& stats) const
     {
         stats.setAttribute(frameNumber, "CellPreloader Count", static_cast<double>(mPreloadCells.size()));

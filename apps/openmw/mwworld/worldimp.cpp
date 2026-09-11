@@ -2111,6 +2111,10 @@ namespace MWWorld
 
     void World::processChangedSettings(const Settings::CategorySettingVector& settings)
     {
+        if (std::find(settings.begin(), settings.end(),
+                std::make_pair(std::string("Groundcover"), std::string("rendering distance")))
+            != settings.end())
+            mWorldScene->prepareGroundcoverDistanceChange();
         mRendering->processChangedSettings(settings);
     }
 

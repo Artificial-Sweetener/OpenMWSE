@@ -1,4 +1,5 @@
 #include "groundcoverlod.hpp"
+#include "groundcoverdistance.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -13,6 +14,39 @@
 
 namespace MWRender
 {
+    GroundcoverLod::GroundcoverLod()
+        : GroundcoverLod(new GroundcoverDistance(0.f))
+    {
+    }
+
+    GroundcoverLod::GroundcoverLod(GroundcoverDistance* distance)
+        : mDistance(distance)
+    {
+        if (!mDistance)
+            throw std::invalid_argument("groundcover LOD requires a distance owner");
+    }
+
+    GroundcoverLod::GroundcoverLod(const GroundcoverLod& other, const osg::CopyOp& copy)
+        : osg::Group(other, copy)
+        , mDistance(other.mDistance)
+    {
+    }
+
+    GroundcoverLod::~GroundcoverLod() = default;
+
+    void GroundcoverLod::traverse(osg::NodeVisitor& visitor)
+    {
+        if (visitor.getTraversalMode() != osg::NodeVisitor::TRAVERSE_ACTIVE_CHILDREN)
+        {
+            osg::Group::traverse(visitor);
+            return;
+        }
+        const float distance = visitor.getDistanceToViewPoint(getBound().center(), true);
+        const unsigned int child = distance < mDistance->getFarLodDistance() ? 0 : 1;
+        if (child < getNumChildren())
+            getChild(child)->accept(visitor);
+    }
+
     namespace
     {
         /// Copy triangle indices from every supported primitive representation.
