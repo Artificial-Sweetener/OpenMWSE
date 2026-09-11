@@ -123,6 +123,7 @@ namespace
         osg::Vec4f fogVolumeParameters;
         osg::Vec4f mediumReferenceParameters;
         osg::Vec4f orographicParameters;
+        std::function<float(const osg::Vec2f&)> terrainHeight;
         osg::Vec4f sunDirection{ 1.f, 0.f, 0.f, 0.f };
         osg::Vec4f fogColor{ 0.45f, 0.5f, 0.6f, 1.f };
         osg::Vec4f skyColor{ 0.3f, 0.4f, 0.55f, 1.f };
@@ -1363,6 +1364,8 @@ void main()
         updater.setWindSpeed(inputs.windSpeed);
         SceneUtil::AtmosphereTerrainGrid terrain;
         terrain.update({ inputs.eyePosition.x(), inputs.eyePosition.y() }, [&](const osg::Vec2f& position) {
+            if (inputs.terrainHeight)
+                return inputs.terrainHeight(position);
             return inputs.mediumReferenceParameters.x()
                 + (position - osg::Vec2f(inputs.orographicParameters.x(), inputs.orographicParameters.y()))
                 * osg::Vec2f(inputs.orographicParameters.z(), inputs.orographicParameters.w());
@@ -2678,6 +2681,39 @@ void main()
 
         context->releaseContext();
         context->close();
+    }
+
+    /// Keep elevated local samples from lifting distant mist and fog off their world-space terrain.
+    TEST(AtmosphereShaderTest, localMediaIgnoreObserverTerrainEstimate)
+    {
+        for (const bool fog : { false, true })
+            for (const bool ubo : { false, true })
+            {
+                NativePassInputs inputs;
+                inputs.width = 16;
+                inputs.height = 12;
+                inputs.useUniformBuffer = ubo;
+                inputs.eyePosition = { 0.f, 0.f, 10000.f };
+                inputs.viewDirection = { 1.f, 0.f, -0.02f };
+                inputs.viewDirection.normalize();
+                inputs.farPlane = 204800.f;
+                inputs.terrainHeight = [](const osg::Vec2f&) { return 0.f; };
+                inputs.mistParameters = fog ? osg::Vec4f() : osg::Vec4f(0.12f, 500.f, 3000.f, 0.f);
+                inputs.fogVolumeParameters = fog ? osg::Vec4f(0.12f, 500.f, 3000.f, 0.3f) : osg::Vec4f();
+                const auto flat = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                inputs.mediumReferenceParameters.x() = 8050.f;
+                inputs.orographicParameters = { 30000.f, 40000.f, 0.1f, -0.05f };
+                const auto mountain = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                ASSERT_FALSE(flat.pixels.empty());
+                EXPECT_EQ(flat.pixels, mountain.pixels);
+                EXPECT_FLOAT_EQ(mountain.at(8, 8).w(), 1.f) << "Mist must not form a suspended horizon sheet";
+                EXPECT_LT(mountain.at(8, 0).w(), 0.999f) << "Ground-directed rays must retain the medium";
+                inputs.mediumReferenceParameters = {};
+                inputs.orographicParameters = {};
+                inputs.terrainHeight = [](const osg::Vec2f&) { return 8000.f; };
+                const auto plateau = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+                EXPECT_LT(plateau.at(8, 8).w(), 0.999f) << "Mist and fog must follow elevated world terrain";
+            }
     }
 
     TEST(AtmosphereShaderTest, executesMistIntegrationAgainstControlledDepth)

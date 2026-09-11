@@ -203,10 +203,10 @@ shared {
         return vec2(max(0.0, min(first, second)), min(omw.far, max(first, second)));
     }
 
-    /// Return the local ground or water datum used by terrain-coupled mist and fog.
+    /// Use the observer-independent cloud terrain field for mist and fog placement.
     float atmosphereLocalGroundHeight(vec2 worldPosition)
     {
-        return max(omw.waterHeight, openmwseCloudTerrainHeight(worldPosition));
+        return openmwseCloudFormationTerrain(worldPosition).x;
     }
 
     /// Evaluate height-fog density in the same integrated world-space advection field as clouds and shadows.
@@ -431,19 +431,17 @@ shared {
         if (mistEnabled || fogEnabled)
         {
             float mistThickness = max(omw.atmosphereMistParameters.z, 1.0);
-            float mistBaseHeight = atmosphereLocalGroundHeight(omw.eyePos.xy) + omw.atmosphereMistParameters.y;
+            vec2 terrainBounds = max(openmwseCloudTerrainHeightBounds(), vec2(omw.waterHeight));
+            vec2 mistBaseHeight = terrainBounds + omw.atmosphereMistParameters.y;
             float fogThickness = max(omw.atmosphereFogVolumeParameters.z, 1.0);
-            float fogBaseHeight = atmosphereLocalGroundHeight(omw.eyePos.xy) + omw.atmosphereFogVolumeParameters.y;
-            float terrainExcursion = length(omw.atmosphereOrographicParameters.zw) * 20480.0;
-            float lowerHeight = mistEnabled ? mistBaseHeight - mistThickness * 0.2 : fogBaseHeight;
-            float upperHeight = mistEnabled ? mistBaseHeight + mistThickness : fogBaseHeight + fogThickness;
+            vec2 fogBaseHeight = terrainBounds + omw.atmosphereFogVolumeParameters.y;
+            float lowerHeight = mistEnabled ? mistBaseHeight.x - mistThickness * 0.2 : fogBaseHeight.x;
+            float upperHeight = mistEnabled ? mistBaseHeight.y + mistThickness : fogBaseHeight.y + fogThickness * 1.15;
             if (fogEnabled)
             {
-                lowerHeight = min(lowerHeight, fogBaseHeight);
-                upperHeight = max(upperHeight, fogBaseHeight + fogThickness);
+                lowerHeight = min(lowerHeight, fogBaseHeight.x);
+                upperHeight = max(upperHeight, fogBaseHeight.y + fogThickness * 1.15);
             }
-            lowerHeight -= terrainExcursion;
-            upperHeight += terrainExcursion;
             vec2 interval = layerIntersection(omw.eyePos.xyz, rayDirection, lowerHeight, upperHeight);
             interval.y = min(interval.y, sceneDistance);
             if (interval.y > interval.x)

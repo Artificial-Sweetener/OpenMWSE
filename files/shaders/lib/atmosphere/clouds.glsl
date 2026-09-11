@@ -117,15 +117,6 @@ float openmwseCloudTerrainInfluence(vec2 worldPosition)
     return 1.0 - smoothstep(8192.0, 20480.0, distanceFromSample);
 }
 
-/// Return local terrain height from the cached center sample and first-order world-space slope.
-float openmwseCloudTerrainHeight(vec2 worldPosition)
-{
-    vec4 mediumReference = openmwseCloudMediumReferenceParameters();
-    vec4 orography = openmwseCloudOrographicParameters();
-    vec2 localOffset = clamp(worldPosition - orography.xy, vec2(-20480.0), vec2(20480.0));
-    return mediumReference.x + dot(localOffset, orography.zw);
-}
-
 /// Read a height from the packed world lattice.
 float openmwseCloudTerrainNode(ivec2 coordinate)
 {

@@ -9,6 +9,7 @@ Shaders Settings
    :location: :bdg-info:`In Game > Settings > Video > Atmosphere`
 
    Enables regional sky scattering, aerial perspective, and mist in exteriors.
+   Mist and volumetric fog follow the same stable world-space terrain field as environmental clouds.
    Applies immediately. Ordinary distance fog remains when disabled. Volumetric clouds are controlled independently.
 
 .. omw-setting::
