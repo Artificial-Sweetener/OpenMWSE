@@ -21,6 +21,7 @@
 #include "diagnosticgputiming.hpp"
 #include "diagnosticshadowwork.hpp"
 #include "shadowcascade.hpp"
+#include "shadowdebughud.hpp"
 
 #include <osgShadow/ShadowedScene>
 #include <osg/CullFace>
@@ -95,83 +96,6 @@ static const char fragmentShaderSource_withBaseTexture_twoShadowMaps[] =
         "  gl_FragColor = color;                                                                \n"
         "} \n";
 #endif
-
-std::string debugVertexShaderSource = "void main(void){gl_Position = gl_Vertex; gl_TexCoord[0]=gl_MultiTexCoord0;}";
-std::string debugFragmentShaderSource =
-        "uniform sampler2D texture;                                              \n"
-        "                                                                        \n"
-        "void main(void)                                                         \n"
-        "{                                                                       \n"
-#if 1
-        "    float f = texture2D(texture, gl_TexCoord[0].xy).r;                  \n"
-        "                                                                        \n"
-        "    f = 256.0 * f;                                                      \n"
-        "    float fC = floor( f ) / 256.0;                                      \n"
-        "                                                                        \n"
-        "    f = 256.0 * fract( f );                                             \n"
-        "    float fS = floor( f ) / 256.0;                                      \n"
-        "                                                                        \n"
-        "    f = 256.0 * fract( f );                                             \n"
-        "    float fH = floor( f ) / 256.0;                                      \n"
-        "                                                                        \n"
-        "    fS *= 0.5;                                                          \n"
-        "    fH = ( fH  * 0.34 + 0.66 ) * ( 1.0 - fS );                          \n"
-        "                                                                        \n"
-        "    vec3 rgb = vec3( ( fC > 0.5 ? ( 1.0 - fC ) : fC ),                  \n"
-        "                     abs( fC - 0.333333 ),                              \n"
-        "                     abs( fC - 0.666667 ) );                            \n"
-        "                                                                        \n"
-        "    rgb = min( vec3( 1.0, 1.0, 1.0 ), 3.0 * rgb );                      \n"
-        "                                                                        \n"
-        "    float fMax = max( max( rgb.r, rgb.g ), rgb.b );                     \n"
-        "    fMax = 1.0 / fMax;                                                  \n"
-        "                                                                        \n"
-        "    vec3 color = fMax * rgb;                                            \n"
-        "                                                                        \n"
-        "    gl_FragColor =  vec4( fS + fH * color, 1 );                         \n"
-#else
-        "    gl_FragColor = texture2D(texture, gl_TexCoord[0].xy);               \n"
-#endif
-        "}                                                                       \n";
-
-std::string debugFrustumVertexShaderSource = "varying float depth; uniform mat4 transform; void main(void){gl_Position = transform * gl_Vertex; depth = gl_Position.z / gl_Position.w;}";
-std::string debugFrustumFragmentShaderSource =
-        "varying float depth;                                                    \n"
-        "                                                                        \n"
-        "void main(void)                                                         \n"
-        "{                                                                       \n"
-#if 1
-        "    float f = depth;                                                    \n"
-        "                                                                        \n"
-        "    f = 256.0 * f;                                                      \n"
-        "    float fC = floor( f ) / 256.0;                                      \n"
-        "                                                                        \n"
-        "    f = 256.0 * fract( f );                                             \n"
-        "    float fS = floor( f ) / 256.0;                                      \n"
-        "                                                                        \n"
-        "    f = 256.0 * fract( f );                                             \n"
-        "    float fH = floor( f ) / 256.0;                                      \n"
-        "                                                                        \n"
-        "    fS *= 0.5;                                                          \n"
-        "    fH = ( fH  * 0.34 + 0.66 ) * ( 1.0 - fS );                          \n"
-        "                                                                        \n"
-        "    vec3 rgb = vec3( ( fC > 0.5 ? ( 1.0 - fC ) : fC ),                  \n"
-        "                     abs( fC - 0.333333 ),                              \n"
-        "                     abs( fC - 0.666667 ) );                            \n"
-        "                                                                        \n"
-        "    rgb = min( vec3( 1.0, 1.0, 1.0 ), 3.0 * rgb );                      \n"
-        "                                                                        \n"
-        "    float fMax = max( max( rgb.r, rgb.g ), rgb.b );                     \n"
-        "    fMax = 1.0 / fMax;                                                  \n"
-        "                                                                        \n"
-        "    vec3 color = fMax * rgb;                                            \n"
-        "                                                                        \n"
-        "    gl_FragColor =  vec4( fS + fH * color, 1 );                         \n"
-#else
-        "    gl_FragColor = vec4(0.0, 0.0, 1.0, 0.0);                            \n"
-#endif
-        "}                                                                       \n";
-
 
 template<class T>
 class RenderLeafTraverser : public T
@@ -741,7 +665,7 @@ void MWShadowTechnique::disableShadows(bool setDummyState)
 
 void SceneUtil::MWShadowTechnique::enableDebugHUD()
 {
-    _debugHud = new DebugHUD(getShadowedScene()->getShadowSettings()->getNumShadowMapsPerLight());
+    _debugHud = new ShadowDebugHud(getShadowedScene()->getShadowSettings()->getNumShadowMapsPerLight());
 }
 
 void SceneUtil::MWShadowTechnique::disableDebugHUD()
@@ -3432,143 +3356,6 @@ void MWShadowTechnique::releaseGLObjects(osg::State* state) const
     }
     if (_debugHud)
         _debugHud->releaseGLObjects(state);
-}
-
-class DoubleBufferCallback : public osg::Callback
-{
-public:
-    DoubleBufferCallback(osg::NodeList &children) : mChildren(children) {}
-
-    bool run(osg::Object* node, osg::Object* visitor) override
-    {
-        // We can't use a static cast as NodeVisitor virtually inherits from Object
-        osg::ref_ptr<osg::NodeVisitor> nodeVisitor = visitor->asNodeVisitor();
-        unsigned int traversalNumber = nodeVisitor->getTraversalNumber();
-        mChildren[traversalNumber % 2]->accept(*nodeVisitor);
-
-        return true;
-    }
-
-protected:
-    osg::NodeList mChildren;
-};
-
-SceneUtil::MWShadowTechnique::DebugHUD::DebugHUD(int numberOfShadowMapsPerLight) : mDebugProgram(new osg::Program)
-{
-    osg::ref_ptr<osg::Shader> vertexShader = new osg::Shader(osg::Shader::VERTEX, debugVertexShaderSource);
-    mDebugProgram->addShader(vertexShader);
-    osg::ref_ptr<osg::Shader> fragmentShader = new osg::Shader(osg::Shader::FRAGMENT, debugFragmentShaderSource);
-    mDebugProgram->addShader(fragmentShader);
-
-    osg::ref_ptr<osg::Program> frustumProgram = new osg::Program;
-    vertexShader = new osg::Shader(osg::Shader::VERTEX, debugFrustumVertexShaderSource);
-    frustumProgram->addShader(vertexShader);
-    fragmentShader = new osg::Shader(osg::Shader::FRAGMENT, debugFrustumFragmentShaderSource);
-    frustumProgram->addShader(fragmentShader);
-
-    for (auto& frustumGeometry : mFrustumGeometries)
-    {
-        frustumGeometry = new osg::Geometry();
-        frustumGeometry->setCullingActive(false);
-
-        frustumGeometry->getOrCreateStateSet()->setAttributeAndModes(frustumProgram, osg::StateAttribute::ON);
-    }
-
-    osg::ref_ptr<osg::DrawElementsUShort> frustumDrawElements = new osg::DrawElementsUShort(osg::PrimitiveSet::LINE_STRIP);
-    for (auto & geom : mFrustumGeometries)
-        geom->addPrimitiveSet(frustumDrawElements);
-    frustumDrawElements->push_back(0);
-    frustumDrawElements->push_back(1);
-    frustumDrawElements->push_back(2);
-    frustumDrawElements->push_back(3);
-    frustumDrawElements->push_back(0);
-    frustumDrawElements->push_back(4);
-    frustumDrawElements->push_back(5);
-    frustumDrawElements->push_back(6);
-    frustumDrawElements->push_back(7);
-    frustumDrawElements->push_back(4);
-
-    frustumDrawElements = new osg::DrawElementsUShort(osg::PrimitiveSet::LINES);
-    for (auto & geom : mFrustumGeometries)
-        geom->addPrimitiveSet(frustumDrawElements);
-    frustumDrawElements->push_back(1);
-    frustumDrawElements->push_back(5);
-    frustumDrawElements->push_back(2);
-    frustumDrawElements->push_back(6);
-    frustumDrawElements->push_back(3);
-    frustumDrawElements->push_back(7);
-
-    for (int i = 0; i < numberOfShadowMapsPerLight; ++i)
-        addAnotherShadowMap();
-}
-
-void SceneUtil::MWShadowTechnique::DebugHUD::draw(osg::ref_ptr<osg::Texture2D> texture, unsigned int shadowMapNumber, const osg::Matrixd &matrix, osgUtil::CullVisitor& cv)
-{
-    // It might be possible to change shadow settings at runtime
-    if (shadowMapNumber > mDebugCameras.size())
-        addAnotherShadowMap();
-    
-    osg::ref_ptr<osg::StateSet> stateSet = new osg::StateSet();
-    stateSet->setTextureAttribute(sDebugTextureUnit, texture, osg::StateAttribute::ON);
-
-    auto frustumUniform = mFrustumUniforms[cv.getTraversalNumber() % 2][shadowMapNumber];
-    frustumUniform->set(matrix);
-    stateSet->addUniform(frustumUniform);
-
-    // Some of these calls may be superfluous.
-    unsigned int traversalMask = cv.getTraversalMask();
-    cv.setTraversalMask(mDebugGeometry[shadowMapNumber]->getNodeMask());
-    cv.pushStateSet(stateSet);
-    mDebugCameras[shadowMapNumber]->accept(cv);
-    cv.popStateSet();
-    cv.setTraversalMask(traversalMask);
-}
-
-void SceneUtil::MWShadowTechnique::DebugHUD::releaseGLObjects(osg::State* state) const
-{
-    for (auto const& camera : mDebugCameras)
-        camera->releaseGLObjects(state);
-    mDebugProgram->releaseGLObjects(state);
-    for (auto const& node : mDebugGeometry)
-        node->releaseGLObjects(state);
-    for (auto const& node : mFrustumTransforms)
-        node->releaseGLObjects(state);
-    for (auto const& node : mFrustumGeometries)
-        node->releaseGLObjects(state);
-}
-
-void SceneUtil::MWShadowTechnique::DebugHUD::setFrustumVertices(osg::ref_ptr<osg::Vec3Array> vertices, unsigned int traversalNumber)
-{
-    mFrustumGeometries[traversalNumber % 2]->setVertexArray(vertices);
-}
-
-void SceneUtil::MWShadowTechnique::DebugHUD::addAnotherShadowMap()
-{
-    size_t shadowMapNumber = mDebugCameras.size();
-
-    mDebugCameras.push_back(new osg::Camera);
-    mDebugCameras[shadowMapNumber]->setViewport(static_cast<int>(200 * shadowMapNumber), 0, 200, 200);
-    mDebugCameras[shadowMapNumber]->setRenderOrder(osg::Camera::POST_RENDER);
-    mDebugCameras[shadowMapNumber]->setClearColor(osg::Vec4(1.0, 1.0, 0.0, 1.0));
-    mDebugCameras[shadowMapNumber]->getOrCreateStateSet()->setMode(GL_DEPTH_TEST, osg::StateAttribute::OFF);
-
-    mDebugGeometry.emplace_back(osg::createTexturedQuadGeometry(osg::Vec3(-1, -1, 0), osg::Vec3(2, 0, 0), osg::Vec3(0, 2, 0)));
-    mDebugGeometry[shadowMapNumber]->setCullingActive(false);
-    mDebugCameras[shadowMapNumber]->addChild(mDebugGeometry[shadowMapNumber]);
-    osg::ref_ptr<osg::StateSet> stateSet = mDebugGeometry[shadowMapNumber]->getOrCreateStateSet();
-    stateSet->setAttributeAndModes(mDebugProgram, osg::StateAttribute::ON);
-    osg::ref_ptr<osg::Uniform> textureUniform = new osg::Uniform("texture", sDebugTextureUnit);
-    //textureUniform->setType(osg::Uniform::SAMPLER_2D);
-    stateSet->addUniform(textureUniform.get());
-
-    mFrustumTransforms.push_back(new osg::Group);
-    osg::NodeList frustumGeometryNodeList(mFrustumGeometries.cbegin(), mFrustumGeometries.cend());
-    mFrustumTransforms[shadowMapNumber]->setCullCallback(new DoubleBufferCallback(frustumGeometryNodeList));
-    mFrustumTransforms[shadowMapNumber]->setCullingActive(false);
-    mDebugCameras[shadowMapNumber]->addChild(mFrustumTransforms[shadowMapNumber]);
-
-    for(auto& uniformVector : mFrustumUniforms)
-        uniformVector.push_back(new osg::Uniform(osg::Uniform::FLOAT_MAT4, "transform"));
 }
 
 osg::ref_ptr<osg::StateSet> SceneUtil::MWShadowTechnique::getOrCreateShadowsBinStateSet()

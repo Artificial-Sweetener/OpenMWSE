@@ -319,19 +319,17 @@ fingerprint = "sha256:f4d346f510c1aa922b8ced758cbe74c34be965afa4ef85eca6ba867d27
 max_lines = 596
 
 [[waivers]]
-id = "OMWSE-REMEDIATION-006"
+id = "OMWSE-STRUCTURAL-028"
 area = "renderer"
 owner = "OpenMWSE rendering"
 rule = "STRUCT003"
 path = "components/sceneutil/mwshadowtechnique.cpp"
-kind = "remediation"
-justification = "This file contains assessed mixed responsibility recorded by OMWSE-DEBT-006; the bounded waiver permits only the current source while the named extraction is completed."
-issue = "architecture:omwse-debt-006"
+kind = "structural"
+justification = "MWShadowTechnique owns one view-dependent shadow-map algorithm from cascade slicing and caster-volume construction through shadow-camera culling and receiver-state publication. Those phases share light-space bounds, traversal-local resources, and cascade indices; the optional debug HUD and reusable diagnostic instrumentation live in separate owners."
+issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:befddf2eb05726214aad6b8cbb57ad44ab7696b1ddba209742db018238060af4"
-max_lines = 2759
-next_limit = 500
-debt = "OMWSE-DEBT-006"
+fingerprint = "sha256:12eaa01b46574c03d375b637883208a1b24cd587f65228521479ffc8c0489f30"
+max_lines = 2575
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-020"

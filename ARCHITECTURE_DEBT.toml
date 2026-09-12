@@ -47,19 +47,3 @@ responsibilities = [
   "script-settings page construction",
 ]
 next_extraction = "Extract the video and graphics settings controller, including live application and diagnostic access, from the general settings window."
-
-[[debts]]
-id = "OMWSE-DEBT-006"
-area = "renderer"
-owner = "OpenMWSE rendering"
-paths = ["components/sceneutil/mwshadowtechnique.cpp"]
-fingerprint = "sha256:befddf2eb05726214aad6b8cbb57ad44ab7696b1ddba209742db018238060af4"
-issue = "architecture:omwse-debt-006"
-review_by = 2027-03-12
-responsibilities = [
-  "shadow frustum and light-space computation",
-  "shadow camera and resource lifecycle",
-  "cull traversal and render-leaf filtering",
-  "debug visualization and diagnostic instrumentation",
-]
-next_extraction = "Extract debug visualization and diagnostic instrumentation from the runtime shadow-map technique."

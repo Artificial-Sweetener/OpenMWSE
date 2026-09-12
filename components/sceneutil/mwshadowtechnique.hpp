@@ -41,6 +41,7 @@
 namespace SceneUtil {
 
     class Light;
+    class ShadowDebugHud;
 
     /** ViewDependentShadowMap provides an base implementation of view dependent shadow mapping techniques.*/
     class MWShadowTechnique : public osgShadow::ShadowTechnique
@@ -324,30 +325,7 @@ namespace SceneUtil {
 
         unsigned int                            _worldMask = ~0u;
 
-        class DebugHUD final : public osg::Referenced
-        {
-        public:
-            DebugHUD(int numberOfShadowMapsPerLight);
-
-            void draw(osg::ref_ptr<osg::Texture2D> texture, unsigned int shadowMapNumber, const osg::Matrixd &matrix, osgUtil::CullVisitor& cv);
-
-            void releaseGLObjects(osg::State* state = 0) const;
-
-            void setFrustumVertices(osg::ref_ptr<osg::Vec3Array> vertices, unsigned int traversalNumber);
-        protected:
-            void addAnotherShadowMap();
-
-            static const int sDebugTextureUnit = 0;
-
-            std::vector<osg::ref_ptr<osg::Camera>> mDebugCameras;
-            osg::ref_ptr<osg::Program> mDebugProgram;
-            std::vector<osg::ref_ptr<osg::Node>> mDebugGeometry;
-            std::vector<osg::ref_ptr<osg::Group>> mFrustumTransforms;
-            std::array<std::vector<osg::ref_ptr<osg::Uniform>>, 2> mFrustumUniforms;
-            std::array<osg::ref_ptr<osg::Geometry>, 2> mFrustumGeometries;
-        };
-
-        osg::ref_ptr<DebugHUD>                  _debugHud;
+        osg::ref_ptr<ShadowDebugHud>            _debugHud;
         std::array<osg::ref_ptr<osg::Program>, GL_ALWAYS - GL_NEVER + 1> _castingPrograms;
         osg::ref_ptr<osg::Program> _opaqueCastingProgram;
         const std::string _shadowsBinName = "ShadowsBin_" + std::to_string(reinterpret_cast<std::uint64_t>(this));
