@@ -1,6 +1,8 @@
 #ifndef OPENMW_MWRENDER_GPUSCENE_H
 #define OPENMW_MWRENDER_GPUSCENE_H
 
+#include <components/shader/materialmode.hpp>
+
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -129,9 +131,12 @@ namespace MWRender
         std::unique_ptr<const GpuTemplate> extract(const osg::Node& node, unsigned int mask, bool bakeBillboards);
         void appendInstances(const GpuTemplate& tmpl, const osg::Matrixf& refMatrix, float refScale,
             const osg::LOD::MinMaxPair& refDistances, bool smallFeatureCulling, std::vector<Instance>& out) const;
-        osg::ref_ptr<osg::Node> createChunk(std::vector<Instance>&& instances, const osg::BoundingSphere& localBound);
+        osg::ref_ptr<osg::Node> createChunk(std::vector<Instance>&& instances, const osg::BoundingSphere& bound);
         /// Rebuilds chunk instance records in place.
-        bool updateChunk(osg::Node& node, const std::vector<Instance>& instances);
+        bool updateChunk(osg::Node& node, const std::vector<Instance>& instances, const osg::BoundingSphere& bound);
+        /// Culls residents without scene graph nodes.
+        void addResident(osg::Node& node);
+        void removeResident(osg::Node& node);
         void setCastingPrograms(const std::vector<osg::ref_ptr<osg::Program>>& programs);
         void setLightManager(SceneUtil::LightManager* lightManager);
         /// Supplies inherited geometry material state.
@@ -144,12 +149,7 @@ namespace MWRender
         osg::ref_ptr<osg::GraphicsOperation> createCompileOperation(unsigned int target);
         void compile(osg::State& state);
 
-        void recordView(osgUtil::CullVisitor& cv);
-        void markChunk(osgUtil::CullVisitor& cv, Id slot, Id generation);
-        void releaseChunk(GpuChunkNode& node, Id slot);
         void draw(osg::RenderInfo& renderInfo, Id bucket);
-        void update();
-        osg::BoundingSphere getResidentBound() const;
 
     private:
         struct Mesh
@@ -199,6 +199,8 @@ namespace MWRender
         {
             osg::ref_ptr<osg::StateSet> mStateSet;
             osg::ref_ptr<const osg::Program> mProgram;
+            /// Only modes, attributes and the program differ.
+            bool mDelta = false;
             std::vector<Id> mBatches;
             std::uint32_t mCommandOffset = 0;
             std::uint32_t mCommandCount = 0;
@@ -356,10 +358,22 @@ namespace MWRender
             bool mUpdateMesh = false;
         };
 
+        struct GpuView
+        {
+            std::array<osg::Vec4f, 16> mPlanes;
+            osg::Vec4f mPixelSizeVector;
+            osg::Vec4f mViewPoint;
+            osg::Vec4f mParams;
+            std::array<std::uint32_t, 4> mMeta;
+        };
+
         struct ViewRecord
         {
             bool mHasParams = false;
+            /// Culled by a frame dispatch.
             bool mDispatched = false;
+            bool mPrepared = false;
+            std::uint32_t mViewIndex = 0;
             std::vector<osg::Vec4f> mPlanes;
             osg::Vec4f mPixelSizeVector;
             float mSmallFeaturePixelSize = 0.f;
@@ -381,6 +395,8 @@ namespace MWRender
             std::vector<PendingSkin> mSkins;
             std::vector<PendingMaterial> mMaterials;
             std::vector<GpuBatch> mBatches;
+            std::uint32_t mSlotCount = 0;
+            std::uint32_t mCommandCount = 0;
             bool mBatchesRebuilt = false;
         };
 
@@ -403,7 +419,7 @@ namespace MWRender
             bool operator()(const std::vector<const osg::StateSet*>& left, const SurfacePath& right) const;
         };
 
-        void rebuildBatches(std::vector<GpuBatch>& table);
+        void rebuildBatches(PendingWork& work);
         Id getMeshLocked(const osg::Geometry& geometry, const osg::Geometry* source = nullptr);
         bool registerSkinLocked(Id mesh, const SceneUtil::RigGeometry& rig);
         Surface getSurfaceLocked(const std::vector<const osg::StateSet*>& statePath, int order);
@@ -413,22 +429,33 @@ namespace MWRender
         void refreshMaterialLocked(Id material, unsigned int frame);
         void takePendingWork(PendingWork& work, std::size_t limit);
         void upload(osg::State& state, PendingWork& work);
-        bool dispatch(osg::State& state, const ViewRecord& view, std::uint32_t instanceExtent,
-            const std::vector<std::uint32_t>& chunkGenerations);
+        static GpuView makeView(const ViewRecord& record);
+        bool dispatch(osg::State& state, const std::vector<GpuView>& views, std::uint32_t viewBase,
+            std::uint32_t instanceExtent, const std::vector<std::uint32_t>& chunkData);
         bool record(osgUtil::CullVisitor& cv, osg::Geometry& geometry, bool updateMesh,
             const GpuCaptureCallback& callback, SkinUpdate* skin = nullptr);
         bool recordRig(osgUtil::CullVisitor& cv, SceneUtil::RigGeometry& rig, const GpuCaptureCallback& callback);
         bool getSkinPose(unsigned int frame, SceneUtil::RigGeometry& rig, SkinPose& out);
         bool applySkin(osg::State& state, const std::vector<SkinUpdate>& skins);
-        bool prepareDynamic(osg::State& state, ViewRecord& view, std::vector<std::uint32_t>& chunkGenerations);
+        bool prepareDynamic(
+            osg::State& state, std::vector<DynamicInstance>& dynamic, const std::vector<SkinUpdate>& skins);
 
         friend class GpuCaptureCallback;
+        friend class GpuSceneNode;
+        friend class GpuChunkNode;
+
+        void recordView(osgUtil::CullVisitor& cv);
+        void markChunk(osgUtil::CullVisitor& cv, Id slot, Id generation);
+        void releaseChunk(GpuChunkNode& node, Id slot);
+        void removeResidentLocked(GpuChunkNode& chunk);
+        void update();
+        osg::BoundingSphere getResidentBound() const;
 
         Shader::ShaderManager& mShaderManager;
         SceneUtil::LightManager* mLightManager = nullptr;
         osg::ref_ptr<const SceneUtil::Material> mDefaultMaterial;
-        bool mSupported = false;
-        bool mMaterialTable = false;
+        std::atomic<bool> mSupported{ false };
+        Shader::MaterialMode mMaterialMode = Shader::MaterialMode::Legacy;
         std::atomic<bool> mEnabled{ true };
         osg::ref_ptr<GpuSceneNode> mNode;
         /// Ordered pass dispatchers under one opaque bin.
@@ -444,18 +471,29 @@ namespace MWRender
         RangeAllocator mSkinInfluences;
         std::unordered_map<SurfacePath, Surface, PathHash, PathEqual> mSurfaces;
         std::vector<Bucket> mBuckets;
+        std::vector<osg::StateAttribute::GLMode> mDeltaModes;
+        std::vector<osg::StateAttribute::TypeMemberPair> mDeltaAttributes;
         std::vector<Dispatcher> mDispatchers;
-        Id mMaterialCount = 0;
         std::vector<PendingMaterial> mMaterials;
         std::vector<std::unique_ptr<MaterialSource>> mMaterialSources;
         std::vector<unsigned int> mMaterialFrames;
         std::vector<osg::ref_ptr<osg::Program>> mProgramsToLink;
+        /// Shadow casting programs indexed by alpha function.
+        std::vector<osg::ref_ptr<osg::Program>> mCastingProgramList;
         std::atomic<unsigned int> mCompletedWork{ 0 };
         std::map<std::pair<Id, Id>, Id> mBatchIds;
         std::vector<Batch> mBatches;
         std::vector<Chunk> mChunks;
         std::vector<Id> mFreeChunks;
         std::unordered_set<GpuChunkNode*> mChunkNodes;
+        struct Resident
+        {
+            Id mSlot;
+            Id mGeneration;
+            osg::BoundingSphere mBound;
+        };
+        std::vector<Resident> mResidents;
+        std::vector<GpuChunkNode*> mResidentNodes;
         Id mNextGeneration = 1;
         RangeAllocator mInstances;
         std::deque<PendingMesh> mPendingMeshes;
@@ -474,6 +512,9 @@ namespace MWRender
 
         unsigned int mUpdateFrame = 0;
         std::unordered_set<const osg::Geometry*> mUpdatedMeshes;
+        std::unordered_map<const osg::Geometry*, unsigned int> mMeshVersions;
+        unsigned int mDispatchFrame = 0;
+        std::uint32_t mDispatchedViews = 0;
         std::unordered_map<Id, SkinMesh> mSkinMeshes;
         std::array<SkinPoseFrame, 4> mSkinPoseFrames;
         std::atomic<bool> mSkinSupported{ true };

@@ -7,6 +7,7 @@
 #include <limits>
 #include <numeric>
 
+#include <osg/AlphaFunc>
 #include <osg/BufferObject>
 #include <osg/Callback>
 #include <osg/Drawable>
@@ -37,6 +38,7 @@
 #include <components/sceneutil/morphgeometry.hpp>
 #include <components/sceneutil/riggeometry.hpp>
 #include <components/sceneutil/riggeometryosgaextension.hpp>
+#include <components/sceneutil/shadowsbin.hpp>
 #include <components/sceneutil/statesetupdater.hpp>
 #include <components/shader/shadermanager.hpp>
 #include <components/terrain/compositemaprenderer.hpp>
@@ -57,11 +59,20 @@
 #ifndef GL_RED_INTEGER
 #define GL_RED_INTEGER 0x8D94
 #endif
+#ifndef GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS
+#define GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS 0x90DD
+#endif
+#ifndef GL_MAX_VERTEX_SHADER_STORAGE_BLOCKS
+#define GL_MAX_VERTEX_SHADER_STORAGE_BLOCKS 0x90D6
+#endif
 #ifndef GL_ARRAY_BUFFER
 #define GL_ARRAY_BUFFER 0x8892
 #endif
 #ifndef GL_ELEMENT_ARRAY_BUFFER
 #define GL_ELEMENT_ARRAY_BUFFER 0x8893
+#endif
+#ifndef GL_VERTEX_ARRAY_BINDING
+#define GL_VERTEX_ARRAY_BINDING 0x85B5
 #endif
 
 namespace MWRender
@@ -154,6 +165,9 @@ namespace MWRender
             "texMat1", "texMat2", "texMat3", "texMat4", "texMat5", "texMat6", "texMat7", "texMat8", "texMat9" };
         constexpr const char* sTexMatNames[]
             = { "texMat0", "texMat1", "texMat2", "texMat3", "texMat4", "texMat5", "texMat6", "texMat7" };
+        constexpr GLint sMaxStorageBinding = 23;
+        constexpr GLint sVertexStorageBlocks = 2;
+
         constexpr unsigned int sLinksPerFrame = 4;
         constexpr std::size_t sUploadsPerFrame = 200;
 
@@ -182,6 +196,8 @@ namespace MWRender
         constexpr unsigned int sWorkGroupSize = 256;
         constexpr unsigned int sSkinGroupSize = 64;
         constexpr unsigned int sMaxPlanes = 16;
+        /// One chunk mask bit per view.
+        constexpr std::size_t sMaxGroupViews = 32;
 
         struct CullPath
         {
@@ -378,15 +394,6 @@ namespace MWRender
                 }
             }
             return true;
-        }
-
-        template <class T>
-        T uniformValue(const osg::StateSet& stateSet, const char* name, const T& fallback)
-        {
-            T value = fallback;
-            if (const osg::Uniform* uniform = stateSet.getUniform(name))
-                uniform->get(value);
-            return value;
         }
 
         template <class Pair, class Find>
@@ -732,13 +739,28 @@ namespace MWRender
 
         void detach() { mScene.store(nullptr, std::memory_order_release); }
         GpuScene::Id getSlot() const { return mSlot; }
+        GpuScene::Id getGeneration() const { return mGeneration; }
+        void setBound(const osg::BoundingSphere& bound)
+        {
+            mBound = bound;
+            dirtyBound();
+        }
+        static constexpr std::size_t sNone = std::numeric_limits<std::size_t>::max();
+        std::size_t mResident = sNone;
 
         void traverse(osg::NodeVisitor& nv) override
         {
             GpuScene* const scene = mScene.load(std::memory_order_acquire);
             if (scene == nullptr || nv.getVisitorType() != osg::NodeVisitor::CULL_VISITOR)
                 return;
-            scene->markChunk(static_cast<osgUtil::CullVisitor&>(nv), mSlot, mGeneration);
+            osgUtil::CullVisitor& cv = static_cast<osgUtil::CullVisitor&>(nv);
+            scene->markChunk(cv, mSlot, mGeneration);
+            if (cv.getComputeNearFarMode() != osg::CullSettings::DO_NOT_COMPUTE_NEAR_FAR && mBound.valid())
+            {
+                osg::BoundingBox box;
+                box.expandBy(mBound);
+                cv.updateCalculatedNearFar(*cv.getModelViewMatrix(), box);
+            }
         }
 
         osg::BoundingSphere computeBound() const override { return mBound; }
@@ -770,8 +792,6 @@ namespace MWRender
             {
                 setCullingActive(false);
                 setSupportsDisplayList(false);
-                setUseDisplayList(false);
-                setUseVertexBufferObjects(true);
                 setUseVertexArrayObject(false);
             }
 
@@ -794,6 +814,11 @@ namespace MWRender
     struct GpuScene::Gl
     {
         osg::GLExtensions* mExt = nullptr;
+        unsigned int mDrawLogs = 32;
+        bool mTraceDraws = false;
+        GLenum(GL_APIENTRY* mGetResetStatus)() = nullptr;
+        void draw(osg::State& state, const char* pass, Shader::MaterialMode mode, GLuint buffer, std::size_t first,
+            GLsizei count);
         ClearBufferDataFn mClearBufferData = nullptr;
         CopyBufferSubDataFn mCopyBufferSubData = nullptr;
         GLuint mVao = 0;
@@ -806,6 +831,10 @@ namespace MWRender
         GLuint mCountBuffer = 0;
         GLuint mVisibleBuffer = 0;
         GLuint mCommandBuffer = 0;
+        std::size_t mCountBytes = 0;
+        std::size_t mVisibleBytes = 0;
+        std::size_t mCommandBytes = 0;
+        GLuint mViewBuffer = 0;
         GLuint mMaterialBuffer = 0;
         GLuint mDynamicInstanceBuffer = 0;
         GLuint mDynamicVisibleBuffer = 0;
@@ -827,20 +856,25 @@ namespace MWRender
         std::size_t mSkinRangeCapacity = 0;
         std::size_t mSkinInfluenceCapacity = 0;
         std::uint32_t mBatchCount = 0;
+        std::uint32_t mSlotCount = 0;
+        std::uint32_t mCommandCount = 0;
+        /// View regions the dispatch buffers hold.
+        std::uint32_t mViewCapacity = 0;
         std::vector<std::pair<std::uint32_t, std::uint32_t>> mDynamicRanges;
         osg::ref_ptr<osg::Program> mCullProgram;
         osg::ref_ptr<osg::Program> mCommandProgram;
         osg::ref_ptr<osg::Program> mSkinProgram;
         osg::ref_ptr<osg::Uniform> mInstanceCount;
         osg::ref_ptr<osg::Uniform> mChunkCount;
-        osg::ref_ptr<osg::Uniform> mPlaneCount;
-        osg::ref_ptr<osg::Uniform> mPlanes;
-        osg::ref_ptr<osg::Uniform> mPixelSizeVector;
-        osg::ref_ptr<osg::Uniform> mSmallFeaturePixelSize;
-        osg::ref_ptr<osg::Uniform> mViewPoint;
-        osg::ref_ptr<osg::Uniform> mLodScale;
+        osg::ref_ptr<osg::Uniform> mViewBase;
+        osg::ref_ptr<osg::Uniform> mViewCount;
+        osg::ref_ptr<osg::Uniform> mSlotCountUniform;
         osg::ref_ptr<osg::Uniform> mBatchCountUniform;
-        std::map<const osg::Program*, osg::ref_ptr<osg::StateSet>> mCastingStateSets;
+        osg::ref_ptr<osg::Uniform> mCommandCountUniform;
+        bool mLimitsChecked = false;
+        std::size_t mStorageLimit = 0;
+        std::map<std::pair<const osg::Program*, bool>, osg::ref_ptr<osg::StateSet>> mCastingStateSets;
+        std::map<const osg::Program*, osg::ref_ptr<osg::Program>> mCastingPrograms;
 
         void grow(GLuint& buffer, std::size_t& capacity, std::size_t required, GLenum usage)
         {
@@ -865,6 +899,15 @@ namespace MWRender
             capacity = newCapacity;
             mVao = 0;
             mDynamicVao = 0;
+        }
+
+        void stream(GLuint& buffer, const void* data, std::size_t size)
+        {
+            if (buffer == 0)
+                mExt->glGenBuffers(1, &buffer);
+            mExt->glBindBuffer(GL_COPY_WRITE_BUFFER, buffer);
+            mExt->glBufferData(GL_COPY_WRITE_BUFFER, std::max<std::size_t>(size, 4), data, GL_STREAM_DRAW);
+            mExt->glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
         }
 
         void upload(GLuint buffer, std::size_t offset, const void* data, std::size_t size)
@@ -930,10 +973,54 @@ namespace MWRender
             if (object != nullptr)
             {
                 result = mExt->glGetTextureHandle(object->id());
-                mExt->glMakeTextureHandleResident(result);
+                if (result != 0)
+                    mExt->glMakeTextureHandleResident(result);
             }
             mHandles.emplace(&texture, result);
             return result;
+        }
+
+        bool resizeViews(std::uint32_t views)
+        {
+            if (views <= mViewCapacity)
+                return true;
+            const std::size_t capacity = std::max(views, 8u);
+            if (capacity * mCommandCount > mStorageLimit / sizeof(GpuCommand)
+                || capacity * mSlotCount > mStorageLimit / sizeof(std::uint32_t)
+                || capacity * mBatchCount > mStorageLimit / sizeof(std::uint32_t))
+            {
+                Log(Debug::Error) << "GPU view buffers exceed storage limit";
+                return false;
+            }
+            mViewCapacity = static_cast<std::uint32_t>(capacity);
+            const auto reallocate = [&](GLuint& buffer, std::size_t& allocated, std::size_t bytes) {
+                bytes = std::max<std::size_t>(bytes, 4);
+                GLuint fresh = 0;
+                mExt->glGenBuffers(1, &fresh);
+                mExt->glBindBuffer(GL_COPY_WRITE_BUFFER, fresh);
+                mExt->glBufferData(GL_COPY_WRITE_BUFFER, bytes, nullptr, GL_DYNAMIC_COPY);
+                if (buffer != 0)
+                {
+                    // Earlier view groups keep their regions.
+                    mExt->glBindBuffer(GL_COPY_READ_BUFFER, buffer);
+                    mCopyBufferSubData(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER, 0, 0,
+                        static_cast<GLsizeiptr>(std::min(allocated, bytes)));
+                    mExt->glBindBuffer(GL_COPY_READ_BUFFER, 0);
+                    mExt->glDeleteBuffers(1, &buffer);
+                }
+                buffer = fresh;
+                allocated = bytes;
+            };
+            reallocate(mVisibleBuffer, mVisibleBytes,
+                static_cast<std::size_t>(mViewCapacity) * mSlotCount * sizeof(std::uint32_t));
+            reallocate(mCountBuffer, mCountBytes,
+                static_cast<std::size_t>(mViewCapacity) * mBatchCount * sizeof(std::uint32_t));
+            reallocate(mCommandBuffer, mCommandBytes,
+                static_cast<std::size_t>(mViewCapacity) * mCommandCount * sizeof(GpuCommand));
+            mExt->glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+            // Fresh buffer names invalidate recorded arrays.
+            mVao = 0;
+            return true;
         }
 
         void zero(GLuint buffer)
@@ -960,14 +1047,49 @@ namespace MWRender
             Log(Debug::Warning) << "GPU-driven object paging unavailable: OpenGL 4.3 features missing";
             return;
         }
-        mMaterialTable = ext.glGetTextureHandle != nullptr && ext.glMakeTextureHandleResident != nullptr
-            && osg::isGLExtensionSupported(ext.contextID, "GL_ARB_bindless_texture")
-            && (osg::isGLExtensionSupported(ext.contextID, "GL_NV_gpu_shader5")
-                || osg::isGLExtensionSupported(ext.contextID, "GL_EXT_nonuniform_qualifier"));
-        if (!mMaterialTable)
-            Log(Debug::Warning) << "GPU-driven object paging: no bindless textures, one draw per material";
+        // Realize-time limits refuse before nodes commit.
+        const GLint storageBindings = SceneUtil::getMaxShaderStorageBindings();
+        if (storageBindings != 0
+            && (storageBindings <= sMaxStorageBinding || SceneUtil::getMaxVertexStorageBlocks() < sVertexStorageBlocks))
+        {
+            Log(Debug::Warning) << "GPU-driven object paging unavailable: too few storage buffer bindings";
+            mSupported = false;
+            return;
+        }
+        const bool bindless = ext.glGetTextureHandle != nullptr && ext.glGetTextureSamplerHandle != nullptr
+            && ext.glMakeTextureHandleResident != nullptr && ext.glMakeTextureHandleNonResident != nullptr
+            && osg::isGLExtensionSupported(ext.contextID, "GL_ARB_bindless_texture");
+        // Instance handles need nonuniform sampler access.
+        const bool shader5 = osg::isGLExtensionSupported(ext.contextID, "GL_NV_gpu_shader5");
+        // AMD exposes nonuniformEXT for OpenGL bindless samplers.
+        const bool qualifier = osg::isGLExtensionSupported(ext.contextID, "GL_EXT_nonuniform_qualifier");
+        const char* forcedMode = std::getenv("OPENMW_GPU_MATERIAL_MODE");
+        const bool forceArray = forcedMode != nullptr && std::string_view(forcedMode) == "array";
+        const bool forceLegacy = forcedMode != nullptr && std::string_view(forcedMode) == "legacy";
+        const GLint maxLayers = ext.isTexture2DArraySupported ? ext.maxLayerCount : 0;
+        if (bindless && (shader5 || qualifier) && !forceArray && !forceLegacy)
+            mMaterialMode = Shader::MaterialMode::Bindless;
+        else
+        {
+            mMaterialMode = Shader::MaterialMode::Legacy;
+            Log(Debug::Warning) << "GPU bindless unavailable; using material draws.";
+        }
+        if (bindless && mMaterialMode != Shader::MaterialMode::Bindless && !forceArray && !forceLegacy)
+            Log(Debug::Warning) << "GPU bindless requirements unavailable; using fallback.";
+        const char* mode = "legacy";
+        if (mMaterialMode == Shader::MaterialMode::Bindless)
+            mode = shader5 ? "bindless-nv" : "bindless-ext";
+        else if (mMaterialMode == Shader::MaterialMode::Array)
+            mode = "array";
+        Log(Debug::Info) << "GPU materials: mode=" << mode << " bindless=" << bindless << " shader5=" << shader5
+                         << " nonuniformEXT=" << qualifier << " vertexBlocks=" << SceneUtil::getMaxVertexStorageBlocks()
+                         << " arrayLayers=" << maxLayers;
         mGl = std::make_unique<Gl>();
         mGl->mExt = &ext;
+        const char* trace = std::getenv("OPENMW_GPU_DRAW_TRACE");
+        mGl->mTraceDraws = trace != nullptr && std::string_view(trace) == "1";
+        if (mGl->mTraceDraws)
+            Log(Debug::Warning) << "GPU draw tracing enabled; rendering will slow down.";
         osg::setGLExtensionFuncPtr(mGl->mClearBufferData, "glClearBufferData");
         osg::setGLExtensionFuncPtr(mGl->mCopyBufferSubData, "glCopyBufferSubData");
         if (mGl->mCopyBufferSubData == nullptr || mGl->mClearBufferData == nullptr)
@@ -1123,7 +1245,7 @@ namespace MWRender
     bool GpuScene::registerSkinLocked(Id mesh, const SceneUtil::RigGeometry& rig)
     {
         const std::vector<std::uint32_t>& groups = rig.getSkinGroups();
-        if (mesh >= mMeshes.size() || groups.size() != mMeshes[mesh].mVertexCount)
+        if (groups.size() != mMeshes[mesh].mVertexCount)
             return false;
         const auto found = mSkinMeshes.find(mesh);
         if (found != mSkinMeshes.end())
@@ -1140,8 +1262,6 @@ namespace MWRender
         {
             if (group == std::numeric_limits<std::uint32_t>::max())
                 continue;
-            if (group >= groups.size())
-                return false;
             count = std::max(count, group + 1);
         }
         if (count == 0 || count != ranges.size())
@@ -1302,8 +1422,7 @@ namespace MWRender
 
     void GpuScene::refreshMaterialLocked(Id material, unsigned int frame)
     {
-        if (!mMaterialTable || material >= mMaterials.size() || material >= mMaterialSources.size()
-            || mMaterialFrames[material] == frame)
+        if (material >= mMaterials.size() || mMaterialFrames[material] == frame)
             return;
         mMaterialFrames[material] = frame;
         PendingMaterial pending = makeMaterial(*mMaterialSources[material], material);
@@ -1338,8 +1457,7 @@ namespace MWRender
             = dynamic_cast<const osg::Program*>(merged->getAttribute(osg::StateAttribute::PROGRAM));
         osg::ref_ptr<osg::Program> instanced;
         if (program != nullptr)
-            instanced = mShaderManager.getInstancedProgram(
-                *program, mMaterialTable ? Shader::MaterialMode::Bindless : Shader::MaterialMode::Legacy);
+            instanced = mShaderManager.getInstancedProgram(*program, mMaterialMode);
         if (instanced == nullptr)
         {
             mSurfaces.emplace(std::move(key), surface);
@@ -1347,10 +1465,10 @@ namespace MWRender
         }
 
         osg::ref_ptr<osg::StateSet> pipeline = merged;
-        if (mMaterialTable)
+        if (mMaterialMode == Shader::MaterialMode::Bindless)
         {
             std::unique_ptr<MaterialSource> source = makeSource(statePath, *program);
-            PendingMaterial material = makeMaterial(*source, mMaterialCount++);
+            PendingMaterial material = makeMaterial(*source, static_cast<Id>(mMaterials.size()));
             pipeline = new osg::StateSet(*merged, osg::CopyOp::SHALLOW_COPY);
             std::vector<unsigned int> materialUnits;
             for (unsigned int i = 0; i < sMapCount; ++i)
@@ -1395,6 +1513,20 @@ namespace MWRender
             Bucket bucket;
             bucket.mStateSet = pipeline;
             bucket.mProgram = instanced;
+            bucket.mDelta = pipeline->getUniformList().empty()
+                && std::all_of(pipeline->getTextureModeList().begin(), pipeline->getTextureModeList().end(),
+                    [](const osg::StateSet::ModeList& modes) { return modes.empty(); })
+                && std::all_of(pipeline->getTextureAttributeList().begin(), pipeline->getTextureAttributeList().end(),
+                    [](const osg::StateSet::AttributeList& attributes) { return attributes.empty(); });
+            // Every bucket state feeds the reset lists.
+            for (const auto& [mode, value] : pipeline->getModeList())
+                if (std::find(mDeltaModes.begin(), mDeltaModes.end(), mode) == mDeltaModes.end())
+                    mDeltaModes.push_back(mode);
+            for (const auto& [typeMember, attribute] : pipeline->getAttributeList())
+                if (typeMember.first != osg::StateAttribute::PROGRAM
+                    && std::find(mDeltaAttributes.begin(), mDeltaAttributes.end(), typeMember)
+                        == mDeltaAttributes.end())
+                    mDeltaAttributes.push_back(typeMember);
             mProgramsToLink.push_back(instanced);
             mBuckets.push_back(std::move(bucket));
 
@@ -1522,10 +1654,10 @@ namespace MWRender
 
     void GpuScene::setCastingPrograms(const std::vector<osg::ref_ptr<osg::Program>>& programs)
     {
+        mCastingProgramList = programs;
         for (const osg::ref_ptr<osg::Program>& program : programs)
         {
-            if (osg::ref_ptr<osg::Program> instanced = mShaderManager.getInstancedProgram(
-                    *program, mMaterialTable ? Shader::MaterialMode::Bindless : Shader::MaterialMode::Legacy))
+            if (osg::ref_ptr<osg::Program> instanced = mShaderManager.getInstancedProgram(*program, mMaterialMode))
             {
                 std::lock_guard<std::mutex> lock(mMutex);
                 mProgramsToLink.push_back(std::move(instanced));
@@ -1620,18 +1752,17 @@ namespace MWRender
             instance.mGeometry = geometry.mGeometry;
             instance.mBucket = geometry.mSurface.mBucket;
             instance.mMaterial = geometry.mSurface.mMaterial;
-            out.push_back(instance);
+            out.push_back(std::move(instance));
         }
     }
 
-    osg::ref_ptr<osg::Node> GpuScene::createChunk(
-        std::vector<Instance>&& instances, const osg::BoundingSphere& localBound)
+    osg::ref_ptr<osg::Node> GpuScene::createChunk(std::vector<Instance>&& instances, const osg::BoundingSphere& bound)
     {
         if (instances.empty())
             return nullptr;
 
         std::lock_guard<std::mutex> lock(mMutex);
-        for (Instance& instance : instances)
+        for (const Instance& instance : instances)
             if (getMeshLocked(*instance.mGeometry) == sInvalid)
                 return nullptr;
         Chunk chunk;
@@ -1686,14 +1817,14 @@ namespace MWRender
         mBatchesDirty = true;
         mPendingInstances.push_back(std::move(pending));
         mChunks[slot] = std::move(chunk);
-        osg::ref_ptr<GpuChunkNode> node = new GpuChunkNode(*this, slot, mChunks[slot].mGeneration, localBound);
+        osg::ref_ptr<GpuChunkNode> node = new GpuChunkNode(*this, slot, mChunks[slot].mGeneration, bound);
         mChunkNodes.insert(node.get());
         return node;
     }
 
     GpuScene::GpuInstance GpuScene::makeRecord(const Instance& instance, Id batch, Id slot, Id generation)
     {
-        GpuInstance record;
+        GpuInstance record{};
         const osg::Matrixf& m = instance.mWorld;
         for (int row = 0; row < 3; ++row)
             for (int col = 0; col < 4; ++col)
@@ -1717,11 +1848,11 @@ namespace MWRender
         std::memcpy(&record.mMeta[3], &instance.mLodMax, sizeof(float));
         record.mMaterial[0] = instance.mMaterial;
         record.mMaterial[1] = sInvalid;
-        record.mMaterial[1] = record.mMaterial[2] = record.mMaterial[3] = 0;
         return record;
     }
 
-    bool GpuScene::updateChunk(osg::Node& node, const std::vector<Instance>& instances)
+    bool GpuScene::updateChunk(
+        osg::Node& node, const std::vector<Instance>& instances, const osg::BoundingSphere& bound)
     {
         auto* chunkNode = dynamic_cast<GpuChunkNode*>(&node);
         if (chunkNode == nullptr)
@@ -1731,6 +1862,26 @@ namespace MWRender
         Chunk& chunk = mChunks[slot];
         if (chunk.mInstanceCount != instances.size())
             return false;
+        std::map<Id, std::uint32_t> counts;
+        for (const Instance& instance : instances)
+        {
+            const auto mesh = mMeshIds.find(instance.mGeometry.get());
+            if (mesh == mMeshIds.end())
+                return false;
+            const auto batch = mBatchIds.find({ instance.mBucket, mesh->second });
+            if (batch == mBatchIds.end())
+                return false;
+            ++counts[batch->second];
+        }
+        // Changed batches need new slot ranges.
+        if (!std::equal(counts.begin(), counts.end(), chunk.mBatchCounts.begin(), chunk.mBatchCounts.end(),
+                [](const auto& left, const auto& right) {
+                    return left.first == right.first && left.second == right.second;
+                }))
+            return false;
+        chunkNode->setBound(bound);
+        if (chunkNode->mResident != GpuChunkNode::sNone)
+            mResidents[chunkNode->mResident].mBound = bound;
         PendingInstances pending;
         pending.mFirst = chunk.mFirstInstance;
         pending.mRecords.reserve(instances.size());
@@ -1751,6 +1902,7 @@ namespace MWRender
     void GpuScene::releaseChunk(GpuChunkNode& node, Id slot)
     {
         std::lock_guard<std::mutex> lock(mMutex);
+        removeResidentLocked(node);
         mChunkNodes.erase(&node);
         Chunk& chunk = mChunks[slot];
         for (const auto& [batch, count] : chunk.mBatchCounts)
@@ -1770,6 +1922,7 @@ namespace MWRender
                 mSkinMeshes.erase(skin);
             }
             mMeshIds.erase(mesh.mGeometry.get());
+            mMeshVersions.erase(mesh.mGeometry.get());
             mesh.mGeometry = nullptr;
             mFreeMeshes.push_back(meshId);
         }
@@ -1805,10 +1958,7 @@ namespace MWRender
         for (auto it = mViews.begin(); it != mViews.end();)
         {
             if (it->first.first + 2 < frame)
-            {
-                mFreeViews.push_back(std::move(it->second));
                 it = mViews.erase(it);
-            }
             else
                 ++it;
         }
@@ -1838,6 +1988,53 @@ namespace MWRender
         view.mViewPoint = cv.getViewPointLocal();
         view.mLodScale = cv.getLODScale();
         view.mHasParams = true;
+        const bool nearFar = cv.getComputeNearFarMode() != osg::CullSettings::DO_NOT_COMPUTE_NEAR_FAR;
+        const osg::Matrix& modelView = *cv.getModelViewMatrix();
+        for (const Resident& resident : mResidents)
+        {
+            if (cv.isCulled(resident.mBound))
+                continue;
+            view.mChunks.emplace_back(resident.mSlot, resident.mGeneration);
+            if (nearFar && resident.mBound.valid())
+            {
+                osg::BoundingBox box;
+                box.expandBy(resident.mBound);
+                cv.updateCalculatedNearFar(modelView, box);
+            }
+        }
+    }
+
+    void GpuScene::addResident(osg::Node& node)
+    {
+        auto* chunk = dynamic_cast<GpuChunkNode*>(&node);
+        if (chunk == nullptr)
+            return;
+        std::lock_guard<std::mutex> lock(mMutex);
+        chunk->mResident = mResidents.size();
+        mResidents.push_back(Resident{ chunk->getSlot(), chunk->getGeneration(), chunk->getBound() });
+        mResidentNodes.push_back(chunk);
+    }
+
+    void GpuScene::removeResident(osg::Node& node)
+    {
+        auto* chunk = dynamic_cast<GpuChunkNode*>(&node);
+        if (chunk == nullptr)
+            return;
+        std::lock_guard<std::mutex> lock(mMutex);
+        removeResidentLocked(*chunk);
+    }
+
+    void GpuScene::removeResidentLocked(GpuChunkNode& chunk)
+    {
+        if (chunk.mResident == GpuChunkNode::sNone)
+            return;
+        const std::size_t index = chunk.mResident;
+        mResidents[index] = mResidents.back();
+        mResidentNodes[index] = mResidentNodes.back();
+        mResidentNodes[index]->mResident = index;
+        mResidents.pop_back();
+        mResidentNodes.pop_back();
+        chunk.mResident = GpuChunkNode::sNone;
     }
 
     bool GpuScene::recordRig(osgUtil::CullVisitor& cv, SceneUtil::RigGeometry& rig, const GpuCaptureCallback& callback)
@@ -1874,7 +2071,8 @@ namespace MWRender
 
         thread_local std::vector<osg::Matrixf> matrices;
         matrices.clear();
-        if (!rig.getPalette(frame, matrices))
+        unsigned int paletteFrame = 0;
+        if (!rig.getLatestPalette(paletteFrame, matrices))
             return false;
         thread_local std::vector<GpuSkinMatrix> pose;
         pose.resize(matrices.size());
@@ -1897,9 +2095,6 @@ namespace MWRender
             out = found->second;
         else
         {
-            constexpr std::size_t maxMatrices = std::numeric_limits<std::uint32_t>::max();
-            if (pose.size() > maxMatrices || slot.mMatrices.size() > maxMatrices - pose.size())
-                return false;
             out = { frame, static_cast<std::uint32_t>(slot.mMatrices.size()), static_cast<std::uint32_t>(pose.size()) };
             slot.mMatrices.insert(slot.mMatrices.end(), pose.begin(), pose.end());
             slot.mPoses.emplace(geometry, out);
@@ -1993,8 +2188,9 @@ namespace MWRender
         return mResidentBound;
     }
 
-    void GpuScene::rebuildBatches(std::vector<GpuBatch>& table)
+    void GpuScene::rebuildBatches(PendingWork& work)
     {
+        std::vector<GpuBatch>& table = work.mBatches;
         table.assign(mBatches.size(), GpuBatch{ 0, 0, 0, 0, sInvalid, { 0, 0, 0 } });
         std::uint32_t slot = 0;
         std::uint32_t command = 0;
@@ -2013,6 +2209,9 @@ namespace MWRender
             }
             bucket.mCommandCount = command - bucket.mCommandOffset;
         }
+        work.mSlotCount = slot;
+        work.mCommandCount = command;
+        work.mBatchesRebuilt = true;
         mBatchesDirty = false;
     }
 
@@ -2034,15 +2233,13 @@ namespace MWRender
         if (mBatchesDirty && mPendingMeshes.empty() && mPendingInstances.empty() && mPendingSkins.empty()
             && mPendingMaterials.empty())
         {
-            rebuildBatches(work.mBatches);
-            work.mBatchesRebuilt = true;
+            rebuildBatches(work);
         }
     }
 
     void GpuScene::upload(osg::State& state, PendingWork& work)
     {
         Gl& gl = *mGl;
-        osg::GLExtensions& ext = *gl.mExt;
 
         std::size_t vertexBytes = 0;
         std::size_t indexBytes = 0;
@@ -2075,19 +2272,7 @@ namespace MWRender
         gl.grow(gl.mSkinInfluenceBuffer, gl.mSkinInfluenceCapacity, skinInfluenceBytes, GL_STATIC_DRAW);
         gl.grow(gl.mIndexBuffer, gl.mIndexCapacity, indexBytes, GL_STATIC_DRAW);
         gl.grow(gl.mMaterialBuffer, gl.mMaterialCapacity, materialBytes, GL_DYNAMIC_COPY);
-        const std::size_t oldInstanceCapacity = gl.mInstanceCapacity;
         gl.grow(gl.mInstanceBuffer, gl.mInstanceCapacity, instanceBytes, GL_DYNAMIC_COPY);
-        if (gl.mInstanceCapacity != oldInstanceCapacity)
-        {
-            const std::size_t visibleBytes = gl.mInstanceCapacity / sizeof(GpuInstance) * sizeof(std::uint32_t);
-            if (gl.mVisibleBuffer != 0)
-                ext.glDeleteBuffers(1, &gl.mVisibleBuffer);
-            ext.glGenBuffers(1, &gl.mVisibleBuffer);
-            ext.glBindBuffer(GL_COPY_WRITE_BUFFER, gl.mVisibleBuffer);
-            ext.glBufferData(GL_COPY_WRITE_BUFFER, visibleBytes, nullptr, GL_DYNAMIC_COPY);
-            ext.glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
-            gl.mVao = 0;
-        }
         for (const PendingMesh& mesh : work.mMeshes)
         {
             gl.upload(
@@ -2127,24 +2312,37 @@ namespace MWRender
             if (!batches.empty())
                 gl.upload(gl.mBatchBuffer, 0, batches.data(), batches.size() * sizeof(GpuBatch));
             gl.mBatchCount = static_cast<std::uint32_t>(batches.size());
-            if (gl.mCommandBuffer != 0)
-                ext.glDeleteBuffers(1, &gl.mCommandBuffer);
-            ext.glGenBuffers(1, &gl.mCommandBuffer);
-            ext.glBindBuffer(GL_COPY_WRITE_BUFFER, gl.mCommandBuffer);
-            ext.glBufferData(GL_COPY_WRITE_BUFFER, std::max<std::size_t>(batches.size(), 1) * sizeof(GpuCommand),
-                nullptr, GL_DYNAMIC_COPY);
-            ext.glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
-            if (gl.mCountBuffer == 0)
-                ext.glGenBuffers(1, &gl.mCountBuffer);
-            ext.glBindBuffer(GL_SHADER_STORAGE_BUFFER, gl.mCountBuffer);
-            ext.glBufferData(GL_SHADER_STORAGE_BUFFER, std::max<std::size_t>(batches.size(), 1) * sizeof(std::uint32_t),
-                nullptr, GL_DYNAMIC_COPY);
-            ext.glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+            gl.mSlotCount = work.mSlotCount;
+            gl.mCommandCount = work.mCommandCount;
+            gl.mViewCapacity = 0;
         }
     }
 
     void GpuScene::compile(osg::State& state)
     {
+        if (!mGl->mLimitsChecked)
+        {
+            mGl->mLimitsChecked = true;
+            if (osg::isGLExtensionSupported(mGl->mExt->contextID, "GL_KHR_robustness")
+                || osg::isGLExtensionSupported(mGl->mExt->contextID, "GL_ARB_robustness"))
+                osg::setGLExtensionFuncPtr(
+                    mGl->mGetResetStatus, "glGetGraphicsResetStatus", "glGetGraphicsResetStatusARB");
+            GLint storageBindings = 0;
+            GLint vertexStorageBlocks = 0;
+            glGetIntegerv(GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS, &storageBindings);
+            glGetIntegerv(GL_MAX_VERTEX_SHADER_STORAGE_BLOCKS, &vertexStorageBlocks);
+            GLint64 storageLimit = 0;
+            mGl->mExt->glGetInteger64v(GL_MAX_SHADER_STORAGE_BLOCK_SIZE, &storageLimit);
+            mGl->mStorageLimit = static_cast<std::size_t>(storageLimit);
+            Log(Debug::Info) << "GPU storage: bindings=" << storageBindings << " vertexBlocks=" << vertexStorageBlocks
+                             << " blockBytes=" << storageLimit;
+            if (storageBindings <= sMaxStorageBinding || vertexStorageBlocks < sVertexStorageBlocks)
+            {
+                Log(Debug::Warning) << "GPU-driven object paging unavailable: too few storage buffer bindings";
+                mSupported = false;
+                return;
+            }
+        }
         PendingWork work;
         std::vector<osg::ref_ptr<osg::Program>> programs;
         {
@@ -2216,13 +2414,9 @@ namespace MWRender
                 const auto registered = mSkinMeshes.find(skin.mMesh);
                 const std::uint64_t last = static_cast<std::uint64_t>(mesh.mBaseVertex) + mesh.mVertexCount;
                 if (mesh.mBaseVertex < 0 || last > mVertices.mExtent || registered == mSkinMeshes.end()
-                    || registered->second.mBoneCount + 1 != skin.mPose.mCount)
-                    return false;
-                if (mesh.mGeometry == nullptr || !mUpdatedMeshes.insert(mesh.mGeometry.get()).second)
+                    || registered->second.mBoneCount + 1 != skin.mPose.mCount || mesh.mGeometry == nullptr
+                    || !mUpdatedMeshes.insert(mesh.mGeometry.get()).second)
                     continue;
-                constexpr std::size_t maxMatrices = std::numeric_limits<std::uint32_t>::max();
-                if (matrixCount > maxMatrices - skin.mPose.mCount)
-                    return false;
                 unsigned int flags = 0;
                 if (mesh.mGeometry->getNormalArray() != nullptr)
                     flags |= 1;
@@ -2243,13 +2437,14 @@ namespace MWRender
         SkinPoseFrame& slot = mSkinPoseFrames[frame % mSkinPoseFrames.size()];
         {
             std::lock_guard<std::mutex> lock(slot.mMutex);
+            // Recycled poses skip deformation.
             if (!slot.mValid || slot.mFrame != frame)
-                return false;
+                return true;
             for (const SkinPose& pose : poses)
             {
                 const std::uint64_t last = static_cast<std::uint64_t>(pose.mFirst) + pose.mCount;
                 if (pose.mFrame != frame || last > slot.mMatrices.size())
-                    return false;
+                    return true;
                 matrices.insert(matrices.end(), slot.mMatrices.begin() + pose.mFirst, slot.mMatrices.begin() + last);
             }
         }
@@ -2266,15 +2461,8 @@ namespace MWRender
         if (pcp == nullptr || !pcp->isLinked())
             return false;
 
-        auto stream = [&](GLuint& buffer, const void* data, std::size_t size) {
-            if (buffer == 0)
-                ext.glGenBuffers(1, &buffer);
-            ext.glBindBuffer(GL_COPY_WRITE_BUFFER, buffer);
-            ext.glBufferData(GL_COPY_WRITE_BUFFER, size, data, GL_STREAM_DRAW);
-            ext.glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
-        };
-        stream(gl.mSkinMatrixBuffer, matrices.data(), matrices.size() * sizeof(GpuSkinMatrix));
-        stream(gl.mSkinTaskBuffer, tasks.data(), tasks.size() * sizeof(GpuSkinTask));
+        gl.stream(gl.mSkinMatrixBuffer, matrices.data(), matrices.size() * sizeof(GpuSkinMatrix));
+        gl.stream(gl.mSkinTaskBuffer, tasks.data(), tasks.size() * sizeof(GpuSkinTask));
         ext.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 17, gl.mSkinSourceBuffer);
         ext.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 18, gl.mVertexBuffer);
         ext.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 19, gl.mSkinGroupBuffer);
@@ -2288,7 +2476,8 @@ namespace MWRender
         return true;
     }
 
-    bool GpuScene::prepareDynamic(osg::State& state, ViewRecord& view, std::vector<std::uint32_t>& chunkGenerations)
+    bool GpuScene::prepareDynamic(
+        osg::State& state, std::vector<DynamicInstance>& dynamic, const std::vector<SkinUpdate>& skins)
     {
         Gl& gl = *mGl;
         const unsigned int frame = state.getFrameStamp()->getFrameNumber();
@@ -2297,19 +2486,22 @@ namespace MWRender
             mUpdateFrame = frame;
             mUpdatedMeshes.clear();
         }
-        if (mSkinSupported.load(std::memory_order_relaxed) && !applySkin(state, view.mSkins))
+        if (mSkinSupported.load(std::memory_order_relaxed) && !applySkin(state, skins))
         {
             Log(Debug::Error) << "GPU skin shader failed";
             mSkinSupported.store(false, std::memory_order_relaxed);
         }
-        gl.mDynamicRanges.assign(mBuckets.size(), { 0, 0 });
-        if (view.mDynamic.empty())
+        {
+            std::lock_guard<std::mutex> lock(mMutex);
+            gl.mDynamicRanges.assign(mBuckets.size(), { 0, 0 });
+        }
+        if (dynamic.empty())
             return true;
 
         std::vector<std::array<Id, 3>> order;
-        order.reserve(view.mDynamic.size());
-        for (Id i = 0; i < view.mDynamic.size(); ++i)
-            order.push_back({ view.mDynamic[i].mBucket, view.mDynamic[i].mMesh, i });
+        order.reserve(dynamic.size());
+        for (Id i = 0; i < dynamic.size(); ++i)
+            order.push_back({ dynamic[i].mBucket, dynamic[i].mMesh, i });
         std::sort(order.begin(), order.end());
 
         struct MeshUpload
@@ -2322,13 +2514,12 @@ namespace MWRender
         std::vector<MeshUpload> meshUploads;
         std::vector<GpuInstance> instances;
         std::vector<GpuCommand> commands;
-        instances.reserve(view.mDynamic.size());
+        instances.reserve(dynamic.size());
 
-        const std::uint32_t chunkBase = static_cast<std::uint32_t>(chunkGenerations.size());
         std::size_t first = 0;
         while (first < order.size())
         {
-            const DynamicInstance& head = view.mDynamic[order[first][2]];
+            const DynamicInstance& head = dynamic[order[first][2]];
             std::size_t last = first + 1;
             while (last < order.size() && order[last][0] == head.mBucket && order[last][1] == head.mMesh)
                 ++last;
@@ -2347,18 +2538,28 @@ namespace MWRender
             const std::uint32_t baseInstance = static_cast<std::uint32_t>(instances.size());
             for (std::size_t i = first; i < last; ++i)
             {
-                const DynamicInstance& instance = view.mDynamic[order[i][2]];
+                const DynamicInstance& instance = dynamic[order[i][2]];
                 GpuInstance record{};
                 for (int row = 0; row < 3; ++row)
                     for (int col = 0; col < 4; ++col)
                         record.mRows[row][col] = instance.mWorld(col, row);
-                record.mMeta[1] = chunkBase + static_cast<std::uint32_t>(instances.size());
                 record.mMaterial[0] = instance.mMaterial;
                 record.mMaterial[1] = sInvalid;
                 instances.push_back(record);
                 if (instance.mUpdateMesh && mUpdatedMeshes.insert(instance.mGeometry.get()).second)
-                    meshUploads.push_back(MeshUpload{ instance.mGeometry, static_cast<std::uint32_t>(mesh.mBaseVertex),
-                        mesh.mVertexCount, mesh.mIndexCount });
+                {
+                    // Skip uploads for unchanged vertex data.
+                    const osg::Array* vertices = instance.mGeometry->getVertexArray();
+                    const unsigned int version = vertices != nullptr ? vertices->getModifiedCount() : 0;
+                    std::lock_guard<std::mutex> versionLock(mMutex);
+                    const auto [it, inserted] = mMeshVersions.try_emplace(instance.mGeometry.get(), version);
+                    if (inserted || it->second != version)
+                    {
+                        it->second = version;
+                        meshUploads.push_back(MeshUpload{ instance.mGeometry,
+                            static_cast<std::uint32_t>(mesh.mBaseVertex), mesh.mVertexCount, mesh.mIndexCount });
+                    }
+                }
             }
 
             const std::uint32_t bucket = head.mBucket;
@@ -2376,21 +2577,18 @@ namespace MWRender
 
         if (instances.empty())
             return true;
-        chunkGenerations.resize(chunkBase + instances.size(), 0);
+        if (commands.size() > gl.mStorageLimit / sizeof(GpuCommand)
+            || instances.size() > gl.mStorageLimit / sizeof(GpuInstance))
+        {
+            Log(Debug::Error) << "GPU dynamic buffers exceed storage limit";
+            return false;
+        }
         std::vector<std::uint32_t> visible(instances.size());
         std::iota(visible.begin(), visible.end(), 0);
 
-        osg::GLExtensions& ext = *gl.mExt;
-        auto stream = [&](GLuint& buffer, const void* data, std::size_t size) {
-            if (buffer == 0)
-                ext.glGenBuffers(1, &buffer);
-            ext.glBindBuffer(GL_COPY_WRITE_BUFFER, buffer);
-            ext.glBufferData(GL_COPY_WRITE_BUFFER, std::max<std::size_t>(size, 4), data, GL_STREAM_DRAW);
-            ext.glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
-        };
-        stream(gl.mDynamicInstanceBuffer, instances.data(), instances.size() * sizeof(GpuInstance));
-        stream(gl.mDynamicVisibleBuffer, visible.data(), visible.size() * sizeof(std::uint32_t));
-        stream(gl.mDynamicCommandBuffer, commands.data(), commands.size() * sizeof(GpuCommand));
+        gl.stream(gl.mDynamicInstanceBuffer, instances.data(), instances.size() * sizeof(GpuInstance));
+        gl.stream(gl.mDynamicVisibleBuffer, visible.data(), visible.size() * sizeof(std::uint32_t));
+        gl.stream(gl.mDynamicCommandBuffer, commands.data(), commands.size() * sizeof(GpuCommand));
 
         for (const MeshUpload& pending : meshUploads)
         {
@@ -2405,8 +2603,20 @@ namespace MWRender
         return true;
     }
 
-    bool GpuScene::dispatch(osg::State& state, const ViewRecord& view, std::uint32_t instanceExtent,
-        const std::vector<std::uint32_t>& chunkGenerations)
+    GpuScene::GpuView GpuScene::makeView(const ViewRecord& record)
+    {
+        GpuView view{};
+        for (std::size_t i = 0; i < record.mPlanes.size(); ++i)
+            view.mPlanes[i] = record.mPlanes[i];
+        view.mPixelSizeVector = record.mPixelSizeVector;
+        view.mViewPoint = osg::Vec4f(record.mViewPoint, record.mLodScale);
+        view.mParams.x() = record.mSmallFeaturePixelSize;
+        view.mMeta[0] = static_cast<std::uint32_t>(record.mPlanes.size());
+        return view;
+    }
+
+    bool GpuScene::dispatch(osg::State& state, const std::vector<GpuView>& views, std::uint32_t viewBase,
+        std::uint32_t instanceExtent, const std::vector<std::uint32_t>& chunkData)
     {
         Gl& gl = *mGl;
         osg::GLExtensions& ext = *gl.mExt;
@@ -2419,26 +2629,21 @@ namespace MWRender
             gl.mCommandProgram->addShader(mShaderManager.getShader("gpuscene_commands.comp"));
             gl.mInstanceCount = new osg::Uniform(osg::Uniform::UNSIGNED_INT, "instanceCount");
             gl.mChunkCount = new osg::Uniform(osg::Uniform::UNSIGNED_INT, "chunkCount");
-            gl.mPlaneCount = new osg::Uniform(osg::Uniform::INT, "planeCount");
-            gl.mPlanes = new osg::Uniform(osg::Uniform::FLOAT_VEC4, "planes", sMaxPlanes);
-            gl.mPixelSizeVector = new osg::Uniform(osg::Uniform::FLOAT_VEC4, "pixelSizeVector");
-            gl.mSmallFeaturePixelSize = new osg::Uniform(osg::Uniform::FLOAT, "smallFeaturePixelSize");
-            gl.mViewPoint = new osg::Uniform(osg::Uniform::FLOAT_VEC3, "viewPoint");
-            gl.mLodScale = new osg::Uniform(osg::Uniform::FLOAT, "lodScale");
+            gl.mViewBase = new osg::Uniform(osg::Uniform::UNSIGNED_INT, "viewBase");
+            gl.mViewCount = new osg::Uniform(osg::Uniform::UNSIGNED_INT, "viewCount");
+            gl.mSlotCountUniform = new osg::Uniform(osg::Uniform::UNSIGNED_INT, "slotCount");
             gl.mBatchCountUniform = new osg::Uniform(osg::Uniform::UNSIGNED_INT, "batchCount");
+            gl.mCommandCountUniform = new osg::Uniform(osg::Uniform::UNSIGNED_INT, "commandCount");
         }
 
-        if (gl.mChunkBuffer == 0)
-            ext.glGenBuffers(1, &gl.mChunkBuffer);
-        if (gl.mVertexBuffer == 0 || gl.mCommandBuffer == 0)
+        if (gl.mVertexBuffer == 0 || gl.mBatchCount == 0)
             return true;
+        if (!gl.resizeViews(viewBase + static_cast<std::uint32_t>(views.size())))
+            return false;
         gl.createVao(state);
 
-        ext.glBindBuffer(GL_SHADER_STORAGE_BUFFER, gl.mChunkBuffer);
-        ext.glBufferData(GL_SHADER_STORAGE_BUFFER,
-            std::max<std::size_t>(chunkGenerations.size(), 1) * sizeof(std::uint32_t),
-            chunkGenerations.empty() ? nullptr : chunkGenerations.data(), GL_STREAM_DRAW);
-        ext.glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+        gl.stream(gl.mChunkBuffer, chunkData.data(), chunkData.size() * sizeof(std::uint32_t));
+        gl.stream(gl.mViewBuffer, views.data(), views.size() * sizeof(GpuView));
         gl.zero(gl.mCountBuffer);
 
         ext.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, gl.mInstanceBuffer);
@@ -2447,8 +2652,7 @@ namespace MWRender
         ext.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 11, gl.mCountBuffer);
         ext.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 12, gl.mVisibleBuffer);
         ext.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 13, gl.mCommandBuffer);
-        if (gl.mMaterialBuffer != 0)
-            ext.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 14, gl.mMaterialBuffer);
+        ext.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 15, gl.mViewBuffer);
 
         ext.glMemoryBarrier(
             GL_SHADER_STORAGE_BARRIER_BIT | GL_COMMAND_BARRIER_BIT | GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT);
@@ -2458,16 +2662,14 @@ namespace MWRender
         if (pcp == nullptr || !pcp->isLinked())
             return false;
         gl.mInstanceCount->set(instanceExtent);
-        gl.mChunkCount->set(static_cast<unsigned int>(chunkGenerations.size()));
-        gl.mPlaneCount->set(static_cast<int>(view.mPlanes.size()));
-        for (unsigned int i = 0; i < view.mPlanes.size(); ++i)
-            gl.mPlanes->setElement(i, view.mPlanes[i]);
-        gl.mPixelSizeVector->set(view.mPixelSizeVector);
-        gl.mSmallFeaturePixelSize->set(view.mSmallFeaturePixelSize);
-        gl.mViewPoint->set(view.mViewPoint);
-        gl.mLodScale->set(view.mLodScale);
-        for (const osg::ref_ptr<osg::Uniform>& uniform : { gl.mInstanceCount, gl.mChunkCount, gl.mPlaneCount,
-                 gl.mPlanes, gl.mPixelSizeVector, gl.mSmallFeaturePixelSize, gl.mViewPoint, gl.mLodScale })
+        gl.mChunkCount->set(static_cast<unsigned int>(chunkData.size() / 2));
+        gl.mViewBase->set(viewBase);
+        gl.mViewCount->set(static_cast<unsigned int>(views.size()));
+        gl.mSlotCountUniform->set(gl.mSlotCount);
+        gl.mBatchCountUniform->set(gl.mBatchCount);
+        gl.mCommandCountUniform->set(gl.mCommandCount);
+        for (const osg::Uniform* uniform : { gl.mInstanceCount.get(), gl.mChunkCount.get(), gl.mViewBase.get(),
+                 gl.mViewCount.get(), gl.mSlotCountUniform.get(), gl.mBatchCountUniform.get() })
             pcp->apply(*uniform);
         ext.glDispatchCompute((instanceExtent + sWorkGroupSize - 1) / sWorkGroupSize, 1, 1);
         ext.glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
@@ -2476,12 +2678,69 @@ namespace MWRender
         pcp = gl.mCommandProgram->getPCP(state);
         if (pcp == nullptr || !pcp->isLinked())
             return false;
-        gl.mBatchCountUniform->set(gl.mBatchCount);
-        pcp->apply(*gl.mBatchCountUniform);
-        ext.glDispatchCompute((gl.mBatchCount + sWorkGroupSize - 1) / sWorkGroupSize, 1, 1);
+        for (const osg::Uniform* uniform : { gl.mViewBase.get(), gl.mViewCount.get(), gl.mSlotCountUniform.get(),
+                 gl.mBatchCountUniform.get(), gl.mCommandCountUniform.get() })
+            pcp->apply(*uniform);
+        ext.glDispatchCompute(
+            (gl.mBatchCount + sWorkGroupSize - 1) / sWorkGroupSize, static_cast<GLuint>(views.size()), 1);
         ext.glMemoryBarrier(
             GL_SHADER_STORAGE_BARRIER_BIT | GL_COMMAND_BARRIER_BIT | GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT);
         return true;
+    }
+
+    void GpuScene::Gl::draw(
+        osg::State& state, const char* pass, Shader::MaterialMode mode, GLuint buffer, std::size_t first, GLsizei count)
+    {
+        mExt->glBindBuffer(GL_DRAW_INDIRECT_BUFFER, buffer);
+        const bool logDraw = mDrawLogs != 0 || mTraceDraws;
+        const osg::Program::PerContextProgram* pcp = state.getLastAppliedProgramObject();
+        if (logDraw)
+        {
+            if (mDrawLogs != 0)
+                --mDrawLogs;
+            GLint vao = 0;
+            glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &vao);
+            Log(Debug::Info) << "GPU draw: context=" << state.getContextID()
+                             << " frame=" << state.getFrameStamp()->getFrameNumber() << " pass=" << pass
+                             << " material=" << static_cast<int>(mode)
+                             << " program=" << (pcp != nullptr ? pcp->getHandle() : 0) << " vao=" << vao
+                             << " indirect=" << buffer << " offset=" << first * sizeof(GpuCommand) << " count=" << count
+                             << " stride=" << sizeof(GpuCommand);
+            Log(Debug::Info) << "GPU buffers: vertex=" << mVertexBuffer << '/' << mVertexCapacity
+                             << " index=" << mIndexBuffer << '/' << mIndexCapacity << " instance=" << mInstanceBuffer
+                             << '/' << mInstanceCapacity << " dynamicInstance=" << mDynamicInstanceBuffer
+                             << " material=" << mMaterialBuffer << '/' << mMaterialCapacity
+                             << " commands=" << mCommandBuffer << '/' << mCommandBytes;
+            if (pcp != nullptr)
+            {
+                const osg::Program* program = pcp->getProgram();
+                for (unsigned int i = 0; i < program->getNumShaders(); ++i)
+                    Log(Debug::Info) << "GPU program " << pcp->getHandle()
+                                     << " shader=" << program->getShader(i)->getName();
+            }
+        }
+        mExt->glMultiDrawElementsIndirect(GL_TRIANGLES, GL_UNSIGNED_INT,
+            reinterpret_cast<const void*>(first * sizeof(GpuCommand)), count, sizeof(GpuCommand));
+        if (mTraceDraws)
+            glFinish();
+        if (logDraw)
+        {
+            if (pcp != nullptr)
+            {
+                std::string log;
+                pcp->getInfoLog(log);
+                if (!log.empty())
+                    Log(Debug::Warning) << "GPU program " << pcp->getHandle() << " driver log: " << log;
+            }
+            if (mGetResetStatus != nullptr)
+            {
+                const GLenum status = mGetResetStatus();
+                if (status != GL_NO_ERROR)
+                    Log(Debug::Error) << "GPU reset status=" << status;
+            }
+            if (mTraceDraws)
+                Log(Debug::Info) << "GPU draw finished: program=" << (pcp != nullptr ? pcp->getHandle() : 0);
+        }
     }
 
     void GpuScene::draw(osg::RenderInfo& renderInfo, Id dispatcherId)
@@ -2492,11 +2751,15 @@ namespace MWRender
         const unsigned int frame = state.getFrameStamp()->getFrameNumber();
         const osg::Camera* camera = renderInfo.getCurrentCamera();
 
-        bool needDispatch = false;
-        ViewRecord view;
-        std::vector<std::uint32_t> chunkGenerations;
+        std::vector<GpuView> views;
+        std::uint32_t viewBase = 0;
+        std::uint32_t viewIndex = 0;
+        std::vector<std::uint32_t> chunkData;
         PendingWork work;
         std::uint32_t instanceExtent = 0;
+        bool needPrepare = false;
+        std::vector<DynamicInstance> dynamic;
+        std::vector<SkinUpdate> skins;
         struct DrawRange
         {
             Id mBucket;
@@ -2504,8 +2767,11 @@ namespace MWRender
             osg::ref_ptr<const osg::Program> mProgram;
             std::uint32_t mOffset;
             std::uint32_t mCount;
+            bool mDelta;
         };
         std::vector<DrawRange> ranges;
+        std::vector<osg::StateAttribute::GLMode> deltaModes;
+        std::vector<osg::StateAttribute::TypeMemberPair> deltaAttributes;
         {
             std::lock_guard<std::mutex> lock(mMutex);
             const auto found = mViews.find(ViewKey(frame, camera));
@@ -2514,41 +2780,110 @@ namespace MWRender
             ViewRecord& record = found->second;
             if (!record.mDispatched)
             {
-                record.mDispatched = true;
-                needDispatch = true;
-                view = record;
-                chunkGenerations.assign(mChunks.size(), 0);
-                for (const auto& [slot, generation] : record.mChunks)
-                    if (slot < chunkGenerations.size() && mChunks[slot].mGeneration == generation)
-                        chunkGenerations[slot] = generation;
+                // Cull all frame views together.
+                if (mDispatchFrame != frame)
+                {
+                    mDispatchFrame = frame;
+                    mDispatchedViews = 0;
+                }
+                viewBase = mDispatchedViews;
+                chunkData.assign(mChunks.size() * 2, 0);
+                const auto add = [&](ViewRecord& pending) {
+                    pending.mDispatched = true;
+                    pending.mViewIndex = viewBase + static_cast<std::uint32_t>(views.size());
+                    const std::uint32_t bit = 1u << views.size();
+                    for (const auto& [slot, generation] : pending.mChunks)
+                    {
+                        if (slot >= mChunks.size() || mChunks[slot].mGeneration != generation)
+                            continue;
+                        const std::size_t offset = static_cast<std::size_t>(slot) * 2;
+                        chunkData[offset] = generation;
+                        chunkData[offset + 1] |= bit;
+                    }
+                    views.push_back(makeView(pending));
+                };
+                add(record);
+                for (auto& [key, pending] : mViews)
+                    if (key.first == frame && !pending.mDispatched && pending.mHasParams
+                        && views.size() < sMaxGroupViews)
+                        add(pending);
+                mDispatchedViews += static_cast<std::uint32_t>(views.size());
                 takePendingWork(work, std::numeric_limits<std::size_t>::max());
                 instanceExtent = mInstances.mExtent;
+            }
+            viewIndex = record.mViewIndex;
+            if (!record.mPrepared)
+            {
+                record.mPrepared = true;
+                needPrepare = true;
+                dynamic = std::move(record.mDynamic);
+                skins = std::move(record.mSkins);
             }
             for (const Id bucketId : mDispatchers[dispatcherId].mBuckets)
             {
                 const Bucket& bucket = mBuckets[bucketId];
-                ranges.push_back(DrawRange{
-                    bucketId, bucket.mStateSet, bucket.mProgram, bucket.mCommandOffset, bucket.mCommandCount });
+                ranges.push_back(DrawRange{ bucketId, bucket.mStateSet, bucket.mProgram, bucket.mCommandOffset,
+                    bucket.mCommandCount, bucket.mDelta });
             }
+            deltaModes = mDeltaModes;
+            deltaAttributes = mDeltaAttributes;
         }
 
-        if (needDispatch)
-        {
+        if (!views.empty())
             upload(state, work);
-            prepareDynamic(state, view, chunkGenerations);
-            const bool dispatched = dispatch(state, view, instanceExtent, chunkGenerations);
-            if (!dispatched)
-            {
-                Log(Debug::Error) << "GPU scene compute shaders failed to link";
-                mSupported = false;
-            }
+        if (needPrepare && !prepareDynamic(state, dynamic, skins))
+        {
+            mSupported = false;
+            return;
+        }
+        if (!views.empty() && !dispatch(state, views, viewBase, instanceExtent, chunkData))
+        {
+            Log(Debug::Error) << "GPU scene dispatch failed";
+            mSupported = false;
         }
 
         Gl& gl = *mGl;
         if (!mSupported)
             return;
+        const std::size_t commandBase = static_cast<std::size_t>(viewIndex) * gl.mCommandCount;
 
         osg::GLExtensions& ext = *gl.mExt;
+        ext.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 14, gl.mMaterialBuffer);
+        // Stack values applied before the first range.
+        std::vector<bool> baseModes(deltaModes.size());
+        std::vector<bool> lockedModes(deltaModes.size());
+        std::vector<const osg::StateAttribute*> baseAttributes(deltaAttributes.size());
+        std::vector<bool> lockedAttributes(deltaAttributes.size());
+        for (std::size_t i = 0; i < deltaModes.size(); ++i)
+        {
+            baseModes[i] = state.getLastAppliedMode(deltaModes[i]);
+            const auto found = state.getModeMap().find(deltaModes[i]);
+            lockedModes[i] = found != state.getModeMap().end() && !found->second.valueVec.empty()
+                && (found->second.valueVec.back() & osg::StateAttribute::OVERRIDE) != 0;
+        }
+        for (std::size_t i = 0; i < deltaAttributes.size(); ++i)
+        {
+            baseAttributes[i] = state.getLastAppliedAttribute(deltaAttributes[i].first, deltaAttributes[i].second);
+            const auto found = state.getAttributeMap().find(deltaAttributes[i]);
+            lockedAttributes[i] = found != state.getAttributeMap().end() && !found->second.attributeVec.empty()
+                && (found->second.attributeVec.back().second & osg::StateAttribute::OVERRIDE) != 0;
+        }
+        const auto castingBase = [&](const osg::StateSet& bucket, bool& useAlpha, bool& alphaBlend) {
+            const SceneUtil::ShadowsBin::CastingState casting = SceneUtil::ShadowsBin::castingState(bucket);
+            alphaBlend = casting.mAlphaBlend;
+            useAlpha = casting.mUseAlpha;
+            // Alpha shadows need a bound diffuse map.
+            if (useAlpha && bucket.getTextureAttribute(0, osg::StateAttribute::TEXTURE) == nullptr)
+                useAlpha = false;
+            return mCastingProgramList[casting.mFunction - GL_NEVER].get();
+        };
+        bool first = true;
+        bool override = false;
+        bool shadowPass = false;
+        const osg::Program* currentBase = nullptr;
+        bool currentUseAlpha = false;
+        bool currentAlphaBlend = false;
+        osg::ref_ptr<const osg::Program> overrideProgram;
         for (const DrawRange& range : ranges)
         {
             const std::pair<std::uint32_t, std::uint32_t> dynamicRange = range.mBucket < gl.mDynamicRanges.size()
@@ -2557,31 +2892,102 @@ namespace MWRender
             if (range.mCount == 0 && dynamicRange.second == 0)
                 continue;
 
-            state.pushStateSet(range.mStateSet);
-            state.apply();
-            const osg::Program::PerContextProgram* appliedPcp = state.getLastAppliedProgramObject();
-            const osg::Program* applied = appliedPcp != nullptr ? appliedPcp->getProgram() : nullptr;
-            bool canDraw = applied != nullptr;
+            bool canDraw = true;
             osg::ref_ptr<osg::StateSet> casting;
-            if (applied != nullptr && applied != range.mProgram)
+            bool delta = range.mDelta && !first;
+            if (delta && shadowPass)
             {
-                osg::ref_ptr<osg::Program> instanced = mShaderManager.getInstancedProgram(
-                    *applied, mMaterialTable ? Shader::MaterialMode::Bindless : Shader::MaterialMode::Legacy);
-                if (instanced == nullptr)
-                    canDraw = false;
-                else if (instanced != applied)
+                bool useAlpha = false;
+                bool alphaBlend = false;
+                const osg::Program* base = castingBase(*range.mStateSet, useAlpha, alphaBlend);
+                delta = base == currentBase && useAlpha == currentUseAlpha && alphaBlend == currentAlphaBlend;
+            }
+            if (delta)
+            {
+                const osg::StateSet& stateSet = *range.mStateSet;
+                for (std::size_t i = 0; i < deltaModes.size(); ++i)
                 {
-                    casting = gl.mCastingStateSets[applied];
-                    if (casting == nullptr)
-                    {
-                        casting = new osg::StateSet;
-                        casting->setAttributeAndModes(instanced,
-                            osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE | osg::StateAttribute::PROTECTED);
-                        gl.mCastingStateSets[applied] = casting;
-                    }
-                    state.pushStateSet(casting);
-                    state.apply();
+                    const auto found = stateSet.getModeList().find(deltaModes[i]);
+                    state.applyMode(deltaModes[i],
+                        found != stateSet.getModeList().end() && !lockedModes[i]
+                            ? (found->second & osg::StateAttribute::ON) != 0
+                            : baseModes[i]);
                 }
+                for (std::size_t i = 0; i < deltaAttributes.size(); ++i)
+                {
+                    const auto found = stateSet.getAttributeList().find(deltaAttributes[i]);
+                    const osg::StateAttribute* attribute
+                        = found != stateSet.getAttributeList().end() && !lockedAttributes[i] ? found->second.first.get()
+                                                                                             : baseAttributes[i];
+                    if (attribute == nullptr)
+                        attribute
+                            = state.getGlobalDefaultAttribute(deltaAttributes[i].first, deltaAttributes[i].second);
+                    if (attribute != nullptr)
+                        state.applyAttribute(attribute);
+                }
+                const osg::Program* program = override ? overrideProgram.get() : range.mProgram.get();
+                canDraw = program != nullptr;
+                if (canDraw && state.applyAttribute(program))
+                {
+                    const osg::Program::PerContextProgram* pcp = state.getLastAppliedProgramObject();
+                    canDraw = pcp != nullptr;
+                    for (const auto& [name, stack] : state.getUniformMap())
+                        if (canDraw && !stack.uniformVec.empty())
+                            pcp->apply(*stack.uniformVec.back().first);
+                }
+            }
+            else
+            {
+                state.pushStateSet(range.mStateSet);
+                state.apply();
+                const osg::Program::PerContextProgram* appliedPcp = state.getLastAppliedProgramObject();
+                const osg::Program* applied = appliedPcp != nullptr ? appliedPcp->getProgram() : nullptr;
+                canDraw = applied != nullptr;
+                override = applied != nullptr && applied != range.mProgram;
+                overrideProgram = nullptr;
+                if (override)
+                {
+                    shadowPass = std::find(mCastingProgramList.begin(), mCastingProgramList.end(), applied)
+                        != mCastingProgramList.end();
+                    bool useAlpha = false;
+                    bool alphaBlend = false;
+                    const osg::Program* base
+                        = shadowPass ? castingBase(*range.mStateSet, useAlpha, alphaBlend) : applied;
+                    currentBase = base;
+                    currentUseAlpha = useAlpha;
+                    currentAlphaBlend = alphaBlend;
+                    const auto cached = gl.mCastingPrograms.find(base);
+                    osg::ref_ptr<osg::Program> instanced = cached != gl.mCastingPrograms.end()
+                        ? cached->second
+                        : gl.mCastingPrograms.emplace(base, mShaderManager.getInstancedProgram(*base, mMaterialMode))
+                              .first->second;
+                    if (instanced == nullptr)
+                        canDraw = false;
+                    else if (instanced != applied)
+                    {
+                        osg::ref_ptr<osg::StateSet>& cachedCasting = gl.mCastingStateSets[{ base, alphaBlend }];
+                        if (cachedCasting == nullptr)
+                        {
+                            cachedCasting = new osg::StateSet;
+                            cachedCasting->setAttributeAndModes(instanced,
+                                osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE
+                                    | osg::StateAttribute::PROTECTED);
+                            if (shadowPass)
+                            {
+                                cachedCasting->addUniform(new osg::Uniform("useDiffuseMapForShadowAlpha", useAlpha),
+                                    osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE);
+                                cachedCasting->addUniform(new osg::Uniform("alphaTestShadows", alphaBlend),
+                                    osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE);
+                            }
+                        }
+                        casting = cachedCasting;
+                        state.pushStateSet(casting);
+                        state.apply();
+                    }
+                    if (canDraw)
+                        overrideProgram = instanced;
+                }
+                first = false;
             }
 
             const GLuint previousVao = state.getCurrentVertexArrayState() != nullptr
@@ -2591,27 +2997,26 @@ namespace MWRender
             {
                 ext.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, gl.mInstanceBuffer);
                 state.bindVertexArrayObject(gl.mVao);
-                ext.glBindBuffer(GL_DRAW_INDIRECT_BUFFER, gl.mCommandBuffer);
-                ext.glMultiDrawElementsIndirect(GL_TRIANGLES, GL_UNSIGNED_INT,
-                    reinterpret_cast<const void*>(static_cast<std::size_t>(range.mOffset) * sizeof(GpuCommand)),
-                    range.mCount, 0);
+                gl.draw(state, shadowPass ? "shadow" : "main", mMaterialMode, gl.mCommandBuffer,
+                    commandBase + range.mOffset, range.mCount);
             }
             if (canDraw && dynamicRange.second != 0 && gl.mDynamicVao != 0)
             {
                 ext.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, gl.mDynamicInstanceBuffer);
                 state.bindVertexArrayObject(gl.mDynamicVao);
-                ext.glBindBuffer(GL_DRAW_INDIRECT_BUFFER, gl.mDynamicCommandBuffer);
-                ext.glMultiDrawElementsIndirect(GL_TRIANGLES, GL_UNSIGNED_INT,
-                    reinterpret_cast<const void*>(static_cast<std::size_t>(dynamicRange.first) * sizeof(GpuCommand)),
-                    dynamicRange.second, 0);
+                gl.draw(state, shadowPass ? "shadow-dynamic" : "main-dynamic", mMaterialMode, gl.mDynamicCommandBuffer,
+                    dynamicRange.first, dynamicRange.second);
             }
             ext.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, gl.mInstanceBuffer);
             state.bindVertexArrayObject(previousVao);
 
             if (casting != nullptr)
                 state.popStateSet();
-            state.popStateSet();
+            if (!delta)
+                state.popStateSet();
         }
-        state.apply();
+        ext.glBindBuffer(GL_DRAW_INDIRECT_BUFFER, 0);
+        if (!first)
+            state.apply();
     }
 }

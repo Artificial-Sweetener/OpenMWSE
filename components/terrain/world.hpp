@@ -100,7 +100,6 @@ namespace Terrain
         virtual void rebuildViews() {}
 
         void setGpuChunkFactory(GpuChunkFactory* factory, unsigned int proxyMask);
-        void clearChunkCache();
 
         virtual void reportStats(unsigned int frameNumber, osg::Stats* stats) {}
 

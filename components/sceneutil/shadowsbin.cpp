@@ -48,6 +48,16 @@ namespace
 namespace SceneUtil
 {
 
+    ShadowsBin::CastingState ShadowsBin::castingState(const osg::StateSet& stateSet)
+    {
+        CastingState state;
+        if (const osg::StateAttribute* attribute = stateSet.getAttribute(osg::StateAttribute::ALPHAFUNC))
+            state.mFunction = static_cast<const osg::AlphaFunc*>(attribute)->getFunction();
+        state.mAlphaBlend = (stateSet.getMode(GL_BLEND) & osg::StateAttribute::ON) != 0;
+        state.mUseAlpha = state.mFunction != GL_ALWAYS || state.mAlphaBlend;
+        return state;
+    }
+
     ShadowsBin::ShadowsBin(const CastingPrograms& castingPrograms, osg::Program* opaqueCastingProgram)
         : osgUtil::RenderBin(osgUtil::RenderBin::SORT_BY_STATE_THEN_FRONT_TO_BACK)
     {

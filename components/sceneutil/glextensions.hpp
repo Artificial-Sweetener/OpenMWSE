@@ -8,6 +8,8 @@ namespace SceneUtil
 {
     bool glExtensionsReady();
     osg::GLExtensions& getGLExtensions();
+    GLint getMaxShaderStorageBindings();
+    GLint getMaxVertexStorageBlocks();
 
     class GetGLExtensionsOperation : public osg::GraphicsOperation
     {

@@ -43,7 +43,10 @@ namespace MWRender
         Stereo::shaderStereoDefines(defines);
 
         mStateSet->setAttributeAndModes(new osg::BlendFunc, modeOff);
-        mStateSet->setAttributeAndModes(shaderManager.getProgram("depthclipped", defines), modeOn);
+        mStateSet->setAttributeAndModes(
+            shaderManager.getProgram("depthclipped", defines, nullptr, {},
+                Shader::ProgramCapability::Instanced | Shader::ProgramCapability::ArrayMaterial),
+            modeOn);
         mStateSet->setAttributeAndModes(new SceneUtil::AutoDepth, modeOn);
     }
 

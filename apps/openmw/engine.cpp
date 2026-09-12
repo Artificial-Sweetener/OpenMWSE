@@ -531,6 +531,7 @@ void OMW::Engine::createGraphicsContext()
     const bool windowBorder = Settings::video().mWindowBorder;
     const SDLUtil::VSyncMode vsync = Settings::video().mVsyncMode;
     unsigned antialiasing = static_cast<unsigned>(Settings::video().mAntialiasing);
+    const bool debugOpenGL = Debug::shouldDebugOpenGL() || Settings::terrain().mObjectPagingGpuDriven;
 
     osg::ref_ptr<osg::GraphicsContext> graphicsContext;
     if (mDiagnosticChild && !mDiagnosticHeaded)
@@ -578,7 +579,7 @@ void OMW::Engine::createGraphicsContext()
         checkSDLError(SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8));
         checkSDLError(SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 0));
         checkSDLError(SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24));
-        if (Debug::shouldDebugOpenGL())
+        if (debugOpenGL)
             checkSDLError(SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG));
         if (antialiasing > 0)
         {
@@ -663,7 +664,7 @@ void OMW::Engine::createGraphicsContext()
     realizeOperations->add(identifyOp);
     realizeOperations->add(new SceneUtil::GetGLExtensionsOperation());
 
-    if (Debug::shouldDebugOpenGL())
+    if (debugOpenGL)
         realizeOperations->add(new Debug::EnableGLDebugOperation());
 
     realizeOperations->add(mSelectDepthFormatOperation);

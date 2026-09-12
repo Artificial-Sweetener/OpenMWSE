@@ -427,18 +427,12 @@ namespace Terrain
             return stateSet;
         }
 
-        namespace
+        /// Groups GPU chunk drawables.
+        const TerrainDrawable* findTerrainDrawable(const osg::Node* node)
         {
-            const TerrainDrawable* findTerrainDrawable(const osg::Node* node)
-            {
-                if (const auto* drawable = dynamic_cast<const TerrainDrawable*>(node))
-                    return drawable;
-                if (const osg::Group* group = node->asGroup())
-                    for (unsigned int i = 0; i < group->getNumChildren(); ++i)
-                        if (const TerrainDrawable* found = findTerrainDrawable(group->getChild(i)))
-                            return found;
-                return nullptr;
-            }
+            if (const osg::Group* group = node->asGroup())
+                node = group->getChild(0);
+            return dynamic_cast<const TerrainDrawable*>(node);
         }
 
         void updateWaterCullingView(

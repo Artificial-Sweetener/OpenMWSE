@@ -88,7 +88,7 @@ namespace MWRender
         }
 
         osg::ref_ptr<ObjectAnimation> anim(
-            new ObjectAnimation(ptr, animationMesh, mResourceSystem, animated, allowLight, mGpuScene));
+            new ObjectAnimation(ptr, animationMesh, mResourceSystem, animated, allowLight));
 
         anim->setGpuScene(mGpuScene);
         mObjects.emplace(ptr.mRef, std::move(anim));

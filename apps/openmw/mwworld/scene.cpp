@@ -980,6 +980,8 @@ namespace MWWorld
 
         navigatorUpdateGuard.reset();
 
+        mRendering.prepareGpuScene(*loadingListener);
+
         changePlayerCell(cell, position, adjustPlayerPos);
 
         // adjust fog
@@ -1305,7 +1307,6 @@ namespace MWWorld
         loadingListener->setLabel("#{OMWEngine:InitializingData}");
 
         mPreloader->syncTerrainLoad(*loadingListener);
-        mRendering.prepareGpuScene(*loadingListener);
     }
 
     void Scene::reloadTerrain()

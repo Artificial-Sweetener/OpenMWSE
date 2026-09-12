@@ -2,11 +2,20 @@
 
 #include <osg/GraphicsContext>
 
+#ifndef GL_MAX_VERTEX_SHADER_STORAGE_BLOCKS
+#define GL_MAX_VERTEX_SHADER_STORAGE_BLOCKS 0x90D6
+#endif
+#ifndef GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS
+#define GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS 0x90DD
+#endif
+
 namespace SceneUtil
 {
     namespace
     {
         std::set<osg::observer_ptr<osg::GLExtensions>> sGLExtensions;
+        GLint sMaxShaderStorageBindings = 0;
+        GLint sMaxVertexStorageBlocks = 0;
 
         class GLExtensionsObserver : public osg::Observer
         {
@@ -47,6 +56,16 @@ namespace SceneUtil
         return **sGLExtensions.begin();
     }
 
+    GLint getMaxShaderStorageBindings()
+    {
+        return sMaxShaderStorageBindings;
+    }
+
+    GLint getMaxVertexStorageBlocks()
+    {
+        return sMaxVertexStorageBlocks;
+    }
+
     GetGLExtensionsOperation::GetGLExtensionsOperation()
         : GraphicsOperation("GetGLExtensionsOperation", false)
     {
@@ -56,5 +75,11 @@ namespace SceneUtil
     {
         auto [itr, _] = sGLExtensions.emplace(graphicsContext->getState()->get<osg::GLExtensions>());
         (*itr)->addObserver(&GLExtensionsObserver::sInstance);
+        // Storage limits exist from GL 4.3 on.
+        if (static_cast<int>((*itr)->glslLanguageVersion * 100) >= 430)
+        {
+            glGetIntegerv(GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS, &sMaxShaderStorageBindings);
+            glGetIntegerv(GL_MAX_VERTEX_SHADER_STORAGE_BLOCKS, &sMaxVertexStorageBlocks);
+        }
     }
 }

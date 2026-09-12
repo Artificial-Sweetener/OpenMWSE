@@ -842,7 +842,7 @@ namespace MWRender
         {
             if (chunkMgr.mObjectPaging != nullptr)
                 chunkMgr.mObjectPaging->clearCache();
-            chunkMgr.mTerrain->clearChunkCache();
+            chunkMgr.mTerrain->clearAssociatedCaches();
             chunkMgr.mTerrain->rebuildViews();
         }
         mObjects->refreshGpuInstances();

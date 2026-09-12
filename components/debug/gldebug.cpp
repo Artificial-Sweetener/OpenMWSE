@@ -32,8 +32,15 @@ either expressed or implied, of the FreeBSD Project.
 
 #include "gldebug.hpp"
 
+#include <cstdint>
 #include <cstdlib>
+#include <map>
 #include <memory>
+#include <mutex>
+#include <string_view>
+#include <tuple>
+
+#include <osg/UserDataContainer>
 
 #include <components/debug/debuglog.hpp>
 
@@ -42,11 +49,48 @@ either expressed or implied, of the FreeBSD Project.
 
 namespace Debug
 {
+    class DebugMessages : public osg::Object
+    {
+    public:
+        DebugMessages() = default;
+        DebugMessages(const DebugMessages& other, const osg::CopyOp& copy)
+            : osg::Object(other, copy)
+        {
+        }
+        META_Object(Debug, DebugMessages)
+
+        std::uint64_t count(GLenum source, GLenum type, GLuint id, GLenum severity, std::string_view message)
+        {
+            if (mVerbose)
+                return 1;
+            std::lock_guard lock(mMutex);
+            const auto key = std::make_tuple(source, type, id, severity, message);
+            auto found = mCounts.find(key);
+            if (found == mCounts.end())
+            {
+                if (mCounts.size() >= 256)
+                    return 1;
+                found = mCounts.emplace(key, 0).first;
+            }
+            const std::uint64_t count = ++found->second;
+            return (count & (count - 1)) == 0 ? count : 0;
+        }
+
+    private:
+        const bool mVerbose = shouldDebugOpenGL();
+        std::mutex mMutex;
+        std::map<std::tuple<GLenum, GLenum, GLuint, GLenum, std::string>, std::uint64_t, std::less<>> mCounts;
+    };
 
     void GL_APIENTRY debugCallback(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length,
         const GLchar* message, const void* userParam)
     {
 #ifdef GL_DEBUG_OUTPUT
+        const std::string_view text(message, length);
+        const std::uint64_t count
+            = static_cast<DebugMessages*>(const_cast<void*>(userParam))->count(source, type, id, severity, text);
+        if (count == 0)
+            return;
         std::string srcStr;
         switch (source)
         {
@@ -107,8 +151,26 @@ namespace Debug
                 break;
         }
 
-        Log(logSeverity) << "OpenGL " << typeStr << " [" << srcStr << "]: " << message;
+        if (severity == GL_DEBUG_SEVERITY_HIGH)
+            logSeverity = Error;
+        else if (source == GL_DEBUG_SOURCE_SHADER_COMPILER)
+            logSeverity = Warning;
+        Log(logSeverity) << "OpenGL " << typeStr << " [" << srcStr << "] id=" << id << " severity=" << severity
+                         << " count=" << count << ": " << text;
 #endif
+    }
+
+    void GL_APIENTRY debugCallbackAMD(
+        GLuint id, GLenum category, GLenum severity, GLsizei length, const GLchar* message, void* userParam)
+    {
+        const std::string_view text(message, length);
+        const std::uint64_t count = static_cast<DebugMessages*>(userParam)->count(0, category, id, severity, text);
+        if (count == 0)
+            return;
+        const Level level
+            = category == GL_DEBUG_CATEGORY_API_ERROR_AMD || severity == GL_DEBUG_SEVERITY_HIGH_AMD ? Error : Warning;
+        Log(level) << "OpenGL AMD category=" << category << " id=" << id << " severity=" << severity
+                   << " count=" << count << ": " << text;
     }
 
     class PushDebugGroup
@@ -136,6 +198,8 @@ namespace Debug
         OpenThreads::ScopedLock<OpenThreads::Mutex> lock(mMutex);
 
         unsigned int contextID = graphicsContext->getState()->getContextID();
+        const osg::ref_ptr<DebugMessages> messages = new DebugMessages;
+        graphicsContext->getOrCreateUserDataContainer()->addUserObject(messages);
 
         typedef void(GL_APIENTRY * DEBUGPROC)(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length,
             const GLchar* message, const void* userParam);
@@ -146,7 +210,8 @@ namespace Debug
         GLDebugMessageControlFunction glDebugMessageControl = nullptr;
         GLDebugMessageCallbackFunction glDebugMessageCallback = nullptr;
 
-        if (osg::isGLExtensionSupported(contextID, "GL_KHR_debug"))
+        const bool khr = osg::isGLExtensionSupported(contextID, "GL_KHR_debug");
+        if (khr)
         {
             osg::setGLExtensionFuncPtr(glDebugMessageCallback, "glDebugMessageCallback");
             osg::setGLExtensionFuncPtr(glDebugMessageControl, "glDebugMessageControl");
@@ -160,17 +225,41 @@ namespace Debug
         }
         else if (osg::isGLExtensionSupported(contextID, "GL_AMD_debug_output"))
         {
-            osg::setGLExtensionFuncPtr(glDebugMessageCallback, "glDebugMessageCallbackAMD");
-            osg::setGLExtensionFuncPtr(glDebugMessageControl, "glDebugMessageControlAMD");
+            PFNGLDEBUGMESSAGECALLBACKAMDPROC callback = nullptr;
+            PFNGLDEBUGMESSAGEENABLEAMDPROC enable = nullptr;
+            osg::setGLExtensionFuncPtr(callback, "glDebugMessageCallbackAMD");
+            osg::setGLExtensionFuncPtr(enable, "glDebugMessageEnableAMD");
+            if (callback != nullptr && enable != nullptr)
+            {
+                callback(debugCallbackAMD, messages.get());
+                enable(0, 0, 0, nullptr, false);
+                enable(GL_DEBUG_CATEGORY_API_ERROR_AMD, 0, 0, nullptr, true);
+                enable(GL_DEBUG_CATEGORY_UNDEFINED_BEHAVIOR_AMD, 0, 0, nullptr, true);
+                enable(GL_DEBUG_CATEGORY_SHADER_COMPILER_AMD, 0, 0, nullptr, true);
+                enable(0, GL_DEBUG_SEVERITY_HIGH_AMD, 0, nullptr, true);
+                if (shouldDebugOpenGL())
+                    enable(0, 0, 0, nullptr, true);
+                Log(Info) << "OpenGL AMD debug callback attached.";
+                return;
+            }
         }
 
         if (glDebugMessageCallback && glDebugMessageControl)
         {
-            glEnable(GL_DEBUG_OUTPUT);
-            glDebugMessageControl(GL_DONT_CARE, GL_DEBUG_TYPE_ERROR, GL_DEBUG_SEVERITY_MEDIUM, 0, nullptr, true);
-            glDebugMessageCallback(debugCallback, nullptr);
+            if (khr)
+                glEnable(GL_DEBUG_OUTPUT);
+            if (shouldDebugOpenGL())
+                glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+            glDebugMessageCallback(debugCallback, messages.get());
+            glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, false);
+            glDebugMessageControl(GL_DONT_CARE, GL_DEBUG_TYPE_ERROR, GL_DONT_CARE, 0, nullptr, true);
+            glDebugMessageControl(GL_DONT_CARE, GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR, GL_DONT_CARE, 0, nullptr, true);
+            glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DEBUG_SEVERITY_HIGH, 0, nullptr, true);
+            glDebugMessageControl(GL_DEBUG_SOURCE_SHADER_COMPILER, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, true);
+            if (shouldDebugOpenGL())
+                glDebugMessageControl(GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, nullptr, true);
 
-            Log(Info) << "OpenGL debug callback attached.";
+            Log(Info) << "OpenGL debug callback attached: " << (khr ? "KHR" : "ARB");
         }
         else
 #endif

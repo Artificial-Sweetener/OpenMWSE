@@ -75,13 +75,10 @@ namespace Terrain
         const auto pair = mCache->lowerBound(templateKey);
         if (pair.has_value() && templateKey == TemplateKey{ .mCenter = pair->first.mCenter, .mLod = pair->first.mLod })
         {
-            templateGeometry = dynamic_cast<const TerrainDrawable*>(pair->second.get());
-            if (templateGeometry == nullptr)
-            {
-                const osg::Group* group = dynamic_cast<const osg::Group*>(pair->second.get());
-                if (group != nullptr && group->getNumChildren() != 0)
-                    templateGeometry = dynamic_cast<const TerrainDrawable*>(group->getChild(0));
-            }
+            const osg::Node* cached = static_cast<const osg::Node*>(pair->second.get());
+            if (const osg::Group* group = cached->asGroup())
+                cached = group->getChild(0);
+            templateGeometry = dynamic_cast<const TerrainDrawable*>(cached);
         }
 
         osg::ref_ptr<osg::Node> node = createChunk(size, center, lod, lodFlags, compile, templateGeometry);

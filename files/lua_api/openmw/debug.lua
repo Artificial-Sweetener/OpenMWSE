@@ -16,6 +16,7 @@
 -- @field [parent=#RENDER_MODE] #number NavMesh
 -- @field [parent=#RENDER_MODE] #number ActorsPaths
 -- @field [parent=#RENDER_MODE] #number RecastMesh
+-- @field [parent=#RENDER_MODE] #number GpuDrivenPaging
 
 ---
 -- Rendering mode values

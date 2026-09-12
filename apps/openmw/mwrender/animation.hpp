@@ -517,7 +517,7 @@ namespace MWRender
     {
     public:
         ObjectAnimation(const MWWorld::Ptr& ptr, const std::string& model, Resource::ResourceSystem* resourceSystem,
-            bool animated, bool allowLight, GpuScene* gpuScene);
+            bool animated, bool allowLight);
         ~ObjectAnimation() override;
 
         bool canBeHarvested() const override;
@@ -530,7 +530,6 @@ namespace MWRender
         void buildGpuInstances();
         void dropGpuInstances();
 
-        GpuScene* mGpuScene;
         bool mGpuRetry = true;
         std::unique_ptr<const GpuTemplate> mGpuHidden;
         osg::ref_ptr<osg::Node> mGpuChunk;

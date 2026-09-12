@@ -23,6 +23,15 @@ namespace SceneUtil
 
         using CastingPrograms = Array<osg::ref_ptr<osg::Program>>;
 
+        /// Casting semantics of one canonical state.
+        struct CastingState
+        {
+            GLenum mFunction = GL_ALWAYS;
+            bool mAlphaBlend = false;
+            bool mUseAlpha = false;
+        };
+        static CastingState castingState(const osg::StateSet& stateSet);
+
         META_Object(SceneUtil, ShadowsBin)
         /// Create front-to-back shadow-state reduction with dedicated opaque and alpha-tested caster programs.
         ShadowsBin(const CastingPrograms& castingPrograms, osg::Program* opaqueCastingProgram);

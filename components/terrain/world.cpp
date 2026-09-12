@@ -167,10 +167,4 @@ namespace Terrain
         if (mChunkManager != nullptr)
             mChunkManager->setGpuChunkFactory(factory, proxyMask);
     }
-
-    void World::clearChunkCache()
-    {
-        if (mChunkManager != nullptr)
-            mChunkManager->clearCache();
-    }
 }

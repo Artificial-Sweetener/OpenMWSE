@@ -339,7 +339,12 @@ namespace MWRender
         {
             osg::State* state = renderInfo.getState();
 
-            PostProcessor* postProcessor = static_cast<PostProcessor*>(renderInfo.getCurrentCamera()->getUserData());
+            PostProcessor* postProcessor = dynamic_cast<PostProcessor*>(renderInfo.getCurrentCamera()->getUserData());
+            if (postProcessor == nullptr)
+            {
+                bin->drawImplementation(renderInfo, previous);
+                return;
+            }
 
             state->applyAttribute(mDepth);
 

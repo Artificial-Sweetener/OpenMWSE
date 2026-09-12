@@ -49,8 +49,8 @@ kind = "structural"
 justification = "The animation implementation owns one model animation state machine: controller attachment, source selection, blending, playback advancement, and text-key delivery all operate on the same animation graph and timing state. Separating those mechanics would expose private invariants without establishing another authoritative owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:8e3a2363a39ef2bb7559ace5ad1ed3887c06fc0e16ae64a49bba39411fe6ef54"
-max_lines = 1940
+fingerprint = "sha256:5b56df8e8d478867be73ab3cecf95ad4f390129043efa3a593a1dc3a31d8cf1a"
+max_lines = 1952
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-004"
@@ -88,8 +88,8 @@ kind = "structural"
 justification = "NPCAnimation is the authoritative visual assembly and animation state for one actor. Body-part selection, equipment visibility, first-person presentation, speech, and blink state all mutate the same scene graph and must be synchronized during rebuilds, so they remain one cohesive owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:46c2615112ba3d7fd847cd26edfce21e1983e68e3c907b6d43c8ef0b109ae761"
-max_lines = 1072
+fingerprint = "sha256:a2312a2a24cc596d23e2e03f33f439075212178130eec06c597cad191a8b460f"
+max_lines = 1077
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-007"
@@ -127,7 +127,7 @@ kind = "structural"
 justification = "RenderingManager is the renderer composition root and scene-facing facade: subsystem construction, ordered frame advancement, scene mutation, settings propagation, and renderer queries all coordinate the same owned object graph. Atmosphere diagnostic policy and applied capture state now belong to a separate controller."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:d7f88db32b49a2735d39a022fdd9661ca4bfa0229407466a8ea0b44c03435f24"
+fingerprint = "sha256:77a928520a693c9390ded9758960e830af20b3e5dd72bbbd2c63d69fae056a9d"
 max_lines = 1694
 
 [[waivers]]
@@ -361,8 +361,8 @@ kind = "structural"
 justification = "QuadtreeWorld owns the terrain quadtree view and chunk lifecycle, including cell adapters, preload behavior, debug borders, and statistics tied to those chunks. The operations share grid coordinates, view membership, and chunk-manager state and do not establish independent policy owners."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:f3ee673464a056e985ff8feb1884db17637b1b609b859b7f42585b2bc2573d48"
-max_lines = 562
+fingerprint = "sha256:78ecc7360cc1b9337dfb49dbd5162fbffa8c5e414697fb15cc18095340ce6d89"
+max_lines = 555
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-025"
@@ -387,5 +387,5 @@ kind = "structural"
 justification = "GpuScene owns one GPU-driven distant-scene lifecycle: compatible geometry normalization, shared buffer residency, view culling, indirect-command construction, and material-bucket submission use the same identifiers and render-thread resources. The stages form one backend contract while their internal data flow is still being established."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:5d529092f9a83599227558bcd45fae68a00a954b06d07d984158cb00b0e93739"
-max_lines = 2434
+fingerprint = "sha256:b23605739e6a1bfaf29881d5bea32c811252a6190652381f45167279516033d6"
+max_lines = 2818

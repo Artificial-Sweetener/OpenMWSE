@@ -73,6 +73,8 @@ namespace
 {
     bool isBareBone(const osg::Node& node)
     {
+        if (node.getNodeMask() == MWRender::Mask_UpdateVisitor)
+            return true;
         if (dynamic_cast<const NifOsg::MatrixTransform*>(&node) == nullptr || node.getNodeMask() != ~0u)
             return false;
         const osg::Group& group = *node.asGroup();
@@ -87,6 +89,8 @@ namespace
         for (unsigned int i = 0; i < group.getNumChildren(); ++i)
         {
             osg::Node& child = *group.getChild(i);
+            if (child.getNodeMask() == MWRender::Mask_UpdateVisitor)
+                continue;
             if (isBareBone(child))
                 out.emplace_back(&child);
             else if (osg::Group* childGroup = child.asGroup())
@@ -1489,8 +1493,7 @@ namespace MWRender
     void Animation::setGpuScene(GpuScene* scene)
     {
         mCaptureScene = scene;
-        if (mCaptureScene != nullptr && mObjectRoot != nullptr)
-            mCaptureScene->capture(*mObjectRoot);
+        refreshGpuInstances();
     }
 
     void Animation::refreshGpuInstances()
@@ -1749,6 +1752,7 @@ namespace MWRender
             else if (mObjectRoot)
                 mGlowUpdater = SceneUtil::addEnchantedGlow(mObjectRoot, mResourceSystem, color, glowDuration);
         }
+        refreshGpuInstances();
     }
 
     void Animation::addExtraLight(osg::ref_ptr<osg::Group> parent, const SceneUtil::LightCommon& esmLight)
@@ -1855,7 +1859,7 @@ namespace MWRender
         mHasMagicEffects = true;
 
         overrideFirstRootTexture(VFS::Path::toNormalized(texture), mResourceSystem, *node);
-        Animation::refreshGpuInstances();
+        refreshGpuInstances();
     }
 
     void Animation::removeEffect(std::string_view effectId)
@@ -2140,9 +2144,8 @@ namespace MWRender
     // --------------------------------------------------------------------------------
 
     ObjectAnimation::ObjectAnimation(const MWWorld::Ptr& ptr, const std::string& model,
-        Resource::ResourceSystem* resourceSystem, bool animated, bool allowLight, GpuScene* gpuScene)
+        Resource::ResourceSystem* resourceSystem, bool animated, bool allowLight)
         : Animation(ptr, osg::ref_ptr<osg::Group>(ptr.getRefData().getBaseNode()), resourceSystem)
-        , mGpuScene(gpuScene)
     {
         if (!model.empty())
         {
@@ -2177,8 +2180,6 @@ namespace MWRender
         {
             harvest(ptr);
         }
-
-        buildGpuInstances();
     }
 
     void ObjectAnimation::harvest(const MWWorld::Ptr& ptr)
@@ -2233,11 +2234,14 @@ namespace MWRender
         };
     }
 
-    ObjectAnimation::~ObjectAnimation() = default;
+    ObjectAnimation::~ObjectAnimation()
+    {
+        dropGpuInstances();
+    }
 
     void ObjectAnimation::buildGpuInstances()
     {
-        if (mGpuChunk != nullptr || mGpuScene == nullptr || !mGpuScene->isEnabled() || mObjectRoot == nullptr
+        if (mGpuChunk != nullptr || mCaptureScene == nullptr || !mCaptureScene->isEnabled() || mObjectRoot == nullptr
             || !mGpuRetry || !mStates.empty())
             return;
         mGpuRetry = false;
@@ -2249,7 +2253,8 @@ namespace MWRender
         const osg::Vec3f scale = transform->getScale();
         if (std::abs(scale.x() - scale.y()) > 1e-4f || std::abs(scale.x() - scale.z()) > 1e-4f)
             return;
-        const std::unique_ptr<const GpuTemplate> tmpl = mGpuScene->extract(*mObjectRoot, ~Mask_UpdateVisitor, false);
+        const std::unique_ptr<const GpuTemplate> tmpl
+            = mCaptureScene->extract(*mObjectRoot, ~Mask_UpdateVisitor, false);
         if (tmpl == nullptr)
             return;
         std::vector<osg::Node*> toHide;
@@ -2267,13 +2272,17 @@ namespace MWRender
         osg::Matrix base;
         transform->computeLocalToWorldMatrix(base, nullptr);
         std::vector<GpuScene::Instance> instances;
-        mGpuScene->appendInstances(*hidden, osg::Matrixf(base), scale.x(),
+        mCaptureScene->appendInstances(*hidden, osg::Matrixf(base), scale.x(),
             osg::LOD::MinMaxPair(0.f, std::numeric_limits<float>::max()), true, instances);
-        mGpuChunk = mGpuScene->createChunk(std::move(instances), mObjectRoot->getBound());
+        osg::BoundingSphere bound = mObjectRoot->getBound();
+        bound.set(bound.center() * base, bound.radius() * scale.x());
+        mGpuChunk = mCaptureScene->createChunk(std::move(instances), bound);
         if (mGpuChunk == nullptr)
             return;
         mGpuHidden = std::move(hidden);
-        mInsert->addChild(mGpuChunk);
+        mCaptureScene->addResident(*mGpuChunk);
+        if (toHide.size() == 1 && toHide.front() == mObjectRoot.get() && mInsert->getNumChildren() == 1)
+            toHide.push_back(mInsert);
         for (osg::Node* node : toHide)
         {
             mHiddenNodes.emplace_back(node, node->getNodeMask());
@@ -2286,7 +2295,7 @@ namespace MWRender
     {
         if (mGpuChunk == nullptr)
             return;
-        mInsert->removeChild(mGpuChunk);
+        mCaptureScene->removeResident(*mGpuChunk);
         mGpuChunk = nullptr;
         mGpuHidden = nullptr;
         for (const auto& [node, mask] : mHiddenNodes)
@@ -2315,9 +2324,11 @@ namespace MWRender
             osg::Matrix base;
             transform->computeLocalToWorldMatrix(base, nullptr);
             std::vector<GpuScene::Instance> instances;
-            mGpuScene->appendInstances(*mGpuHidden, osg::Matrixf(base), scale.x(),
+            mCaptureScene->appendInstances(*mGpuHidden, osg::Matrixf(base), scale.x(),
                 osg::LOD::MinMaxPair(0.f, std::numeric_limits<float>::max()), true, instances);
-            if (mGpuScene->updateChunk(*mGpuChunk, instances))
+            osg::BoundingSphere bound = mObjectRoot->getBound();
+            bound.set(bound.center() * base, bound.radius() * scale.x());
+            if (mCaptureScene->updateChunk(*mGpuChunk, instances, bound))
                 return;
         }
         dropGpuInstances();

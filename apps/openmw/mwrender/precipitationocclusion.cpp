@@ -58,7 +58,8 @@ namespace
 
             Shader::ShaderManager& shaderMgr
                 = MWBase::Environment::get().getResourceSystem()->getSceneManager()->getShaderManager();
-            mProgram = shaderMgr.getProgram("depthclipped");
+            mProgram = shaderMgr.getProgram("depthclipped", {}, nullptr, {},
+                Shader::ProgramCapability::Instanced | Shader::ProgramCapability::ArrayMaterial);
         }
 
     private:
