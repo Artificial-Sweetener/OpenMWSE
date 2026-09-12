@@ -376,7 +376,8 @@ namespace MWRender
                 for (const GpuScene::Instance& instance : gpuInstances)
                     localBound.expandBy(
                         osg::BoundingSphere(instance.mBounds.center() - worldCenter, instance.mBounds.radius()));
-                return mGpuScene->createChunk(std::move(gpuInstances), localBound);
+                return mGpuScene->createChunk(
+                    std::move(gpuInstances), localBound, Settings::groundcover().mPointLighting);
             };
             osg::ref_ptr<osg::Node> gpuChunk = buildChunk();
             if (gpuChunk == nullptr)

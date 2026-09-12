@@ -39,6 +39,14 @@ MWGui::GraphicsSettings::GraphicsSettings(Layout& layout, std::function<void()> 
     , mShadowMapResolution(layout.getWidget("ShadowMapResolution")->castType<MyGUI::EditBox>())
     , mShadowResolutionDecrease(layout.getWidget("ShadowResolutionDecrease")->castType<MyGUI::Button>())
     , mShadowResolutionIncrease(layout.getWidget("ShadowResolutionIncrease")->castType<MyGUI::Button>())
+    , mOptimizationsEnabled(layout.getWidget("OptimizationsEnabledButton")->castType<MyGUI::Button>())
+    , mOptimizationButtons{ layout.getWidget("GpuDrivenPagingButton")->castType<MyGUI::Button>(),
+        layout.getWidget("GpuSkinningButton")->castType<MyGUI::Button>(),
+        layout.getWidget("GpuOcclusionButton")->castType<MyGUI::Button>(),
+        layout.getWidget("GpuActorsButton")->castType<MyGUI::Button>(),
+        layout.getWidget("GpuTextureArraysButton")->castType<MyGUI::Button>(),
+        layout.getWidget("IndexedLightListsButton")->castType<MyGUI::Button>(),
+        layout.getWidget("GpuSceneLightingButton")->castType<MyGUI::Button>() }
 {
     mVolumetricQuality->eventComboChangePosition
         += MyGUI::newDelegate(this, &GraphicsSettings::onVolumetricQualityChanged);
@@ -60,6 +68,8 @@ MWGui::GraphicsSettings::GraphicsSettings(Layout& layout, std::function<void()> 
         += MyGUI::newDelegate(this, &GraphicsSettings::onShadowResolutionStep);
     mShadowResolutionIncrease->eventMouseButtonClick
         += MyGUI::newDelegate(this, &GraphicsSettings::onShadowResolutionStep);
+    mOptimizationsEnabled->eventMouseButtonClick
+        += MyGUI::newDelegate(this, &GraphicsSettings::onOptimizationPrerequisiteChanged);
 
     refresh();
 }
@@ -69,6 +79,7 @@ void MWGui::GraphicsSettings::refresh()
     mDistanceSettings->refresh();
     refreshShadowResolution();
     refreshAtmosphereControls();
+    refreshOptimizationControls();
 }
 
 void MWGui::GraphicsSettings::updateLayout()
@@ -82,6 +93,7 @@ void MWGui::GraphicsSettings::showPage(std::string_view page)
         : page == "detail"                                   ? "DetailPage"
         : page == "water"                                    ? "WaterPage"
         : page == "shadows"                                  ? "ShadowsPage"
+        : page == "optimizations"                            ? "OptimizationsPage"
                                                              : "";
     if (pageWidget.empty())
         throw std::invalid_argument("unknown video settings page");
@@ -195,6 +207,11 @@ void MWGui::GraphicsSettings::onAtmosphereAppearanceChanged(MyGUI::ComboBox* sen
     mApply();
 }
 
+void MWGui::GraphicsSettings::onOptimizationPrerequisiteChanged(MyGUI::Widget*)
+{
+    refreshOptimizationControls();
+}
+
 void MWGui::GraphicsSettings::refreshShadowResolution()
 {
     const int value = Settings::shadows().mShadowMapResolution;
@@ -233,4 +250,10 @@ void MWGui::GraphicsSettings::refreshAtmosphereControls()
     mDistantShadowsButton->setEnabled(filteredShadows);
     mDistantShadowQuality->setEnabled(filteredShadows && Settings::openmwseShadows().mDistantShadows);
     mCloudShadowIntensity->setEnabled(Settings::shadows().mCloudShadows && filteredShadows);
+}
+
+void MWGui::GraphicsSettings::refreshOptimizationControls()
+{
+    for (MyGUI::Button* button : mOptimizationButtons)
+        button->setEnabled(Settings::optimizations().mEnabled);
 }

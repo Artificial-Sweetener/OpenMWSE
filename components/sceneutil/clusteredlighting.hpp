@@ -1,6 +1,8 @@
 #ifndef OPENMW_COMPONENTS_SCENEUTIL_CLUSTEREDLIGHTING_HPP
 #define OPENMW_COMPONENTS_SCENEUTIL_CLUSTEREDLIGHTING_HPP
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <osg/Vec4f>
 
@@ -29,6 +31,18 @@ namespace SceneUtil
         float mQuadratic;
         float mRadius;
     };
+
+    struct LightReceiver
+    {
+        osg::Vec4f mBound;
+        std::array<std::uint32_t, 4> mMeta{};
+    };
+
+    static_assert(sizeof(LightReceiver) == 32);
+    static_assert(offsetof(LightReceiver, mMeta) == 16);
+    static_assert(sizeof(PointLight) == 80);
+    static_assert(offsetof(PointLight, mConstant) == 64);
+    static_assert(sizeof(LightGrid) == 8);
 }
 
 #endif

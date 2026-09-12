@@ -801,7 +801,7 @@ namespace Shader
         }
     }
 
-    void ShaderManager::applyInstancedDefines(DefineMap& defines, MaterialMode mode, bool clusteredLighting)
+    void ShaderManager::applyInstancedDefines(DefineMap& defines, MaterialMode mode)
     {
         defines["gpuInstanced"] = "1";
         defines["gpuMaterial"] = mode != MaterialMode::Legacy ? "1" : "0";
@@ -809,8 +809,8 @@ namespace Shader
         defines["gpuLegacyBindings"] = mode == MaterialMode::Legacy ? "1" : "0";
         defines["gpuArrayBindings"] = mode == MaterialMode::Array ? "1" : "0";
         defines["gpuBindlessBindings"] = mode == MaterialMode::Bindless ? "1" : "0";
-        defines["gpuLightList"] = clusteredLighting ? "0" : "1";
         defines["legacyLightList"] = "0";
+        defines["lightingMethodClustered"] = "1";
     }
 
     osg::ref_ptr<osg::Program> ShaderManager::getInstancedProgram(
@@ -841,13 +841,6 @@ namespace Shader
         }
 
         osg::ref_ptr<osg::Program> result;
-        const auto defineValue = [&](const DefineMap& defines, const char* name) {
-            const auto found = defines.find(name);
-            if (found != defines.end())
-                return std::string_view(found->second);
-            const auto global = mGlobalDefines.find(name);
-            return global != mGlobalDefines.end() ? std::string_view(global->second) : std::string_view();
-        };
         if (vertexKey != nullptr && fragmentKey != nullptr && hasCapability(capabilities, ProgramCapability::Instanced)
             && (mode != MaterialMode::Array || hasCapability(capabilities, ProgramCapability::ArrayMaterial)))
         {
@@ -855,13 +848,12 @@ namespace Shader
             // Diffuse-only materials get a cheaper variant.
             const bool diffuseOnly
                 = !full && !uberBeyondDiffuse(vertexKey->second) && !uberBeyondDiffuse(fragmentKey->second);
-            const bool clustered = defineValue(vertexKey->second, "lightingMethodClustered") == "1";
             const auto twin = [&](const MapKey& key) {
                 DefineMap defines = key.second;
                 defines["gpuUber"] = "0";
                 if (uber && mode != MaterialMode::Legacy)
                     applyUberDefines(defines, diffuseOnly);
-                applyInstancedDefines(defines, mode, clustered);
+                applyInstancedDefines(defines, mode);
                 return getShaderInternal(key.first, defines);
             };
             osg::ref_ptr<osg::Shader> vertex = twin(*vertexKey);
@@ -957,8 +949,14 @@ namespace Shader
 
     bool ShaderManager::createSourceFromTemplate(std::string& source,
         std::vector<std::string>& linkedShaderTemplateNames, const std::string& templateName,
-        const ShaderManager::DefineMap& defines)
+        ShaderManager::DefineMap defines)
     {
+        const auto enabled = [&](const std::string& name) {
+            const auto& values = defines.contains(name) ? defines : mGlobalDefines;
+            const auto found = values.find(name);
+            return found != values.end() && found->second == "1";
+        };
+        defines["clusteredClassic"] = enabled("lightingMethodClustered") && enabled("classicFalloff") ? "1" : "0";
         if (!parseDefines(source, defines, mGlobalDefines, templateName))
             return false;
         if (!parseDirectives(source, linkedShaderTemplateNames, defines, mGlobalDefines, templateName))
@@ -1100,7 +1098,7 @@ namespace Shader
             { "gpuLegacyBindings", "1" },
             { "gpuArrayBindings", "0" },
             { "gpuBindlessBindings", "0" },
-            { "gpuLightList", "0" },
+            { "clusteredClassic", "0" },
             { "legacyLightList", "1" },
             { "adjustCoverage", "0" },
         };

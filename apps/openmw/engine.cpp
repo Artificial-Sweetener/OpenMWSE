@@ -531,7 +531,7 @@ void OMW::Engine::createGraphicsContext()
     const bool windowBorder = Settings::video().mWindowBorder;
     const SDLUtil::VSyncMode vsync = Settings::video().mVsyncMode;
     unsigned antialiasing = static_cast<unsigned>(Settings::video().mAntialiasing);
-    const bool debugOpenGL = Debug::shouldDebugOpenGL() || Settings::terrain().mObjectPagingGpuDriven;
+    const bool debugOpenGL = Debug::shouldDebugOpenGL() || Settings::optimizations().useGpuDrivenPaging();
 
     osg::ref_ptr<osg::GraphicsContext> graphicsContext;
     if (mDiagnosticChild && !mDiagnosticHeaded)

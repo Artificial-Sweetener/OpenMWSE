@@ -1,8 +1,12 @@
 #ifndef OPENMW_COMPONENTS_LIGHTUTIL_H
 #define OPENMW_COMPONENTS_LIGHTUTIL_H
 
+#include <cstdint>
+
 #include <osg/Vec4f>
 #include <osg/ref_ptr>
+
+#include <components/esm3/refnum.hpp>
 
 namespace osg
 {
@@ -20,6 +24,8 @@ namespace SceneUtil
     class Light;
     class LightSource;
     struct LightCommon;
+
+    std::uint64_t pagedLightId(ESM::RefNum refNum);
 
     /// @brief Set up global attenuation settings for a Light.
     /// @param radius The radius of the light source.

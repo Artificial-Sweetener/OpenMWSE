@@ -55,6 +55,7 @@ namespace osgUtil
 
 namespace SceneUtil
 {
+    class LightListCallback;
     class LightManager;
     class Material;
     class PositionAttitudeTransform;
@@ -141,7 +142,8 @@ namespace MWRender
             State
         };
 
-        explicit GpuScene(Shader::ShaderManager& shaderManager);
+        /// Construct the GPU scene with immutable skinning and material policies.
+        GpuScene(Shader::ShaderManager& shaderManager, bool gpuSkinning, bool packedTextures);
         ~GpuScene() override;
 
         osg::ref_ptr<osg::Node> createTerrainChunk(
@@ -175,8 +177,9 @@ namespace MWRender
             const osg::LOD::MinMaxPair& refDistances, bool smallFeatureCulling, std::vector<Instance>& out) const;
         /// False once a cached material retires.
         bool isTemplateLive(const GpuTemplate& tmpl) const;
-        osg::ref_ptr<osg::Node> createChunk(std::vector<Instance>&& instances, const osg::BoundingSphere& bound);
-        /// Rebuilds chunk instance records in place.
+        osg::ref_ptr<osg::Node> createChunk(
+            std::vector<Instance>&& instances, const osg::BoundingSphere& bound, bool lit);
+        /// Rebakes a chunk's instance records in place.
         bool updateChunk(osg::Node& node, const std::vector<Instance>& instances, const osg::BoundingSphere& bound);
         /// Culls residents without scene graph nodes.
         void addResident(osg::Node& node);
@@ -336,6 +339,7 @@ namespace MWRender
             std::vector<Id> mMeshes;
             std::vector<Id> mMaterials;
             osg::BoundingSphere mBounds;
+            std::uint32_t mReceiverSlot = 0;
         };
 
         struct GpuInstance
@@ -352,7 +356,7 @@ namespace MWRender
         static_assert(offsetof(GpuInstance, mMeta) == 80);
         static_assert(offsetof(GpuInstance, mMaterial) == 96);
 
-        static GpuInstance makeRecord(const Instance& instance, Id batch, Id slot, Id generation);
+        static GpuInstance makeRecord(const Instance& instance, Id batch, Id slot, Id generation, Id lightSlot);
 
         struct GpuOcclusion
         {
@@ -503,6 +507,12 @@ namespace MWRender
             std::uint32_t mMatrixCount = 0;
         };
 
+        struct ReceiverSlot
+        {
+            Id mSlot;
+            std::uint32_t mReceiver;
+        };
+
         struct DynamicInstance
         {
             std::shared_ptr<const ActorBatch> mBatch;
@@ -511,6 +521,7 @@ namespace MWRender
             Id mMesh = sInvalid;
             Id mBucket = sInvalid;
             Id mMaterial = sInvalid;
+            std::uint32_t mReceiver = 0;
             bool mUpdateMesh = false;
         };
 
@@ -543,6 +554,7 @@ namespace MWRender
             osg::Matrixf mViewProj;
             bool mOcclusion = false;
             std::vector<std::pair<Id, Id>> mChunks;
+            std::vector<ReceiverSlot> mReceivers;
             std::vector<DynamicInstance> mDynamic;
             std::vector<SkinUpdate> mSkins;
         };
@@ -640,13 +652,14 @@ namespace MWRender
             unsigned int frame, SceneUtil::RigGeometry& rig, SkinPose& out, unsigned int snapshot = sInvalid);
         bool getBatchPose(unsigned int frame, const ActorBatch& batch, SkinPose& out);
         void recordActorBatch(osgUtil::CullVisitor& cv, ViewRecord& view, const std::shared_ptr<ActorBatch>& batch,
-            const osg::Matrixf& world);
+            const osg::Matrixf& world, std::uint32_t receiver);
         bool runSkin(osg::State& state, const std::vector<GpuSkinTask>& tasks,
             const std::vector<GpuSkinMatrix>& matrices, std::uint32_t maxVertices);
         bool applySkin(osg::State& state, const std::vector<SkinUpdate>& skins);
         bool applyRaySkin(osg::State& state, const RayBatch& batch);
-        bool prepareDynamic(
-            osg::State& state, std::vector<DynamicInstance>& dynamic, const std::vector<SkinUpdate>& skins);
+        bool prepareDynamic(osg::State& state, std::vector<DynamicInstance>& dynamic,
+            const std::vector<SkinUpdate>& skins, std::uint32_t receiverBase, std::vector<ReceiverSlot>& receivers);
+        bool prepareReceivers(std::uint32_t view, const std::vector<ReceiverSlot>& receivers);
         std::unique_ptr<RayBatch> makeRayBatchLocked(std::vector<RayRequest>&& requests);
         bool runRay(osg::State& state, osg::GraphicsContext& context, std::unique_ptr<RayBatch>& batch);
         static RayHit decodeRay(const RayBatch& batch, std::size_t ray, const void* hit, bool valid);
@@ -659,7 +672,7 @@ namespace MWRender
         friend class GpuChunkNode;
 
         void recordView(osgUtil::CullVisitor& cv);
-        void markChunk(osgUtil::CullVisitor& cv, Id slot, Id generation);
+        void markChunk(osgUtil::CullVisitor& cv, Id slot, Id generation, bool lit);
         void releaseChunk(GpuChunkNode& node, Id slot);
         void removeResidentLocked(GpuChunkNode& chunk);
         void update(unsigned int frame);
@@ -672,6 +685,7 @@ namespace MWRender
         std::atomic<bool> mSupported{ false };
         Shader::MaterialMode mMaterialMode = Shader::MaterialMode::Legacy;
         std::atomic<bool> mArraysProbed{ false };
+        bool mGpuSkinningEnabled = false;
         std::atomic<bool> mEnabled{ true };
         std::atomic<bool> mOcclusionEnabled{ true };
         osg::ref_ptr<GpuSceneNode> mNode;
@@ -697,6 +711,8 @@ namespace MWRender
             SceneUtil::PositionAttitudeTransform* mActor;
             Id mMesh = sInvalid;
             Surface mSurface;
+            osg::ref_ptr<SceneUtil::LightListCallback> mLightList;
+            osg::ref_ptr<osg::Node> mLightNode;
             bool mBatched = false;
         };
         std::vector<RigEntry> mRigRegistry;
@@ -759,11 +775,13 @@ namespace MWRender
             Id mSlot;
             Id mGeneration;
             osg::BoundingSphere mBound;
+            bool mLit;
         };
         std::vector<Resident> mResidents;
         std::vector<GpuChunkNode*> mResidentNodes;
         Id mNextGeneration = 1;
         RangeAllocator mInstances;
+        RangeAllocator mReceiverSlots;
         std::deque<PendingMesh> mPendingMeshes;
         std::deque<PendingInstances> mPendingInstances;
         std::deque<PendingSkin> mPendingSkins;

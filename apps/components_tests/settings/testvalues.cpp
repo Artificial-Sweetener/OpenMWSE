@@ -234,6 +234,20 @@ namespace Settings
             values.mOptimizations.mEnabled.set(false);
             EXPECT_TRUE(values.mOptimizations.mGpuSkinning);
             EXPECT_FALSE(values.mOptimizations.isActive(values.mOptimizations.mGpuSkinning));
+
+            values.mOptimizations.mGpuDrivenPaging.set(true);
+            EXPECT_FALSE(values.mOptimizations.isActive(values.mOptimizations.mGpuDrivenPaging));
+            EXPECT_FALSE(values.mOptimizations.useGpuDrivenPaging());
+            values.mOptimizations.mEnabled.set(true);
+            EXPECT_TRUE(values.mOptimizations.isActive(values.mOptimizations.mGpuDrivenPaging));
+            EXPECT_TRUE(values.mOptimizations.useGpuDrivenPaging());
+            EXPECT_FALSE(values.mOptimizations.useGpuActors());
+            values.mOptimizations.mGpuSkinning.set(false);
+            values.mOptimizations.mGpuActors.set(true);
+            EXPECT_TRUE(values.mOptimizations.useGpuActors());
+            EXPECT_FALSE(values.mOptimizations.useGpuSkinning());
+            values.mOptimizations.mGpuSkinning.set(true);
+            EXPECT_TRUE(values.mOptimizations.useGpuSkinning());
         }
 
         /// Save and reload the prerequisite independently from retained subordinate selections.

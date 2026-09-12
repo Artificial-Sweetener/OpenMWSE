@@ -181,8 +181,6 @@ namespace
                  "particleOcclusion", "reconstructNormalZ", "softParticles", "adjustCoverage" })
             defines[name] = "0";
         defines["alphaFunc"] = std::to_string(GL_ALWAYS);
-        defines["lightingMethodClustered"] = "1";
-        defines["useGPUShader4"] = "1";
         return defines;
     }
 
@@ -309,6 +307,7 @@ namespace
             // Light defines the renderer supplies globally.
             globals["maxLights"] = "16";
             globals["simpleLighting"] = "0";
+            globals["lightingMethodClustered"] = "0";
             mShaderManager.setGlobalDefines(globals);
             const Shader::ShaderManager::DefineMap defines = objectDefines();
             const osg::ref_ptr<osg::Shader> vertex = mShaderManager.getShader("objects.vert", defines);
@@ -329,7 +328,7 @@ namespace
 
         std::unique_ptr<GpuScene> makeScene()
         {
-            auto scene = std::make_unique<GpuScene>(mShaderManager);
+            auto scene = std::make_unique<GpuScene>(mShaderManager, true, true);
             scene->setDefaultMaterial(new SceneUtil::Material);
             return scene;
         }
@@ -457,6 +456,75 @@ namespace
         ASSERT_NE(surfaceOf(*scene, *state).mBucket, GpuScene::sInvalid);
         EXPECT_EQ(statValue(*scene, "GPU array pools"), 1.0);
         EXPECT_EQ(statValue(*scene, "GPU legacy materials"), 0.0);
+    }
+
+    TEST_F(GpuSceneArrayTest, RespectsLighting)
+    {
+        const osg::ref_ptr<osg::Program> instanced
+            = mShaderManager.getInstancedProgram(*mProgram, Shader::MaterialMode::Legacy);
+        ASSERT_TRUE(instanced);
+        const auto findShader = [](const osg::Program& program, const char* name) -> const osg::Shader* {
+            for (unsigned int i = 0; i < program.getNumShaders(); ++i)
+                if (program.getShader(i)->getName().find(name) != std::string::npos)
+                    return program.getShader(i);
+            return nullptr;
+        };
+        const auto hasShader
+            = [&](const osg::Program& program, const char* name) { return findShader(program, name) != nullptr; };
+        EXPECT_FALSE(hasShader(*instanced, "lighting_vertex_gpu.glsl"));
+        EXPECT_FALSE(hasShader(*instanced, "lighting_fragment_gpu.glsl"));
+        EXPECT_FALSE(hasShader(*instanced, "lighting_vertex_legacy.glsl"));
+        EXPECT_FALSE(hasShader(*instanced, "lighting_fragment_legacy.glsl"));
+        EXPECT_TRUE(hasShader(*instanced, "lib/core/lighting_vertex.glsl"));
+        EXPECT_TRUE(hasShader(*instanced, "lib/core/lighting_fragment.glsl"));
+        for (const char* name : { "lib/core/lighting_vertex.glsl", "lib/core/lighting_fragment.glsl" })
+        {
+            const osg::Shader* shader = findShader(*instanced, name);
+            ASSERT_NE(shader, nullptr);
+            EXPECT_LT(shader->getShaderSource().find("#extension"), shader->getShaderSource().find("pointLightSSBO"));
+        }
+
+        Shader::ShaderManager::DefineMap globals = mShaderManager.getGlobalDefines();
+        globals["lightingMethodClustered"] = "1";
+        globals["legacyLightList"] = "0";
+        globals["useGPUShader4"] = "1";
+        Shader::ShaderManager clusteredManager;
+        clusteredManager.setShaderPath(std::filesystem::path{ OPENMW_PROJECT_SOURCE_DIR } / "files" / "shaders");
+        clusteredManager.setGlobalDefines(globals);
+        const Shader::ShaderManager::DefineMap defines = objectDefines();
+        const osg::ref_ptr<osg::Shader> vertex = clusteredManager.getShader("objects.vert", defines);
+        const osg::ref_ptr<osg::Shader> fragment = clusteredManager.getShader("objects.frag", defines);
+        ASSERT_TRUE(vertex);
+        ASSERT_TRUE(fragment);
+        const osg::ref_ptr<osg::Program> program = clusteredManager.getProgram(vertex, fragment, nullptr, {},
+            Shader::ProgramCapability::Instanced | Shader::ProgramCapability::ArrayMaterial
+                | Shader::ProgramCapability::UberMaterial);
+        ASSERT_TRUE(program);
+        const osg::ref_ptr<osg::Program> clustered
+            = clusteredManager.getInstancedProgram(*program, Shader::MaterialMode::Legacy);
+        ASSERT_TRUE(clustered);
+        EXPECT_FALSE(hasShader(*clustered, "lighting_vertex_legacy.glsl"));
+        EXPECT_FALSE(hasShader(*clustered, "lighting_fragment_legacy.glsl"));
+        EXPECT_FALSE(hasShader(*clustered, "lighting_vertex_gpu.glsl"));
+        EXPECT_FALSE(hasShader(*clustered, "lighting_fragment_gpu.glsl"));
+        EXPECT_TRUE(hasShader(*clustered, "lib/core/lighting_vertex.glsl"));
+        EXPECT_TRUE(hasShader(*clustered, "lib/core/lighting_fragment.glsl"));
+    }
+
+    TEST_F(GpuSceneArrayTest, LinksLegacySky)
+    {
+        const osg::ref_ptr<osg::Program> sky
+            = mShaderManager.getProgram("sky", {}, nullptr, {}, Shader::ProgramCapability::Instanced);
+        ASSERT_TRUE(sky);
+        const osg::ref_ptr<osg::Program> instanced
+            = mShaderManager.getInstancedProgram(*sky, Shader::MaterialMode::Legacy);
+        ASSERT_TRUE(instanced);
+
+        osg::State& state = *sContext->getState();
+        state.applyAttribute(instanced);
+        const osg::Program::PerContextProgram* program = instanced->getPCP(state);
+        ASSERT_NE(program, nullptr);
+        EXPECT_TRUE(program->isLinked());
     }
 
     TEST_F(GpuSceneArrayTest, PacksCompatibleLayers)
@@ -680,7 +748,7 @@ namespace
             *tmpl, osg::Matrixf::identity(), 1.f, { 0.f, std::numeric_limits<float>::max() }, false, instances);
         ASSERT_FALSE(instances.empty());
         osg::ref_ptr<osg::Node> chunk
-            = scene->createChunk(std::move(instances), osg::BoundingSphere(osg::Vec3f(), 1.f));
+            = scene->createChunk(std::move(instances), osg::BoundingSphere(osg::Vec3f(), 1.f), false);
         ASSERT_TRUE(chunk);
 
         // Chunk users outlast the grace period.
@@ -762,7 +830,7 @@ namespace
         ASSERT_FALSE(scene->isTemplateLive(*tmpl));
 
         // Paging re-extracts the template after this.
-        EXPECT_FALSE(scene->createChunk(std::move(instances), osg::BoundingSphere(osg::Vec3f(), 1.f)));
+        EXPECT_FALSE(scene->createChunk(std::move(instances), osg::BoundingSphere(osg::Vec3f(), 1.f), false));
     }
 
     TEST_F(GpuSceneArrayTest, IsolatesLiveMaterial)
@@ -963,5 +1031,98 @@ namespace
         ASSERT_NE(result, nullptr);
         EXPECT_TRUE(result->mLegacy);
         EXPECT_EQ(result->mGeometries.size(), 1u);
+    }
+
+    TEST_F(GpuSceneArrayTest, ReceiversSkipUnlitChunks)
+    {
+        const std::unique_ptr<GpuScene> scene = makeScene();
+        ASSERT_TRUE(scene->isSupported());
+
+        const osg::ref_ptr<osg::Texture2D> texture = makeTexture(makeImage(sSide, 11));
+        const osg::ref_ptr<osg::Geometry> geometry = makeTriangle();
+        geometry->setStateSet(makeState(*texture));
+        const std::unique_ptr<const MWRender::GpuTemplate> tmpl = scene->extract(*geometry, ~0u, false);
+        ASSERT_TRUE(tmpl);
+
+        std::vector<GpuScene::Instance> instances;
+        scene->appendInstances(
+            *tmpl, osg::Matrixf::identity(), 1.f, { 0.f, std::numeric_limits<float>::max() }, false, instances);
+        ASSERT_FALSE(instances.empty());
+        const osg::ref_ptr<osg::Node> chunk
+            = scene->createChunk(std::move(instances), osg::BoundingSphere(osg::Vec3f(), 1.f), false);
+        ASSERT_TRUE(chunk);
+
+        EXPECT_EQ(statValue(*scene, "GPU receiver slots"), 0.0);
+    }
+
+    TEST_F(GpuSceneArrayTest, ReceiversShareChunkInstances)
+    {
+        const std::unique_ptr<GpuScene> scene = makeScene();
+        ASSERT_TRUE(scene->isSupported());
+
+        const osg::ref_ptr<osg::Texture2D> texture = makeTexture(makeImage(sSide, 12));
+        const osg::ref_ptr<osg::Geometry> geometry = makeTriangle();
+        geometry->setStateSet(makeState(*texture));
+        const std::unique_ptr<const MWRender::GpuTemplate> tmpl = scene->extract(*geometry, ~0u, false);
+        ASSERT_TRUE(tmpl);
+
+        std::vector<GpuScene::Instance> first;
+        scene->appendInstances(
+            *tmpl, osg::Matrixf::identity(), 1.f, { 0.f, std::numeric_limits<float>::max() }, false, first);
+        scene->appendInstances(*tmpl, osg::Matrixf::translate(4.f, 0.f, 0.f), 1.f,
+            { 0.f, std::numeric_limits<float>::max() }, false, first);
+        const std::size_t firstCount = first.size();
+        ASSERT_GE(firstCount, 2u);
+        const osg::ref_ptr<osg::Node> lit
+            = scene->createChunk(std::move(first), osg::BoundingSphere(osg::Vec3f(), 1.f), true);
+        ASSERT_TRUE(lit);
+
+        // The sentinel burns one slot.
+        EXPECT_EQ(statValue(*scene, "GPU receiver slots"), 2.0);
+
+        std::vector<GpuScene::Instance> second;
+        scene->appendInstances(*tmpl, osg::Matrixf::translate(8.f, 0.f, 0.f), 1.f,
+            { 0.f, std::numeric_limits<float>::max() }, false, second);
+        const osg::ref_ptr<osg::Node> more
+            = scene->createChunk(std::move(second), osg::BoundingSphere(osg::Vec3f(), 1.f), true);
+        ASSERT_TRUE(more);
+
+        EXPECT_EQ(statValue(*scene, "GPU receiver slots"), 3.0);
+    }
+
+    TEST_F(GpuSceneArrayTest, ReceiversReuseFreedSlots)
+    {
+        const std::unique_ptr<GpuScene> scene = makeScene();
+        ASSERT_TRUE(scene->isSupported());
+
+        const osg::ref_ptr<osg::Texture2D> texture = makeTexture(makeImage(sSide, 13));
+        const osg::ref_ptr<osg::Geometry> geometry = makeTriangle();
+        geometry->setStateSet(makeState(*texture));
+        const std::unique_ptr<const MWRender::GpuTemplate> tmpl = scene->extract(*geometry, ~0u, false);
+        ASSERT_TRUE(tmpl);
+
+        std::vector<GpuScene::Instance> instances;
+        scene->appendInstances(
+            *tmpl, osg::Matrixf::identity(), 1.f, { 0.f, std::numeric_limits<float>::max() }, false, instances);
+        const std::size_t count = instances.size();
+        ASSERT_GE(count, 1u);
+        osg::ref_ptr<osg::Node> lit
+            = scene->createChunk(std::move(instances), osg::BoundingSphere(osg::Vec3f(), 1.f), true);
+        ASSERT_TRUE(lit);
+        const double grown = statValue(*scene, "GPU receiver slots");
+        EXPECT_EQ(grown, 2.0);
+
+        lit = nullptr;
+
+        std::vector<GpuScene::Instance> replacement;
+        scene->appendInstances(
+            *tmpl, osg::Matrixf::identity(), 1.f, { 0.f, std::numeric_limits<float>::max() }, false, replacement);
+        ASSERT_EQ(replacement.size(), count);
+        const osg::ref_ptr<osg::Node> reused
+            = scene->createChunk(std::move(replacement), osg::BoundingSphere(osg::Vec3f(), 1.f), true);
+        ASSERT_TRUE(reused);
+
+        // The freed range serves the new chunk.
+        EXPECT_EQ(statValue(*scene, "GPU receiver slots"), grown);
     }
 }

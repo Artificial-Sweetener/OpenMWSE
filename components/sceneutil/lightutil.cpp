@@ -42,6 +42,13 @@ namespace
 namespace SceneUtil
 {
 
+    std::uint64_t pagedLightId(ESM::RefNum refNum)
+    {
+        if (!refNum.hasContentFile())
+            return 0;
+        return (static_cast<std::uint64_t>(refNum.mContentFile) + 1) << 32 | refNum.mIndex;
+    }
+
     void configureLight(SceneUtil::Light* light, float radius, bool isExterior)
     {
         float quadraticAttenuation = 0.f;

@@ -31,8 +31,8 @@ namespace SceneUtil
     {
         ranges.clear();
         weights.clear();
-        ranges.reserve(mData->mInfluences.size());
-        for (const auto& influence : mData->mInfluences)
+        ranges.reserve(mData->mGpuInfluences.size());
+        for (const auto& influence : mData->mGpuInfluences)
         {
             ranges.push_back(
                 { static_cast<std::uint32_t>(weights.size()), static_cast<std::uint32_t>(influence.first.size()) });
@@ -42,8 +42,7 @@ namespace SceneUtil
         return mData->mBones.size();
     }
 
-    bool RigGeometry::getLatestPalette(
-        unsigned int& frame, std::vector<osg::Matrixf>& out, osg::Matrixf* local) const
+    bool RigGeometry::getLatestPalette(unsigned int& frame, std::vector<osg::Matrixf>& out, osg::Matrixf* local) const
     {
         std::lock_guard<std::mutex> lock(mGpuSkinMutex);
         const GpuSkinFrame* latest = nullptr;
@@ -139,7 +138,7 @@ namespace SceneUtil
         {
             const auto* source = static_cast<const osg::Vec3Array*>(mSourceGeometry->getVertexArray());
             auto* target = static_cast<osg::Vec3Array*>(mQueryGeometry->getVertexArray());
-            for (const auto& influence : mData->mInfluences)
+            for (const auto& influence : mData->mGpuInfluences)
             {
                 osg::Matrixf result(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
                 for (const auto& [bone, weight] : influence.first)

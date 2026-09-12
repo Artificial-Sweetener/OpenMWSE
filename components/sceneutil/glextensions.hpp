@@ -10,6 +10,7 @@ namespace SceneUtil
     osg::GLExtensions& getGLExtensions();
     GLint getMaxShaderStorageBindings();
     GLint getMaxVertexStorageBlocks();
+    GLint getFragmentStorageBlocks();
 
     class GetGLExtensionsOperation : public osg::GraphicsOperation
     {

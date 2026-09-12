@@ -60,6 +60,7 @@
 #include <components/sceneutil/shadowsbin.hpp>
 #include <components/sceneutil/statesetupdater.hpp>
 #include <components/sceneutil/texturetype.hpp>
+#include <components/sceneutil/util.hpp>
 #include <components/sceneutil/workqueue.hpp>
 #include <components/settings/values.hpp>
 #include <components/shader/shadermanager.hpp>
@@ -91,6 +92,12 @@
 #endif
 #ifndef GL_TEXTURE_SAMPLES
 #define GL_TEXTURE_SAMPLES 0x9106
+#endif
+#ifndef GL_MAX_FRAGMENT_SHADER_STORAGE_BLOCKS
+#define GL_MAX_FRAGMENT_SHADER_STORAGE_BLOCKS 0x90DA
+#endif
+#ifndef GL_MAX_COMBINED_SHADER_STORAGE_BLOCKS
+#define GL_MAX_COMBINED_SHADER_STORAGE_BLOCKS 0x90DC
 #endif
 #ifndef GL_ARRAY_BUFFER
 #define GL_ARRAY_BUFFER 0x8892
@@ -339,7 +346,8 @@ namespace MWRender
         constexpr const char* sTexMatNames[]
             = { "texMat0", "texMat1", "texMat2", "texMat3", "texMat4", "texMat5", "texMat6", "texMat7" };
         constexpr GLint sMaxStorageBinding = 23;
-        constexpr GLint sVertexStorageBlocks = 2;
+        constexpr GLint sVertexStorageBlocks = 6;
+        constexpr GLint sFragmentStorageBlocks = 4;
 
         constexpr unsigned int sLinksPerFrame = 4;
         constexpr std::size_t sUploadsPerFrame = 200;
@@ -739,7 +747,7 @@ namespace MWRender
                     || dynamic_cast<osg::Sequence*>(&node) != nullptr
                     || (node.getNodeMask() != ~0u && node.getNodeMask() != Mask_GpuProxy);
                 for (const osg::Callback* callback = node.getCullCallback(); callback != nullptr;
-                     callback = callback->getNestedCallback())
+                    callback = callback->getNestedCallback())
                     conditional = conditional || dynamic_cast<const SceneUtil::LightListCallback*>(callback) == nullptr;
                 mUpdaterDepth += updater;
                 mConditionalDepth += conditional;
@@ -847,15 +855,18 @@ namespace MWRender
         GpuChunkNode(const GpuChunkNode& copy, const osg::CopyOp& copyop = osg::CopyOp::SHALLOW_COPY)
             : osg::Node(copy, copyop)
             , mScene(nullptr)
+            , mLit(copy.mLit)
             , mBound(copy.mBound)
         {
         }
         META_Node(MWRender, GpuChunkNode)
 
-        GpuChunkNode(GpuScene& scene, GpuScene::Id slot, GpuScene::Id generation, const osg::BoundingSphere& bound)
+        GpuChunkNode(
+            GpuScene& scene, GpuScene::Id slot, GpuScene::Id generation, bool lit, const osg::BoundingSphere& bound)
             : mScene(&scene)
             , mSlot(slot)
             , mGeneration(generation)
+            , mLit(lit)
             , mBound(bound)
         {
         }
@@ -869,6 +880,7 @@ namespace MWRender
         void detach() { mScene.store(nullptr, std::memory_order_release); }
         GpuScene::Id getSlot() const { return mSlot; }
         GpuScene::Id getGeneration() const { return mGeneration; }
+        bool isLit() const { return mLit; }
         void setBound(const osg::BoundingSphere& bound)
         {
             mBound = bound;
@@ -883,7 +895,7 @@ namespace MWRender
             if (scene == nullptr || nv.getVisitorType() != osg::NodeVisitor::CULL_VISITOR)
                 return;
             osgUtil::CullVisitor& cv = static_cast<osgUtil::CullVisitor&>(nv);
-            scene->markChunk(cv, mSlot, mGeneration);
+            scene->markChunk(cv, mSlot, mGeneration, mLit);
             if (cv.getComputeNearFarMode() != osg::CullSettings::DO_NOT_COMPUTE_NEAR_FAR && mBound.valid())
             {
                 osg::BoundingBox box;
@@ -898,6 +910,7 @@ namespace MWRender
         std::atomic<GpuScene*> mScene{ nullptr };
         GpuScene::Id mSlot = 0;
         GpuScene::Id mGeneration = 0;
+        bool mLit = false;
         osg::BoundingSphere mBound;
     };
 
@@ -1498,6 +1511,7 @@ namespace MWRender
         std::size_t mCommandBytes = 0;
         GLuint mViewBuffer = 0;
         GLuint mOcclusionBuffer = 0;
+        std::vector<GLuint> mReceiverBuffers;
         GLuint mMaterialBuffer = 0;
         GLuint mDynamicInstanceBuffer = 0;
         GLuint mDynamicVisibleBuffer = 0;
@@ -1942,8 +1956,9 @@ namespace MWRender
         }
     };
 
-    GpuScene::GpuScene(Shader::ShaderManager& shaderManager)
+    GpuScene::GpuScene(Shader::ShaderManager& shaderManager, bool gpuSkinning, bool packedTextures)
         : mShaderManager(shaderManager)
+        , mGpuSkinningEnabled(gpuSkinning)
     {
         if (!SceneUtil::glExtensionsReady())
             return;
@@ -1960,7 +1975,8 @@ namespace MWRender
         // Realize-time limits refuse before nodes commit.
         const GLint storageBindings = SceneUtil::getMaxShaderStorageBindings();
         if (storageBindings != 0
-            && (storageBindings <= sMaxStorageBinding || SceneUtil::getMaxVertexStorageBlocks() < sVertexStorageBlocks))
+            && (storageBindings <= sMaxStorageBinding || SceneUtil::getMaxVertexStorageBlocks() < sVertexStorageBlocks
+                || SceneUtil::getFragmentStorageBlocks() < sFragmentStorageBlocks))
         {
             Log(Debug::Warning) << "GPU-driven object paging unavailable: too few storage buffer bindings";
             mSupported = false;
@@ -1977,9 +1993,9 @@ namespace MWRender
         const bool forceArray = forcedMode != nullptr && std::string_view(forcedMode) == "array";
         const bool forceLegacy = forcedMode != nullptr && std::string_view(forcedMode) == "legacy";
         const GLint maxLayers = ext.isTexture2DArraySupported ? ext.maxLayerCount : 0;
-        if (bindless && (shader5 || qualifier) && !forceArray && !forceLegacy)
+        if (packedTextures && bindless && (shader5 || qualifier) && !forceArray && !forceLegacy)
             mMaterialMode = Shader::MaterialMode::Bindless;
-        else if (!forceLegacy && maxLayers >= 2)
+        else if (packedTextures && !forceLegacy && maxLayers >= 2)
             mMaterialMode = Shader::MaterialMode::Array;
         else
         {
@@ -2144,6 +2160,12 @@ namespace MWRender
     {
         if (!isEnabled())
             return;
+        SceneUtil::LightListCallback* lightList = nullptr;
+        // The actor's light list carries torch ignores.
+        for (osg::Callback* callback = node.getCullCallback(); callback != nullptr;
+            callback = callback->getNestedCallback())
+            if ((lightList = dynamic_cast<SceneUtil::LightListCallback*>(callback)) != nullptr)
+                break;
         CaptureVisitor visitor(mNode, actor != nullptr);
         // The sky keeps per-view transforms and state.
         visitor.setTraversalMask(~(Mask_Sky | (actor != nullptr ? Mask_UpdateVisitor : 0u)));
@@ -2168,6 +2190,8 @@ namespace MWRender
         }
         for (const CaptureVisitor::CapturedRig& captured : visitor.mRigs)
         {
+            if (!mGpuSkinningEnabled)
+                continue;
             SceneUtil::RigGeometry* rig = captured.mRig;
             if (orderDependentPath(captured.mStates))
                 continue;
@@ -2187,7 +2211,7 @@ namespace MWRender
                 {
                     ++mMeshes[mesh].mUsers;
                     addMaterialLocked(surface.mMaterial);
-                    mRigRegistry.push_back(RigEntry{ rig, actor, mesh, surface });
+                    mRigRegistry.push_back(RigEntry{ rig, actor, mesh, surface, lightList, &node });
                     if (isEnabled())
                     {
                         rig->setNodeMask(Mask_GpuProxy);
@@ -3543,9 +3567,11 @@ namespace MWRender
                 source.mUnits[i] = unit;
                 source.mTextures[i] = unit < 0
                     ? nullptr
-                    : resolvePair<osg::StateSet::RefAttributePair>(source.mPath, [&](const osg::StateSet& stateSet) {
-                          return stateSet.getTextureAttributePair(unit, osg::StateAttribute::TEXTURE);
-                      });
+                    : resolvePair<osg::StateSet::RefAttributePair>(
+                          source.mPath,
+                          [&](const osg::StateSet& stateSet) {
+                              return stateSet.getTextureAttributePair(unit, osg::StateAttribute::TEXTURE);
+                          });
             }
             if (source.mTextures[i] != nullptr)
                 material.mTextures[i] = dynamic_cast<osg::Texture*>(source.mTextures[i]->first.get());
@@ -4147,7 +4173,7 @@ namespace MWRender
     }
 
     osg::ref_ptr<osg::Node> GpuScene::createTerrainChunk(
-        Terrain::TerrainDrawable& drawable, const osg::Vec3f& worldOffset, bool)
+        Terrain::TerrainDrawable& drawable, const osg::Vec3f& worldOffset, bool lit)
     {
         if (!isEnabled() || drawable.getPasses().empty())
             return nullptr;
@@ -4175,7 +4201,10 @@ namespace MWRender
             instance.mMaterial = surface.mMaterial;
             instances.push_back(instance);
         }
-        return createChunk(std::move(instances), drawable.getBound());
+        osg::ref_ptr<osg::Node> chunk = createChunk(std::move(instances), drawable.getBound(), lit);
+        if (chunk && lit)
+            chunk->addCullCallback(new SceneUtil::LightListCallback);
+        return chunk;
     }
 
     void GpuScene::setCastingPrograms(const std::vector<osg::ref_ptr<osg::Program>>& programs)
@@ -4215,6 +4244,7 @@ namespace MWRender
                 ++legacy;
         stats.setAttribute(frame, "GPU texture bytes", static_cast<double>(bytes));
         stats.setAttribute(frame, "GPU texture budget", static_cast<double>(mTextures->mBudgetBytes));
+        stats.setAttribute(frame, "GPU receiver slots", static_cast<double>(mReceiverSlots.mExtent));
         stats.setAttribute(frame, "GPU array bytes", static_cast<double>(mTextures->mArrayBytes));
         const std::size_t pools = static_cast<std::size_t>(std::count_if(mTextures->mPools.begin(),
             mTextures->mPools.end(), [](const auto& pool) { return pool != nullptr && pool->mCapacity != 0; }));
@@ -4430,7 +4460,8 @@ namespace MWRender
         }
     }
 
-    osg::ref_ptr<osg::Node> GpuScene::createChunk(std::vector<Instance>&& instances, const osg::BoundingSphere& bound)
+    osg::ref_ptr<osg::Node> GpuScene::createChunk(
+        std::vector<Instance>&& instances, const osg::BoundingSphere& bound, bool lit)
     {
         if (instances.empty())
             return nullptr;
@@ -4446,6 +4477,15 @@ namespace MWRender
             mNextGeneration = 1;
         chunk.mInstanceCount = static_cast<std::uint32_t>(instances.size());
         chunk.mFirstInstance = mInstances.allocate(chunk.mInstanceCount);
+        if (lit)
+        {
+            // Slot zero stays the unlit sentinel.
+            if (mReceiverSlots.mExtent == 0)
+                mReceiverSlots.allocate(1);
+            chunk.mReceiverSlot = mReceiverSlots.allocate(1);
+            if (chunk.mReceiverSlot == sInvalid)
+                chunk.mReceiverSlot = 0;
+        }
 
         Id slot;
         if (!mFreeChunks.empty())
@@ -4464,8 +4504,9 @@ namespace MWRender
         pending.mFirst = chunk.mFirstInstance;
         pending.mRecords.reserve(instances.size());
         pending.mOcclusion.reserve(instances.size());
-        for (const Instance& instance : instances)
+        for (std::size_t i = 0; i < instances.size(); ++i)
         {
+            const Instance& instance = instances[i];
             const Id meshId = mMeshIds.at(instance.mGeometry.get());
             const auto key = std::make_pair(instance.mBucket, meshId);
             auto batchIt = mBatchIds.find(key);
@@ -4481,7 +4522,7 @@ namespace MWRender
             ++batchCounts[batch];
             chunk.mMeshes.push_back(meshId);
             chunk.mMaterials.push_back(instance.mMaterial);
-            pending.mRecords.push_back(makeRecord(instance, batch, slot, chunk.mGeneration));
+            pending.mRecords.push_back(makeRecord(instance, batch, slot, chunk.mGeneration, chunk.mReceiverSlot));
             pending.mOcclusion.push_back(makeOcclusion(instance));
             chunk.mBounds.expandBy(instance.mBounds);
         }
@@ -4499,12 +4540,12 @@ namespace MWRender
         mBatchesDirty = true;
         mPendingInstances.push_back(std::move(pending));
         mChunks[slot] = std::move(chunk);
-        osg::ref_ptr<GpuChunkNode> node = new GpuChunkNode(*this, slot, mChunks[slot].mGeneration, bound);
+        osg::ref_ptr<GpuChunkNode> node = new GpuChunkNode(*this, slot, mChunks[slot].mGeneration, lit, bound);
         mChunkNodes.insert(node.get());
         return node;
     }
 
-    GpuScene::GpuInstance GpuScene::makeRecord(const Instance& instance, Id batch, Id slot, Id generation)
+    GpuScene::GpuInstance GpuScene::makeRecord(const Instance& instance, Id batch, Id slot, Id generation, Id lightSlot)
     {
         GpuInstance record{};
         const osg::Matrixf& m = instance.mWorld;
@@ -4529,7 +4570,7 @@ namespace MWRender
         record.mMeta[2] = generation;
         std::memcpy(&record.mMeta[3], &instance.mLodMax, sizeof(float));
         record.mMaterial[0] = instance.mMaterial;
-        record.mMaterial[1] = sInvalid;
+        record.mMaterial[1] = lightSlot;
         return record;
     }
 
@@ -4582,11 +4623,12 @@ namespace MWRender
         pending.mRecords.reserve(instances.size());
         pending.mOcclusion.reserve(instances.size());
         chunk.mBounds = osg::BoundingSphere();
-        for (const Instance& instance : instances)
+        for (std::size_t i = 0; i < instances.size(); ++i)
         {
+            const Instance& instance = instances[i];
             const Id meshId = mMeshIds.at(instance.mGeometry.get());
             const Id batch = mBatchIds.at(std::make_pair(instance.mBucket, meshId));
-            pending.mRecords.push_back(makeRecord(instance, batch, slot, chunk.mGeneration));
+            pending.mRecords.push_back(makeRecord(instance, batch, slot, chunk.mGeneration, chunk.mReceiverSlot));
             pending.mOcclusion.push_back(makeOcclusion(instance));
             chunk.mBounds.expandBy(instance.mBounds);
         }
@@ -4609,6 +4651,8 @@ namespace MWRender
         for (const Id material : chunk.mMaterials)
             dropMaterialLocked(material);
         mInstances.free(chunk.mFirstInstance, chunk.mInstanceCount);
+        if (chunk.mReceiverSlot != 0)
+            mReceiverSlots.free(chunk.mReceiverSlot, 1);
         chunk = Chunk();
         mFreeChunks.push_back(slot);
         mResidentBound = osg::BoundingSphere();
@@ -4655,6 +4699,7 @@ namespace MWRender
             viewIt->second.mDispatched = false;
             viewIt->second.mPlanes.clear();
             viewIt->second.mChunks.clear();
+            viewIt->second.mReceivers.clear();
             viewIt->second.mDynamic.clear();
             viewIt->second.mSkins.clear();
         }
@@ -4686,10 +4731,18 @@ namespace MWRender
             {
                 if (cv.isCulled(resident.mBound))
                     continue;
+                if (resident.mSlot >= mChunks.size() || mChunks[resident.mSlot].mGeneration != resident.mGeneration)
+                    continue;
+                const Chunk& chunk = mChunks[resident.mSlot];
                 view.mChunks.emplace_back(resident.mSlot, resident.mGeneration);
-                if (resident.mSlot < mChunks.size() && mChunks[resident.mSlot].mGeneration == resident.mGeneration)
-                    for (const Id material : mChunks[resident.mSlot].mMaterials)
-                        markMaterialLocked(material, frame);
+                if (resident.mLit && mLightManager && mLightManager->getClassicLighting())
+                {
+                    osg::BoundingSphere bound = resident.mBound;
+                    SceneUtil::transformBoundingSphere(modelView, bound);
+                    view.mReceivers.push_back({ chunk.mReceiverSlot, mLightManager->addReceiver(cv, bound) });
+                }
+                for (const Id material : chunk.mMaterials)
+                    markMaterialLocked(material, frame);
                 if (nearFar && resident.mBound.valid())
                 {
                     osg::BoundingBox box;
@@ -4725,11 +4778,20 @@ namespace MWRender
             osg::Matrix matrix;
             actor.computeLocalToWorldMatrix(matrix, nullptr);
             const osg::Matrixf world(matrix);
+            std::uint32_t receiver = 0;
+            if (mLightManager && mLightManager->getClassicLighting())
+            {
+                const RigEntry& entry = mRigRegistry[first];
+                osg::BoundingSphere bound = entry.mLightNode->getBound();
+                SceneUtil::transformBoundingSphere(world * modelView, bound);
+                receiver = mLightManager->addReceiver(
+                    cv, bound, entry.mLightList ? &entry.mLightList->getIgnoredLightSources() : nullptr);
+            }
             const auto batches = mActorBatches.find(&actor);
             if (batches != mActorBatches.end())
             {
                 for (const auto& batch : batches->second)
-                    recordActorBatch(cv, view, batch, world);
+                    recordActorBatch(cv, view, batch, world, receiver);
                 if (nearFar)
                 {
                     osg::BoundingBox bound;
@@ -4766,11 +4828,11 @@ namespace MWRender
                 }
 
                 DynamicInstance instance;
-                instance.mGeometry = rig.getGpuGeometry();
                 instance.mWorld = world;
                 instance.mMesh = entry.mMesh;
                 instance.mBucket = entry.mSurface.mBucket;
                 instance.mMaterial = entry.mSurface.mMaterial;
+                instance.mReceiver = receiver;
                 view.mDynamic.push_back(std::move(instance));
                 markMaterialLocked(entry.mSurface.mMaterial, frame);
                 skin.mMesh = entry.mMesh;
@@ -4782,8 +4844,8 @@ namespace MWRender
         }
     }
 
-    void GpuScene::recordActorBatch(
-        osgUtil::CullVisitor& cv, ViewRecord& view, const std::shared_ptr<ActorBatch>& batch, const osg::Matrixf& world)
+    void GpuScene::recordActorBatch(osgUtil::CullVisitor& cv, ViewRecord& view,
+        const std::shared_ptr<ActorBatch>& batch, const osg::Matrixf& world, std::uint32_t receiver)
     {
         const unsigned int frame = cv.getFrameStamp()->getFrameNumber();
         SkinUpdate skin;
@@ -4811,6 +4873,7 @@ namespace MWRender
         instance.mWorld = world;
         instance.mMesh = batch->mMesh;
         instance.mBucket = batch->mBucket;
+        instance.mReceiver = receiver;
         view.mDynamic.push_back(std::move(instance));
     }
 
@@ -4821,7 +4884,7 @@ namespace MWRender
             return;
         std::lock_guard<std::mutex> lock(mMutex);
         chunk->mResident = mResidents.size();
-        mResidents.push_back(Resident{ chunk->getSlot(), chunk->getGeneration(), chunk->getBound() });
+        mResidents.push_back(Resident{ chunk->getSlot(), chunk->getGeneration(), chunk->getBound(), chunk->isLit() });
         mResidentNodes.push_back(chunk);
     }
 
@@ -4925,7 +4988,7 @@ namespace MWRender
     bool GpuScene::record(osgUtil::CullVisitor& cv, osg::Geometry& geometry, bool updateMesh,
         const GpuCaptureCallback& callback, SkinUpdate* skin)
     {
-        static const std::string sLightBuffer = "LightBuffer";
+        static const std::string sLightCluster = "lightCluster";
         thread_local std::vector<const osg::StateSet*> statePath;
         statePath.clear();
         const bool hasBase = sCullPath.mScene == this && sCullPath.mFrame == cv.getFrameStamp()->getFrameNumber()
@@ -4937,7 +5000,7 @@ namespace MWRender
                 || (hasBase
                     && std::find(sCullPath.mStates.begin(), sCullPath.mStates.end(), stateSet)
                         != sCullPath.mStates.end())
-                || stateSet->getUniform(sLightBuffer) != nullptr)
+                || stateSet->getUniform(sLightCluster) != nullptr)
                 continue;
             statePath.push_back(stateSet);
         }
@@ -4952,9 +5015,12 @@ namespace MWRender
         if (viewMatrix != nullptr)
             world *= osg::Matrixf::inverse(osg::Matrixf(*viewMatrix));
         DynamicInstance instance;
-        instance.mGeometry = &geometry;
+        if (updateMesh)
+            instance.mGeometry = &geometry;
         instance.mWorld = world;
         instance.mUpdateMesh = updateMesh;
+        if (mLightManager && mLightManager->getClassicLighting())
+            instance.mReceiver = mLightManager->currentReceiver();
 
         std::lock_guard<std::mutex> lock(mMutex);
         // Only dispatching cameras consume captures.
@@ -4977,15 +5043,19 @@ namespace MWRender
         return true;
     }
 
-    void GpuScene::markChunk(osgUtil::CullVisitor& cv, Id slot, Id generation)
+    void GpuScene::markChunk(osgUtil::CullVisitor& cv, Id slot, Id generation, bool lit)
     {
         std::lock_guard<std::mutex> lock(mMutex);
         const unsigned int frame = cv.getFrameStamp()->getFrameNumber();
         ViewRecord& view = mViews[ViewKey(frame, cv.getCurrentCamera())];
         view.mChunks.emplace_back(slot, generation);
-        if (slot < mChunks.size() && mChunks[slot].mGeneration == generation)
-            for (const Id material : mChunks[slot].mMaterials)
-                markMaterialLocked(material, frame);
+        if (slot >= mChunks.size() || mChunks[slot].mGeneration != generation)
+            return;
+        const Chunk& chunk = mChunks[slot];
+        if (lit && mLightManager && mLightManager->getClassicLighting())
+            view.mReceivers.push_back({ chunk.mReceiverSlot, mLightManager->currentReceiver() });
+        for (const Id material : chunk.mMaterials)
+            markMaterialLocked(material, frame);
     }
 
     void GpuScene::update(unsigned int frame)
@@ -5213,14 +5283,21 @@ namespace MWRender
                     mGl->mGetResetStatus, "glGetGraphicsResetStatus", "glGetGraphicsResetStatusARB");
             GLint storageBindings = 0;
             GLint vertexStorageBlocks = 0;
+            GLint fragmentStorageBlocks = 0;
+            GLint combinedStorageBlocks = 0;
             glGetIntegerv(GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS, &storageBindings);
             glGetIntegerv(GL_MAX_VERTEX_SHADER_STORAGE_BLOCKS, &vertexStorageBlocks);
+            glGetIntegerv(GL_MAX_FRAGMENT_SHADER_STORAGE_BLOCKS, &fragmentStorageBlocks);
+            glGetIntegerv(GL_MAX_COMBINED_SHADER_STORAGE_BLOCKS, &combinedStorageBlocks);
             GLint64 storageLimit = 0;
             mGl->mExt->glGetInteger64v(GL_MAX_SHADER_STORAGE_BLOCK_SIZE, &storageLimit);
             mGl->mStorageLimit = static_cast<std::size_t>(storageLimit);
             Log(Debug::Info) << "GPU storage: bindings=" << storageBindings << " vertexBlocks=" << vertexStorageBlocks
-                             << " blockBytes=" << storageLimit;
-            if (storageBindings <= sMaxStorageBinding || vertexStorageBlocks < sVertexStorageBlocks)
+                             << " fragmentBlocks=" << fragmentStorageBlocks
+                             << " combinedBlocks=" << combinedStorageBlocks << " blockBytes=" << storageLimit;
+            if (storageBindings <= sMaxStorageBinding || vertexStorageBlocks < sVertexStorageBlocks
+                || fragmentStorageBlocks < sFragmentStorageBlocks
+                || combinedStorageBlocks < sVertexStorageBlocks + sFragmentStorageBlocks)
             {
                 Log(Debug::Warning) << "GPU-driven object paging unavailable: too few storage buffer bindings";
                 mSupported = false;
@@ -5257,6 +5334,8 @@ namespace MWRender
             gl.mSkinSourceBuffer, gl.mSkinGroupBuffer, gl.mSkinRangeBuffer, gl.mSkinInfluenceBuffer, gl.mSkinTaskBuffer,
             gl.mSkinMatrixBuffer, gl.mRayBuffer, gl.mRayTaskBuffer };
         gl.mExt->glDeleteBuffers(static_cast<GLsizei>(std::size(buffers)), buffers);
+        gl.mExt->glDeleteBuffers(static_cast<GLsizei>(gl.mReceiverBuffers.size()), gl.mReceiverBuffers.data());
+        gl.mReceiverBuffers.clear();
         gl.mVertexBuffer = 0;
         gl.mIndexBuffer = 0;
         gl.mInstanceBuffer = 0;
@@ -5350,7 +5429,7 @@ void main()
 )GLSL";
 
         /// Object defines an array material variant needs.
-        Shader::ShaderManager::DefineMap arrayDefines(bool clusteredLighting)
+        Shader::ShaderManager::DefineMap arrayDefines()
         {
             Shader::ShaderManager::DefineMap defines;
             for (const char* name : Shader::sMaterialMapNames)
@@ -5364,9 +5443,8 @@ void main()
             defines["alphaFunc"] = std::to_string(GL_GREATER);
             defines["adjustCoverage"] = "1";
             defines["useGPUShader4"] = "1";
-            defines["lightingMethodClustered"] = clusteredLighting ? "1" : "0";
             defines["gpuUber"] = "1";
-            Shader::ShaderManager::applyInstancedDefines(defines, Shader::MaterialMode::Array, clusteredLighting);
+            Shader::ShaderManager::applyInstancedDefines(defines, Shader::MaterialMode::Array);
             return defines;
         }
     }
@@ -5465,10 +5543,7 @@ void main()
             osg::Program::PerContextProgram* pcp = program->getPCP(state);
             return pcp != nullptr && pcp->isLinked();
         };
-        const Shader::ShaderManager::DefineMap globals = mShaderManager.getGlobalDefines();
-        const auto clustered = globals.find("lightingMethodClustered");
-        const Shader::ShaderManager::DefineMap defines
-            = arrayDefines(clustered != globals.end() && clustered->second == "1");
+        const Shader::ShaderManager::DefineMap defines = arrayDefines();
         osg::ref_ptr<osg::Shader> vertex = mShaderManager.getShader("objects.vert", defines);
         osg::ref_ptr<osg::Shader> fragment = mShaderManager.getShader("objects.frag", defines);
         if (vertex == nullptr || fragment == nullptr)
@@ -5756,8 +5831,8 @@ void main()
         return runSkin(state, tasks, batch.mSkinMatrices, maxVertices);
     }
 
-    bool GpuScene::prepareDynamic(
-        osg::State& state, std::vector<DynamicInstance>& dynamic, const std::vector<SkinUpdate>& skins)
+    bool GpuScene::prepareDynamic(osg::State& state, std::vector<DynamicInstance>& dynamic,
+        const std::vector<SkinUpdate>& skins, std::uint32_t receiverBase, std::vector<ReceiverSlot>& receivers)
     {
         Gl& gl = *mGl;
         const unsigned int frame = state.getFrameStamp()->getFrameNumber();
@@ -5781,6 +5856,11 @@ void main()
         }
         if (dynamic.empty())
             return true;
+        if (dynamic.size() > sInvalid - receiverBase)
+        {
+            Log(Debug::Warning) << "GPU light slots exceed index limits";
+            return false;
+        }
 
         std::vector<std::array<Id, 3>> order;
         order.reserve(dynamic.size());
@@ -5827,9 +5907,11 @@ void main()
                 for (int row = 0; row < 3; ++row)
                     for (int col = 0; col < 4; ++col)
                         record.mRows[row][col] = instance.mWorld(col, row);
+                record.mMaterial[1] = receiverBase + static_cast<std::uint32_t>(instances.size());
                 record.mMaterial[0] = instance.mMaterial;
-                record.mMaterial[1] = sInvalid;
                 instances.push_back(record);
+                if (instance.mReceiver != 0)
+                    receivers.push_back({ record.mMaterial[1], instance.mReceiver });
                 if (instance.mUpdateMesh)
                 {
                     // Skip uploads for unchanged vertex data.
@@ -5887,6 +5969,27 @@ void main()
             gl.upload(gl.mVertexBuffer, pending.mVertexOffset * sizeof(GpuVertex), vertices.data(), vertices.size());
         }
         gl.createVao(state, true);
+        return true;
+    }
+
+    bool GpuScene::prepareReceivers(std::uint32_t view, const std::vector<ReceiverSlot>& receivers)
+    {
+        Gl& gl = *mGl;
+        // Unmapped slots receive only sunlight.
+        std::size_t slots = 1;
+        for (const ReceiverSlot& receiver : receivers)
+            slots = std::max(slots, static_cast<std::size_t>(receiver.mSlot) + 1);
+        if (slots > gl.mStorageLimit / sizeof(std::uint32_t))
+        {
+            Log(Debug::Warning) << "GPU light slots exceed storage limits";
+            return false;
+        }
+        std::vector<std::uint32_t> indices(slots, 0);
+        for (const ReceiverSlot& receiver : receivers)
+            indices[receiver.mSlot] = receiver.mReceiver;
+        if (gl.mReceiverBuffers.size() <= view)
+            gl.mReceiverBuffers.resize(view + 1, 0);
+        gl.stream(gl.mReceiverBuffers[view], indices.data(), indices.size() * sizeof(std::uint32_t));
         return true;
     }
 
@@ -6287,9 +6390,12 @@ void main()
         std::vector<std::uint32_t> chunkData;
         PendingWork work;
         std::uint32_t instanceExtent = 0;
+        std::uint32_t receiverBase = 0;
         bool needPrepare = false;
         std::vector<DynamicInstance> dynamic;
         std::vector<SkinUpdate> skins;
+        std::vector<ReceiverSlot> receivers;
+        const bool classicLighting = mLightManager != nullptr && mLightManager->getClassicLighting();
         std::unique_ptr<RayBatch> rayBatch;
         std::vector<RayRequest> invalidated;
         struct DrawRange
@@ -6366,6 +6472,8 @@ void main()
                 needPrepare = true;
                 dynamic = std::move(record.mDynamic);
                 skins = std::move(record.mSkins);
+                receivers = std::move(record.mReceivers);
+                receiverBase = std::max(mReceiverSlots.mExtent, 1u);
             }
             if (prepass)
             {
@@ -6423,10 +6531,14 @@ void main()
                 || !runRay(state, *state.getGraphicsContext(), rayBatch))
                 finishRay(mRayState, *rayBatch, nullptr, false);
         }
-        if (needPrepare && !prepareDynamic(state, dynamic, skins))
+        if (needPrepare)
         {
-            mSupported = false;
-            return;
+            if (!prepareDynamic(state, dynamic, skins, receiverBase, receivers)
+                || (classicLighting && !prepareReceivers(viewIndex, receivers)))
+            {
+                mSupported = false;
+                return;
+            }
         }
         CullPass pass = CullPass::Full;
         osg::ref_ptr<const osg::Texture> depthSource;
@@ -6520,6 +6632,10 @@ void main()
             const bool ready = depthSource != nullptr && buildPyramid(state, *depthSource);
             resolve(ready);
             return;
+        }
+        if (classicLighting)
+        {
+            ext.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 15, gl.mReceiverBuffers.at(viewIndex));
         }
         // Stack values applied before the first range.
         std::vector<bool> baseModes(deltaModes.size());

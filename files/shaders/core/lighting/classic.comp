@@ -1,0 +1,94 @@
+#version 430
+
+struct Receiver
+{
+    vec4 bound;
+    uvec4 meta;
+};
+
+layout(std430, binding = 1) readonly buffer ReceiverBuffer { Receiver receivers[]; };
+layout(std430, binding = 3) writeonly buffer GridBuffer { uvec2 grid[]; };
+layout(std430, binding = 4) writeonly buffer IndexBuffer { uint indices[]; };
+layout(std430, binding = 5) readonly buffer BoundBuffer { Receiver lights[]; };
+layout(std430, binding = 6) readonly buffer IgnoreBuffer { uint ignored[]; };
+
+uniform uint lightCount;
+uniform uint receiverCount;
+uniform uint lightLimit;
+
+layout(local_size_x = 64) in;
+
+bool closer(uint left, uint right, vec3 center)
+{
+    vec3 ld = center - lights[left].bound.xyz;
+    vec3 rd = center - lights[right].bound.xyz;
+    return lights[left].bound.w * dot(rd, rd) > lights[right].bound.w * dot(ld, ld);
+}
+
+void main()
+{
+    uint receiver = gl_GlobalInvocationID.x;
+    if (receiver >= receiverCount)
+        return;
+
+    Receiver object = receivers[receiver];
+    if (receiver == 0u)
+    {
+        grid[receiver] = uvec2(0u);
+        return;
+    }
+
+    uint selected[64];
+    uint count = 0u;
+    bool sorted = false;
+    uint limit = min(lightLimit, 64u);
+    for (uint light = 0u; light < lightCount; ++light)
+    {
+        vec3 delta = object.bound.xyz - lights[light].bound.xyz;
+        float reach = object.bound.w + lights[light].bound.w;
+        if (dot(delta, delta) > reach * reach)
+            continue;
+        bool skip = false;
+        for (uint i = 0u; i < object.meta.y; ++i)
+            skip = skip || ignored[object.meta.x + i] == lights[light].meta.x;
+        if (skip)
+            continue;
+
+        if (count < limit)
+        {
+            selected[count++] = light;
+            continue;
+        }
+        // Preserve collection order below the limit.
+        if (!sorted)
+        {
+            for (uint i = 1u; i < count; ++i)
+            {
+                uint value = selected[i];
+                uint j = i;
+                while (j > 0u && closer(value, selected[j - 1u], object.bound.xyz))
+                {
+                    selected[j] = selected[j - 1u];
+                    --j;
+                }
+                selected[j] = value;
+            }
+            sorted = true;
+        }
+        uint at = count;
+        while (at > 0u && closer(light, selected[at - 1u], object.bound.xyz))
+            --at;
+        if (at < count)
+        {
+            for (uint i = count - 1u; i > at; --i)
+                selected[i] = selected[i - 1u];
+            selected[at] = light;
+        }
+    }
+
+    uint offset = receiver * limit;
+    for (uint i = 0u; i < count; ++i)
+        indices[offset + i] = selected[i];
+    // Empty callbacks inherit the enclosing receiver.
+    grid[receiver] = uvec2(count == 0u ? object.meta.z : offset, count);
+}

@@ -67,8 +67,8 @@ namespace MWGui
         MyGUI::Button* mClusteredLightingButton;
         MyGUI::Widget* mClassicFalloffWidget;
         MyGUI::Button* mLightsResetButton;
-        MyGUI::Widget* mMinimumBrightnessText;
-        MyGUI::Widget* mMinimumBrightnessScroll;
+        MyGUI::Widget* mMinimumBrightness;
+        MyGUI::Widget* mMinimumLightRadius;
 
         MyGUI::ComboBox* mPrimaryLanguage;
         MyGUI::ComboBox* mSecondaryLanguage;

@@ -4,8 +4,6 @@
 
 #if @lightingMethodClustered
     #include "lib/light/bindings.glsl"
-#elif @gpuLightList
-    #include "lib/light/bindings-gpu.glsl"
 #else
     #include "lib/light/bindings-legacy.glsl"
 #endif
@@ -18,6 +16,16 @@ uniform mat4 osg_ViewMatrixInverse;
 uniform float near;
 uniform vec2 screenRes;
 uniform vec3 gridSize;
+
+#if @clusteredClassic
+#if @gpuInstanced
+flat in uint gpuLightCluster;
+uint receiverCluster() { return gpuLightCluster; }
+#else
+uniform uint lightCluster;
+uint receiverCluster() { return lightCluster; }
+#endif
+#endif
 
 void doLighting(vec2 screenCoord, vec3 viewPos, vec3 viewNormal, float shininess, float shadowing, out vec3 diffuseLight, out vec3 ambientLight, out vec3 specularLight) {
     vec3 viewDir = normalize(viewPos);
@@ -36,7 +44,7 @@ void doLighting(vec2 screenCoord, vec3 viewPos, vec3 viewNormal, float shininess
     specularLight *= shadowing;
 
 #if @lightingMethodClustered
-    LightGrid grid = lightGrid[getClusterTileIndex(screenRes, gridSize, near, screenCoord, viewPos.z)];
+    LightGrid grid = clusterLights(getClusterTileIndex(screenRes, gridSize, near, screenCoord, viewPos.z));
     for (uint i = 0u; i < grid.count; ++i) {
         PointLight light = pointLight[lightIndexList[grid.offset + i]];
 #else
@@ -48,13 +56,13 @@ void doLighting(vec2 screenCoord, vec3 viewPos, vec3 viewNormal, float shininess
     }
 }
 
-#if @lightingMethodClustered
+#if @lightingMethodClustered && !@clusteredClassic
 vec3 doSpecularLighting(vec2 screenCoord, vec3 viewPos, vec3 viewNormal) {
     vec3 specular = vec3(0.0);
     vec3 viewDir = normalize(viewPos);
     float shininess = 50.0;
 
-    LightGrid grid = lightGrid[getClusterTileIndex(screenRes, gridSize, near, screenCoord, viewPos.z)];
+    LightGrid grid = clusterLights(getClusterTileIndex(screenRes, gridSize, near, screenCoord, viewPos.z));
     for (uint i = 0u; i < grid.count; ++i) {
         PointLight light = pointLight[lightIndexList[grid.offset + i]];
 

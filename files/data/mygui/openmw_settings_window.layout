@@ -961,7 +961,6 @@
                                     <UserString key="Caption_Text" value="#{OMWEngine:MatchSunlightToSunTooltip}"/>
                                 </Widget>
                             </Widget>
-
                             <!-- Classic Falloff -->
                             <Widget type="HBox" align="Stretch" name="ClassicFalloffWidget">
                                 <UserString key="HStretch" value="true"/>
@@ -979,7 +978,7 @@
                                 </Widget>
                             </Widget>
 
-                           <!-- Max Lights -->
+                            <!-- Max Lights -->
                             <Widget type="Widget" position="0 0 0 60" align="Top HStretch">
                                 <UserString key="HStretch" value="true"/>
                                 <Widget type="TextBox" skin="NormalText" position="0 4 350 18" align="Left Top" name="MaxLightsText">
@@ -1031,6 +1030,30 @@
                                 <UserString key="SettingLabelCaption" value="LightsMaximumDistanceValue"/>
                             </Widget>
 
+                            <Widget type="VBox" align="Top HStretch" name="MinimumLightRadius">
+                                <UserString key="HStretch" value="true"/>
+                                <Widget type="TextBox" skin="NormalText" position="0 0 350 18" align="Top HStretch" name="MinimumLightRadiusText">
+                                    <UserString key="HStretch" value="true"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:LightsMinimumRadiusTooltip}"/>
+                                </Widget>
+                                <Widget type="ScrollBar" skin="MW_HScroll" position="0 0 0 18" align="HStretch Top">
+                                    <UserString key="HStretch" value="true"/>
+                                    <Property key="Range" value="129"/>
+                                    <Property key="Page" value="4"/>
+                                    <Property key="WheelPage" value="4"/>
+                                    <UserString key="SettingType" value="Slider"/>
+                                    <UserString key="SettingMin" value="0"/>
+                                    <UserString key="SettingMax" value="32"/>
+                                    <UserString key="SettingCategory" value="Shaders"/>
+                                    <UserString key="SettingName" value="minimum light radius"/>
+                                    <UserString key="SettingValueType" value="Float"/>
+                                    <UserString key="SettingLabelWidget" value="MinimumLightRadiusText"/>
+                                    <UserString key="SettingLabelCaption" value="LightsMinimumRadiusValue"/>
+                                </Widget>
+                            </Widget>
+
                             <!-- Bounding Sphere Multiplier -->
                             <Widget type="Widget" position="0 0 0 18" align="Top Left HStretch">
                                 <UserString key="HStretch" value="true"/>
@@ -1057,25 +1080,26 @@
                             </Widget>
 
                             <!-- Minimum Interior Brightness -->
-                            <Widget type="Widget" position="0 0 0 18" align="Top Left HStretch">
+                            <Widget type="VBox" align="Top HStretch" name="MinimumBrightness">
                                 <UserString key="HStretch" value="true"/>
-                                <Widget type="TextBox" skin="NormalText" position_real="0 0 1 1" align="Stretch" name="MinimumBrightnessText">
+                                <Widget type="TextBox" skin="NormalText" position="0 0 350 18" align="Top HStretch" name="MinimumBrightnessText">
+                                    <UserString key="HStretch" value="true"/>
                                     <UserString key="ToolTipType" value="Layout"/>
                                     <UserString key="ToolTipLayout" value="TextToolTip"/>
                                     <UserString key="Caption_Text" value="#{OMWEngine:LightsMinimumInteriorBrightnessTooltip}"/>
                                 </Widget>
-                            </Widget>
-                            <Widget type="ScrollBar" skin="MW_HScroll" position="0 0 0 18" align="HStretch Top" name="MinimumBrightnessScroll">
-                                <UserString key="HStretch" value="true"/>
-                                <Property key="Range" value="10000"/>
-                                <Property key="Page" value="100"/>
-                                <Property key="WheelPage" value="100"/>
-                                <UserString key="SettingType" value="Slider"/>
-                                <UserString key="SettingCategory" value="Shaders"/>
-                                <UserString key="SettingName" value="minimum interior brightness"/>
-                                <UserString key="SettingValueType" value="Float"/>
-                                <UserString key="SettingLabelWidget" value="MinimumBrightnessText"/>
-                                <UserString key="SettingLabelCaption" value="LightsMinimumInteriorBrightnessValue"/>
+                                <Widget type="ScrollBar" skin="MW_HScroll" position="0 0 0 18" align="HStretch Top">
+                                    <UserString key="HStretch" value="true"/>
+                                    <Property key="Range" value="10000"/>
+                                    <Property key="Page" value="100"/>
+                                    <Property key="WheelPage" value="100"/>
+                                    <UserString key="SettingType" value="Slider"/>
+                                    <UserString key="SettingCategory" value="Shaders"/>
+                                    <UserString key="SettingName" value="minimum interior brightness"/>
+                                    <UserString key="SettingValueType" value="Float"/>
+                                    <UserString key="SettingLabelWidget" value="MinimumBrightnessText"/>
+                                    <UserString key="SettingLabelCaption" value="LightsMinimumInteriorBrightnessValue"/>
+                                </Widget>
                             </Widget>
 
                             <Widget type="Widget" position="0 0 0 2" align="Top HStretch">
@@ -1090,6 +1114,143 @@
                                     <Property key="Caption" value="#{Interface:Reset}"/>
                                 </Widget>
                                 <Widget type="Spacer"/>
+                            </Widget>
+                        </Widget>
+                    </Widget>
+
+                    <Widget type="TabItem" name="OptimizationsPage">
+                        <Property key="Caption" value=" #{OMWEngine:Optimizations} "/>
+                        <Widget type="ScrollView" skin="MW_ScrollView" position_real="0 0 1 1" align="Stretch">
+                            <Property key="CanvasSize" value="352 312"/>
+                            <Property key="CanvasAlign" value="Left Top"/>
+                            <Property key="VisibleHScroll" value="false"/>
+                            <Widget type="VBox" position="0 0 352 300" align="Left Top">
+                                <Widget type="HBox" align="Stretch">
+                                    <UserString key="HStretch" value="true"/>
+                                    <UserString key="VStretch" value="false"/>
+                                    <Widget type="AutoSizedButton" skin="MW_Button" name="OptimizationsEnabledButton">
+                                        <UserString key="SettingCategory" value="Optimizations"/>
+                                        <UserString key="SettingName" value="enabled"/>
+                                        <UserString key="SettingType" value="CheckButton"/>
+                                    </Widget>
+                                    <Widget type="AutoSizedTextBox" skin="SandText">
+                                        <Property key="Caption" value="#{OMWEngine:EnableOptionalOptimizations}"/>
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:EnableOptionalOptimizationsTooltip}"/>
+                                    </Widget>
+                                </Widget>
+                                <Widget type="AutoSizedTextBox" skin="SandText" align="Left Top HStretch">
+                                    <Property key="Caption" value="#{OMWEngine:OptimizationsPrerequisiteHint}"/>
+                                    <Property key="TextAlign" value="WordBreak Left Top"/>
+                                    <UserString key="HStretch" value="true"/>
+                                    <UserString key="VStretch" value="false"/>
+                                </Widget>
+                                <Widget type="HBox" align="Stretch">
+                                    <UserString key="HStretch" value="true"/>
+                                    <UserString key="VStretch" value="false"/>
+                                    <Widget type="AutoSizedButton" skin="MW_Button" name="GpuDrivenPagingButton">
+                                        <UserString key="SettingCategory" value="Optimizations"/>
+                                        <UserString key="SettingName" value="gpu driven paging"/>
+                                        <UserString key="SettingType" value="CheckButton"/>
+                                    </Widget>
+                                    <Widget type="AutoSizedTextBox" skin="SandText">
+                                        <Property key="Caption" value="#{OMWEngine:GpuDrivenPaging}"/>
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:GpuDrivenPagingTooltip}"/>
+                                    </Widget>
+                                </Widget>
+                                <Widget type="HBox" align="Stretch">
+                                    <UserString key="HStretch" value="true"/>
+                                    <UserString key="VStretch" value="false"/>
+                                    <Widget type="AutoSizedButton" skin="MW_Button" name="GpuSkinningButton">
+                                        <UserString key="SettingCategory" value="Optimizations"/>
+                                        <UserString key="SettingName" value="gpu skinning"/>
+                                        <UserString key="SettingType" value="CheckButton"/>
+                                    </Widget>
+                                    <Widget type="AutoSizedTextBox" skin="SandText">
+                                        <Property key="Caption" value="#{OMWEngine:GpuSkinning}"/>
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:GpuSkinningTooltip}"/>
+                                    </Widget>
+                                </Widget>
+                                <Widget type="HBox" align="Stretch">
+                                    <UserString key="HStretch" value="true"/>
+                                    <UserString key="VStretch" value="false"/>
+                                    <Widget type="AutoSizedButton" skin="MW_Button" name="GpuOcclusionButton">
+                                        <UserString key="SettingCategory" value="Optimizations"/>
+                                        <UserString key="SettingName" value="gpu occlusion culling"/>
+                                        <UserString key="SettingType" value="CheckButton"/>
+                                    </Widget>
+                                    <Widget type="AutoSizedTextBox" skin="SandText">
+                                        <Property key="Caption" value="#{OMWEngine:GpuOcclusionCulling}"/>
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:GpuOcclusionCullingTooltip}"/>
+                                    </Widget>
+                                </Widget>
+                                <Widget type="HBox" align="Stretch">
+                                    <UserString key="HStretch" value="true"/>
+                                    <UserString key="VStretch" value="false"/>
+                                    <Widget type="AutoSizedButton" skin="MW_Button" name="GpuActorsButton">
+                                        <UserString key="SettingCategory" value="Optimizations"/>
+                                        <UserString key="SettingName" value="gpu actors"/>
+                                        <UserString key="SettingType" value="CheckButton"/>
+                                    </Widget>
+                                    <Widget type="AutoSizedTextBox" skin="SandText">
+                                        <Property key="Caption" value="#{OMWEngine:GpuActors}"/>
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:GpuActorsTooltip}"/>
+                                    </Widget>
+                                </Widget>
+                                <Widget type="HBox" align="Stretch">
+                                    <UserString key="HStretch" value="true"/>
+                                    <UserString key="VStretch" value="false"/>
+                                    <Widget type="AutoSizedButton" skin="MW_Button" name="GpuTextureArraysButton">
+                                        <UserString key="SettingCategory" value="Optimizations"/>
+                                        <UserString key="SettingName" value="gpu texture arrays"/>
+                                        <UserString key="SettingType" value="CheckButton"/>
+                                    </Widget>
+                                    <Widget type="AutoSizedTextBox" skin="SandText">
+                                        <Property key="Caption" value="#{OMWEngine:GpuTextureArrays}"/>
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:GpuTextureArraysTooltip}"/>
+                                    </Widget>
+                                </Widget>
+                                <Widget type="HBox" align="Stretch">
+                                    <UserString key="HStretch" value="true"/>
+                                    <UserString key="VStretch" value="false"/>
+                                    <Widget type="AutoSizedButton" skin="MW_Button" name="IndexedLightListsButton">
+                                        <UserString key="SettingCategory" value="Optimizations"/>
+                                        <UserString key="SettingName" value="indexed light lists"/>
+                                        <UserString key="SettingType" value="CheckButton"/>
+                                    </Widget>
+                                    <Widget type="AutoSizedTextBox" skin="SandText">
+                                        <Property key="Caption" value="#{OMWEngine:IndexedLightLists}"/>
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:IndexedLightListsTooltip}"/>
+                                    </Widget>
+                                </Widget>
+                                <Widget type="HBox" align="Stretch">
+                                    <UserString key="HStretch" value="true"/>
+                                    <UserString key="VStretch" value="false"/>
+                                    <Widget type="AutoSizedButton" skin="MW_Button" name="GpuSceneLightingButton">
+                                        <UserString key="SettingCategory" value="Optimizations"/>
+                                        <UserString key="SettingName" value="gpu scene lighting"/>
+                                        <UserString key="SettingType" value="CheckButton"/>
+                                    </Widget>
+                                    <Widget type="AutoSizedTextBox" skin="SandText">
+                                        <Property key="Caption" value="#{OMWEngine:GpuSceneLighting}"/>
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:GpuSceneLightingTooltip}"/>
+                                    </Widget>
+                                </Widget>
                             </Widget>
                         </Widget>
                     </Widget>

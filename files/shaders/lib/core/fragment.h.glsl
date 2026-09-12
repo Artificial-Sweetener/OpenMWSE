@@ -7,7 +7,6 @@
 @link "lib/core/fragment_multiview.glsl" if @useOVR_multiview
 @link "lib/core/lighting_fragment.glsl" if @lightingMethodClustered
 @link "lib/core/lighting_fragment_legacy.glsl" if @legacyLightList
-@link "lib/core/lighting_fragment_gpu.glsl" if @gpuLightList
 
 #include "lib/core/material_fragment.h.glsl"
 

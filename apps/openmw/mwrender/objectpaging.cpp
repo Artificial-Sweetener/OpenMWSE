@@ -281,7 +281,7 @@ namespace MWRender
             void handleCallbacks(const osg::Node* node, osg::Node* cloned) const
             {
                 for (const osg::Callback* callback = node->getCullCallback(); callback != nullptr;
-                     callback = callback->getNestedCallback())
+                    callback = callback->getNestedCallback())
                 {
                     if (node->getCullCallback()->getNestedCallback())
                     {
@@ -541,12 +541,12 @@ namespace MWRender
         };
 
         osg::ref_ptr<osg::Node> makeGpuChunk(
-            GpuScene& scene, std::vector<GpuScene::Instance>&& instances, const osg::Vec3f& worldCenter)
+            GpuScene& scene, std::vector<GpuScene::Instance>&& instances, const osg::Vec3f& worldCenter, bool lit)
         {
             osg::BoundingSphere bound;
             for (const GpuScene::Instance& instance : instances)
                 bound.expandBy(osg::BoundingSphere(instance.mBounds.center() - worldCenter, instance.mBounds.radius()));
-            return scene.createChunk(std::move(instances), bound);
+            return scene.createChunk(std::move(instances), bound, lit);
         }
 
         PagedCellRef makePagedCellRef(const ESM::CellRef& value)
@@ -1004,7 +1004,8 @@ namespace MWRender
 
         if (!gpuInstances.empty())
         {
-            osg::ref_ptr<osg::Node> gpuChunk = makeGpuChunk(*mGpuScene, std::move(gpuInstances), worldCenter);
+            osg::ref_ptr<osg::Node> gpuChunk
+                = makeGpuChunk(*mGpuScene, std::move(gpuInstances), worldCenter, activeGrid);
             if (gpuChunk == nullptr)
             {
                 // A material retired between lookup and build.
@@ -1017,7 +1018,7 @@ namespace MWRender
                         mGpuScene->appendInstances(*fresh, gpuRef.mMatrix, gpuRef.mScale, gpuRef.mDistances,
                             gpuRef.mSmallFeatureCulling, gpuInstances);
                 }
-                gpuChunk = makeGpuChunk(*mGpuScene, std::move(gpuInstances), worldCenter);
+                gpuChunk = makeGpuChunk(*mGpuScene, std::move(gpuInstances), worldCenter, activeGrid);
                 if (gpuChunk == nullptr)
                     Log(Debug::Warning) << "GPU chunk rebuild failed; objects hidden.";
             }

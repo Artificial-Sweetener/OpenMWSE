@@ -1,3 +1,4 @@
+#include <components/sceneutil/clusteredlighting.hpp>
 #include <components/shader/materialmode.hpp>
 #include <components/shader/shadermanager.hpp>
 #include <components/testing/util.hpp>
@@ -15,6 +16,7 @@
 #include <tuple>
 #include <vector>
 
+#include <osg/BufferObject>
 #include <osg/GraphicsContext>
 #include <osg/Program>
 #include <osg/Shader>
@@ -38,7 +40,7 @@ namespace
           "#define LEGACY_BINDINGS @gpuLegacyBindings\n"
           "#define ARRAY_BINDINGS @gpuArrayBindings\n"
           "#define BINDLESS_BINDINGS @gpuBindlessBindings\n"
-          "#define LIGHT_LIST @gpuLightList\n"
+          "#define LIGHT_LIST @clusteredClassic\n"
           "#define UBER @gpuUber\n"
           "#define PPL @forcePPL\n"
           "void main() { gl_Position = ftransform(); }\n";
@@ -64,7 +66,12 @@ namespace
     {
         ShaderManager mManager;
 
-        InstancedProgramTest() { mManager.setShaderPath(TestingOpenMW::outputDir()); }
+        InstancedProgramTest()
+        {
+            mManager.setShaderPath(TestingOpenMW::outputDir());
+            ShaderManager::DefineMap globals{ { "classicFalloff", "0" } };
+            mManager.setGlobalDefines(globals);
+        }
 
         static std::string writeTemplate(std::string_view suffix, std::string_view content)
         {
@@ -85,6 +92,7 @@ namespace
             const std::string vertexName = writeTemplate(vertexSuffix, sVertexTemplate);
             const std::string fragmentName = writeTemplate(fragmentSuffix, sFragmentTemplate);
             ShaderManager::DefineMap defines = getDefaultDefines();
+            defines.erase("classicFalloff");
             for (const auto& [key, value] : extra)
                 defines[key] = value;
             const osg::ref_ptr<osg::Shader> vertex = mManager.getShader(vertexName, defines);
@@ -152,7 +160,7 @@ namespace
         for (const osg::Program* twin : { legacy.get(), array.get(), bindless.get() })
         {
             EXPECT_THAT(shaderSource(*twin, 0), HasSubstr("#define INSTANCED 1"));
-            EXPECT_THAT(shaderSource(*twin, 0), HasSubstr("#define LIGHT_LIST 1"));
+            EXPECT_THAT(shaderSource(*twin, 0), HasSubstr("#define LIGHT_LIST 0"));
         }
         EXPECT_THAT(shaderSource(*legacy, 0), HasSubstr("#define LEGACY_BINDINGS 1"));
         EXPECT_THAT(shaderSource(*legacy, 0), HasSubstr("#define ARRAY_BINDINGS 0"));
@@ -173,6 +181,38 @@ namespace
 
         const osg::ref_ptr<osg::Program> twin = mManager.getInstancedProgram(*program, MaterialMode::Bindless);
         ASSERT_TRUE(twin);
+        EXPECT_THAT(shaderSource(*twin, 0), HasSubstr("#define LIGHT_LIST 0"));
+    }
+
+    TEST_F(InstancedProgramTest, refreshesLightingMode)
+    {
+        ShaderManager::DefineMap globals{ { "lightingMethodClustered", "1" } };
+        mManager.setGlobalDefines(globals);
+        const auto program = buildProgram("_objects.vert", "_objects.frag");
+        ASSERT_TRUE(program);
+        std::vector<osg::ref_ptr<osg::Program>> twins;
+        for (auto mode : { MaterialMode::Legacy, MaterialMode::Array, MaterialMode::Bindless })
+        {
+            twins.push_back(mManager.getInstancedProgram(*program, mode));
+            ASSERT_TRUE(twins.back());
+        }
+        for (const char* classicFalloff : { "0", "1", "0" })
+        {
+            globals["classicFalloff"] = classicFalloff;
+            mManager.setGlobalDefines(globals);
+            for (const auto& twin : twins)
+                EXPECT_THAT(shaderSource(*twin, 0), HasSubstr(std::string("#define LIGHT_LIST ") + classicFalloff));
+        }
+    }
+
+    TEST_F(InstancedProgramTest, keepsLocalLightingMode)
+    {
+        const auto program = buildProgram("_objects.vert", "_objects.frag", { { "classicFalloff", "0" } });
+        ASSERT_TRUE(program);
+        const auto twin = mManager.getInstancedProgram(*program, MaterialMode::Bindless);
+        ASSERT_TRUE(twin);
+        ShaderManager::DefineMap globals{ { "classicFalloff", "1" } };
+        mManager.setGlobalDefines(globals);
         EXPECT_THAT(shaderSource(*twin, 0), HasSubstr("#define LIGHT_LIST 0"));
     }
 
@@ -363,10 +403,10 @@ namespace
                 buffer << stream.rdbuf();
                 const std::string source = buffer.str();
                 for (auto it = std::sregex_iterator(source.begin(), source.end(), iterator);
-                     it != std::sregex_iterator(); ++it)
+                    it != std::sregex_iterator(); ++it)
                     iterators.insert((*it)[1].str());
                 for (auto it = std::sregex_iterator(source.begin(), source.end(), token); it != std::sregex_iterator();
-                     ++it)
+                    ++it)
                     tokens.insert((*it)[1].str());
             }
             for (const std::string& name : tokens)
@@ -469,15 +509,16 @@ namespace
             || (!osg::isGLExtensionSupported(state.getContextID(), "GL_NV_gpu_shader5")
                 && !osg::isGLExtensionSupported(state.getContextID(), "GL_EXT_nonuniform_qualifier")))
             GTEST_SKIP() << "Nonuniform bindless requirements unavailable";
-        for (const char* clustered : { "0", "1" })
+        for (const char* classicFalloff : { "0", "1" })
         {
             for (const char* name : { "objects", "terrain", "groundcover", "shadowcasting", "depthclipped",
                      "gpuscene_prepass", "bs/default", "bs/nolighting" })
             {
-                const std::string label = std::string(name) + "_" + clustered;
+                const std::string label = std::string(name) + "_" + classicFalloff;
                 SCOPED_TRACE(label);
-                const ShaderManager::DefineMap defines = { { "diffuseMap", "1" }, { "diffuseMapUV", "0" },
-                    { "lightingMethodClustered", clustered }, { "useGPUShader4", "1" }, { "adjustCoverage", "1" } };
+                const ShaderManager::DefineMap defines
+                    = { { "diffuseMap", "1" }, { "diffuseMapUV", "0" }, { "lightingMethodClustered", "1" },
+                          { "classicFalloff", classicFalloff }, { "useGPUShader4", "1" }, { "adjustCoverage", "1" } };
                 const osg::ref_ptr<osg::Program> classic = buildProgram(name, defines, sMaterialCapabilities);
                 ASSERT_TRUE(classic);
                 const osg::ref_ptr<osg::Program> program
@@ -490,6 +531,276 @@ namespace
                 EXPECT_TRUE(pcp->isLinked()) << log;
             }
         }
+        mManager.releaseGLObjects(&state);
+        context->releaseContext();
+        context->close();
+    }
+
+    TEST_F(ShaderTemplateTest, switchesLightingPrograms)
+    {
+        const osg::ref_ptr<osg::GraphicsContext::Traits> traits = new osg::GraphicsContext::Traits;
+        traits->readDISPLAY();
+        traits->setUndefinedScreenDetailsToDefaultScreen();
+        traits->width = 8;
+        traits->height = 8;
+        traits->pbuffer = true;
+        traits->doubleBuffer = false;
+        traits->glContextVersion = "4.3";
+        traits->glContextProfileMask = 0x2;
+        const osg::ref_ptr<osg::GraphicsContext> context = osg::GraphicsContext::createGraphicsContext(traits);
+        if (!context || !context->realize() || !context->makeCurrent())
+            GTEST_SKIP() << "Offscreen GL context unavailable";
+        osg::State& state = *context->getState();
+        std::vector<MaterialMode> modes{ MaterialMode::Legacy, MaterialMode::Array };
+        if (osg::isGLExtensionSupported(state.getContextID(), "GL_ARB_bindless_texture")
+            && (osg::isGLExtensionSupported(state.getContextID(), "GL_NV_gpu_shader5")
+                || osg::isGLExtensionSupported(state.getContextID(), "GL_EXT_nonuniform_qualifier")))
+            modes.push_back(MaterialMode::Bindless);
+        auto globals = mManager.getGlobalDefines();
+        globals["lightingMethodClustered"] = "1";
+        globals["legacyLightList"] = "0";
+        globals["useGPUShader4"] = "1";
+        mManager.setGlobalDefines(globals);
+        std::vector<osg::ref_ptr<osg::Program>> programs;
+        for (const char* name : { "objects", "terrain", "groundcover", "bs/default" })
+        {
+            const auto classic
+                = buildProgram(name, { { "diffuseMap", "1" }, { "diffuseMapUV", "0" } }, sMaterialCapabilities);
+            ASSERT_TRUE(classic);
+            programs.push_back(classic);
+            for (auto mode : modes)
+            {
+                programs.push_back(mManager.getInstancedProgram(*classic, mode));
+                ASSERT_TRUE(programs.back());
+            }
+        }
+        for (const char* classicFalloff : { "0", "1", "0" })
+        {
+            SCOPED_TRACE(classicFalloff);
+            globals["classicFalloff"] = classicFalloff;
+            mManager.setGlobalDefines(globals);
+            for (const auto& program : programs)
+            {
+                program->compileGLObjects(state);
+                const auto* pcp = program->getPCP(state);
+                std::string log;
+                pcp->getInfoLog(log);
+                EXPECT_TRUE(pcp->isLinked()) << log;
+            }
+        }
+        mManager.releaseGLObjects(&state);
+        context->releaseContext();
+        context->close();
+    }
+
+    TEST_F(ShaderTemplateTest, classicClustersSelectReceivers)
+    {
+        using SceneUtil::LightReceiver;
+        const osg::ref_ptr<osg::GraphicsContext::Traits> traits = new osg::GraphicsContext::Traits;
+        traits->readDISPLAY();
+        traits->setUndefinedScreenDetailsToDefaultScreen();
+        traits->width = 8;
+        traits->height = 8;
+        traits->pbuffer = true;
+        traits->doubleBuffer = false;
+        traits->glContextVersion = "4.3";
+        traits->glContextProfileMask = 0x2;
+        const osg::ref_ptr<osg::GraphicsContext> context = osg::GraphicsContext::createGraphicsContext(traits);
+        if (!context || !context->realize() || !context->makeCurrent())
+            GTEST_SKIP() << "Offscreen GL context unavailable";
+        osg::State& state = *context->getState();
+        auto& ext = *state.get<osg::GLExtensions>();
+        const auto shader = mManager.getShader("core/lighting/classic.comp", {}, osg::Shader::COMPUTE);
+        ASSERT_TRUE(shader);
+        const auto program = mManager.getProgram(nullptr, shader);
+        ASSERT_TRUE(program);
+        state.applyAttribute(program);
+        auto* pcp = program->getPCP(state);
+        std::string log;
+        pcp->getInfoLog(log);
+        ASSERT_TRUE(pcp->isLinked()) << log;
+        GLuint buffers[5]{};
+        ext.glGenBuffers(5, buffers);
+        const GLuint bindings[] = { 1, 3, 4, 5, 6 };
+        const auto upload = [&](unsigned int slot, const void* data, std::size_t size) {
+            ext.glBindBuffer(GL_SHADER_STORAGE_BUFFER, buffers[slot]);
+            ext.glBufferData(GL_SHADER_STORAGE_BUFFER, size, data, GL_DYNAMIC_DRAW);
+            ext.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, bindings[slot], buffers[slot]);
+        };
+        constexpr std::uint32_t sentinel = 0xfeedface;
+        std::vector<LightReceiver> objects(130);
+        for (std::size_t i = 1; i < objects.size(); ++i)
+            objects[i].mBound = osg::Vec4f(static_cast<float>(i % 3) * 40, 0, -200, 35);
+        objects[3].mBound = objects[1].mBound;
+        objects[4].mBound = osg::Vec4f(9000, 0, -200, 1);
+        objects[4].mMeta[2] = 1;
+        objects[5].mMeta[1] = 2;
+        const std::vector<std::uint32_t> ignored{ 101, 103 };
+        for (const unsigned int limit : { 2u, 16u, 64u })
+        {
+            SCOPED_TRACE(limit);
+            for (const unsigned int lightCount : { 5u, 97u, 0u, 7u })
+            {
+                SCOPED_TRACE(lightCount);
+                std::vector<LightReceiver> lights(std::max(lightCount, 1u));
+                for (std::size_t i = 0; i < lightCount; ++i)
+                    lights[i]
+                        = { osg::Vec4f(static_cast<float>(i) * 1.137f - 12, 0, -205, 17.f + static_cast<float>(i % 7)),
+                              { static_cast<std::uint32_t>(100 + i), 0, 0, 0 } };
+                std::vector<std::uint32_t> grid(objects.size() * 2 + 2, sentinel);
+                std::vector<std::uint32_t> indices(objects.size() * limit + 1, sentinel);
+                upload(0, objects.data(), objects.size() * sizeof(LightReceiver));
+                upload(1, grid.data(), grid.size() * sizeof(std::uint32_t));
+                upload(2, indices.data(), indices.size() * sizeof(std::uint32_t));
+                upload(3, lights.data(), lights.size() * sizeof(LightReceiver));
+                upload(4, ignored.data(), ignored.size() * sizeof(std::uint32_t));
+                ext.glUniform1ui(pcp->getUniformLocation("lightCount"), lightCount);
+                ext.glUniform1ui(pcp->getUniformLocation("receiverCount"), static_cast<GLuint>(objects.size()));
+                ext.glUniform1ui(pcp->getUniformLocation("lightLimit"), limit);
+                ext.glDispatchCompute(static_cast<GLuint>((objects.size() + 63) / 64), 1, 1);
+                ext.glMemoryBarrier(GL_BUFFER_UPDATE_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT);
+                ext.glBindBuffer(GL_SHADER_STORAGE_BUFFER, buffers[1]);
+                ext.glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, grid.size() * sizeof(std::uint32_t), grid.data());
+                ext.glBindBuffer(GL_SHADER_STORAGE_BUFFER, buffers[2]);
+                ext.glGetBufferSubData(
+                    GL_SHADER_STORAGE_BUFFER, 0, indices.size() * sizeof(std::uint32_t), indices.data());
+                EXPECT_EQ(glGetError(), GL_NO_ERROR);
+                EXPECT_EQ(grid[0], 0u);
+                EXPECT_EQ(grid[1], 0u);
+                EXPECT_EQ(grid[objects.size() * 2], sentinel);
+                EXPECT_EQ(grid.back(), sentinel);
+                EXPECT_EQ(indices.back(), sentinel);
+                for (std::size_t object = 1; object < objects.size(); ++object)
+                {
+                    SCOPED_TRACE(object);
+                    const auto& receiver = objects[object];
+                    const osg::Vec3f center(receiver.mBound.x(), receiver.mBound.y(), receiver.mBound.z());
+                    std::vector<std::uint32_t> expected;
+                    const auto distance = [&](std::uint32_t light) {
+                        const auto& bound = lights[light].mBound;
+                        return (center - osg::Vec3f(bound.x(), bound.y(), bound.z())).length2();
+                    };
+                    for (std::uint32_t light = 0; light < lightCount; ++light)
+                    {
+                        const float reach = receiver.mBound.w() + lights[light].mBound.w();
+                        bool skip = false;
+                        for (std::uint32_t i = 0; i < receiver.mMeta[1]; ++i)
+                            skip |= ignored[receiver.mMeta[0] + i] == lights[light].mMeta[0];
+                        if (!skip && distance(light) <= reach * reach)
+                            expected.push_back(light);
+                    }
+                    if (expected.size() > limit)
+                    {
+                        std::sort(expected.begin(), expected.end(), [&](std::uint32_t a, std::uint32_t b) {
+                            return lights[a].mBound.w() * distance(b) > lights[b].mBound.w() * distance(a);
+                        });
+                        expected.resize(limit);
+                    }
+                    EXPECT_EQ(grid[object * 2 + 1], expected.size());
+                    if (expected.empty())
+                        EXPECT_EQ(grid[object * 2], receiver.mMeta[2]);
+                    else
+                    {
+                        EXPECT_EQ(grid[object * 2], object * limit);
+                        for (std::size_t i = 0; i < expected.size(); ++i)
+                            EXPECT_EQ(indices[object * limit + i], expected[i]);
+                    }
+                }
+            }
+        }
+        const ShaderManager::DefineMap defines{ { "lightingMethodClustered", "1" }, { "classicFalloff", "1" },
+            { "gpuMaterial", "0" } };
+        const auto instance = mManager.getShader("lib/core/instance.glsl", defines, osg::Shader::VERTEX);
+        const auto lightBindings = mManager.getShader("lib/light/bindings.glsl", defines, osg::Shader::FRAGMENT);
+        ASSERT_TRUE(instance);
+        ASSERT_TRUE(lightBindings);
+        const osg::ref_ptr<osg::Program> draw = new osg::Program;
+        draw->addShader(instance);
+        draw->addShader(new osg::Shader(osg::Shader::VERTEX, R"glsl(#version 430 compatibility
+            mat4 instanceWorld();
+            void main() {
+                vec2 p[4] = vec2[4](vec2(-1,-1), vec2(1,-1), vec2(-1,1), vec2(1,1));
+                gl_Position = instanceWorld() * vec4(p[gl_VertexID], 0, 1);
+            }
+        )glsl"));
+        draw->addShader(new osg::Shader(
+            osg::Shader::FRAGMENT, "#version 430 compatibility\n" + lightBindings->getShaderSource() + R"glsl(
+            flat in uint gpuLightCluster;
+            out vec4 color;
+            void main() {
+                LightGrid selected = clusterLights(int(gpuLightCluster));
+                color = vec4(selected.count > 0u ? 1 : 0, 0, selected.count == 0u ? 1 : 0, 1);
+            }
+        )glsl"));
+        draw->addBindAttribLocation("instanceSlot", 7);
+        state.applyAttribute(draw);
+        auto* drawProgram = draw->getPCP(state);
+        drawProgram->getInfoLog(log);
+        ASSERT_TRUE(drawProgram->isLinked()) << log;
+        struct Instance
+        {
+            std::array<osg::Vec4f, 5> mVectors{};
+            std::array<std::uint32_t, 4> mMeta{};
+            std::array<std::uint32_t, 4> mMaterial{};
+        };
+        static_assert(sizeof(Instance) == 112);
+        std::array<Instance, 2> instances;
+        for (std::size_t i = 0; i < instances.size(); ++i)
+        {
+            instances[i].mVectors[0] = osg::Vec4f(.5f, 0, 0, i == 0 ? -.5f : .5f);
+            instances[i].mVectors[1] = osg::Vec4f(0, 1, 0, 0);
+            instances[i].mVectors[2] = osg::Vec4f(0, 0, 1, 0);
+            instances[i].mMaterial[1] = i == 0 ? 3 : 5;
+        }
+        const std::array<std::uint32_t, 4> slots{ 99, 99, 0, 1 };
+        const std::array<std::uint32_t, 6> elements{ 0, 1, 2, 2, 1, 3 };
+        std::array<std::uint32_t, 15> commands{ 0, 0, 0, 0, 0, 6, 1, 0, 0, 2, 6, 1, 0, 0, 3 };
+        std::array<GLuint, 5> drawBuffers{};
+        GLuint vao = 0;
+        ext.glGenVertexArrays(1, &vao);
+        ext.glBindVertexArray(vao);
+        ext.glGenBuffers(static_cast<GLsizei>(drawBuffers.size()), drawBuffers.data());
+        const auto fill = [&](std::size_t index, GLenum target, const auto& data) {
+            ext.glBindBuffer(target, drawBuffers[index]);
+            ext.glBufferData(target, sizeof(data), data.data(), GL_DYNAMIC_DRAW);
+        };
+        fill(0, GL_SHADER_STORAGE_BUFFER, instances);
+        ext.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, drawBuffers[0]);
+        fill(2, GL_ARRAY_BUFFER_ARB, slots);
+        ext.glEnableVertexAttribArray(7);
+        ext.glVertexAttribIPointer(7, 1, GL_UNSIGNED_INT, 0, nullptr);
+        ext.glVertexAttribDivisor(7, 1);
+        fill(3, GL_ELEMENT_ARRAY_BUFFER_ARB, elements);
+        glViewport(0, 0, 8, 8);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_BLEND);
+        glClearColor(0, 0, 0, 0);
+        for (unsigned int view = 0; view < 3; ++view)
+        {
+            SCOPED_TRACE(view);
+            // Sparse slots exercise offsets and inheritance.
+            std::array<std::uint32_t, 6> receivers{ 0, 0, 0, view == 0 ? 1u : 2u, 0, view == 0 ? 2u : 4u };
+            fill(1, GL_SHADER_STORAGE_BUFFER, receivers);
+            ext.glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 15, drawBuffers[1]);
+            commands[11] = view == 2 ? 0 : 1;
+            fill(4, GL_DRAW_INDIRECT_BUFFER, commands);
+            glClear(GL_COLOR_BUFFER_BIT);
+            ext.glMultiDrawElementsIndirect(GL_TRIANGLES, GL_UNSIGNED_INT,
+                reinterpret_cast<const void*>(5 * sizeof(std::uint32_t)), 2, 5 * sizeof(std::uint32_t));
+            std::array<unsigned char, 4> left{}, right{};
+            glReadPixels(1, 4, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, left.data());
+            glReadPixels(6, 4, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, right.data());
+            EXPECT_EQ(left[0], view == 0 ? 255 : 0);
+            EXPECT_EQ(left[2], view == 0 ? 0 : 255);
+            EXPECT_EQ(right[0], view == 1 ? 255 : 0);
+            EXPECT_EQ(right[2], view == 0 ? 255 : 0);
+            EXPECT_EQ(glGetError(), GL_NO_ERROR);
+        }
+        ext.glBindVertexArray(0);
+        ext.glDeleteVertexArrays(1, &vao);
+        ext.glDeleteBuffers(static_cast<GLsizei>(drawBuffers.size()), drawBuffers.data());
+        draw->releaseGLObjects(&state);
+        ext.glDeleteBuffers(5, buffers);
         mManager.releaseGLObjects(&state);
         context->releaseContext();
         context->close();

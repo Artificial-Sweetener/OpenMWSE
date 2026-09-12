@@ -59,9 +59,6 @@ set(SHADER_FILES
     lib/core/instance.h.glsl
     lib/core/gpuscene_types.glsl
     lib/core/gpuscene_material.glsl
-    lib/core/gpuscene_lights.glsl
-    lib/core/lighting_fragment_gpu.glsl
-    lib/core/lighting_vertex_gpu.glsl
     lib/core/material_vertex.h.glsl
     lib/core/material_vertex_legacy.glsl
     lib/core/material_vertex_gpu.glsl
@@ -73,7 +70,6 @@ set(SHADER_FILES
     lib/core/vertex_multiview.glsl
     lib/light/bindings.glsl
     lib/light/bindings-legacy.glsl
-    lib/light/bindings-gpu.glsl
     lib/light/bindings-point.glsl
     lib/light/clamp.glsl
     lib/light/util.glsl
@@ -140,6 +136,7 @@ set(SHADER_FILES
     core/gui.frag
     core/gui.vert
     core/lighting/cluster.comp
+    core/lighting/classic.comp
     core/lighting/cull.comp
 )
 

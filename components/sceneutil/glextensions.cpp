@@ -5,6 +5,9 @@
 #ifndef GL_MAX_VERTEX_SHADER_STORAGE_BLOCKS
 #define GL_MAX_VERTEX_SHADER_STORAGE_BLOCKS 0x90D6
 #endif
+#ifndef GL_MAX_FRAGMENT_SHADER_STORAGE_BLOCKS
+#define GL_MAX_FRAGMENT_SHADER_STORAGE_BLOCKS 0x90DA
+#endif
 #ifndef GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS
 #define GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS 0x90DD
 #endif
@@ -16,6 +19,7 @@ namespace SceneUtil
         std::set<osg::observer_ptr<osg::GLExtensions>> sGLExtensions;
         GLint sMaxShaderStorageBindings = 0;
         GLint sMaxVertexStorageBlocks = 0;
+        GLint sMaxFragmentStorageBlocks = 0;
 
         class GLExtensionsObserver : public osg::Observer
         {
@@ -66,6 +70,11 @@ namespace SceneUtil
         return sMaxVertexStorageBlocks;
     }
 
+    GLint getFragmentStorageBlocks()
+    {
+        return sMaxFragmentStorageBlocks;
+    }
+
     GetGLExtensionsOperation::GetGLExtensionsOperation()
         : GraphicsOperation("GetGLExtensionsOperation", false)
     {
@@ -80,6 +89,7 @@ namespace SceneUtil
         {
             glGetIntegerv(GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS, &sMaxShaderStorageBindings);
             glGetIntegerv(GL_MAX_VERTEX_SHADER_STORAGE_BLOCKS, &sMaxVertexStorageBlocks);
+            glGetIntegerv(GL_MAX_FRAGMENT_SHADER_STORAGE_BLOCKS, &sMaxFragmentStorageBlocks);
         }
     }
 }

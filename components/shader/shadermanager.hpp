@@ -89,7 +89,7 @@ namespace Shader
             const osg::Program& program, MaterialMode mode, bool full = false);
 
         /// Defines that select the instance and material bodies.
-        static void applyInstancedDefines(DefineMap& defines, MaterialMode mode, bool clusteredLighting);
+        static void applyInstancedDefines(DefineMap& defines, MaterialMode mode);
 
         std::optional<int> getSamplerUnit(const osg::Program& program, std::string_view name) const;
 
@@ -112,7 +112,7 @@ namespace Shader
         void releaseGLObjects(osg::State* state);
 
         bool createSourceFromTemplate(std::string& source, std::vector<std::string>& linkedShaderTemplateNames,
-            const std::string& templateName, const ShaderManager::DefineMap& defines);
+            const std::string& templateName, ShaderManager::DefineMap defines);
 
         void setMaxTextureUnits(int maxTextureUnits) { mMaxTextureUnits = maxTextureUnits; }
         int getMaxTextureUnits() const { return mMaxTextureUnits; }

@@ -201,15 +201,15 @@ Each installation uses its own matching executables and ``defaults.bin``.
    :default: false
    :location: :bdg-info:`In Game > Settings > Options > Video > Lights` :bdg-success:`Launcher > Settings > Visuals > Lighting`
 
-    Divides the screen into regions to assign lights, removing per-object light limits.
+   Divides the screen into regions to assign lights, removing per-object light limits.
 
-    Classic falloff and max light options do not apply in this mode.
+   Classic falloff and max light options do not apply in this mode unless optional GPU-scene lighting is active.
 
-    Enables point light specular highlights on the water plane when the water shader is enabled.
+   Enables point light specular highlights on the water plane when the water shader is enabled.
 
    .. note::
 
-      It is highly recommended to use this with per-pixel lighting enabled as vertex lighting can cause light pop at screen edges.
+      Per-pixel lighting avoids the light pop at screen edges that vertex lighting can produce in this mode.
 
 .. omw-setting::
    :title: light radius multiplier
@@ -230,9 +230,7 @@ Each installation uses its own matching executables and ``defaults.bin``.
    Use traditional point light attenuation without early fade out.
    Reduces lighting seams but may darken the scene.
 
-   .. note::
-
-      This setting is only applicable when clustered lighting is disabled
+   With optional GPU-scene lighting, classic falloff preserves traditional object light selection and per-object limits.
 
 .. omw-setting::
    :title: match sunlight to sun
@@ -251,7 +249,22 @@ Each installation uses its own matching executables and ``defaults.bin``.
    :location: :bdg-info:`In Game > Settings > Options > Video > Lights`
 
    Maximum distance at which lights illuminate objects.
-   Set to ≤ 0 to disable fading for lights.
+   Set to 0 to disable distance fading.
+   Clustered lighting also applies this limit to paged lights before uploading them.
+
+.. omw-setting::
+   :title: minimum light radius
+   :type: float32
+   :range: ≥ 0
+   :default: 4
+   :location: :bdg-info:`In Game > Settings > Options > Video > Lights`
+
+   Minimum projected influence radius for clustered lights, in viewport pixels.
+   Clustered Classic ignores this cutoff.
+   Lights fade between twice this radius and the cutoff.
+   Set to 0 to disable size culling.
+   This measures the light's bounds, not its visible flame or illuminated surface.
+   Culled lights are excluded from the GPU light buffer.
 
 .. omw-setting::
    :title: light fade start
@@ -273,7 +286,7 @@ Each installation uses its own matching executables and ``defaults.bin``.
 
    .. note::
 
-      This setting is only applicable when clustered lighting is disabled
+      Applies to Clustered Classic and standard lighting.
 
 .. omw-setting::
    :title: minimum interior brightness
@@ -284,6 +297,7 @@ Each installation uses its own matching executables and ``defaults.bin``.
 
    Minimum ambient brightness inside interiors.
    Should be small to avoid unwanted visual changes.
+   Classic falloff ignores this setting.
 
 .. omw-setting::
    :title: antialias alpha test

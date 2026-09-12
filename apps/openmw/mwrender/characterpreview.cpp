@@ -147,7 +147,7 @@ namespace MWRender
     public:
         CharacterPreviewRTTNode(uint32_t sizeX, uint32_t sizeY)
             : RTTNode(sizeX, sizeY, Settings::video().mAntialiasing, false, 0,
-                StereoAwareness::Unaware_MultiViewShaders, shouldAddMSAAIntermediateTarget())
+                  StereoAwareness::Unaware_MultiViewShaders, shouldAddMSAAIntermediateTarget())
             , mAspectRatio(static_cast<float>(sizeX) / static_cast<float>(sizeY))
         {
             if (SceneUtil::AutoDepth::isReversed())
@@ -225,11 +225,13 @@ namespace MWRender
 
         osg::ref_ptr<SceneUtil::LightManager> lightManager = new SceneUtil::LightManager(
             SceneUtil::LightSettings{
-                .mClusteredLighting = Settings::shaders().mClusteredLighting,
+                .mClusteredLighting = true,
+                .mClassicFalloff = Settings::shaders().mClassicFalloff,
                 .mMaxLights = Settings::shaders().mMaxLights,
                 .mMaximumLightDistance = Settings::shaders().mMaximumLightDistance,
                 .mLightFadeStart = Settings::shaders().mLightFadeStart,
                 .mLightRadiusMultiplier = Settings::shaders().mLightRadiusMultiplier,
+                .mMinimumLightRadius = Settings::shaders().mMinimumLightRadius,
                 .mClusteredGridSize = { 1, 1, 1 },
                 .mClusteredWorkGroupSize = 1,
             },
@@ -494,7 +496,7 @@ namespace MWRender
 
     RaceSelectionPreview::RaceSelectionPreview(osg::Group* parent, Resource::ResourceSystem* resourceSystem)
         : CharacterPreview(
-            parent, resourceSystem, MWMechanics::getPlayer(), 512, 512, osg::Vec3f(0, 125, 8), osg::Vec3f(0, 0, 8))
+              parent, resourceSystem, MWMechanics::getPlayer(), 512, 512, osg::Vec3f(0, 125, 8), osg::Vec3f(0, 0, 8))
         , mBase(*mCharacter.get<ESM::NPC>()->mBase)
         , mRef(ESM::makeBlankCellRef(), &mBase)
         , mPitchRadians(osg::DegreesToRadians(6.f))

@@ -127,11 +127,17 @@ namespace
                 if (mDoThreadUnsafeOps)
                 {
                     lm->updateMaxLights(Settings::shaders().mMaxLights);
-                    lm->enableClustered(Settings::shaders().mClusteredLighting);
+                    lm->enableClustered(lm->isClusteredSupported()
+                        && (Settings::optimizations().useGpuSceneLighting() || Settings::shaders().mClusteredLighting));
+                    lm->setClassicFalloff(
+                        Settings::optimizations().useGpuSceneLighting() && Settings::shaders().mClassicFalloff);
+                    lm->enableIndexedLightLists(
+                        Settings::optimizations().isActive(Settings::optimizations().mIndexedLightLists));
                 }
 
                 lm->processChangedSettings(Settings::shaders().mLightRadiusMultiplier,
-                    Settings::shaders().mMaximumLightDistance, Settings::shaders().mLightFadeStart);
+                    Settings::shaders().mMaximumLightDistance, Settings::shaders().mLightFadeStart,
+                    Settings::optimizations().useGpuSceneLighting() ? Settings::shaders().mMinimumLightRadius : 0.f);
 
                 return;
             }
@@ -241,20 +247,27 @@ namespace MWRender
 
         // Let LightManager choose which backend to use based on our hint.
         // Ultimately dependent on support for various OpenGL extensions.
+        const bool optimizedLighting = Settings::optimizations().useGpuSceneLighting();
         osg::ref_ptr<SceneUtil::LightManager> sceneRoot = new SceneUtil::LightManager(
             SceneUtil::LightSettings{
-                .mClusteredLighting = Settings::shaders().mClusteredLighting,
+                .mClusteredLighting = optimizedLighting || Settings::shaders().mClusteredLighting,
+                .mClassicFalloff = optimizedLighting && Settings::shaders().mClassicFalloff,
+                .mIndexedLightLists = Settings::optimizations().isActive(Settings::optimizations().mIndexedLightLists),
                 .mMaxLights = Settings::shaders().mMaxLights,
                 .mMaximumLightDistance = Settings::shaders().mMaximumLightDistance,
                 .mLightFadeStart = Settings::shaders().mLightFadeStart,
                 .mLightRadiusMultiplier = Settings::shaders().mLightRadiusMultiplier,
+                .mMinimumLightRadius = optimizedLighting ? Settings::shaders().mMinimumLightRadius : 0.f,
             },
             resourceSystem);
 
         resourceSystem->getSceneManager()->setSupportsClusteredLighting(sceneRoot->isClusteredSupported());
 
-        // Sync clustered lighting setting so it's more intuitive when viewed in the in-game setting panel
-        Settings::shaders().mClusteredLighting.set(sceneRoot->getClusteredLighting());
+        if (!optimizedLighting)
+            Settings::shaders().mClusteredLighting.set(sceneRoot->getClusteredLighting());
+
+        Log(Debug::Info) << "Lighting: " << (sceneRoot->getClusteredLighting() ? "clustered" : "standard")
+                         << (Settings::shaders().mClassicFalloff ? "-classic" : "");
 
         sceneRoot->setLightingMask(Mask_Lighting);
         mSceneRoot = sceneRoot;
@@ -301,7 +314,7 @@ namespace MWRender
         // Only set up the shadow casting shaders once our global defines have been set
         mShadowManager->setupShaders(mResourceSystem->getSceneManager()->getShaderManager());
 
-        if (Settings::terrain().mObjectPaging && Settings::terrain().mObjectPagingGpuDriven)
+        if (Settings::terrain().mObjectPaging && Settings::optimizations().useGpuDrivenPaging())
             createGpuScene();
 
         mNavMesh = std::make_unique<NavMesh>(mRootNode, mWorkQueue, Settings::navigator().mEnableNavMeshRender,
@@ -310,7 +323,8 @@ namespace MWRender
         mRecastMesh = std::make_unique<RecastMesh>(mRootNode, Settings::navigator().mEnableRecastMeshRender);
         mPathgrid = std::make_unique<Pathgrid>(mRootNode);
 
-        mObjects = std::make_unique<Objects>(mResourceSystem, sceneRoot, mGpuScene.get(), unrefQueue);
+        mObjects = std::make_unique<Objects>(mResourceSystem, sceneRoot,
+            Settings::optimizations().useGpuActors() ? mGpuScene.get() : nullptr, unrefQueue);
 
         if (getenv("OPENMW_DONT_PRECOMPILE") == nullptr)
         {
@@ -591,8 +605,9 @@ namespace MWRender
     void RenderingManager::configureAmbient(const MWWorld::Cell& cell)
     {
         bool isInterior = !cell.isExterior() && !cell.isQuasiExterior();
-        bool needsAdjusting = false;
-        needsAdjusting = isInterior && (!Settings::shaders().mClassicFalloff || Settings::shaders().mClusteredLighting);
+        const bool optimizedLighting = Settings::optimizations().useGpuSceneLighting();
+        const bool needsAdjusting = isInterior
+            && (!Settings::shaders().mClassicFalloff || (!optimizedLighting && Settings::shaders().mClusteredLighting));
 
         osg::Vec4f ambient = SceneUtil::colourFromRGB(cell.getMood().mAmbiantColor);
 
@@ -762,7 +777,7 @@ namespace MWRender
             mStateUpdater->setWireframe(wireframe);
             mGpuOcclusion = !wireframe || mode == Render_WireframeDepth;
             if (mGpuScene != nullptr)
-                mGpuScene->setOcclusionEnabled(mGpuOcclusion);
+                mGpuScene->setOcclusionEnabled(mGpuOcclusion && Settings::optimizations().useGpuOcclusionCulling());
             return wireframe;
         }
         else if (mode == Render_Water)
@@ -798,37 +813,38 @@ namespace MWRender
         }
         else if (mode == Render_GpuDrivenPaging)
         {
-            if (mGpuScene == nullptr)
-
-            {
-                // Worldspace managers rewire on recreation.
-                if (!Settings::terrain().mObjectPaging || !createGpuScene())
-                    return false;
-                wireGpuScene();
-                rebuildPagedCaches();
-                return true;
-            }
-            const bool enable = !mGpuScene->isEnabled();
-            mGpuScene->setEnabled(enable);
-            rebuildPagedCaches();
-            return enable;
+            if (!Settings::optimizations().useGpuDrivenPaging())
+                return false;
+            const bool enable = mGpuScene == nullptr || !mGpuScene->isEnabled();
+            return setGpuDrivenPagingEnabled(enable);
         }
         return false;
     }
 
     bool RenderingManager::createGpuScene()
     {
+        if (!Settings::terrain().mObjectPaging || !Settings::optimizations().useGpuDrivenPaging())
+            return false;
+        if (!mSceneRoot->isClusteredSupported())
+        {
+            Log(Debug::Warning) << "GPU rendering requires clustered lighting support.";
+            return false;
+        }
         if (mGpuScene != nullptr)
             return true;
-        mGpuScene = std::make_unique<GpuScene>(mResourceSystem->getSceneManager()->getShaderManager());
+        mGpuScene = std::make_unique<GpuScene>(mResourceSystem->getSceneManager()->getShaderManager(),
+            Settings::optimizations().useGpuSkinning(), Settings::optimizations().useGpuTextureArrays());
         if (!mGpuScene->isSupported())
         {
             mGpuScene.reset();
             return false;
         }
         mGpuScene->setEnabled(true);
-        mGpuScene->setOcclusionEnabled(mGpuOcclusion);
+        mGpuScene->setOcclusionEnabled(mGpuOcclusion && Settings::optimizations().useGpuOcclusionCulling());
         mGpuScene->setLightManager(mSceneRoot.get());
+        if (const auto* material = dynamic_cast<const SceneUtil::Material*>(
+                mSceneRoot->getOrCreateStateSet()->getAttribute(osg::StateAttribute::MATERIAL)))
+            mGpuScene->setDefaultMaterial(material);
         // Late construction repeats the setup-time wiring.
         if (mPostProcessor != nullptr)
             mGpuScene->setPostProcessor(mPostProcessor.get());
@@ -847,15 +863,40 @@ namespace MWRender
         return true;
     }
 
-    void RenderingManager::wireGpuScene()
+    bool RenderingManager::setGpuDrivenPagingEnabled(bool enabled)
     {
-        GpuScene* const scene = mGpuScene.get();
-        mObjects->setGpuScene(scene);
+        if ((!enabled && mGpuScene == nullptr) || (enabled && mGpuScene != nullptr && mGpuScene->isEnabled()))
+            return true;
+
+        mViewer->stopThreading();
+        bool applied = true;
+        if (enabled)
+        {
+            applied = createGpuScene();
+            if (applied)
+                wireGpuScene(mGpuScene.get());
+        }
+        else
+        {
+            mGpuScene->setEnabled(false);
+            wireGpuScene(nullptr);
+            mGpuScene.reset();
+        }
+        if (applied)
+            rebuildPagedCaches();
+        mViewer->startThreading();
+        return applied;
+    }
+
+    void RenderingManager::wireGpuScene(GpuScene* scene)
+    {
+        GpuScene* const actorScene = Settings::optimizations().useGpuActors() ? scene : nullptr;
+        mObjects->setGpuScene(actorScene);
         mWater->setGpuScene(scene);
         mSky->setGpuScene(scene);
         mEffectManager->setGpuScene(scene);
         if (mPlayerAnimation != nullptr)
-            mPlayerAnimation->setGpuScene(scene);
+            mPlayerAnimation->setGpuScene(actorScene);
         for (auto& [_, chunkMgr] : mWorldspaceChunks)
         {
             chunkMgr.mTerrain->setGpuChunkFactory(scene, Mask_GpuProxy);
@@ -864,6 +905,23 @@ namespace MWRender
             if (chunkMgr.mGroundcover != nullptr)
                 chunkMgr.mGroundcover->setGpuScene(scene);
         }
+    }
+
+    bool RenderingManager::reconfigureGpuScene()
+    {
+        if (mGpuScene == nullptr || !mGpuScene->isEnabled())
+            return true;
+
+        mViewer->stopThreading();
+        mGpuScene->setEnabled(false);
+        wireGpuScene(nullptr);
+        mGpuScene.reset();
+        const bool created = createGpuScene();
+        if (created)
+            wireGpuScene(mGpuScene.get());
+        rebuildPagedCaches();
+        mViewer->startThreading();
+        return created;
     }
 
     void RenderingManager::rebuildPagedCaches()
@@ -1452,7 +1510,8 @@ namespace MWRender
     void RenderingManager::asyncCastRenderingRay(RayCallback callback, const osg::Vec3f& origin, const osg::Vec3f& dest,
         bool ignorePlayer, bool ignoreActors, bool ignoreTerrain, std::span<const MWWorld::Ptr> ignoreList)
     {
-        if (ignoreActors || mGpuScene == nullptr || !mGpuScene->isEnabled())
+        if (ignoreActors || !Settings::optimizations().useGpuActors() || mGpuScene == nullptr
+            || !mGpuScene->isEnabled())
         {
             callback(castRay(origin, dest, ignorePlayer, ignoreActors, ignoreTerrain, ignoreList));
             return;
@@ -1578,7 +1637,7 @@ namespace MWRender
     {
         mPlayerAnimation = new NpcAnimation(player, player.getRefData().getBaseNode(), mResourceSystem, 0,
             NpcAnimation::VM_Normal, mFirstPersonFieldOfView);
-        mPlayerAnimation->setGpuScene(mGpuScene.get());
+        mPlayerAnimation->setGpuScene(Settings::optimizations().useGpuActors() ? mGpuScene.get() : nullptr);
 
         mCamera->setAnimation(mPlayerAnimation.get());
         mCamera->attachTo(player);
@@ -1780,6 +1839,59 @@ namespace MWRender
 
     void RenderingManager::processChangedSettings(const Settings::CategorySettingVector& changed)
     {
+        const bool prerequisiteChanged = changed.contains({ "Optimizations", "enabled" });
+        const bool gpuPagingChanged = prerequisiteChanged || changed.contains({ "Optimizations", "gpu driven paging" });
+        if (gpuPagingChanged)
+        {
+            const bool enabled = Settings::optimizations().useGpuDrivenPaging();
+            setGpuDrivenPagingEnabled(enabled);
+        }
+        const bool gpuScenePolicyChanged = changed.contains({ "Optimizations", "gpu skinning" })
+            || changed.contains({ "Optimizations", "gpu texture arrays" });
+        if (!gpuPagingChanged && gpuScenePolicyChanged && Settings::optimizations().useGpuDrivenPaging())
+            reconfigureGpuScene();
+        if (prerequisiteChanged || changed.contains({ "Optimizations", "gpu actors" }))
+        {
+            GpuScene* actorScene
+                = Settings::optimizations().useGpuActors() && mGpuScene != nullptr && mGpuScene->isEnabled()
+                ? mGpuScene.get()
+                : nullptr;
+            mObjects->setGpuScene(actorScene);
+            if (mPlayerAnimation != nullptr)
+                mPlayerAnimation->setGpuScene(actorScene);
+        }
+        if (prerequisiteChanged || changed.contains({ "Optimizations", "gpu occlusion culling" }))
+        {
+            if (mGpuScene != nullptr)
+                mGpuScene->setOcclusionEnabled(mGpuOcclusion && Settings::optimizations().useGpuOcclusionCulling());
+        }
+
+        const bool lightingBackendChanged = prerequisiteChanged
+            || changed.contains({ "Optimizations", "gpu scene lighting" })
+            || changed.contains({ "Optimizations", "indexed light lists" })
+            || changed.contains({ "Shaders", "clustered lighting" });
+        if (lightingBackendChanged)
+        {
+            mViewer->stopThreading();
+
+            LightManagerUpdateVisitor visitor;
+            visitor.setDoThreadUnsafeOps(true);
+            mViewer->getSceneData()->accept(visitor);
+
+            auto defines = mResourceSystem->getSceneManager()->getShaderManager().getGlobalDefines();
+            for (const auto& [name, value] : getLightRoot()->getLightDefines())
+                defines[name] = value;
+            mResourceSystem->getSceneManager()->getShaderManager().setGlobalDefines(defines);
+            mStateUpdater->reset();
+
+            if (MWMechanics::getPlayer().isInCell())
+                configureAmbient(*MWMechanics::getPlayer().getCell()->getCell());
+
+            Log(Debug::Info) << "Lighting: " << (getLightRoot()->getClusteredLighting() ? "clustered" : "standard")
+                             << (Settings::shaders().mClassicFalloff ? "-classic" : "");
+            mViewer->startThreading();
+        }
+
         const bool volumesChanged = std::any_of(changed.begin(), changed.end(), [](const auto& setting) {
             return setting.first == "Shaders"
                 && (setting.second == "atmospheric scattering" || setting.second == "volumetric clouds"
@@ -1866,6 +1978,17 @@ namespace MWRender
                 defines["forcePPL"] = Settings::shaders().mForcePerPixelLighting ? "1" : "0";
                 defines["classicFalloff"] = Settings::shaders().mClassicFalloff ? "1" : "0";
                 defines["clamp"] = Settings::shaders().mClampLighting ? "1" : "0";
+                if (it->second == "classic falloff")
+                {
+                    LightManagerUpdateVisitor visitor;
+                    visitor.setDoThreadUnsafeOps(true);
+                    mViewer->getSceneData()->accept(visitor);
+                    for (const auto& [name, value] : getLightRoot()->getLightDefines())
+                        defines[name] = value;
+                    Log(Debug::Info) << "Lighting: "
+                                     << (getLightRoot()->getClusteredLighting() ? "clustered" : "standard")
+                                     << (Settings::shaders().mClassicFalloff ? "-classic" : "");
+                }
                 mResourceSystem->getSceneManager()->getShaderManager().setGlobalDefines(defines);
 
                 if (MWMechanics::getPlayer().isInCell() && it->second == "classic falloff")
@@ -1875,8 +1998,8 @@ namespace MWRender
             }
             else if (it->first == "Shaders"
                 && (it->second == "light radius multiplier" || it->second == "maximum light distance"
-                    || it->second == "light fade start" || it->second == "max lights"
-                    || it->second == "clustered lighting" || it->second == "particle point lighting"))
+                    || it->second == "light fade start" || it->second == "minimum light radius"
+                    || it->second == "max lights" || it->second == "particle point lighting"))
             {
                 if (MWMechanics::getPlayer().isInCell())
                     configureAmbient(*MWMechanics::getPlayer().getCell()->getCell());
@@ -1884,8 +2007,7 @@ namespace MWRender
                 LightManagerUpdateVisitor visitor;
                 bool lightManagersUpdated = false;
 
-                if (it->second == "max lights" || it->second == "clustered lighting"
-                    || it->second == "particle point lighting")
+                if (it->second == "max lights" || it->second == "particle point lighting")
                 {
                     mViewer->stopThreading();
 

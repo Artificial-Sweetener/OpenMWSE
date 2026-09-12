@@ -105,6 +105,7 @@ file(GLOB UNITTEST_SRC_FILES
 
     vfs/testpathutil.cpp
 
+    sceneutil/lightmanager.cpp
     sceneutil/osgacontroller.cpp
     sceneutil/offscreencontext.cpp
     sceneutil/optimizeroptions.cpp

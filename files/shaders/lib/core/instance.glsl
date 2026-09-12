@@ -15,30 +15,15 @@ layout(std430, binding = 8) restrict readonly buffer InstanceBuffer
 flat out int gpuMaterialId;
 #endif
 
-#if @gpuLightList
-#include "lib/core/gpuscene_lights.glsl"
-
-flat out uvec2 gpuLightRangeData;
-
-uvec2 gpuLightRangeOf(uint slot)
-{
-    // The buffer ends after lit slots.
-    if (slot >= uint(lightRanges.length()))
-        return uvec2(0u, 0u);
-    LightRange range = lightRanges[slot];
-    return uvec2(range.first, range.count);
-}
+#if @clusteredClassic
+layout(std430, binding = 15) readonly buffer ReceiverSlots { uint lightClusters[]; };
+flat out uint gpuLightCluster;
 #endif
 
 uint instanceMaterial()
 {
     uint material = instances[instanceSlot].material.x;
     return material == 0xffffffffu ? vertexMaterial : material;
-}
-
-uint instanceLight()
-{
-    return instances[instanceSlot].material.y;
 }
 
 mat4 instanceMatrix(Instance inst)
@@ -50,11 +35,11 @@ mat4 instanceMatrix(Instance inst)
 mat4 instanceWorld()
 {
     Instance inst = instances[instanceSlot];
+#if @clusteredClassic
+    gpuLightCluster = inst.material.y < uint(lightClusters.length()) ? lightClusters[inst.material.y] : 0u;
+#endif
 #if @gpuMaterial
     gpuMaterialId = int(instanceMaterial());
-#endif
-#if @gpuLightList
-    gpuLightRangeData = gpuLightRangeOf(inst.material.y);
 #endif
     return instanceMatrix(inst);
 }

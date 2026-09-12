@@ -48,6 +48,7 @@ void main()
     barrier();
 
     if (gl_LocalInvocationIndex == 0) {
+        g_Count = min(g_Count, uint(@maxLightsPerCluster));
         g_Offset = atomicAdd(globalLightIndexCount, g_Count);
         lightGrid[gl_WorkGroupID.x] = LightGrid(g_Offset, g_Count);
     }

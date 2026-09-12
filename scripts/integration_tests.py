@@ -85,7 +85,8 @@ def parse_test_name(status, line):
 
 
 def write_generated_config(
-    config_dir, userdata_dir, data_local_dir, test_config_dir, config_source_dir, args, iniimporter_binary, ini_path
+    config_dir, userdata_dir, data_local_dir, test_config_dir, config_source_dir, suite_dir, args, iniimporter_binary,
+    ini_path
 ):
     shutil.rmtree(config_dir, ignore_errors=True)
     config_dir.mkdir(parents=True)
@@ -120,6 +121,9 @@ def write_generated_config(
             f"memory limit = {1024 * 1024 * 256}\n"
             "lua profiler = true\n"
         )
+        suite_settings = suite_dir / "settings.cfg"
+        if suite_settings.is_file():
+            settings_cfg.write(suite_settings.read_text(encoding="utf-8"))
 
 
 def run_test(suite_name, suite_dir, config_dir, log_dir, time_str, data_dirs, args, openmw_binary):
@@ -243,6 +247,7 @@ def main():
             data_local_dir=suite_work_dir / "data-local",
             test_config_dir=test_config_dir,
             config_source_dir=config_source_dir,
+            suite_dir=all_suites[name],
             args=args,
             iniimporter_binary=iniimporter_binary,
             ini_path=ini_path,

@@ -1,6 +1,7 @@
 #ifndef OPENMW_MWGUI_GRAPHICSSETTINGS_H
 #define OPENMW_MWGUI_GRAPHICSSETTINGS_H
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -53,11 +54,15 @@ namespace MWGui
         void onDistantShadowQualityChanged(MyGUI::ComboBox* sender, std::size_t position);
         /// Apply the selected atmospheric appearance immediately.
         void onAtmosphereAppearanceChanged(MyGUI::ComboBox* sender, std::size_t position);
+        /// Refresh subordinate optimization availability after the prerequisite changes.
+        void onOptimizationPrerequisiteChanged(MyGUI::Widget* sender);
 
         /// Synchronize the shadow resolution field and increment boundaries.
         void refreshShadowResolution();
         /// Synchronize dependent atmosphere and shadow control states.
         void refreshAtmosphereControls();
+        /// Synchronize subordinate optimization availability without changing saved selections.
+        void refreshOptimizationControls();
 
         Layout& mLayout;
         std::function<void()> mApply;
@@ -73,6 +78,8 @@ namespace MWGui
         MyGUI::EditBox* mShadowMapResolution;
         MyGUI::Button* mShadowResolutionDecrease;
         MyGUI::Button* mShadowResolutionIncrease;
+        MyGUI::Button* mOptimizationsEnabled;
+        std::array<MyGUI::Button*, 7> mOptimizationButtons;
     };
 }
 

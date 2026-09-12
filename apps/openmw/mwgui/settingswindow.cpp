@@ -29,6 +29,7 @@
 #include <components/settings/values.hpp>
 #include <components/vfs/manager.hpp>
 #include <components/vfs/recursivedirectoryiterator.hpp>
+#include <components/widgets/box.hpp>
 #include <components/widgets/sharedstatebutton.hpp>
 
 #include "../mwbase/environment.hpp"
@@ -286,8 +287,8 @@ namespace MWGui
         getWidget(mScriptAdapter, "ScriptAdapter");
         getWidget(mScriptDisabled, "ScriptDisabled");
         getWidget(mClassicFalloffWidget, "ClassicFalloffWidget");
-        getWidget(mMinimumBrightnessText, "MinimumBrightnessText");
-        getWidget(mMinimumBrightnessScroll, "MinimumBrightnessScroll");
+        getWidget(mMinimumBrightness, "MinimumBrightness");
+        getWidget(mMinimumLightRadius, "MinimumLightRadius");
 
 #ifndef WIN32
         // hide gamma controls since it currently does not work under Linux
@@ -323,7 +324,6 @@ namespace MWGui
         mLightsResetButton->eventMouseButtonClick
             += MyGUI::newDelegate(this, &SettingsWindow::onLightsResetButtonClicked);
         mMaxLights->eventComboChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onMaxLightsChanged);
-
 
         mWindowModeList->eventComboChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onWindowModeChanged);
         mVSyncModeList->eventComboChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onVSyncModeChanged);
@@ -627,6 +627,7 @@ namespace MWGui
         Settings::shaders().mMatchSunlightToSun.reset();
         Settings::shaders().mLightRadiusMultiplier.reset();
         Settings::shaders().mMaximumLightDistance.reset();
+        Settings::shaders().mMinimumLightRadius.reset();
         Settings::shaders().mLightFadeStart.reset();
         Settings::shaders().mMinimumInteriorBrightness.reset();
         Settings::shaders().mMaxLights.reset();
@@ -851,15 +852,21 @@ namespace MWGui
 
     void SettingsWindow::updateLightSettings()
     {
-        mClusteredLightingButton->setEnabled(
-            MWBase::Environment::get().getResourceSystem()->getSceneManager()->isClusteredLightingSupported());
+        const bool supportsClustered
+            = MWBase::Environment::get().getResourceSystem()->getSceneManager()->isClusteredLightingSupported();
+        const bool optimizedLighting = Settings::optimizations().useGpuSceneLighting();
+        const bool isClustered = supportsClustered && (optimizedLighting || Settings::shaders().mClusteredLighting);
+        const bool usesClassic = Settings::shaders().mClassicFalloff && (!isClustered || optimizedLighting);
 
-        const bool isClustered = Settings::shaders().mClusteredLighting;
-        const bool isClassic = !isClustered && Settings::shaders().mClassicFalloff;
-
-        mClassicFalloffWidget->setVisible(!isClustered);
-        mMinimumBrightnessText->setVisible(!isClassic);
-        mMinimumBrightnessScroll->setVisible(!isClassic);
+        mClusteredLightingButton->setEnabled(supportsClustered && !optimizedLighting);
+        mClassicFalloffWidget->setVisible(optimizedLighting || !isClustered);
+        mMaxLights->setEnabled(!isClustered || usesClassic);
+        mMinimumLightRadius->setVisible(optimizedLighting && !usesClassic);
+        mMinimumLightRadius->setUserString("Hidden", optimizedLighting && !usesClassic ? "false" : "true");
+        const bool showBrightness = !usesClassic;
+        mMinimumBrightness->setVisible(showBrightness);
+        mMinimumBrightness->setUserString("Hidden", showBrightness ? "false" : "true");
+        static_cast<Gui::VBox*>(mMinimumLightRadius->getParent())->notifyChildrenSizeChanged();
     }
 
     void SettingsWindow::updateWindowModeSettings()

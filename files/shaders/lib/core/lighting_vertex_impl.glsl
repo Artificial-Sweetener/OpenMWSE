@@ -4,8 +4,6 @@
 
 #if @lightingMethodClustered
     #include "lib/light/bindings.glsl"
-#elif @gpuLightList
-    #include "lib/light/bindings-gpu.glsl"
 #else
     #include "lib/light/bindings-legacy.glsl"
 #endif
@@ -18,6 +16,16 @@ uniform mat4 osg_ViewMatrixInverse;
 uniform float near;
 uniform vec2 screenRes;
 uniform vec3 gridSize;
+
+#if @clusteredClassic
+#if @gpuInstanced
+flat out uint gpuLightCluster;
+uint receiverCluster() { return gpuLightCluster; }
+#else
+uniform uint lightCluster;
+uint receiverCluster() { return lightCluster; }
+#endif
+#endif
 
 /// Evaluate canonical directional and cloud-shadow lighting at a view-space surface position.
 void directionalLighting(vec3 viewPos, vec3 viewDir, vec3 viewNormal, float shininess, out vec3 diffuseLight,
@@ -44,7 +52,7 @@ void pointLighting(vec2 screenCoord, vec3 viewDir, vec3 viewPos, vec3 viewNormal
 #endif
 
 #if @lightingMethodClustered
-    LightGrid grid = lightGrid[getClusterTileIndex(screenRes, gridSize, near, screenCoord, viewPos.z)];
+    LightGrid grid = clusterLights(getClusterTileIndex(screenRes, gridSize, near, screenCoord, viewPos.z));
     for (uint i = 0u; i < grid.count; ++i) {
         PointLight light = pointLight[lightIndexList[grid.offset + i]];
 #else

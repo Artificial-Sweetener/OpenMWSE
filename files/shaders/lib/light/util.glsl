@@ -45,20 +45,29 @@ float specularIntensity(vec3 viewNormal, vec3 viewDir, float shininess, vec3 lig
 
 float calcAttenuation(PointLight light, float dist) {
     float attenuation = 1.0 / (light.constant + light.linear * dist + light.quadratic * dist * dist);
-    #if !@classicFalloff || @lightingMethodClustered
+    #if !@classicFalloff || (@lightingMethodClustered && !@clusteredClassic)
         // Fade illumination out to 0 when reaching the lights radius
         attenuation *= 1.0 - fade((dist / light.radius - 0.75) / 0.25);
     #endif
     return attenuation;
 }
 
+#if @clusteredClassic
+uint receiverCluster();
+#endif
+
 int getClusterTileIndex(vec2 screenRes, vec3 gridSize, float near, vec2 screenCoord, float viewSpaceZ) {
+#if @clusteredClassic
+    return int(receiverCluster());
+#else
     int zTile = int((log(abs(viewSpaceZ) / near) * int(gridSize.z)) / log(clusterFar / near));
     vec2 tileSize = screenRes / vec2(gridSize.xy);
     ivec3 tile = ivec3(screenCoord / tileSize, zTile);
+    tile = ivec3(clamp(vec3(tile), vec3(0.0), gridSize - vec3(1.0)));
     int tileIndex = tile.x + (tile.y * int(gridSize.x)) + (tile.z * int(gridSize.x) * int(gridSize.y));
 
     return tileIndex;
+#endif
 }
 
 void calcDirectionalLighting(DirectionalLight light, vec3 viewDir, vec3 viewNormal, float shininess, inout vec3 diffuseLight, inout vec3 ambientLight, inout vec3 specularLight) {
@@ -71,7 +80,7 @@ void calcDirectionalLighting(DirectionalLight light, vec3 viewDir, vec3 viewNorm
 // Ensure lights with bounds crossing the far cluster plane fade out.
 // Without this there will be a hard cutoff where objects outside the cluster far plane are not lit.
 float clusterFade(vec3 viewPos, float radius) {
-#if @lightingMethodClustered
+#if @lightingMethodClustered && !@clusteredClassic
     return 1.0 - fade(clamp((-viewPos.z - (clusterFar - radius)) / radius, 0.0, 1.0));
 #else
     return 1.0;

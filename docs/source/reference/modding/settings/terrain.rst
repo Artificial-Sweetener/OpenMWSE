@@ -191,20 +191,6 @@ Terrain Settings
    without impacting the performance as dramatically as the minimum size setting.
 
 .. omw-setting::
-   :title: object paging gpu driven
-   :type: boolean
-   :range: true, false
-   :default: false
-
-   Keeps paged objects, static objects of the loaded cells and terrain chunks as instances in GPU buffers.
-   A compute shader decides visibility and the instances are drawn with one indirect draw per material pipeline.
-   Requires OpenGL 4.3 and has no effect unless ``object paging`` is enabled.
-   Without ``distant terrain`` terrain stays on the regular path.
-   With ``GL_ARB_bindless_texture`` textures are indexed per instance.
-   Without it, compatible textures batch through texture arrays and the rest uses one draw per material.
-   Content the GPU path cannot represent keeps using the regular path.
-
-.. omw-setting::
    :title: object paging gpu texture budget
    :type: integer
    :range: >= -1

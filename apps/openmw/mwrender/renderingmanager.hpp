@@ -353,8 +353,14 @@ namespace MWRender
         /// Create and attach the optional GPU scene when supported by the active graphics context.
         bool createGpuScene();
 
-        /// Hand a newly created GPU scene to every renderer that can contribute compatible geometry.
-        void wireGpuScene();
+        /// Select baseline or GPU-driven paging and rebuild affected scene caches.
+        bool setGpuDrivenPagingEnabled(bool enabled);
+
+        /// Hand the selected GPU scene to every renderer that can contribute compatible geometry.
+        void wireGpuScene(GpuScene* scene);
+
+        /// Recreate the GPU scene after an immutable skinning or material policy changes.
+        bool reconfigureGpuScene();
 
         /// Rebuild paged object and terrain caches after switching GPU-driven paging at runtime.
         void rebuildPagedCaches();

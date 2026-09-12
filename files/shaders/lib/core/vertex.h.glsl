@@ -4,7 +4,6 @@
 @link "lib/core/vertex_multiview.glsl" if @useOVR_multiview
 @link "lib/core/lighting_vertex.glsl" if @lightingMethodClustered
 @link "lib/core/lighting_vertex_legacy.glsl" if @legacyLightList
-@link "lib/core/lighting_vertex_gpu.glsl" if @gpuLightList
 
 #include "lib/core/material_vertex.h.glsl"
 

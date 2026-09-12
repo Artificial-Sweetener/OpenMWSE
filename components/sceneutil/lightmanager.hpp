@@ -2,9 +2,13 @@
 #define OPENMW_COMPONENTS_SCENEUTIL_LIGHTMANAGER_H
 
 #include <array>
+#include <atomic>
+#include <cstdint>
 #include <memory>
 #include <set>
+#include <span>
 #include <unordered_map>
+#include <vector>
 
 #include <osg/BufferIndexBinding>
 #include <osg/BufferTemplate>
@@ -97,7 +101,7 @@ namespace SceneUtil
 
         void clear(size_t frame) { mIndex[frame % 2] = 0; }
 
-        void setLight(size_t frame, const Light* light, float radius)
+        void setLight(size_t frame, const Light* light, float radius, float fade)
         {
             size_t frameId = frame % 2;
             int i = mIndex[frameId];
@@ -108,7 +112,7 @@ namespace SceneUtil
             i *= 3;
 
             mUniformBuffers[frameId]->setElement(i + 0, light->getPosition());
-            mUniformBuffers[frameId]->setElement(i + 1, light->getDiffuse());
+            mUniformBuffers[frameId]->setElement(i + 1, light->getDiffuse() * fade);
             mUniformBuffers[frameId]->setElement(i + 2,
                 osg::Vec4f(light->getConstantAttenuation(), light->getLinearAttenuation(),
                     light->getQuadraticAttenuation(), radius));
@@ -141,6 +145,8 @@ namespace SceneUtil
     /// position.
     class LightSource : public osg::Node
     {
+        friend class LightManager;
+
         // double buffered, since one of them may be in use by the draw thread at any given time
         DoubleBuffer<osg::ref_ptr<Light>> mLight;
 
@@ -154,6 +160,10 @@ namespace SceneUtil
         size_t mLastAppliedFrame;
 
         bool mEmpty = false;
+        bool mDistant = false;
+        size_t mDistantFrame = 0;
+        int mDistantSlot = -1;
+        std::uint64_t mPagedId = 0;
 
     public:
         META_Node(SceneUtil, LightSource)
@@ -174,6 +184,16 @@ namespace SceneUtil
         void setEmpty(bool empty) { mEmpty = empty; }
 
         bool getEmpty() const { return mEmpty; }
+
+        /// Paged light without flicker.
+        void setDistant(bool distant);
+
+        bool getDistant() const { return mDistant; }
+
+        /// Shared reference identity; zero means none.
+        void setPagedId(std::uint64_t id) { mPagedId = id; }
+
+        std::uint64_t getPagedId() const { return mPagedId; }
 
         /// Get the Light safe for modification in the given frame.
         /// @par May be used externally to animate the light's color/attenuation properties,
@@ -201,10 +221,13 @@ namespace SceneUtil
     struct LightSettings
     {
         bool mClusteredLighting = false;
+        bool mClassicFalloff = false;
+        bool mIndexedLightLists = false;
         int mMaxLights = 8;
         float mMaximumLightDistance = Constants::CellSizeInUnits;
         float mLightFadeStart = 0;
         float mLightRadiusMultiplier = 1;
+        float mMinimumLightRadius = 4;
         osg::Vec3i mClusteredGridSize = { 16, 8, 24 };
         int mClusteredWorkGroupSize = 512;
     };
@@ -216,20 +239,43 @@ namespace SceneUtil
     class LightManager : public osg::Group
     {
     public:
-        struct LightSourceTransform
+        struct LightSourceBound
         {
-            LightSource* mLightSource;
+            osg::ref_ptr<LightSource> mLightSource;
+            osg::BoundingSphere mWorldBound;
+            /// Classic lights keep the upstream transform.
             osg::Matrixf mWorldMatrix;
+            bool mDistant = false;
         };
 
         struct LightSourceViewBound
         {
-            LightSource* mLightSource;
+            osg::ref_ptr<LightSource> mLightSource;
             osg::BoundingSphere mViewBound;
+            float mFade = 1.f;
             bool mCulled = false;
         };
 
         using LightList = std::vector<const LightSourceViewBound*>;
+
+        struct LightGrid
+        {
+            osg::Vec3f mOrigin;
+            float mCellSize = 1.f;
+            std::array<int, 3> mSize{ 0, 0, 0 };
+            std::vector<std::uint32_t> mCellStart;
+            std::vector<std::uint32_t> mEntries;
+            std::vector<std::uint32_t> mMark;
+            std::uint32_t mStamp = 0;
+            bool mBuilt = false;
+        };
+
+        struct ViewLights
+        {
+            std::vector<LightSourceViewBound> mBounds;
+            LightGrid mGrid;
+        };
+
         using SupportedMethods = std::array<bool, 3>;
 
         META_Node(SceneUtil, LightManager)
@@ -252,8 +298,14 @@ namespace SceneUtil
         /// Internal use only, called automatically by the LightSource's UpdateCallback
         void addLight(LightSource* lightSource, const osg::Matrixf& worldMat, size_t frameNum);
 
+        void addDistantBound(LightSource* lightSource, const osg::BoundingSphere& worldBound, size_t frameNum);
+
         const std::vector<LightSourceViewBound>& getLightsInViewSpace(
             osgUtil::CullVisitor* cv, const osg::RefMatrix* viewMatrix, size_t frameNum);
+
+        /// Intersecting lights in collection order.
+        void getLightsIntersecting(osgUtil::CullVisitor* cv, const osg::RefMatrix* viewMatrix, size_t frameNum,
+            const osg::BoundingSphere& viewBound, LightList& out);
 
         osg::ref_ptr<osg::StateSet> getLightListStateSet(
             const LightList& lightList, size_t frameNum, const osg::RefMatrix* viewMatrix);
@@ -263,13 +315,25 @@ namespace SceneUtil
 
         bool getClusteredLighting() const;
 
+        bool getClassicLighting() const { return mClusteredLighting && mClassicFalloff; }
+
+        void setClassicFalloff(bool enabled);
+
+        std::uint32_t addReceiver(osgUtil::CullVisitor& cv, const osg::BoundingSphere& viewBound,
+            const std::set<LightSource*>* ignored = nullptr, std::uint32_t parent = 0);
+
+        std::uint32_t currentReceiver() const { return mCurrentReceiver; }
+
+        void setReceiver(std::uint32_t receiver) { mCurrentReceiver = receiver; }
+
         int getMaxLights() const;
 
         bool isClusteredSupported() { return mSupportsClustered; }
 
         std::map<std::string, std::string> getLightDefines() const;
 
-        void processChangedSettings(float lightBoundsMultiplier, float maximumLightDistance, float lightFadeStart);
+        void processChangedSettings(
+            float lightBoundsMultiplier, float maximumLightDistance, float lightFadeStart, float minimumLightRadius);
 
         /// Not thread safe, it is the responsibility of the caller to stop/start threading on the viewer
         void updateMaxLights(int maxLights);
@@ -285,36 +349,123 @@ namespace SceneUtil
 
         float getPointLightFadeEnd() const { return mPointLightFadeEnd; }
 
+        /// Projected pixels per world unit.
+        float getDistantPixelScale() const { return mDistantLightPixelScale.load(std::memory_order_relaxed); }
+
+        void setDistantPixelScale(float scale) { mDistantLightPixelScale.store(scale, std::memory_order_relaxed); }
+
+        /// Paged light cluster depth.
+        void setDistantLightRange(float range) { mDistantLightRange = range; }
+
+        /// Distant paging follows the GPU scene.
+        void setDistantLightsEnabled(bool enabled) { mDistantLightsEnabled = enabled; }
+
+        bool getDistantLightsEnabled() const { return mDistantLightsEnabled; }
+
+        float getDistantLightRange() const { return mDistantLightRange; }
+
+        /// Select clustered lighting when supported, or restore standard per-object lighting.
         void enableClustered(bool enabled);
+
+        /// Select indexed pooled or baseline associative light-list state caching.
+        void enableIndexedLightLists(bool enabled);
 
         Resource::ResourceSystem* getResourceSystem() { return mResourceSystem; }
 
     private:
-        void initPerObjectUniform(int targetLights);
-        void initClustered();
+        struct LightListSlot
+        {
+            const osg::RefMatrix* mViewMatrix;
+            std::uint32_t mIdsFirst;
+            std::uint32_t mIdsCount;
+            std::size_t mHash;
+            osg::ref_ptr<osg::StateSet> mStateSet;
+        };
 
-        void updateSettings(float lightBoundsMultiplier, float maximumLightDistance, float lightFadeStart);
+        struct LightListView
+        {
+            const osg::RefMatrix* mViewMatrix;
+            std::span<const LightSourceViewBound* const> mLights;
+        };
+
+        struct LightListHash
+        {
+            std::size_t operator()(const LightListView& key) const;
+        };
+
+        osg::ref_ptr<osg::StateSet>& getLightList(const LightList& lightList, const osg::RefMatrix* viewMatrix);
+
+        osg::Matrixf makeLightData(
+            const LightSourceViewBound& bound, size_t frameNum, const osg::RefMatrix* viewMatrix) const;
+
+        void initPerObjectUniform(int targetLights);
+
+        void updateSettings(
+            float lightBoundsMultiplier, float maximumLightDistance, float lightFadeStart, float minimumLightRadius);
 
         void setMaxLights(int value);
 
         Resource::ResourceSystem* mResourceSystem;
 
-        std::vector<LightSourceTransform> mLights;
+        std::vector<LightSourceBound> mLights;
+        std::vector<std::uint64_t> mActiveLightIds;
+        std::vector<LightSourceBound> mPendingDistant;
+        struct DistantLight
+        {
+            osg::ref_ptr<LightSource> mLightSource;
+            osg::BoundingSphere mWorldBound;
+            size_t mLastSeen;
+        };
+        /// Retains lights across chunk swaps.
+        std::vector<DistantLight> mDistantLights;
+        /// Tracks slots by reference identity.
+        std::unordered_map<std::uint64_t, std::size_t> mDistantIds;
 
-        using LightSourceViewBoundCollection = std::vector<LightSourceViewBound>;
-        std::map<osg::observer_ptr<osg::Camera>, LightSourceViewBoundCollection> mLightsInViewSpace;
+        DistantLight* findDistantSlot(LightSource& light);
 
-        std::map<std::pair<const osg::RefMatrix*, std::vector<int>>, osg::ref_ptr<osg::StateSet>> mLightListStateSets;
+        ViewLights& getViewLights(osgUtil::CullVisitor* cv, const osg::RefMatrix* viewMatrix, size_t frameNum);
+
+        std::map<osg::observer_ptr<osg::Camera>, ViewLights> mLightsInViewSpace;
+
+        struct PooledStateSet
+        {
+            osg::ref_ptr<osg::StateSet> mStateSet;
+            osg::ref_ptr<osg::Uniform> mData;
+            osg::ref_ptr<osg::Uniform> mCount;
+        };
+
+        struct StateSetPool
+        {
+            std::vector<PooledStateSet> mStateSets;
+            std::size_t mUsed = 0;
+        };
+
+        DoubleBuffer<StateSetPool> mStateSetPools;
+
+        std::map<std::pair<const osg::RefMatrix*, std::vector<int>>, osg::ref_ptr<osg::StateSet>>
+            mBaselineLightListStateSets;
+
+        /// Rebuilt per frame; capacity persists.
+        std::vector<LightListSlot> mListSlots;
+        std::vector<int> mListIds;
+        std::vector<std::uint32_t> mListTable;
 
         size_t mLightingMask;
 
         osg::ref_ptr<Light> mSun;
 
         bool mClusteredLighting;
+        bool mClassicFalloff = false;
+        bool mIndexedLightLists = false;
+        std::uint32_t mCurrentReceiver = 0;
+        bool mDistantLightsEnabled = false;
 
         float mPointLightRadiusMultiplier;
         float mPointLightFadeEnd;
         float mPointLightFadeStart;
+        float mMinimumLightRadius;
+        float mDistantLightRange = 0.f;
+        std::atomic<float> mDistantLightPixelScale{ 0.f };
 
         int mMaxLights;
 
@@ -337,6 +488,14 @@ namespace SceneUtil
 
         struct ViewData
         {
+            bool updateCluster(size_t frameId, float clusterFar, const osg::Matrixd& projection)
+            {
+                const bool changed = mClusterFar[frameId] != clusterFar || mProjection[frameId] != projection;
+                mClusterFar[frameId] = clusterFar;
+                mProjection[frameId] = projection;
+                return changed;
+            }
+
             DoubleBuffer<osg::Matrixd> mProjection;
             DoubleBuffer<osg::ref_ptr<osg::BufferTemplate<std::vector<PointLight>>>> mGPULights;
             DoubleBuffer<osg::ref_ptr<osg::StateSet>> mStateSet;
@@ -346,9 +505,15 @@ namespace SceneUtil
             DoubleBuffer<osg::ref_ptr<osg::ShaderStorageBufferBinding>> mLightIndexCounterSSBB;
             DoubleBuffer<osg::ref_ptr<osg::DispatchCompute>> mClusterComputeNode;
             DoubleBuffer<osg::ref_ptr<osg::DispatchCompute>> mCullComputeNode;
+            DoubleBuffer<osg::ref_ptr<osg::BufferTemplate<std::vector<LightReceiver>>>> mReceivers;
+            DoubleBuffer<osg::ref_ptr<osg::BufferTemplate<std::vector<LightReceiver>>>> mLightBounds;
+            DoubleBuffer<osg::ref_ptr<osg::UIntArray>> mIgnoredLights;
+            DoubleBuffer<osg::ref_ptr<osg::ShaderStorageBufferBinding>> mReceiverSSBB;
+            DoubleBuffer<osg::ref_ptr<osg::ShaderStorageBufferBinding>> mLightBoundSSBB;
+            DoubleBuffer<osg::ref_ptr<osg::ShaderStorageBufferBinding>> mIgnoredSSBB;
             osg::ref_ptr<osg::ShaderStorageBufferBinding> mClusterSSBB;
 
-            float mClusterFar = 1.f;
+            DoubleBuffer<float> mClusterFar{ 1.f, 1.f };
             size_t mLastFrameNumber = 0;
         };
 
@@ -402,6 +567,10 @@ namespace SceneUtil
         size_t mLastFrameNumber;
         LightManager::LightList mLightList;
         std::set<SceneUtil::LightSource*> mIgnoredLightSources;
+        DoubleBuffer<std::vector<osg::ref_ptr<osg::StateSet>>> mReceiverStates;
+        size_t mReceiverFrame = 0;
+        size_t mReceiverUsed = 0;
+        std::uint32_t mReceiver = 0;
     };
 
     void configureStateSetSunOverride(const Light* light, osg::StateSet* stateset,

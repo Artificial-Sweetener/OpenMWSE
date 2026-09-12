@@ -31,3 +31,21 @@ layout(std430, binding = 5) restrict buffer lightIndexCounterSSBO {
 };
 
 uniform DirectionalLight sun;
+
+LightGrid clusterLights(int index)
+{
+#if @clusteredClassic
+    if (uint(index) >= uint(lightGrid.length()))
+        return LightGrid(0u, 0u);
+    LightGrid grid = lightGrid[index];
+    // Empty receivers inherit their parent's list.
+    while (grid.count == 0u && grid.offset > 0u && grid.offset < uint(index))
+    {
+        index = int(grid.offset);
+        grid = lightGrid[index];
+    }
+    return grid;
+#else
+    return lightGrid[index];
+#endif
+}

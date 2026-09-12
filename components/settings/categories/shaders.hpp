@@ -38,6 +38,7 @@ namespace Settings
         SettingValue<float> mMaximumLightDistance{ mIndex, "Shaders", "maximum light distance",
             makeMaxSanitizerFloat(0) };
         SettingValue<float> mLightFadeStart{ mIndex, "Shaders", "light fade start", makeClampSanitizerFloat(0, 1) };
+        SettingValue<float> mMinimumLightRadius{ mIndex, "Shaders", "minimum light radius", makeMaxSanitizerFloat(0) };
         SettingValue<int> mMaxLights{ mIndex, "Shaders", "max lights", makeClampSanitizerInt(2, 64) };
         SettingValue<float> mMinimumInteriorBrightness{ mIndex, "Shaders", "minimum interior brightness",
             makeClampSanitizerFloat(0, 1) };

@@ -431,15 +431,21 @@ namespace SceneUtil
             mData = new InfluenceData;
 
         std::map<BoneWeights, VertexList> influencesToVertices;
+        std::map<BoneWeights, VertexList> gpuInfluencesToVertices;
         for (size_t i = 0; i < influences.size(); i++)
-            influencesToVertices[capInfluences(influences[i])].emplace_back(static_cast<VertexList::value_type>(i));
+        {
+            influencesToVertices[influences[i]].emplace_back(static_cast<VertexList::value_type>(i));
+            gpuInfluencesToVertices[capInfluences(influences[i])].emplace_back(static_cast<VertexList::value_type>(i));
+        }
         influencesToVertices.erase(BoneWeights());
+        gpuInfluencesToVertices.erase(BoneWeights());
 
         mData->mInfluences.reserve(influencesToVertices.size());
         mData->mInfluences.assign(influencesToVertices.begin(), influencesToVertices.end());
+        mData->mGpuInfluences.assign(gpuInfluencesToVertices.begin(), gpuInfluencesToVertices.end());
         mData->mGroups.assign(influences.size(), std::numeric_limits<std::uint32_t>::max());
-        for (std::uint32_t group = 0; group < mData->mInfluences.size(); ++group)
-            for (const unsigned short vertex : mData->mInfluences[group].second)
+        for (std::uint32_t group = 0; group < mData->mGpuInfluences.size(); ++group)
+            for (const unsigned short vertex : mData->mGpuInfluences[group].second)
                 mData->mGroups[vertex] = group;
     }
 

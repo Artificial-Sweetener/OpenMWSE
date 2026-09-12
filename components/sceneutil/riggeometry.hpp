@@ -72,7 +72,7 @@ namespace SceneUtil
 
         /// Replace the immutable bone metadata used by CPU and GPU skinning.
         void setBoneInfo(std::vector<BoneInfo>&& bones);
-        /// Keeps four heaviest weights per vertex, normalized.
+        /// Preserve source influences for CPU skinning and derive bounded GPU influence groups.
         void setInfluences(const std::vector<BoneWeights>& influences);
 
         /// Initialize this geometry from the source geometry.
@@ -173,6 +173,7 @@ namespace SceneUtil
         {
             std::vector<BoneInfo> mBones;
             std::vector<std::pair<BoneWeights, VertexList>> mInfluences;
+            std::vector<std::pair<BoneWeights, VertexList>> mGpuInfluences;
             std::vector<std::uint32_t> mGroups;
             osg::Matrixf mTransform;
             std::string mRootBone;
