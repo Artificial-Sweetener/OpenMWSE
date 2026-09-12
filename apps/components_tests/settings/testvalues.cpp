@@ -216,6 +216,44 @@ namespace Settings
             EXPECT_FLOAT_EQ(values.mOpenMWSEShadows.mCloudShadowIntensity.get(), 1.f);
         }
 
+        /// Keep subordinate optimization selections dormant until the shared prerequisite is enabled.
+        TEST_F(SettingsValuesTest, optionalOptimizationsRequireThePrerequisite)
+        {
+            Index index;
+            Values values(index);
+            EXPECT_FALSE(values.mOptimizations.mEnabled);
+            EXPECT_FALSE(values.mOptimizations.isActive(values.mOptimizations.mGpuSkinning));
+
+            values.mOptimizations.mGpuSkinning.set(true);
+            EXPECT_TRUE(values.mOptimizations.mGpuSkinning);
+            EXPECT_FALSE(values.mOptimizations.isActive(values.mOptimizations.mGpuSkinning));
+
+            values.mOptimizations.mEnabled.set(true);
+            EXPECT_TRUE(values.mOptimizations.isActive(values.mOptimizations.mGpuSkinning));
+
+            values.mOptimizations.mEnabled.set(false);
+            EXPECT_TRUE(values.mOptimizations.mGpuSkinning);
+            EXPECT_FALSE(values.mOptimizations.isActive(values.mOptimizations.mGpuSkinning));
+        }
+
+        /// Save and reload the prerequisite independently from retained subordinate selections.
+        TEST_F(SettingsStartupTest, preservesDormantOptimizationSelectionsAcrossSaveAndReload)
+        {
+            std::ofstream(mDirectory / "settings.cfg")
+                << "[Optimizations]\nenabled = false\ngpu skinning = true\ngpu actors = true\n";
+            ASSERT_NO_FATAL_FAILURE(load());
+            EXPECT_FALSE(optimizations().mEnabled);
+            EXPECT_TRUE(optimizations().mGpuSkinning);
+            EXPECT_TRUE(optimizations().mGpuActors);
+            EXPECT_FALSE(optimizations().isActive(optimizations().mGpuSkinning));
+
+            Manager::saveUser(mDirectory / "settings.cfg");
+            ASSERT_NO_FATAL_FAILURE(load());
+            EXPECT_FALSE(optimizations().mEnabled);
+            EXPECT_TRUE(optimizations().mGpuSkinning);
+            EXPECT_TRUE(optimizations().mGpuActors);
+        }
+
         TEST_F(SettingsValuesTest, migrateBundledAtmosphereWithoutOverwritingExplicitChoices)
         {
             Manager::mUserSettings

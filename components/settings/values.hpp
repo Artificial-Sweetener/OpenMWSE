@@ -15,6 +15,7 @@
 #include "categories/models.hpp"
 #include "categories/navigator.hpp"
 #include "categories/openmwseshadows.hpp"
+#include "categories/optimizations.hpp"
 #include "categories/physics.hpp"
 #include "categories/postprocessing.hpp"
 #include "categories/saves.hpp"
@@ -58,6 +59,7 @@ namespace Settings
         NavigatorCategory mNavigator{ mIndex };
         ShadowsCategory mShadows{ mIndex };
         OpenMWSEShadowsCategory mOpenMWSEShadows{ mIndex };
+        OptimizationsCategory mOptimizations{ mIndex };
         PhysicsCategory mPhysics{ mIndex };
         ModelsCategory mModels{ mIndex };
         GroundcoverCategory mGroundcover{ mIndex };
@@ -190,6 +192,12 @@ namespace Settings
     inline OpenMWSEShadowsCategory& openmwseShadows()
     {
         return values().mOpenMWSEShadows;
+    }
+
+    /// Return the prerequisite and selections for optional engine optimizations.
+    inline OptimizationsCategory& optimizations()
+    {
+        return values().mOptimizations;
     }
 
     inline PhysicsCategory& physics()
