@@ -124,6 +124,8 @@ namespace MWRender
         bool isSupported() const { return mSupported; }
         bool isEnabled() const { return mSupported && mEnabled; }
         void setEnabled(bool enabled);
+        /// Enable or disable depth-pyramid occlusion while retaining GPU scene rendering.
+        void setOcclusionEnabled(bool enabled) { mOcclusionEnabled = enabled; }
         osg::Group* getNode();
         void capture(osg::Node& node);
 
@@ -488,6 +490,7 @@ namespace MWRender
         std::atomic<bool> mSupported{ false };
         Shader::MaterialMode mMaterialMode = Shader::MaterialMode::Legacy;
         std::atomic<bool> mEnabled{ true };
+        std::atomic<bool> mOcclusionEnabled{ true };
         osg::ref_ptr<GpuSceneNode> mNode;
         /// Ordered pass dispatchers under one opaque bin.
         osg::ref_ptr<osg::Group> mOrderedNode;

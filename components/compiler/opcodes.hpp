@@ -222,6 +222,7 @@ namespace Compiler
         const int opcodeToggleCollisionDebug = 0x2000132;
         const int opcodeToggleCollisionBoxes = 0x20001ac;
         const int opcodeToggleWireframe = 0x200013b;
+        const int opcodeToggleWireframeDepth = 0x2000327;
         const int opcodeFadeIn = 0x200013c;
         const int opcodeFadeOut = 0x200013d;
         const int opcodeFadeTo = 0x200013e;

@@ -3076,7 +3076,7 @@ namespace MWRender
         CullPass pass = CullPass::Full;
         osg::ref_ptr<const osg::Texture> depthSource;
         const unsigned int frameId = frame % 2;
-        if (prepass && !views.empty() && mPostProcessor != nullptr)
+        if (prepass && mOcclusionEnabled && !views.empty() && mPostProcessor != nullptr)
         {
             depthSource = mPostProcessor->getPrimaryFbo(frameId)
                               ->getAttachment(osg::Camera::PACKED_DEPTH_STENCIL_BUFFER)

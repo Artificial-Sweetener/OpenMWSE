@@ -432,12 +432,13 @@ namespace MWScript
             }
         };
 
+        template <MWRender::RenderMode Mode>
         class OpToggleWireframe : public Interpreter::Opcode0
         {
         public:
             void execute(Interpreter::Runtime& runtime) override
             {
-                bool enabled = MWBase::Environment::get().getWorld()->toggleRenderMode(MWRender::Render_Wireframe);
+                bool enabled = MWBase::Environment::get().getWorld()->toggleRenderMode(Mode);
 
                 runtime.getContext().report(enabled ? "Wireframe Rendering -> On" : "Wireframe Rendering -> Off");
             }
@@ -1837,7 +1838,10 @@ namespace MWScript
             interpreter.installSegment5<OpUnlock<ExplicitRef>>(Compiler::Misc::opcodeUnlockExplicit);
             interpreter.installSegment5<OpToggleCollisionDebug>(Compiler::Misc::opcodeToggleCollisionDebug);
             interpreter.installSegment5<OpToggleCollisionBoxes>(Compiler::Misc::opcodeToggleCollisionBoxes);
-            interpreter.installSegment5<OpToggleWireframe>(Compiler::Misc::opcodeToggleWireframe);
+            interpreter.installSegment5<OpToggleWireframe<MWRender::Render_Wireframe>>(
+                Compiler::Misc::opcodeToggleWireframe);
+            interpreter.installSegment5<OpToggleWireframe<MWRender::Render_WireframeDepth>>(
+                Compiler::Misc::opcodeToggleWireframeDepth);
             interpreter.installSegment5<OpFadeIn>(Compiler::Misc::opcodeFadeIn);
             interpreter.installSegment5<OpFadeOut>(Compiler::Misc::opcodeFadeOut);
             interpreter.installSegment5<OpFadeTo>(Compiler::Misc::opcodeFadeTo);

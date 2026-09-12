@@ -363,6 +363,7 @@ namespace MWRender
         osg::ref_ptr<SceneUtil::LightManager> mSceneRoot;
         Resource::ResourceSystem* mResourceSystem;
         std::unique_ptr<GpuScene> mGpuScene;
+        bool mGpuOcclusion = true;
         osg::ref_ptr<SceneUtil::WorkQueue> mWorkQueue;
 
         osg::ref_ptr<SceneUtil::Light> mSunLight;

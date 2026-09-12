@@ -242,6 +242,8 @@ namespace Compiler
             extensions.registerInstruction("tcg", "", opcodeToggleCollisionDebug);
             extensions.registerInstruction("twf", "", opcodeToggleWireframe);
             extensions.registerInstruction("togglewireframe", "", opcodeToggleWireframe);
+            extensions.registerInstruction("twfd", "", opcodeToggleWireframeDepth);
+            extensions.registerInstruction("togglewireframedepth", "", opcodeToggleWireframeDepth);
             extensions.registerInstruction("fadein", "f", opcodeFadeIn);
             extensions.registerInstruction("fadeout", "f", opcodeFadeOut);
             extensions.registerInstruction("fadeto", "ff", opcodeFadeTo);

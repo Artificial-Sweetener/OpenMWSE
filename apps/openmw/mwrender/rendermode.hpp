@@ -15,6 +15,7 @@ namespace MWRender
         Render_ActorsPaths,
         Render_RecastMesh,
         Render_GpuDrivenPaging,
+        Render_WireframeDepth,
     };
 }
 
