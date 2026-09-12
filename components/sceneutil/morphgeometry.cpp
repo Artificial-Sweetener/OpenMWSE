@@ -181,21 +181,19 @@ namespace SceneUtil
         }
     }
 
-    void MorphGeometry::cull(osg::NodeVisitor* nv)
+    osg::Geometry& MorphGeometry::morph(unsigned int frame)
     {
-        if (mLastFrameNumber == nv->getTraversalNumber() || !mDirty || mMorphTargets.size() == 0)
-        {
-            osg::Geometry& geom = *getGeometry(mLastFrameNumber);
-            nv->pushOntoNodePath(&geom);
-            nv->apply(geom);
-            nv->popFromNodePath();
-            return;
-        }
+        return morph(frame, nullptr);
+    }
+
+    osg::Geometry& MorphGeometry::morph(unsigned int frame, const DeformationStats* deformationStats)
+    {
+        if (mLastFrameNumber == frame || !mDirty || mMorphTargets.size() == 0)
+            return *getGeometry(mLastFrameNumber);
 
         mDirty = false;
-        mLastFrameNumber = nv->getTraversalNumber();
+        mLastFrameNumber = frame;
         osg::Geometry& geom = *getGeometry(mLastFrameNumber);
-        DeformationStats deformationStats(*nv);
 
         const osg::Vec3Array* positionSrc = mMorphTargets[0].getOffsets();
         osg::Vec3Array* positionDst = static_cast<osg::Vec3Array*>(geom.getVertexArray());
@@ -216,9 +214,17 @@ namespace SceneUtil
         positionDst->dirty();
 
         geom.osg::Drawable::dirtyGLObjects();
-        deformationStats.record(
-            DeformationPath::Morphing, positionSrc->size(), positionDst->getTotalDataSize());
+        if (deformationStats != nullptr)
+            deformationStats->record(
+                DeformationPath::Morphing, positionSrc->size(), positionDst->getTotalDataSize());
 
+        return geom;
+    }
+
+    void MorphGeometry::cull(osg::NodeVisitor* nv)
+    {
+        DeformationStats deformationStats(*nv);
+        osg::Geometry& geom = morph(nv->getTraversalNumber(), &deformationStats);
         nv->pushOntoNodePath(&geom);
         nv->apply(geom);
         nv->popFromNodePath();

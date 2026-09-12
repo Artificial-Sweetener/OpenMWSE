@@ -5,6 +5,7 @@
 
 namespace SceneUtil
 {
+    class DeformationStats;
 
     /// @brief Vertex morphing implementation.
     /// @note The internal Geometry used for rendering is double buffered, this allows updates to be done in a thread
@@ -66,6 +67,8 @@ namespace SceneUtil
         inline MorphTarget& getMorphTarget(unsigned int i) { return mMorphTargets[i]; }
 
         osg::ref_ptr<osg::Geometry> getSourceGeometry() const;
+        /// Update and return the render geometry for a frame without diagnostic attribution.
+        osg::Geometry& morph(unsigned int frame);
         void setInnerCull(osg::DrawableCullCallback* callback);
         osg::DrawableCullCallback* getInnerCull() { return mInnerCull; }
 
@@ -76,6 +79,8 @@ namespace SceneUtil
         osg::BoundingBox computeBoundingBox() const override;
 
     private:
+        /// Update the render geometry and optionally attribute the changed vertices to diagnostics.
+        osg::Geometry& morph(unsigned int frame, const DeformationStats* deformationStats);
         void cull(osg::NodeVisitor* nv);
 
         MorphTargetList mMorphTargets;
