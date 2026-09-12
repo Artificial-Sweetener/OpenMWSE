@@ -3,13 +3,13 @@
 #include "lib/sky/cloud_lighting.h.glsl"
 
 #include "lib/core/vertex.h.glsl"
+#include "lib/core/instance.h.glsl"
 
 #include "lib/sky/passes.glsl"
 #include "fog.h.glsl"
 #include "atmosphere.glsl"
 
 uniform int pass;
-uniform mat4 texMat0;
 
 varying vec4 passColor;
 varying vec2 diffuseMapUV;
@@ -33,14 +33,15 @@ void main()
     vec4 position = gl_Vertex;
     if (pass == PASS_SUN && atmosphere.sunlightEnabled)
         position.xy *= 3.0;
-    vec4 viewPosition = modelToView(position);
+    vec4 vertex = instanceWorld() * position;
+    vec4 viewPosition = modelToView(vertex);
 
     gl_Position = viewToClip(viewPosition);
     passColor = gl_Color;
     passViewDirection = viewPosition.xyz;
 
     if (pass == PASS_CLOUDS)
-        diffuseMapUV = (texMat0 * gl_MultiTexCoord0).xy;
+        diffuseMapUV = mapUV(@diffuseMapIndex, 0, gl_MultiTexCoord0);
     else
         diffuseMapUV = gl_MultiTexCoord0.xy;
 }

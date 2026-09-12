@@ -8,11 +8,14 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <osg/Program>
 #include <osg/Shader>
 #include <osg/ref_ptr>
+
+#include "materialmode.hpp"
 
 namespace osgViewer
 {
@@ -22,6 +25,26 @@ namespace osgViewer
 namespace Shader
 {
     struct HotReloadManager;
+
+    // What a program's templates implement.
+    enum class ProgramCapability : unsigned int
+    {
+        None = 0,
+        Instanced = 1 << 0,
+        ArrayMaterial = 1 << 1,
+        UberMaterial = 1 << 2,
+    };
+
+    constexpr ProgramCapability operator|(ProgramCapability lhs, ProgramCapability rhs)
+    {
+        return static_cast<ProgramCapability>(static_cast<unsigned int>(lhs) | static_cast<unsigned int>(rhs));
+    }
+
+    constexpr bool hasCapability(ProgramCapability set, ProgramCapability flag)
+    {
+        return (static_cast<unsigned int>(set) & static_cast<unsigned int>(flag)) != 0;
+    }
+
     /// @brief Reads shader template files and turns them into a concrete shader, based on a list of define's.
     /// @par Shader templates can get the value of a define with the syntax @define.
     class ShaderManager
@@ -47,12 +70,25 @@ namespace Shader
         typedef std::map<std::string, int> SamplerBindingMap;
 
         /// @param samplers Sampler uniforms to bind once per linked program instead of on every stateset.
+        /// @param capabilities What the templates implement for getInstancedProgram.
         osg::ref_ptr<osg::Program> getProgram(const std::string& templateName, const DefineMap& defines = {},
-            const osg::Program* programTemplate = nullptr, const SamplerBindingMap& samplers = {});
+            const osg::Program* programTemplate = nullptr, const SamplerBindingMap& samplers = {},
+            ProgramCapability capabilities = ProgramCapability::None);
 
         osg::ref_ptr<osg::Program> getProgram(osg::ref_ptr<osg::Shader> vertexShader,
             osg::ref_ptr<osg::Shader> fragmentShader, const osg::Program* programTemplate = nullptr,
-            const SamplerBindingMap& samplers = {});
+            const SamplerBindingMap& samplers = {}, ProgramCapability capabilities = ProgramCapability::None);
+
+        static constexpr unsigned int sInstanceSlotAttribute = 6;
+
+        /// Compiles a GPU-instanced material variant.
+        /// @note Returns nullptr when the program lacks the capabilities the mode needs.
+        osg::ref_ptr<osg::Program> getInstancedProgram(const osg::Program& program, MaterialMode mode);
+
+        /// Defines that select the instance and material bodies.
+        static void applyInstancedDefines(DefineMap& defines, MaterialMode mode, bool clusteredLighting);
+
+        std::optional<int> getSamplerUnit(const osg::Program& program, std::string_view name) const;
 
         const osg::Program* getProgramTemplate() const { return mProgramTemplate; }
         void setProgramTemplate(const osg::Program* program) { mProgramTemplate = program; }
@@ -100,6 +136,9 @@ namespace Shader
     private:
         osg::ref_ptr<osg::Shader> getShaderInternal(std::string templateName, const DefineMap& defines = {},
             std::optional<osg::Shader::Type> type = std::nullopt);
+        osg::ref_ptr<osg::Program> getProgramInternal(const osg::ref_ptr<osg::Shader>& vertexShader,
+            const osg::ref_ptr<osg::Shader>& fragmentShader, const osg::Program* programTemplate,
+            const SamplerBindingMap& samplers, ProgramCapability capabilities);
         void getLinkedShaders(osg::ref_ptr<osg::Shader> shader, const std::vector<std::string>& linkedShaderNames,
             const DefineMap& defines);
         void addLinkedShaders(osg::ref_ptr<osg::Shader> shader, osg::ref_ptr<osg::Program> program);
@@ -116,9 +155,14 @@ namespace Shader
         typedef std::map<MapKey, osg::ref_ptr<osg::Shader>> ShaderMap;
         ShaderMap mShaders;
 
-        typedef std::map<std::pair<osg::ref_ptr<osg::Shader>, osg::ref_ptr<osg::Shader>>, osg::ref_ptr<osg::Program>>
+        typedef std::multimap<std::pair<osg::ref_ptr<osg::Shader>, osg::ref_ptr<osg::Shader>>,
+            osg::ref_ptr<osg::Program>>
             ProgramMap;
         ProgramMap mPrograms;
+
+        std::map<const osg::Shader*, MapKey> mShaderKeys;
+        std::map<std::pair<osg::ref_ptr<const osg::Program>, MaterialMode>, osg::ref_ptr<osg::Program>>
+            mInstancedPrograms;
 
         typedef std::vector<osg::ref_ptr<osg::Shader>> ShaderList;
         typedef std::map<osg::ref_ptr<osg::Shader>, ShaderList> LinkedShadersMap;

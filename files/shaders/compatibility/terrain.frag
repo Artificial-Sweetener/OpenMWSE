@@ -6,22 +6,10 @@
 
 varying vec2 uv;
 
-uniform sampler2D diffuseMap;
-
-#if @normalMap
-uniform sampler2D normalMap;
-#endif
-
-#if @blendMap
-uniform sampler2D blendMap;
-#endif
-
 varying float euclideanDepth;
 varying float linearDepth;
 
-#define PER_PIXEL_LIGHTING (@normalMap || @specularMap || @forcePPL)
-
-#if !PER_PIXEL_LIGHTING
+#if !@forcePPL
 centroid varying vec3 shadedLighting;
 centroid varying vec3 shadedSpecular;
 centroid varying vec3 passLighting;
@@ -35,9 +23,6 @@ varying vec3 passNormal;
 uniform vec2 screenRes;
 uniform float near;
 uniform float far;
-
-uniform mat4 texMat0;
-uniform mat4 texMat1;
 
 #include "lib/core/fragment.h.glsl"
 
@@ -54,25 +39,25 @@ void main()
 {
     Material material = getMaterial();
 
-    vec2 adjustedUV = (texMat0 * vec4(uv, 0.0, 1.0)).xy;
+    vec2 adjustedUV = transformUV(0, uv);
 
 #if @parallax
-    float height = texture2D(normalMap, adjustedUV).a;
+    float height = sampleNormalMap(adjustedUV).a;
     adjustedUV += getParallaxOffset(transpose(normalToViewMatrix) * normalize(-passViewPos), height);
 #endif
-    vec4 diffuseTex = texture2D(diffuseMap, adjustedUV);
+    vec4 diffuseTex = sampleDiffuseMap(adjustedUV);
     gl_FragData[0] = vec4(diffuseTex.xyz, 1.0);
 
     vec4 diffuseColor = getDiffuseColor(material, passColor);
     gl_FragData[0].a *= diffuseColor.a;
 
 #if @blendMap
-    vec2 blendMapUV = (texMat1 * vec4(uv, 0.0, 1.0)).xy;
-    gl_FragData[0].a *= texture2D(blendMap, blendMapUV).a;
+    vec2 blendMapUV = transformUV(1, uv);
+    gl_FragData[0].a *= sampleBlendMap(blendMapUV).a;
 #endif
 
 #if @normalMap
-    vec4 normalTex = texture2D(normalMap, adjustedUV);
+    vec4 normalTex = sampleNormalMap(adjustedUV);
     vec3 normal = normalTex.xyz * 2.0 - 1.0;
 #if @reconstructNormalZ
     normal.z = sqrt(1.0 - dot(normal.xy, normal.xy));
@@ -84,7 +69,7 @@ void main()
 
     float shadowing = unshadowedLightRatio(linearDepth);
     vec3 lighting, specular;
-#if !PER_PIXEL_LIGHTING
+#if !@forcePPL
     lighting = mix(shadedLighting, passLighting, shadowing);
     specular = mix(shadedSpecular, passSpecular, shadowing);
 #else

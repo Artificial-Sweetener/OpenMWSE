@@ -4,33 +4,31 @@
     #extension GL_EXT_gpu_shader4: require
 #endif
 
+@link "lib/core/instance.glsl" if @gpuInstanced
+@link "compatibility/groundcover_instance.glsl" if !@gpuInstanced
+
 #include "lib/core/vertex.h.glsl"
 
 
-attribute vec4 aOffset;
-attribute vec3 aRotation;
+mat4 instanceWorld();
+mat3 instanceNormal();
+vec4 instanceTangent(vec4 tangent);
 
 // World-unit fade interval shared with CPU groundcover visibility.
 uniform vec2 groundcoverFade;
 
 #if @diffuseMap
 varying vec2 diffuseMapUV;
-uniform mat4 texMat@diffuseMapUV;
 #endif
 
 #if @normalMap
 varying vec2 normalMapUV;
-uniform mat4 texMat@normalMapUV;
 #endif
-
-// Other shaders respect forcePPL, but legacy groundcover mods were designed to work with vertex lighting.
-// They may do not look as intended with per-pixel lighting, so ignore this setting for now.
-#define PER_PIXEL_LIGHTING @normalMap
 
 varying float euclideanDepth;
 varying float linearDepth;
 
-#if !PER_PIXEL_LIGHTING
+#if !@forcePPL
 centroid varying vec3 shadedLighting;
 centroid varying vec3 passLighting;
 #include "lib/light/clamp.glsl"
@@ -102,75 +100,44 @@ vec2 groundcoverDisplacement(in vec3 worldpos, float h)
     return clamp(0.02 * h, 0.0, 1.0) * (harmonics * displace + stomp);
 }
 
-mat4 rotation(in vec3 angle)
-{
-    float sin_x = sin(angle.x);
-    float cos_x = cos(angle.x);
-    float sin_y = sin(angle.y);
-    float cos_y = cos(angle.y);
-    float sin_z = sin(angle.z);
-    float cos_z = cos(angle.z);
-
-    return mat4(
-        cos_z*cos_y+sin_x*sin_y*sin_z, -sin_z*cos_x, cos_z*sin_y+sin_z*sin_x*cos_y, 0.0,
-        sin_z*cos_y+cos_z*sin_x*sin_y, cos_z*cos_x, sin_z*sin_y-cos_z*sin_x*cos_y, 0.0,
-        -sin_y*cos_x, sin_x, cos_x*cos_y, 0.0,
-        0.0, 0.0, 0.0, 1.0);
-}
-
-mat3 rotation3(in mat4 rot4)
-{
-    return mat3(
-        rot4[0].xyz,
-        rot4[1].xyz,
-        rot4[2].xyz);
-}
-
 void main(void)
 {
+    mat4 instanceMatrix = instanceWorld();
+    vec4 worldPos = instanceMatrix * gl_Vertex;
+    vec3 position = instanceMatrix[3].xyz;
     Material material = getMaterial();
-
-    vec3 position = aOffset.xyz;
-    float scale = aOffset.w;
-
-    mat4 rotation = rotation(aRotation);
-    vec4 displacedVertex = rotation * scale * gl_Vertex;
-
-    displacedVertex = vec4(displacedVertex.xyz + position, 1.0);
-
-    vec4 worldPos = osg_ViewMatrixInverse * gl_ModelViewMatrix * displacedVertex;
     worldPos.xy += groundcoverDisplacement(worldPos.xyz, gl_Vertex.z);
     vec4 viewPos = osg_ViewMatrix * worldPos;
     passViewPos = viewPos.xyz;
     gl_ClipVertex = viewPos;
     euclideanDepth = length(viewPos.xyz);
 
-    if (length(gl_ModelViewMatrix * vec4(position, 1.0)) > groundcoverFade.y)
+    if (length(osg_ViewMatrix * vec4(position, 1.0)) > groundcoverFade.y)
         gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
     else
         gl_Position = viewToClip(viewPos);
 
     linearDepth = getLinearDepth(gl_Position.z, viewPos.z);
 
-    passNormal = rotation3(rotation) * gl_Normal.xyz;
+    passNormal = instanceNormal() * gl_Normal.xyz;
     normalToViewMatrix = gl_NormalMatrix;
 #if @normalMap
-    normalToViewMatrix *= generateTangentSpace(gl_MultiTexCoord7.xyzw * rotation, passNormal);
+    normalToViewMatrix *= generateTangentSpace(instanceTangent(gl_MultiTexCoord7), passNormal);
 #endif
 
-#if (!PER_PIXEL_LIGHTING || @shadows_enabled)
+#if (!@forcePPL || @shadows_enabled)
     vec3 viewNormal = normalize(gl_NormalMatrix * passNormal);
 #endif
 
 #if @diffuseMap
-    diffuseMapUV = (texMat@diffuseMapUV * gl_MultiTexCoord@diffuseMapUV).xy;
+    diffuseMapUV = mapUV(@diffuseMapIndex, @diffuseMapUV, gl_MultiTexCoord@diffuseMapUV);
 #endif
 
 #if @normalMap
-    normalMapUV = (texMat@normalMapUV * gl_MultiTexCoord@normalMapUV).xy;
+    normalMapUV = mapUV(@normalMapIndex, @normalMapUV, gl_MultiTexCoord@normalMapUV);
 #endif
 
-#if PER_PIXEL_LIGHTING
+#if @forcePPL
     passViewPos = viewPos.xyz;
 #else
     float shininess = max(1e-4, material.shininess);

@@ -16,17 +16,6 @@ bool sphereAABBIntersection(vec3 center, float radius, vec3 aabbMin, vec3 aabbMa
     return dot(closestPoint - center, closestPoint - center) <= radius * radius;
 }
 
-bool testSphereAABB(int i, Cluster cluster)
-{
-    vec3 center = pointLight[i].position.xyz;
-    float radius = pointLight[i].radius;
-
-    vec3 aabbMin = cluster.minPoint.xyz;
-    vec3 aabbMax = cluster.maxPoint.xyz;
-
-    return sphereAABBIntersection(center, radius, aabbMin, aabbMax);
-}
-
 void main()
 {
     if (gl_LocalInvocationIndex == 0) {

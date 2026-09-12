@@ -5,10 +5,10 @@
 #endif
 
 #include "lib/core/vertex.h.glsl"
+#include "lib/core/instance.h.glsl"
 
 #if @diffuseMap
 varying vec2 diffuseMapUV;
-uniform mat4 texMat@diffuseMapUV;
 #endif
 
 varying vec3 passNormal;
@@ -29,24 +29,25 @@ uniform vec4 falloffParams;
 
 void main(void)
 {
-    gl_Position = modelToClip(gl_Vertex);
+    vec4 vertex = instanceWorld() * gl_Vertex;
+    gl_Position = modelToClip(vertex);
 
-    vec4 viewPos = modelToView(gl_Vertex);
+    vec4 viewPos = modelToView(vertex);
     gl_ClipVertex = viewPos;
     euclideanDepth = length(viewPos.xyz);
     linearDepth = getLinearDepth(gl_Position.z, viewPos.z);
 
 #if @diffuseMap
-    diffuseMapUV = (texMat@diffuseMapUV * gl_MultiTexCoord@diffuseMapUV).xy;
+    diffuseMapUV = mapUV(@diffuseMapIndex, @diffuseMapUV, gl_MultiTexCoord@diffuseMapUV);
 #endif
 
     passColor = gl_Color;
     passViewPos = viewPos.xyz;
-    passNormal = gl_Normal.xyz;
+    passNormal = instanceNormal() * gl_Normal.xyz;
 
     if (useFalloff)
     {
-        vec3 viewNormal = gl_NormalMatrix * normalize(gl_Normal.xyz);
+        vec3 viewNormal = gl_NormalMatrix * normalize(passNormal);
         vec3 viewDir = normalize(viewPos.xyz);
         float viewAngle = abs(dot(viewNormal, viewDir));
         passFalloff = smoothstep(falloffParams.x, falloffParams.y, viewAngle);

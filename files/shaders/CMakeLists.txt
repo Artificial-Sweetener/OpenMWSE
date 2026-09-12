@@ -54,10 +54,27 @@ set(SHADER_FILES
     lib/core/lighting_fragment_impl.glsl
     lib/core/lighting_vertex_impl.glsl
     lib/core/vertex.glsl
+    lib/core/instance.glsl
+    lib/core/instance_identity.glsl
+    lib/core/instance.h.glsl
+    lib/core/gpuscene_types.glsl
+    lib/core/gpuscene_material.glsl
+    lib/core/gpuscene_lights.glsl
+    lib/core/lighting_fragment_gpu.glsl
+    lib/core/lighting_vertex_gpu.glsl
+    lib/core/material_vertex.h.glsl
+    lib/core/material_vertex_legacy.glsl
+    lib/core/material_vertex_gpu.glsl
+    lib/core/material_fragment.h.glsl
+    lib/core/material_fragment_legacy.glsl
+    lib/core/material_fragment_bindless.glsl
+    lib/core/material_fragment_array.glsl
     lib/core/vertex.h.glsl
     lib/core/vertex_multiview.glsl
     lib/light/bindings.glsl
     lib/light/bindings-legacy.glsl
+    lib/light/bindings-gpu.glsl
+    lib/light/bindings-point.glsl
     lib/light/clamp.glsl
     lib/light/util.glsl
     lib/light/struct.glsl
@@ -80,6 +97,10 @@ set(SHADER_FILES
     compatibility/water.vert
     compatibility/water.frag
     compatibility/objects.vert
+    compatibility/gpuscene_cull.comp
+    compatibility/gpuscene_commands.comp
+    compatibility/gpuscene_skin.comp
+    compatibility/gpuscene_raycast.comp
     compatibility/objects.frag
     compatibility/terrain.vert
     compatibility/terrain.frag
@@ -87,6 +108,10 @@ set(SHADER_FILES
     compatibility/terrain_composite.frag
     compatibility/shadows_vertex.glsl
     compatibility/shadows_fragment.glsl
+    compatibility/gpuscene_downsample.comp
+    compatibility/gpuscene_prepass.frag
+    compatibility/gpuscene_prepass.vert
+    compatibility/groundcover_instance.glsl
     compatibility/shadowcasting.vert
     compatibility/shadowcasting.frag
     compatibility/normals.glsl

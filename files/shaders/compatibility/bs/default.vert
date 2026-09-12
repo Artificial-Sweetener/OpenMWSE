@@ -4,23 +4,19 @@
     #extension GL_EXT_gpu_shader4: require
 #endif
 
-#define PER_PIXEL_LIGHTING 1
-
 #include "lib/core/vertex.h.glsl"
+#include "lib/core/instance.h.glsl"
 
 #if @diffuseMap
 varying vec2 diffuseMapUV;
-uniform mat4 texMat@diffuseMapUV;
 #endif
 
 #if @emissiveMap
 varying vec2 emissiveMapUV;
-uniform mat4 texMat@emissiveMapUV;
 #endif
 
 #if @normalMap
 varying vec2 normalMapUV;
-uniform mat4 texMat@normalMapUV;
 varying vec4 passTangent;
 #endif
 
@@ -40,31 +36,33 @@ centroid varying vec4 passColor;
 
 void main(void)
 {
-    gl_Position = modelToClip(gl_Vertex);
+    vec4 vertex = instanceWorld() * gl_Vertex;
+    gl_Position = modelToClip(vertex);
 
-    vec4 viewPos = modelToView(gl_Vertex);
+    vec4 viewPos = modelToView(vertex);
     gl_ClipVertex = viewPos;
     euclideanDepth = length(viewPos.xyz);
     linearDepth = getLinearDepth(gl_Position.z, viewPos.z);
     passColor = gl_Color;
     passViewPos = viewPos.xyz;
-    passNormal = gl_Normal.xyz;
+    passNormal = instanceNormal() * gl_Normal.xyz;
     normalToViewMatrix = gl_NormalMatrix;
 
 #if @normalMap
-    normalToViewMatrix *= generateTangentSpace(gl_MultiTexCoord7.xyzw, passNormal);
+    passTangent = instanceTangent(gl_MultiTexCoord7);
+    normalToViewMatrix *= generateTangentSpace(passTangent, passNormal);
 #endif
 
 #if @diffuseMap
-    diffuseMapUV = (texMat@diffuseMapUV * gl_MultiTexCoord@diffuseMapUV).xy;
+    diffuseMapUV = mapUV(@diffuseMapIndex, @diffuseMapUV, gl_MultiTexCoord@diffuseMapUV);
 #endif
 
 #if @emissiveMap
-    emissiveMapUV = (texMat@emissiveMapUV * gl_MultiTexCoord@emissiveMapUV).xy;
+    emissiveMapUV = mapUV(@emissiveMapIndex, @emissiveMapUV, gl_MultiTexCoord@emissiveMapUV);
 #endif
 
 #if @normalMap
-    normalMapUV = (texMat@normalMapUV * gl_MultiTexCoord@normalMapUV).xy;
+    normalMapUV = mapUV(@normalMapIndex, @normalMapUV, gl_MultiTexCoord@normalMapUV);
 #endif
 
 

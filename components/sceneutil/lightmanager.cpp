@@ -429,6 +429,7 @@ namespace SceneUtil
 
         defines["maxLights"] = std::to_string(getMaxLights());
         defines["lightingMethodClustered"] = mClusteredLighting ? "1" : "0";
+        defines["legacyLightList"] = mClusteredLighting ? "0" : "1";
         defines["useGPUShader4"] = std::to_string(mClusteredLighting);
         defines["simpleLighting"] = "0";
 

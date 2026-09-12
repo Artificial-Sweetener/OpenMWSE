@@ -4,7 +4,6 @@
 
 uniform sampler2D reflectionMap;
 uniform sampler2D reflectedCloudTexture;
-uniform Material material;
 
 vec4 sampleReflectionMap(vec2 uv)
 {
@@ -44,9 +43,4 @@ vec4 sampleOpaqueDepthTex(vec2 uv)
 vec4 sampleOpaqueColorTex(vec2 uv)
 {
     return texture2D(opaqueColorTex, uv);
-}
-
-Material getMaterial()
-{
-    return material;
 }

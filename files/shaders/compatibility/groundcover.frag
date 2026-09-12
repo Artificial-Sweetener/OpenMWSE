@@ -8,30 +8,23 @@
 
 
 #if @diffuseMap
-uniform sampler2D diffuseMap;
 varying vec2 diffuseMapUV;
 #endif
 
 #if @normalMap
-uniform sampler2D normalMap;
 varying vec2 normalMapUV;
 #endif
-
-// Other shaders respect forcePPL, but legacy groundcover mods were designed to work with vertex lighting.
-// They may do not look as intended with per-pixel lighting, so ignore this setting for now.
-#define PER_PIXEL_LIGHTING @normalMap
 
 varying float euclideanDepth;
 varying float linearDepth;
 uniform vec2 screenRes;
 uniform float near;
 uniform float far;
-uniform float alphaRef;
 
 // World-unit fade interval shared with CPU groundcover visibility.
 uniform vec2 groundcoverFade;
 
-#if PER_PIXEL_LIGHTING
+#if @forcePPL
 #include "lib/light/clamp.glsl"
 #else
 centroid varying vec3 shadedLighting;
@@ -53,7 +46,7 @@ void main()
     Material material = getMaterial();
 
 #if @diffuseMap
-    gl_FragData[0] = texture2D(diffuseMap, diffuseMapUV);
+    gl_FragData[0] = sampleDiffuseMap(diffuseMapUV);
 #else
     gl_FragData[0] = vec4(1.0);
 #endif
@@ -63,23 +56,25 @@ void main()
     if (euclideanDepth > groundcoverFade.x)
         gl_FragData[0].a *= 1.0-smoothstep(groundcoverFade.x, groundcoverFade.y, euclideanDepth);
 
-    gl_FragData[0].a = alphaTest(gl_FragData[0].a, alphaRef);
+    gl_FragData[0].a = alphaTest(gl_FragData[0].a, getAlphaRef());
 
+    vec3 viewNormal = normalize(gl_NormalMatrix * passNormal);
 #if @normalMap
-    vec4 normalTex = texture2D(normalMap, normalMapUV);
-    vec3 normal = normalTex.xyz * 2.0 - 1.0;
+    if (hasMap(@normalMapIndex))
+    {
+        vec4 normalTex = sampleNormalMap(normalMapUV);
+        vec3 normal = normalTex.xyz * 2.0 - 1.0;
 #if @reconstructNormalZ
-    normal.z = sqrt(1.0 - dot(normal.xy, normal.xy));
+        normal.z = sqrt(1.0 - dot(normal.xy, normal.xy));
 #endif
-    vec3 viewNormal = normalToView(normal);
-#else
-    vec3 viewNormal = normalToView(normalize(passNormal));
+        viewNormal = normalToView(normal);
+    }
 #endif
 
     float shadowing = unshadowedLightRatio(linearDepth);
 
     vec3 lighting;
-#if !PER_PIXEL_LIGHTING
+#if !@forcePPL
     lighting = mix(shadedLighting, passLighting, shadowing);
 #else
     vec3 diffuseLight, ambientLight, specularLight;

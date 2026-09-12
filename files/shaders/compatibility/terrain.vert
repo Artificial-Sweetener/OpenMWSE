@@ -5,13 +5,13 @@
 #endif
 
 #include "lib/core/vertex.h.glsl"
+#include "lib/core/instance.h.glsl"
+
 varying vec2 uv;
 varying float euclideanDepth;
 varying float linearDepth;
 
-#define PER_PIXEL_LIGHTING (@normalMap || @specularMap || @forcePPL)
-
-#if !PER_PIXEL_LIGHTING
+#if !@forcePPL
 centroid varying vec3 shadedLighting;
 centroid varying vec3 shadedSpecular;
 centroid varying vec3 passLighting;
@@ -32,17 +32,17 @@ centroid varying vec4 passColor;
 
 void main(void)
 {
+    vec4 vertex = instanceWorld() * gl_Vertex;
+    passNormal = instanceNormal() * gl_Normal.xyz;
     Material material = getMaterial();
+    gl_Position = modelToClip(vertex);
 
-    gl_Position = modelToClip(gl_Vertex);
-
-    vec4 viewPos = modelToView(gl_Vertex);
+    vec4 viewPos = modelToView(vertex);
     gl_ClipVertex = viewPos;
     euclideanDepth = length(viewPos.xyz);
     linearDepth = getLinearDepth(gl_Position.z, viewPos.z);
 
     passColor = gl_Color;
-    passNormal = gl_Normal.xyz;
     passViewPos = viewPos.xyz;
     normalToViewMatrix = gl_NormalMatrix;
 
@@ -52,11 +52,11 @@ void main(void)
     normalToViewMatrix *= tbnMatrix;
 #endif
 
-#if !PER_PIXEL_LIGHTING || @shadows_enabled
+#if !@forcePPL || @shadows_enabled
     vec3 viewNormal = normalize(gl_NormalMatrix * passNormal);
 #endif
 
-#if !PER_PIXEL_LIGHTING
+#if !@forcePPL
     float shininess = max(1e-4, material.shininess);
     vec3 viewDir = passViewPos / euclideanDepth;
     vec3 diffuseColor = getDiffuseColor(material, passColor).rgb;

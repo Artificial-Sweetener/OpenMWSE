@@ -7,71 +7,55 @@
 #endif
 
 #if @diffuseMap
-uniform sampler2D diffuseMap;
 varying vec2 diffuseMapUV;
 #endif
 
 #if @darkMap
-uniform sampler2D darkMap;
 varying vec2 darkMapUV;
 #endif
 
 #if @detailMap
-uniform sampler2D detailMap;
 varying vec2 detailMapUV;
 #endif
 
 #if @decalMap
-uniform sampler2D decalMap;
 varying vec2 decalMapUV;
 #endif
 
 #if @emissiveMap
-uniform sampler2D emissiveMap;
 varying vec2 emissiveMapUV;
 #endif
 
 #if @normalMap
-uniform sampler2D normalMap;
 varying vec2 normalMapUV;
 #endif
 
 #if @envMap
-uniform sampler2D envMap;
 varying vec2 envMapUV;
-uniform vec4 envMapColor;
 #endif
 
 #if @specularMap
-uniform sampler2D specularMap;
 varying vec2 specularMapUV;
 #endif
 
 #if @bumpMap
-uniform sampler2D bumpMap;
 varying vec2 bumpMapUV;
-uniform vec2 envMapLumaBias;
-uniform mat2 bumpMapMatrix;
 #endif
 
 #if @glossMap
-uniform sampler2D glossMap;
 varying vec2 glossMapUV;
 #endif
 
 uniform vec2 screenRes;
 uniform float near;
 uniform float far;
-uniform float alphaRef;
 uniform float distortionStrength;
 uniform float alpha;
 uniform float actorFade;
 
-#define PER_PIXEL_LIGHTING (@normalMap || @specularMap || @forcePPL)
-
 centroid varying vec4 passColor;
 
-#if !PER_PIXEL_LIGHTING
+#if !@forcePPL
 centroid varying vec3 shadedLighting;
 centroid varying vec3 shadedSpecular;
 centroid varying vec3 passLighting;
@@ -126,9 +110,9 @@ void main()
 
 #if @parallax || @diffuseParallax
 #if @parallax
-    float height = texture2D(normalMap, normalMapUV).a;
+    float height = sampleNormalMap(normalMapUV).a;
 #else
-    float height = texture2D(diffuseMap, diffuseMapUV).a;
+    float height = sampleDiffuseMap(diffuseMapUV).a;
 #endif
     offset = getParallaxOffset(transpose(normalToViewMatrix) * normalize(-passViewPos), height);
 #endif
@@ -136,19 +120,24 @@ void main()
 vec2 screenCoords = gl_FragCoord.xy / screenRes;
 
 #if @diffuseMap
-    gl_FragData[0] = texture2D(diffuseMap, diffuseMapUV + offset);
+    if (hasMap(@diffuseMapIndex))
+    {
+        gl_FragData[0] = sampleDiffuseMap(diffuseMapUV + offset);
 
 #if defined(DISTORTION) && DISTORTION
-    gl_FragData[0].a *= getDiffuseColor(material, passColor).a;
-    gl_FragData[0] = applyDistortion(gl_FragData[0], distortionStrength, gl_FragCoord.z, sampleOpaqueDepthTex(screenCoords / @distorionRTRatio).x);
-    return;
+        gl_FragData[0].a *= getDiffuseColor(material, passColor).a;
+        gl_FragData[0] = applyDistortion(gl_FragData[0], distortionStrength, gl_FragCoord.z, sampleOpaqueDepthTex(screenCoords / @distorionRTRatio).x);
+        return;
 #endif
 
 #if @diffuseParallax
-    gl_FragData[0].a = 1.0;
+        gl_FragData[0].a = 1.0;
 #else
-    gl_FragData[0].a *= coveragePreservingAlphaScale(diffuseMap, diffuseMapUV + offset);
+        gl_FragData[0].a *= mapCoverageScale(@diffuseMapIndex, diffuseMapUV + offset);
 #endif
+    }
+    else
+        gl_FragData[0] = vec4(1.0);
 #else
     gl_FragData[0] = vec4(1.0);
 #endif
@@ -157,78 +146,98 @@ vec2 screenCoords = gl_FragCoord.xy / screenRes;
     gl_FragData[0].a *= diffuseColor.a * alpha * actorFade;
 
 #if @darkMap
-    gl_FragData[0] *= texture2D(darkMap, darkMapUV);
-    gl_FragData[0].a *= coveragePreservingAlphaScale(darkMap, darkMapUV);
+    if (hasMap(@darkMapIndex))
+    {
+        gl_FragData[0] *= sampleDarkMap(darkMapUV);
+        gl_FragData[0].a *= mapCoverageScale(@darkMapIndex, darkMapUV);
+    }
 #endif
 
-    gl_FragData[0].a = alphaTest(gl_FragData[0].a, alphaRef);
+    gl_FragData[0].a = alphaTest(gl_FragData[0].a, getAlphaRef());
 
-#if @normalMap
-    vec4 normalTex = texture2D(normalMap, normalMapUV + offset);
-    vec3 normal = normalTex.xyz * 2.0 - 1.0;
-#if @reconstructNormalZ
-    normal.z = sqrt(1.0 - dot(normal.xy, normal.xy));
-#endif
-    vec3 viewNormal = normalToView(normal);
-#else
     vec3 viewNormal = normalize(gl_NormalMatrix * passNormal);
+#if @normalMap
+    if (hasMap(@normalMapIndex))
+    {
+        vec4 normalTex = sampleNormalMap(normalMapUV + offset);
+        vec3 normal = normalTex.xyz * 2.0 - 1.0;
+#if @reconstructNormalZ
+        normal.z = sqrt(1.0 - dot(normal.xy, normal.xy));
+#endif
+        viewNormal = normalToView(normal);
+    }
 #endif
 
     vec3 viewVec = normalize(passViewPos);
 
 #if @detailMap
-    gl_FragData[0].xyz *= texture2D(detailMap, detailMapUV).xyz * 2.0;
+    if (hasMap(@detailMapIndex))
+        gl_FragData[0].xyz *= sampleDetailMap(detailMapUV).xyz * 2.0;
 #endif
 
 #if @decalMap
-    vec4 decalTex = texture2D(decalMap, decalMapUV);
-    gl_FragData[0].xyz = mix(gl_FragData[0].xyz, decalTex.xyz, decalTex.a * diffuseColor.a);
+    if (hasMap(@decalMapIndex))
+    {
+        vec4 decalTex = sampleDecalMap(decalMapUV);
+        gl_FragData[0].xyz = mix(gl_FragData[0].xyz, decalTex.xyz, decalTex.a * diffuseColor.a);
+    }
 #endif
 
 #if @envMap
-
-    vec2 envTexCoordGen = envMapUV;
-    float envLuma = 1.0;
+    vec3 envEffect = vec3(0.0);
+    if (hasMap(@envMapIndex))
+    {
+        vec2 envTexCoordGen = envMapUV;
+        float envLuma = 1.0;
 
 #if @normalMap
-    // if using normal map + env map, take advantage of per-pixel normals for envTexCoordGen
-    vec3 r = reflect( viewVec, viewNormal );
-    float m = 2.0 * sqrt( r.x*r.x + r.y*r.y + (r.z+1.0)*(r.z+1.0) );
-    envTexCoordGen = vec2(r.x/m + 0.5, r.y/m + 0.5);
+        // if using normal map + env map, take advantage of per-pixel normals for envTexCoordGen
+        if (hasMap(@normalMapIndex))
+        {
+            vec3 r = reflect( viewVec, viewNormal );
+            float m = 2.0 * sqrt( r.x*r.x + r.y*r.y + (r.z+1.0)*(r.z+1.0) );
+            envTexCoordGen = vec2(r.x/m + 0.5, r.y/m + 0.5);
+        }
 #endif
 
 #if @bumpMap
-    vec4 bumpTex = texture2D(bumpMap, bumpMapUV);
-    envTexCoordGen += bumpTex.rg * bumpMapMatrix;
-    envLuma = clamp(bumpTex.b * envMapLumaBias.x + envMapLumaBias.y, 0.0, 1.0);
+        if (hasMap(@bumpMapIndex))
+        {
+            vec4 bumpTex = sampleBumpMap(bumpMapUV);
+            envTexCoordGen += bumpTex.rg * getBumpMapMatrix();
+            envLuma = clamp(bumpTex.b * getEnvMapLumaBias().x + getEnvMapLumaBias().y, 0.0, 1.0);
+        }
 #endif
 
-    vec3 envEffect = texture2D(envMap, envTexCoordGen).xyz * envMapColor.xyz * envLuma;
+        envEffect = sampleEnvMap(envTexCoordGen).xyz * getEnvMapColor().xyz * envLuma;
 
 #if @glossMap
-    envEffect *= texture2D(glossMap, glossMapUV).xyz;
+        if (hasMap(@glossMapIndex))
+            envEffect *= sampleGlossMap(glossMapUV).xyz;
 #endif
 
 #if @preLightEnv
-    gl_FragData[0].xyz += envEffect;
+        gl_FragData[0].xyz += envEffect;
 #endif
-
+    }
 #endif
 
     vec3 diagnosticSampledSurfaceColor = gl_FragData[0].rgb;
     float shadowing = unshadowedLightRatio(-passViewPos.z);
     vec3 lighting, specular;
-#if !PER_PIXEL_LIGHTING
+#if !@forcePPL
     lighting = mix(shadedLighting, passLighting, shadowing);
     specular = mix(shadedSpecular, passSpecular, shadowing);
 #else
-#if @specularMap
-    vec4 specTex = texture2D(specularMap, specularMapUV);
-    float shininess = specTex.a * 255.0;
-    vec3 specularColor = specTex.xyz;
-#else
     float shininess = material.shininess;
     vec3 specularColor = getSpecularColor(material, passColor).xyz;
+#if @specularMap
+    if (hasMap(@specularMapIndex))
+    {
+        vec4 specTex = sampleSpecularMap(specularMapUV);
+        shininess = specTex.a * 255.0;
+        specularColor = specTex.xyz;
+    }
 #endif
     vec3 diffuseLight, ambientLight, specularLight;
 
@@ -259,7 +268,8 @@ vec2 screenCoords = gl_FragCoord.xy / screenRes;
 #endif
 
 #if @emissiveMap
-    gl_FragData[0].xyz += texture2D(emissiveMap, emissiveMapUV).xyz;
+    if (hasMap(@emissiveMapIndex))
+        gl_FragData[0].xyz += sampleEmissiveMap(emissiveMapUV).xyz;
 #endif
 
     gl_FragData[0] = applyFogAtPos(gl_FragData[0], passViewPos, near, far);

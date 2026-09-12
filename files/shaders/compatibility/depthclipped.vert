@@ -3,18 +3,17 @@
 varying vec2 diffuseMapUV;
 varying float alphaPassthrough;
 
-uniform mat4 texMat0;
-
 #include "lib/core/vertex.h.glsl"
+#include "lib/core/instance.h.glsl"
 #include "lib/material/vertexcolors.glsl"
 
 void main()
 {
     Material material = getMaterial();
+    vec4 vertex = instanceWorld() * gl_Vertex;
+    gl_Position = modelToClip(vertex);
 
-    gl_Position = modelToClip(gl_Vertex);
-
-    vec4 viewPos = modelToView(gl_Vertex);
+    vec4 viewPos = modelToView(vertex);
     gl_ClipVertex = viewPos;
 
     if (material.vertexColorMode == ColorMode_AmbientAndDiffuse)
@@ -22,5 +21,5 @@ void main()
     else
         alphaPassthrough = material.diffuse.a;
 
-    diffuseMapUV = (texMat0 * gl_MultiTexCoord0).xy;
+    diffuseMapUV = mapUV(@diffuseMapIndex, 0, gl_MultiTexCoord0);
 }

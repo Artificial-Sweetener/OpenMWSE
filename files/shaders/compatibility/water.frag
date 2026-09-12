@@ -63,7 +63,7 @@ varying vec4 position;
 varying vec3 passViewPos;
 varying float linearDepth;
 
-uniform sampler2D normalMap;
+uniform float osg_SimulationTime;
 
 uniform float near;
 uniform float far;
@@ -71,8 +71,6 @@ uniform float far;
 uniform float rainIntensity;
 
 uniform vec2 screenRes;
-
-#define PER_PIXEL_LIGHTING 0
 
 #include "lib/water/fresnel.glsl"
 #include "lib/water/rain_ripples.glsl"
@@ -108,12 +106,12 @@ void main(void)
 
     #define waterTimer osg_SimulationTime
 
-    vec3 normal0 = 2.0 * texture2D(normalMap,normalCoords(UV, 0.05, 0.04, waterTimer, -0.015, -0.005, vec3(0.0,0.0,0.0))).rgb - 1.0;
-    vec3 normal1 = 2.0 * texture2D(normalMap,normalCoords(UV, 0.1,  0.08, waterTimer,  0.02,   0.015, normal0)).rgb - 1.0;
-    vec3 normal2 = 2.0 * texture2D(normalMap,normalCoords(UV, 0.25, 0.07, waterTimer, -0.04,  -0.03,  normal1)).rgb - 1.0;
-    vec3 normal3 = 2.0 * texture2D(normalMap,normalCoords(UV, 0.5,  0.09, waterTimer,  0.03,   0.04,  normal2)).rgb - 1.0;
-    vec3 normal4 = 2.0 * texture2D(normalMap,normalCoords(UV, 1.0,  0.4,  waterTimer, -0.02,   0.1,   normal3)).rgb - 1.0;
-    vec3 normal5 = 2.0 * texture2D(normalMap,normalCoords(UV, 2.0,  0.7,  waterTimer,  0.1,   -0.06,  normal4)).rgb - 1.0;
+    vec3 normal0 = 2.0 * sampleNormalMap(normalCoords(UV, 0.05, 0.04, waterTimer, -0.015, -0.005, vec3(0.0,0.0,0.0))).rgb - 1.0;
+    vec3 normal1 = 2.0 * sampleNormalMap(normalCoords(UV, 0.1,  0.08, waterTimer,  0.02,   0.015, normal0)).rgb - 1.0;
+    vec3 normal2 = 2.0 * sampleNormalMap(normalCoords(UV, 0.25, 0.07, waterTimer, -0.04,  -0.03,  normal1)).rgb - 1.0;
+    vec3 normal3 = 2.0 * sampleNormalMap(normalCoords(UV, 0.5,  0.09, waterTimer,  0.03,   0.04,  normal2)).rgb - 1.0;
+    vec3 normal4 = 2.0 * sampleNormalMap(normalCoords(UV, 1.0,  0.4,  waterTimer, -0.02,   0.1,   normal3)).rgb - 1.0;
+    vec3 normal5 = 2.0 * sampleNormalMap(normalCoords(UV, 2.0,  0.7,  waterTimer,  0.1,   -0.06,  normal4)).rgb - 1.0;
 
     vec4 rainRipple;
 
@@ -239,8 +237,8 @@ void main(void)
 
 #if @wobblyShores
     // wobbly water: hard-fade into refraction texture at extremely low depth, with a wobble based on normal mapping
-    vec3 normalShoreRippleRain = texture2D(normalMap,normalCoords(UV, 2.0, 2.7, -1.0*waterTimer,  0.05,  0.1,  normal3)).rgb - 0.5
-                               + texture2D(normalMap,normalCoords(UV, 2.0, 2.7,      waterTimer,  0.04, -0.13, normal4)).rgb - 0.5;
+    vec3 normalShoreRippleRain = sampleNormalMap(normalCoords(UV, 2.0, 2.7, -1.0*waterTimer,  0.05,  0.1,  normal3)).rgb - 0.5
+                               + sampleNormalMap(normalCoords(UV, 2.0, 2.7,      waterTimer,  0.04, -0.13, normal4)).rgb - 0.5;
     float viewFactor = mix(abs(viewDir.z), 1.0, 0.2);
     float verticalWaterDepth = realWaterDepth * viewFactor; // an estimate
     float shoreOffset = verticalWaterDepth - (normal2.r + mix(0.0, normalShoreRippleRain.r, rainIntensity) + 0.15)*8.0;

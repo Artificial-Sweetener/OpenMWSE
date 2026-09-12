@@ -1,0 +1,127 @@
+#version 430
+
+layout(local_size_x = 64) in;
+
+layout(std430, binding = 17) restrict readonly buffer SourceBuffer
+{
+    uint sourceVertices[];
+};
+
+layout(std430, binding = 18) restrict buffer VertexBuffer
+{
+    uint vertices[];
+};
+
+layout(std430, binding = 19) restrict readonly buffer GroupBuffer
+{
+    uint skinGroups[];
+};
+
+layout(std430, binding = 20) restrict readonly buffer TaskBuffer
+{
+    uvec4 skinTasks[];
+};
+
+struct SkinMatrix
+{
+    vec4 col0;
+    vec4 col1;
+    vec4 col2;
+};
+
+layout(std430, binding = 21) restrict readonly buffer MatrixBuffer
+{
+    SkinMatrix skinMatrices[];
+};
+
+layout(std430, binding = 22) restrict readonly buffer RangeBuffer
+{
+    uvec2 skinRanges[];
+};
+
+struct SkinInfluence
+{
+    uint bone;
+    float weight;
+};
+
+layout(std430, binding = 23) restrict readonly buffer InfluenceBuffer
+{
+    SkinInfluence skinInfluences[];
+};
+
+SkinMatrix blendSkin(uint group, uint palette)
+{
+    SkinMatrix result = SkinMatrix(vec4(0.0), vec4(0.0), vec4(0.0));
+    uvec2 range = skinRanges[group];
+    for (uint i = 0u; i < range.y; ++i)
+    {
+        SkinInfluence influence = skinInfluences[range.x + i];
+        SkinMatrix bone = skinMatrices[palette + 1u + influence.bone];
+        result.col0 += bone.col0 * influence.weight;
+        result.col1 += bone.col1 * influence.weight;
+        result.col2 += bone.col2 * influence.weight;
+    }
+    return result;
+}
+
+vec3 transformPoint(vec4 value, SkinMatrix matrix)
+{
+    return vec3(dot(value, matrix.col0), dot(value, matrix.col1), dot(value, matrix.col2));
+}
+
+vec3 transformVector(vec3 value, SkinMatrix matrix)
+{
+    return vec3(
+        dot(value, matrix.col0.xyz), dot(value, matrix.col1.xyz), dot(value, matrix.col2.xyz));
+}
+
+void main()
+{
+    uvec4 task = skinTasks[gl_WorkGroupID.y];
+    uint localVertex = gl_GlobalInvocationID.x;
+    if (localVertex >= task.y)
+        return;
+
+    uint vertex = task.x + localVertex;
+    uint group = skinGroups[vertex];
+    if (group == 0xffffffffu)
+        return;
+
+    SkinMatrix transform = skinMatrices[task.z];
+    SkinMatrix skin = blendSkin(group, task.z);
+    uint base = vertex * 28u;
+    vec4 position = vec4(uintBitsToFloat(uvec3(sourceVertices[base], sourceVertices[base + 1u],
+                                  sourceVertices[base + 2u])),
+        1.0);
+    vec3 transformed = transformPoint(position, skin);
+    transformed = transformPoint(vec4(transformed, 1.0), transform);
+    uvec3 bits = floatBitsToUint(transformed);
+    vertices[base] = bits.x;
+    vertices[base + 1u] = bits.y;
+    vertices[base + 2u] = bits.z;
+
+    if ((task.w & 1u) != 0u)
+    {
+        vec3 normal = uintBitsToFloat(
+            uvec3(sourceVertices[base + 3u], sourceVertices[base + 4u], sourceVertices[base + 5u]));
+        transformed = transformVector(normal, skin);
+        transformed = transformVector(transformed, transform);
+        bits = floatBitsToUint(transformed);
+        vertices[base + 3u] = bits.x;
+        vertices[base + 4u] = bits.y;
+        vertices[base + 5u] = bits.z;
+    }
+
+    if ((task.w & 2u) != 0u)
+    {
+        vec3 tangent = uintBitsToFloat(
+            uvec3(sourceVertices[base + 21u], sourceVertices[base + 22u], sourceVertices[base + 23u]));
+        transformed = transformVector(tangent, skin);
+        transformed = transformVector(transformed, transform);
+        bits = floatBitsToUint(transformed);
+        vertices[base + 21u] = bits.x;
+        vertices[base + 22u] = bits.y;
+        vertices[base + 23u] = bits.z;
+    }
+}

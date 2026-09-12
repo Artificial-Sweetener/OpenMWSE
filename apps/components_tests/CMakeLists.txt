@@ -50,6 +50,7 @@ file(GLOB UNITTEST_SRC_FILES
     settings/testvalues.cpp
     settings/distance.cpp
 
+    shader/instancedprogram.cpp
     shader/parsedefines.cpp
     shader/parsefors.cpp
     shader/parselinks.cpp

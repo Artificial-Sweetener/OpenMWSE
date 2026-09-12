@@ -1,0 +1,168 @@
+#version 430
+
+layout(local_size_x = 256) in;
+
+#include "lib/core/gpuscene_types.glsl"
+
+layout(std430, binding = 8) restrict readonly buffer InstanceBuffer { Instance instances[]; };
+layout(std430, binding = 9) restrict readonly buffer BatchBuffer { Batch batches[]; };
+layout(std430, binding = 10) restrict readonly buffer ChunkBuffer { uvec2 chunks[]; };
+layout(std430, binding = 11) restrict buffer CountBuffer { uint counts[]; };
+layout(std430, binding = 12) restrict writeonly buffer VisibleBuffer { uint visibleInstances[]; };
+layout(std430, binding = 15) restrict readonly buffer ViewBuffer { View views[]; };
+
+struct Occlusion
+{
+    vec4 minimum;
+    vec4 maximum;
+};
+
+layout(std430, binding = 16) restrict buffer OcclusionBuffer { Occlusion occlusion[]; };
+
+uniform sampler2D depthPyramid;
+uniform int pyramidLevels;
+uniform float occluderPixelSize;
+uniform uint cullPass;
+uniform int occlusionReady;
+uniform uint instanceCount;
+uniform uint chunkCount;
+uniform uint viewBase;
+uniform uint viewCount;
+uniform uint slotCount;
+uniform uint batchCount;
+
+const uint passSeed = 1u;
+const uint passResolve = 2u;
+
+// Large bounds seed the depth prepass.
+bool isOccluder(vec4 bounds, uint v)
+{
+    float denominator = dot(views[v].pixelSizeVector, vec4(bounds.xyz, 1.0));
+    return denominator <= 0.0 || bounds.w >= occluderPixelSize * denominator;
+}
+
+bool hidden(uint id, Instance inst, uint v)
+{
+    Occlusion item = occlusion[id];
+    mat4 world = transpose(mat4(inst.row0, inst.row1, inst.row2, vec4(0.0, 0.0, 0.0, 1.0)));
+    mat4 viewProj = views[v].viewProj;
+    vec2 rectMin = vec2(1.0);
+    vec2 rectMax = vec2(-1.0);
+#if @reverseZ
+    float nearest = 0.0;
+#else
+    float nearest = 1.0;
+#endif
+    for (uint corner = 0u; corner < 8u; ++corner)
+    {
+        vec3 side = vec3(float(corner & 1u), float((corner >> 1u) & 1u), float((corner >> 2u) & 1u));
+        vec3 position = mix(item.minimum.xyz, item.maximum.xyz, side);
+        vec4 clip = viewProj * world * vec4(position, 1.0);
+        if (clip.w <= 0.0)
+            return false;
+        vec3 ndc = clip.xyz / clip.w;
+        rectMin = min(rectMin, ndc.xy);
+        rectMax = max(rectMax, ndc.xy);
+#if @reverseZ
+        // The camera keeps the un-reversed projection.
+        nearest = max(nearest, 1.0 - (ndc.z * 0.5 + 0.5));
+#else
+        nearest = min(nearest, ndc.z * 0.5 + 0.5);
+#endif
+    }
+    rectMin = clamp(rectMin, -1.0, 1.0) * 0.5 + 0.5;
+    rectMax = clamp(rectMax, -1.0, 1.0) * 0.5 + 0.5;
+    vec2 rectTexels = (rectMax - rectMin) * vec2(textureSize(depthPyramid, 0));
+    if (any(greaterThanEqual(rectTexels, vec2(128.0))))
+        return false;
+    int level = clamp(
+        int(ceil(log2(max(max(rectTexels.x, rectTexels.y), 1.0)))), 0, pyramidLevels - 1);
+    ivec2 levelSize = textureSize(depthPyramid, level);
+    ivec2 first = clamp(ivec2(floor(rectMin * vec2(levelSize))) - ivec2(1), ivec2(0), levelSize - 1);
+    ivec2 last = clamp(ivec2(floor(rectMax * vec2(levelSize))) + ivec2(1), ivec2(0), levelSize - 1);
+#if @reverseZ
+    float occluder = 1.0;
+    for (int y = first.y; y <= last.y; ++y)
+        for (int x = first.x; x <= last.x; ++x)
+            occluder = min(occluder, texelFetch(depthPyramid, ivec2(x, y), level).r);
+    return nearest < occluder;
+#else
+    float occluder = 0.0;
+    for (int y = first.y; y <= last.y; ++y)
+        for (int x = first.x; x <= last.x; ++x)
+            occluder = max(occluder, texelFetch(depthPyramid, ivec2(x, y), level).r);
+    return nearest > occluder;
+#endif
+}
+
+void main()
+{
+    uint id = gl_GlobalInvocationID.x;
+    if (id >= instanceCount)
+        return;
+
+    Instance inst = instances[id];
+    uint generation = inst.meta.z;
+    if (generation == 0u || inst.meta.y >= chunkCount)
+        return;
+    uvec2 chunk = chunks[inst.meta.y];
+    if (chunk.x != generation)
+        return;
+
+    uint flags = inst.meta.x >> 24u;
+    uint batch = inst.meta.x & 0xffffffu;
+    // Failed meshes keep no draw command.
+    if (batches[batch].command == 0xffffffffu)
+        return;
+    // Children of the switch node named NightDaySwitch carry a mode mask
+    // in bits 2-4, one bit per NightDayMode: default, exterior night,
+    // interior day. Generic switch nodes have arbitrary semantics and get
+    // no mask; zero means the instance draws in every mode.
+    uint modes = (flags >> 2u) & 7u;
+    vec4 bounds = inst.bounds;
+    for (uint v = 0u; v < viewCount; ++v)
+    {
+        if ((chunk.y & (1u << v)) == 0u)
+            continue;
+
+        bool visible = true;
+        uint planeCount = views[v].meta.x;
+        for (uint i = 0u; i < planeCount && visible; ++i)
+            visible = dot(views[v].planes[i].xyz, bounds.xyz) + views[v].planes[i].w >= -bounds.w;
+        if (!visible)
+            continue;
+
+        float smallFeaturePixelSize = views[v].params.x;
+        if ((flags & 1u) != 0u && smallFeaturePixelSize > 0.0
+            && dot(views[v].pixelSizeVector, vec4(bounds.xyz, 1.0)) * smallFeaturePixelSize > bounds.w)
+            continue;
+
+        // meta.z holds the view's current NightDayMode.
+        if (modes != 0u && (modes & (1u << views[v].meta.z)) == 0u)
+            continue;
+
+        if ((flags & 2u) != 0u)
+        {
+            float d = distance(views[v].viewPoint.xyz, inst.lod.xyz) * views[v].viewPoint.w;
+            if (d < inst.lod.w || d >= uintBitsToFloat(inst.meta.w))
+                continue;
+        }
+
+        bool useOcclusion = (views[v].meta.y & 1u) != 0u;
+        if (useOcclusion)
+        {
+            // Seed draws occluders, resolve tests the rest.
+            bool occluder = isOccluder(bounds, v);
+            if (cullPass == passSeed && !occluder)
+                continue;
+            if (cullPass == passResolve && (occluder || (occlusionReady != 0 && hidden(id, inst, v))))
+                continue;
+        }
+        else if (cullPass == passResolve)
+            continue;
+
+        uint region = viewBase + v;
+        uint slot = atomicAdd(counts[region * batchCount + batch], 1u);
+        visibleInstances[region * slotCount + batches[batch].firstSlot + slot] = id;
+    }
+}

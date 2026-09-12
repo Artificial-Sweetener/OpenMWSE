@@ -20,22 +20,12 @@ float mipmapLevel(vec2 scaleduv)
     return max(0.0, 0.5 * log2(maxDUVSquared));
 }
 
-float coveragePreservingAlphaScale(sampler2D diffuseMap, vec2 uv)
+/// Preserve authored alpha coverage through the active legacy, array, or bindless material source.
+float coveragePreservingAlphaScale(int map, vec2 uv)
 {
     if (openmwseAtmosphereDiagnosticMode == openmwseAtmosphereDiagnosticCoverageBypassed)
         return 1.0;
-
-    #if @adjustCoverage
-        vec2 textureSize;
-        #if @useGPUShader4
-            textureSize = textureSize2D(diffuseMap, 0);
-        #else
-            textureSize = vec2(256.0);
-        #endif
-            return 1.0 + mipmapLevel(uv * textureSize) * 0.25;
-    #else
-        return 1.0;
-    #endif
+    return mapCoverageScale(map, uv);
 }
 
 float alphaTest(float alpha, float ref)

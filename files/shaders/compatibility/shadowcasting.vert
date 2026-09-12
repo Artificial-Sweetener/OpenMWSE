@@ -1,5 +1,7 @@
 #version 120
 
+#include "lib/core/instance.h.glsl"
+
 /// Preserve light-facing casters while leaving geometry behind the receiver volume to normal clipping.
 vec4 clampShadowCasterLightFacingDepth(vec4 clipPosition)
 {
@@ -12,8 +14,9 @@ vec4 clampShadowCasterLightFacingDepth(vec4 clipPosition)
 void main(void)
 {
     // Opaque casters need only clip-space position and user clip-plane distance.
-    gl_Position = clampShadowCasterLightFacingDepth(gl_ModelViewProjectionMatrix * gl_Vertex);
-    gl_ClipVertex = gl_ModelViewMatrix * gl_Vertex;
+    vec4 vertex = instanceWorld() * gl_Vertex;
+    gl_Position = clampShadowCasterLightFacingDepth(gl_ModelViewProjectionMatrix * vertex);
+    gl_ClipVertex = gl_ModelViewMatrix * vertex;
 }
 
 #else
@@ -30,19 +33,17 @@ uniform bool useDiffuseMapForShadowAlpha = true;
 uniform bool alphaTestShadows = true;
 uniform float alpha;
 uniform float actorFade;
-uniform mat4 texMat0;
 
 void main(void)
 {
     Material material = getMaterial();
-
-    gl_Position = clampShadowCasterLightFacingDepth(gl_ModelViewProjectionMatrix * gl_Vertex);
-
-    vec4 viewPos = (gl_ModelViewMatrix * gl_Vertex);
+    vec4 vertex = instanceWorld() * gl_Vertex;
+    gl_Position = clampShadowCasterLightFacingDepth(gl_ModelViewProjectionMatrix * vertex);
+    vec4 viewPos = (gl_ModelViewMatrix * vertex);
     gl_ClipVertex = viewPos;
 
     if (useDiffuseMapForShadowAlpha)
-        diffuseMapUV = (texMat0 * gl_MultiTexCoord0).xy;
+        diffuseMapUV = mapUV(@diffuseMapIndex, 0, gl_MultiTexCoord0);
     else
         diffuseMapUV = vec2(0.0); // Avoid undefined behaviour if running on hardware predating the concept of dynamically uniform expressions
     if (material.vertexColorMode == ColorMode_AmbientAndDiffuse)

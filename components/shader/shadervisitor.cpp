@@ -32,6 +32,7 @@
 #include <components/stereo/stereomanager.hpp>
 #include <components/vfs/manager.hpp>
 
+#include "materialmap.hpp"
 #include "removedalphafunc.hpp"
 #include "shadermanager.hpp"
 
@@ -247,17 +248,11 @@ namespace Shader
         addedState->setName("addedState");
     }
 
-    // This list is used both for detecting known texture types (including added normal maps etc.) and setting the
-    // shader defines. Normal maps and normal height maps both get sent to the shader as a normal map, so the latter
-    // must be detected separately.
-    const char* defaultTextures[] = { "diffuseMap", "normalMap", "emissiveMap", "darkMap", "detailMap", "envMap",
-        "specularMap", "decalMap", "bumpMap", "glossMap" };
+    // Normal height maps arrive as normal maps.
     bool isTextureNameRecognized(std::string_view name)
     {
-        if (std::find(std::begin(defaultTextures), std::end(defaultTextures), name) != std::end(defaultTextures))
-            return true;
-        else
-            return name == "normalHeightMap";
+        const auto end = sMaterialMapNames.begin() + sObjectMapCount;
+        return std::find(sMaterialMapNames.begin(), end, name) != end || name == "normalHeightMap";
     }
 
     void ShaderVisitor::applyStateSet(osg::ref_ptr<osg::StateSet> stateset, osg::Node& node)
@@ -529,10 +524,11 @@ namespace Shader
             previousAddedState = new AddedState;
 
         ShaderManager::DefineMap defineMap;
-        for (unsigned int i = 0; i < sizeof(defaultTextures) / sizeof(defaultTextures[0]); ++i)
+        for (std::size_t i = 0; i < sObjectMapCount; ++i)
         {
-            defineMap[defaultTextures[i]] = "0";
-            defineMap[std::string(defaultTextures[i]) + std::string("UV")] = "0";
+            const std::string name(sMaterialMapNames[i]);
+            defineMap[name] = "0";
+            defineMap[name + "UV"] = "0";
         }
         for (std::map<int, std::string>::const_iterator texIt = reqs.mTextures.begin(); texIt != reqs.mTextures.end();
              ++texIt)
@@ -607,7 +603,16 @@ namespace Shader
         if (simpleLighting)
             defineMap["simpleLighting"] = "1";
 
-        if (simpleLighting || isParticle)
+        std::string shaderPrefix;
+        if (!node.getUserValue("shaderPrefix", shaderPrefix))
+            shaderPrefix = mDefaultShaderPrefix;
+
+        // Groundcover mods expect vertex lighting.
+        const bool vertexLighting = simpleLighting || isParticle || shaderPrefix == "groundcover";
+        // Lighting maps need per-pixel lighting.
+        if (defineMap["normalMap"] == "1" || defineMap["specularMap"] == "1")
+            defineMap["forcePPL"] = "1";
+        else if (vertexLighting)
             defineMap["forcePPL"] = "0";
 
         bool particleOcclusion = false;
@@ -654,16 +659,14 @@ namespace Shader
 
         Stereo::shaderStereoDefines(defineMap);
 
-        std::string shaderPrefix;
-        if (!node.getUserValue("shaderPrefix", shaderPrefix))
-            shaderPrefix = mDefaultShaderPrefix;
         defineMap["groundcover"] = shaderPrefix == "groundcover" ? "1" : "0";
-
         ShaderManager::SamplerBindingMap samplers;
         for (const auto& [unit, name] : reqs.mTextures)
             samplers[name] = unit;
 
-        auto program = mShaderManager.getProgram(shaderPrefix, defineMap, mProgramTemplate, samplers);
+        // Visitor templates implement the material interface.
+        auto program = mShaderManager.getProgram(shaderPrefix, defineMap, mProgramTemplate, samplers,
+            ProgramCapability::Instanced | ProgramCapability::ArrayMaterial | ProgramCapability::UberMaterial);
         writableStateSet->setAttributeAndModes(program, osg::StateAttribute::ON);
         addedState->setAttributeAndModes(std::move(program));
 

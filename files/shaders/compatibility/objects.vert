@@ -6,57 +6,45 @@
 
 #if @diffuseMap
 varying vec2 diffuseMapUV;
-uniform mat4 texMat@diffuseMapUV;
 #endif
 
 #if @darkMap
 varying vec2 darkMapUV;
-uniform mat4 texMat@darkMapUV;
 #endif
 
 #if @detailMap
 varying vec2 detailMapUV;
-uniform mat4 texMat@detailMapUV;
 #endif
 
 #if @decalMap
 varying vec2 decalMapUV;
-uniform mat4 texMat@decalMapUV;
 #endif
 
 #if @emissiveMap
 varying vec2 emissiveMapUV;
-uniform mat4 texMat@emissiveMapUV;
 #endif
 
 #if @normalMap
 varying vec2 normalMapUV;
-uniform mat4 texMat@normalMapUV;
 #endif
 
 #if @envMap
 varying vec2 envMapUV;
-uniform mat4 texMat@envMapUV;
 #endif
 
 #if @bumpMap
 varying vec2 bumpMapUV;
-uniform mat4 texMat@bumpMapUV;
 #endif
 
 #if @specularMap
 varying vec2 specularMapUV;
-uniform mat4 texMat@specularMapUV;
 #endif
 
 #if @glossMap
 varying vec2 glossMapUV;
-uniform mat4 texMat@glossMapUV;
 #endif
 
-#define PER_PIXEL_LIGHTING (@normalMap || @specularMap || @forcePPL)
-
-#if !PER_PIXEL_LIGHTING
+#if !@forcePPL
 centroid varying vec3 shadedLighting;
 centroid varying vec3 shadedSpecular;
 centroid varying vec3 passLighting;
@@ -70,6 +58,7 @@ varying vec4 passTangent;
 #endif
 
 #include "lib/core/vertex.h.glsl"
+#include "lib/core/instance.h.glsl"
 
 #include "lib/material/vertexcolors.glsl"
 #include "shadows_vertex.glsl"
@@ -90,27 +79,28 @@ centroid varying vec4 passColor;
 void main(void)
 {
     Material material = getMaterial();
+    vec4 vertex = instanceWorld() * gl_Vertex;
+    passNormal = instanceNormal() * gl_Normal.xyz;
 
 #if @particleOcclusion
     mat4 model = osg_ViewMatrixInverse * gl_ModelViewMatrix;
-    orthoDepthMapCoord = ((depthSpaceMatrix * model) * vec4(gl_Vertex.xyz, 1.0)).xyz;
+    orthoDepthMapCoord = ((depthSpaceMatrix * model) * vec4(vertex.xyz, 1.0)).xyz;
 #endif
 
-    gl_Position = modelToClip(gl_Vertex);
+    gl_Position = modelToClip(vertex);
 
-    vec4 viewPos = modelToView(gl_Vertex);
+    vec4 viewPos = modelToView(vertex);
     gl_ClipVertex = viewPos;
     passColor = gl_Color;
     passViewPos = viewPos.xyz;
-    passNormal = gl_Normal.xyz;
     normalToViewMatrix = gl_NormalMatrix;
 
 #if @normalMap || @diffuseParallax
-    passTangent = gl_MultiTexCoord7.xyzw;
+    passTangent = instanceTangent(gl_MultiTexCoord7);
     normalToViewMatrix *= generateTangentSpace(passTangent, passNormal);
 #endif
 
-#if @envMap || !PER_PIXEL_LIGHTING || @shadows_enabled
+#if @envMap || !@forcePPL || @shadows_enabled
     vec3 viewNormal = normalize(gl_NormalMatrix * passNormal);
 #endif
 
@@ -122,42 +112,42 @@ void main(void)
 #endif
 
 #if @diffuseMap
-    diffuseMapUV = (texMat@diffuseMapUV * gl_MultiTexCoord@diffuseMapUV).xy;
+    diffuseMapUV = mapUV(@diffuseMapIndex, @diffuseMapUV, gl_MultiTexCoord@diffuseMapUV);
 #endif
 
 #if @darkMap
-    darkMapUV = (texMat@darkMapUV * gl_MultiTexCoord@darkMapUV).xy;
+    darkMapUV = mapUV(@darkMapIndex, @darkMapUV, gl_MultiTexCoord@darkMapUV);
 #endif
 
 #if @detailMap
-    detailMapUV = (texMat@detailMapUV * gl_MultiTexCoord@detailMapUV).xy;
+    detailMapUV = mapUV(@detailMapIndex, @detailMapUV, gl_MultiTexCoord@detailMapUV);
 #endif
 
 #if @decalMap
-    decalMapUV = (texMat@decalMapUV * gl_MultiTexCoord@decalMapUV).xy;
+    decalMapUV = mapUV(@decalMapIndex, @decalMapUV, gl_MultiTexCoord@decalMapUV);
 #endif
 
 #if @emissiveMap
-    emissiveMapUV = (texMat@emissiveMapUV * gl_MultiTexCoord@emissiveMapUV).xy;
+    emissiveMapUV = mapUV(@emissiveMapIndex, @emissiveMapUV, gl_MultiTexCoord@emissiveMapUV);
 #endif
 
 #if @normalMap
-    normalMapUV = (texMat@normalMapUV * gl_MultiTexCoord@normalMapUV).xy;
+    normalMapUV = mapUV(@normalMapIndex, @normalMapUV, gl_MultiTexCoord@normalMapUV);
 #endif
 
 #if @bumpMap
-    bumpMapUV = (texMat@bumpMapUV * gl_MultiTexCoord@bumpMapUV).xy;
+    bumpMapUV = mapUV(@bumpMapIndex, @bumpMapUV, gl_MultiTexCoord@bumpMapUV);
 #endif
 
 #if @specularMap
-    specularMapUV = (texMat@specularMapUV * gl_MultiTexCoord@specularMapUV).xy;
+    specularMapUV = mapUV(@specularMapIndex, @specularMapUV, gl_MultiTexCoord@specularMapUV);
 #endif
 
 #if @glossMap
-    glossMapUV = (texMat@glossMapUV * gl_MultiTexCoord@glossMapUV).xy;
+    glossMapUV = mapUV(@glossMapIndex, @glossMapUV, gl_MultiTexCoord@glossMapUV);
 #endif
 
-#if !PER_PIXEL_LIGHTING
+#if !@forcePPL
     vec3 emissionColor = getEmissionColor(material, passColor).rgb;
     if (skipLighting(material, passColor))
     {

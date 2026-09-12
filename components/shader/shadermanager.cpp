@@ -1,6 +1,8 @@
 #include "shadermanager.hpp"
 #include "cloudprogram.hpp"
 
+#include "materialmap.hpp"
+
 #include <algorithm>
 #include <cassert>
 #include <chrono>
@@ -574,6 +576,7 @@ namespace Shader
 
             getLinkedShaders(shader, linkedShaderNames, defines);
 
+            mShaderKeys.emplace(shader.get(), MapKey(templateName, defines));
             shaderIt = mShaders.insert(std::make_pair(std::make_pair(templateName, defines), shader)).first;
         }
         return shaderIt->second;
@@ -585,16 +588,20 @@ namespace Shader
     public:
         /// Create a sampler program with no fixed texture-unit assignments.
         SamplerProgram() = default;
-        /// Retain texture-unit assignments for every graphics-context program variant.
-        explicit SamplerProgram(const ShaderManager::SamplerBindingMap& samplers);
-        /// Copy a program template and attach its fixed sampler assignments.
-        SamplerProgram(
-            const ShaderManager::SamplerBindingMap& samplers, const osg::Program& other, const osg::CopyOp& copyop);
+        /// Retain texture-unit assignments and instancing capabilities for every graphics-context variant.
+        SamplerProgram(const ShaderManager::SamplerBindingMap& samplers, ProgramCapability capabilities);
+        /// Copy a program template while preserving cloud precompilation, sampler assignments, and capabilities.
+        SamplerProgram(const ShaderManager::SamplerBindingMap& samplers, ProgramCapability capabilities,
+            const osg::Program& other, const osg::CopyOp& copyop);
         SamplerProgram(const SamplerProgram& other, const osg::CopyOp& copyop = osg::CopyOp::SHALLOW_COPY);
 
         META_Object(Shader, SamplerProgram)
 
+        int compare(const osg::StateAttribute& other) const override;
         bool hasSamplers(const ShaderManager::SamplerBindingMap& samplers) const;
+        ShaderManager::SamplerBindingMap getSamplers() const;
+        std::optional<int> getSamplerUnit(std::string_view name) const;
+        ProgramCapability getCapabilities() const { return mCapabilities; }
 
         void apply(osg::State& state) const override;
 
@@ -603,26 +610,46 @@ namespace Shader
     private:
         std::vector<osg::ref_ptr<osg::Uniform>> mSamplers;
         mutable osg::buffered_value<const PerContextProgram*> mApplied;
+        ProgramCapability mCapabilities = ProgramCapability::None;
     };
 
-    SamplerProgram::SamplerProgram(const ShaderManager::SamplerBindingMap& samplers)
+    SamplerProgram::SamplerProgram(const ShaderManager::SamplerBindingMap& samplers, ProgramCapability capabilities)
+        : mCapabilities(capabilities)
     {
         for (const auto& [name, unit] : samplers)
             mSamplers.emplace_back(new osg::Uniform(name.c_str(), unit));
     }
 
-    SamplerProgram::SamplerProgram(
-        const ShaderManager::SamplerBindingMap& samplers, const osg::Program& other, const osg::CopyOp& copyop)
+    SamplerProgram::SamplerProgram(const ShaderManager::SamplerBindingMap& samplers, ProgramCapability capabilities,
+        const osg::Program& other, const osg::CopyOp& copyop)
         : CloudProgram(other, copyop)
+        , mCapabilities(capabilities)
     {
         for (const auto& [name, unit] : samplers)
             mSamplers.emplace_back(new osg::Uniform(name.c_str(), unit));
     }
 
     SamplerProgram::SamplerProgram(const SamplerProgram& other, const osg::CopyOp& copyop)
-        : SamplerProgram({}, other, copyop)
+        : SamplerProgram({}, other.mCapabilities, other, copyop)
     {
         mSamplers = other.mSamplers;
+    }
+
+    int SamplerProgram::compare(const osg::StateAttribute& other) const
+    {
+        COMPARE_StateAttribute_Types(SamplerProgram, other);
+        const int result = osg::Program::compare(other);
+        if (result != 0)
+            return result;
+        COMPARE_StateAttribute_Parameter(mCapabilities);
+        COMPARE_StateAttribute_Parameter(mSamplers.size());
+        for (std::size_t i = 0; i < mSamplers.size(); ++i)
+        {
+            const int sampler = mSamplers[i]->compare(*rhs.mSamplers[i]);
+            if (sampler != 0)
+                return sampler;
+        }
+        return 0;
     }
 
     bool SamplerProgram::hasSamplers(const ShaderManager::SamplerBindingMap& samplers) const
@@ -638,6 +665,37 @@ namespace Shader
                 return false;
         }
         return true;
+    }
+
+    ShaderManager::SamplerBindingMap SamplerProgram::getSamplers() const
+    {
+        ShaderManager::SamplerBindingMap result;
+        for (const osg::ref_ptr<osg::Uniform>& sampler : mSamplers)
+        {
+            int unit = -1;
+            sampler->get(unit);
+            result.emplace(sampler->getName(), unit);
+        }
+        return result;
+    }
+
+    std::optional<int> SamplerProgram::getSamplerUnit(std::string_view name) const
+    {
+        for (const osg::ref_ptr<osg::Uniform>& sampler : mSamplers)
+        {
+            if (sampler->getName() != name)
+                continue;
+            int unit = -1;
+            sampler->get(unit);
+            return unit;
+        }
+        return std::nullopt;
+    }
+
+    std::optional<int> ShaderManager::getSamplerUnit(const osg::Program& program, std::string_view name) const
+    {
+        const auto* samplerProgram = dynamic_cast<const SamplerProgram*>(&program);
+        return samplerProgram != nullptr ? samplerProgram->getSamplerUnit(name) : std::nullopt;
     }
 
     void SamplerProgram::apply(osg::State& state) const
@@ -666,7 +724,7 @@ namespace Shader
     }
 
     osg::ref_ptr<osg::Program> ShaderManager::getProgram(const std::string& templateName, const DefineMap& defines,
-        const osg::Program* programTemplate, const SamplerBindingMap& samplers)
+        const osg::Program* programTemplate, const SamplerBindingMap& samplers, ProgramCapability capabilities)
     {
         auto vert = getShader(templateName + ".vert", defines);
         auto frag = getShader(templateName + ".frag", defines);
@@ -674,31 +732,158 @@ namespace Shader
         if (!vert || !frag)
             throw std::runtime_error("failed initializing shader: " + templateName);
 
-        return getProgram(std::move(vert), std::move(frag), programTemplate, samplers);
+        return getProgram(vert, frag, programTemplate, samplers, capabilities);
     }
 
     osg::ref_ptr<osg::Program> ShaderManager::getProgram(osg::ref_ptr<osg::Shader> vertexShader,
         osg::ref_ptr<osg::Shader> fragmentShader, const osg::Program* programTemplate,
-        const SamplerBindingMap& samplers)
+        const SamplerBindingMap& samplers, ProgramCapability capabilities)
     {
         std::lock_guard<std::mutex> lock(mMutex);
-        ProgramMap::iterator found = mPrograms.find(std::make_pair(vertexShader, fragmentShader));
-        if (found == mPrograms.end())
+        return getProgramInternal(vertexShader, fragmentShader, programTemplate, samplers, capabilities);
+    }
+
+    osg::ref_ptr<osg::Program> ShaderManager::getProgramInternal(const osg::ref_ptr<osg::Shader>& vertexShader,
+        const osg::ref_ptr<osg::Shader>& fragmentShader, const osg::Program* programTemplate,
+        const SamplerBindingMap& samplers, ProgramCapability capabilities)
+    {
+        const auto key = std::make_pair(vertexShader, fragmentShader);
+        const auto [begin, end] = mPrograms.equal_range(key);
+        for (auto it = begin; it != end; ++it)
         {
-            if (!programTemplate)
-                programTemplate = mProgramTemplate;
-            osg::ref_ptr<SamplerProgram> program = programTemplate
-                ? new SamplerProgram(samplers, *programTemplate, osg::CopyOp::SHALLOW_COPY)
-                : new SamplerProgram(samplers);
-            program->addShader(vertexShader);
-            program->addShader(fragmentShader);
-            addLinkedShaders(vertexShader, program);
-            addLinkedShaders(fragmentShader, program);
-            found = mPrograms.insert(std::make_pair(std::make_pair(vertexShader, fragmentShader), program)).first;
+            const auto* cached = static_cast<const SamplerProgram*>(it->second.get());
+            if (cached->hasSamplers(samplers) && cached->getCapabilities() == capabilities)
+                return it->second;
         }
-        else
-            assert(static_cast<SamplerProgram*>(found->second.get())->hasSamplers(samplers));
-        return found->second;
+        if (!programTemplate)
+            programTemplate = mProgramTemplate;
+        osg::ref_ptr<SamplerProgram> program = programTemplate
+            ? new SamplerProgram(samplers, capabilities, *programTemplate, osg::CopyOp::SHALLOW_COPY)
+            : new SamplerProgram(samplers, capabilities);
+        program->addShader(vertexShader);
+        program->addShader(fragmentShader);
+        addLinkedShaders(vertexShader, program);
+        addLinkedShaders(fragmentShader, program);
+        mPrograms.emplace_hint(end, key, program);
+        return program;
+    }
+
+    namespace
+    {
+        void applyUberDefines(ShaderManager::DefineMap& defines, bool diffuseOnly)
+        {
+            for (std::size_t i = 0; i < sObjectMapCount; ++i)
+            {
+                const MaterialMap map = static_cast<MaterialMap>(i);
+                const bool enabled = !diffuseOnly || map == MaterialMap::Diffuse;
+                const std::string name(sMaterialMapNames[i]);
+                defines[name] = enabled ? "1" : "0";
+                defines[name + "UV"] = "0";
+            }
+            defines["gpuUber"] = "1";
+        }
+
+        bool uberMapEnabled(const ShaderManager::DefineMap& defines, MaterialMap map)
+        {
+            const auto found = defines.find(materialMapName(map));
+            return found != defines.end() && found->second == "1";
+        }
+
+        bool uberBeyondDiffuse(const ShaderManager::DefineMap& defines)
+        {
+            for (std::size_t i = 0; i < sObjectMapCount; ++i)
+            {
+                const MaterialMap map = static_cast<MaterialMap>(i);
+                if (map != MaterialMap::Diffuse && uberMapEnabled(defines, map))
+                    return true;
+            }
+            return false;
+        }
+    }
+
+    void ShaderManager::applyInstancedDefines(DefineMap& defines, MaterialMode mode, bool clusteredLighting)
+    {
+        defines["gpuInstanced"] = "1";
+        defines["gpuMaterial"] = mode != MaterialMode::Legacy ? "1" : "0";
+        defines["gpuMaterialArray"] = mode == MaterialMode::Array ? "1" : "0";
+        defines["gpuLegacyBindings"] = mode == MaterialMode::Legacy ? "1" : "0";
+        defines["gpuArrayBindings"] = mode == MaterialMode::Array ? "1" : "0";
+        defines["gpuBindlessBindings"] = mode == MaterialMode::Bindless ? "1" : "0";
+        defines["gpuLightList"] = clusteredLighting ? "0" : "1";
+        defines["legacyLightList"] = "0";
+    }
+
+    osg::ref_ptr<osg::Program> ShaderManager::getInstancedProgram(const osg::Program& program, MaterialMode mode)
+    {
+        std::lock_guard<std::mutex> lock(mMutex);
+        const auto cacheKey = std::make_pair(osg::ref_ptr<const osg::Program>(&program), mode);
+        const auto cached = mInstancedPrograms.find(cacheKey);
+        if (cached != mInstancedPrograms.end())
+            return cached->second;
+
+        const auto* samplerProgram = dynamic_cast<const SamplerProgram*>(&program);
+        const ProgramCapability capabilities
+            = samplerProgram != nullptr ? samplerProgram->getCapabilities() : ProgramCapability::None;
+        const MapKey* vertexKey = nullptr;
+        const MapKey* fragmentKey = nullptr;
+        for (unsigned int i = 0; i < program.getNumShaders(); ++i)
+        {
+            const osg::Shader* shader = program.getShader(i);
+            const auto key = mShaderKeys.find(shader);
+            if (key == mShaderKeys.end())
+                continue;
+            const std::string_view extension = Misc::getFileExtension(key->second.first);
+            if (shader->getType() == osg::Shader::VERTEX && extension == "vert")
+                vertexKey = &key->second;
+            else if (shader->getType() == osg::Shader::FRAGMENT && extension == "frag")
+                fragmentKey = &key->second;
+        }
+
+        osg::ref_ptr<osg::Program> result;
+        const auto defineValue = [&](const DefineMap& defines, const char* name) {
+            const auto found = defines.find(name);
+            if (found != defines.end())
+                return std::string_view(found->second);
+            const auto global = mGlobalDefines.find(name);
+            return global != mGlobalDefines.end() ? std::string_view(global->second) : std::string_view();
+        };
+        if (vertexKey != nullptr && fragmentKey != nullptr && hasCapability(capabilities, ProgramCapability::Instanced)
+            && (mode != MaterialMode::Array || hasCapability(capabilities, ProgramCapability::ArrayMaterial)))
+        {
+            const bool uber = hasCapability(capabilities, ProgramCapability::UberMaterial);
+            // Diffuse-only materials get a cheaper variant.
+            const bool diffuseOnly = !uberBeyondDiffuse(vertexKey->second) && !uberBeyondDiffuse(fragmentKey->second);
+            const bool clustered = defineValue(vertexKey->second, "lightingMethodClustered") == "1";
+            const auto twin = [&](const MapKey& key) {
+                DefineMap defines = key.second;
+                defines["gpuUber"] = "0";
+                if (uber && mode != MaterialMode::Legacy)
+                    applyUberDefines(defines, diffuseOnly);
+                applyInstancedDefines(defines, mode, clustered);
+                return getShaderInternal(key.first, defines);
+            };
+            osg::ref_ptr<osg::Shader> vertex = twin(*vertexKey);
+            osg::ref_ptr<osg::Shader> fragment = twin(*fragmentKey);
+            if (vertex != nullptr && fragment != nullptr)
+            {
+                osg::ref_ptr<osg::Program> programTemplate = cloneProgram(&program);
+                while (programTemplate->getNumShaders() > 0)
+                    programTemplate->removeShader(programTemplate->getShader(0));
+                SamplerBindingMap samplers;
+                if (samplerProgram != nullptr)
+                    samplers = samplerProgram->getSamplers();
+                if (mode == MaterialMode::Bindless)
+                    std::erase_if(samplers, [](const auto& sampler) {
+                        return std::find(sMaterialMapNames.begin(), sMaterialMapNames.end(), sampler.first)
+                            != sMaterialMapNames.end();
+                    });
+                result = getProgramInternal(vertex, fragment, programTemplate, samplers, capabilities);
+                if (!result->getAttribBindingList().contains("instanceSlot"))
+                    result->addBindAttribLocation("instanceSlot", sInstanceSlotAttribute);
+            }
+        }
+        mInstancedPrograms.emplace(cacheKey, result);
+        return result;
     }
 
     osg::ref_ptr<osg::Program> ShaderManager::cloneProgram(const osg::Program* src)
@@ -887,7 +1072,7 @@ namespace Shader
 
     ShaderManager::DefineMap getDefaultDefines()
     {
-        return {
+        ShaderManager::DefineMap defines = {
             { "forcePPL", "0" },
             { "clamp", "1" },
             { "preLightEnv", "0" },
@@ -905,6 +1090,23 @@ namespace Shader
             { "particle", "0" },
             { "groundcover", "0" },
             { "particlePointLighting", "1" },
+            { "gpuInstanced", "0" },
+            { "gpuMaterial", "0" },
+            { "gpuMaterialArray", "0" },
+            { "gpuUber", "0" },
+            { "gpuLegacyBindings", "1" },
+            { "gpuArrayBindings", "0" },
+            { "gpuBindlessBindings", "0" },
+            { "gpuLightList", "0" },
+            { "legacyLightList", "1" },
+            { "adjustCoverage", "0" },
         };
+        for (std::size_t i = 0; i < sMaterialMapCount; ++i)
+        {
+            const std::string name(sMaterialMapNames[i]);
+            defines[name] = "0";
+            defines[name + "Index"] = std::to_string(i);
+        }
+        return defines;
     }
 }

@@ -1,0 +1,129 @@
+#version 430
+
+layout(local_size_x = 64) in;
+
+layout(std430, binding = 17) restrict readonly buffer VertexBuffer
+{
+    uint vertices[];
+};
+
+layout(std430, binding = 18) restrict readonly buffer IndexBuffer
+{
+    uint indices[];
+};
+
+struct Ray
+{
+    vec4 origin;
+    vec4 delta;
+};
+
+layout(std430, binding = 19) restrict readonly buffer RayBuffer
+{
+    Ray rays[];
+};
+
+struct Task
+{
+    uvec4 meta;
+    vec4 row0;
+    vec4 row1;
+    vec4 row2;
+};
+
+layout(std430, binding = 20) restrict readonly buffer TaskBuffer
+{
+    Task tasks[];
+};
+
+struct Hit
+{
+    uvec4 meta;
+    uvec4 detail;
+};
+
+layout(std430, binding = 21) restrict buffer HitBuffer
+{
+    Hit hits[];
+};
+
+uniform uint rayPass;
+uniform uint taskBase;
+
+const uint noHit = 0xffffffffu;
+const float ratioScale = 4294967040.0;
+
+vec3 worldVertex(Task task, uint corner, uint triangle)
+{
+    uint localIndex = indices[task.meta.y + triangle * 3u + corner];
+    uint vertex = task.meta.z + localIndex;
+    uint base = vertex * 28u;
+    vec4 local = vec4(uintBitsToFloat(
+                          uvec3(vertices[base], vertices[base + 1u], vertices[base + 2u])),
+        1.0);
+    return vec3(dot(task.row0, local), dot(task.row1, local), dot(task.row2, local));
+}
+
+bool intersectTriangle(Ray ray, vec3 a, vec3 b, vec3 c, out float ratio, out vec2 bary)
+{
+    vec3 first = b - a;
+    vec3 second = c - a;
+    vec3 crossDelta = cross(ray.delta.xyz, second);
+    float determinant = dot(first, crossDelta);
+    if (abs(determinant) < 1e-8)
+        return false;
+    float inverse = 1.0 / determinant;
+    vec3 offset = ray.origin.xyz - a;
+    float u = dot(offset, crossDelta) * inverse;
+    if (u < 0.0 || u > 1.0)
+        return false;
+    vec3 crossOffset = cross(offset, first);
+    float v = dot(ray.delta.xyz, crossOffset) * inverse;
+    if (v < 0.0 || u + v > 1.0)
+        return false;
+    ratio = dot(second, crossOffset) * inverse;
+    if (ratio < 0.0 || ratio > 1.0)
+        return false;
+    bary = vec2(u, v);
+    return true;
+}
+
+uint fixedRatio(float ratio)
+{
+    return min(uint(clamp(ratio, 0.0, 1.0) * ratioScale), 0xfffffffeu);
+}
+
+void main()
+{
+    uint taskIndex = taskBase + gl_WorkGroupID.y;
+    Task task = tasks[taskIndex];
+    uint triangle = gl_GlobalInvocationID.x;
+    if (triangle >= task.meta.w)
+        return;
+
+    vec3 a = worldVertex(task, 0u, triangle);
+    vec3 b = worldVertex(task, 1u, triangle);
+    vec3 c = worldVertex(task, 2u, triangle);
+    Ray ray = rays[task.meta.x];
+    float ratio;
+    vec2 bary;
+    if (!intersectTriangle(ray, a, b, c, ratio, bary))
+        return;
+    uint encoded = fixedRatio(ratio);
+    if (rayPass == 0u)
+    {
+        atomicMin(hits[task.meta.x].meta.x, encoded);
+        return;
+    }
+    if (hits[task.meta.x].meta.x != encoded
+        || atomicCompSwap(hits[task.meta.x].meta.y, noHit, taskIndex) != noHit)
+        return;
+
+    vec3 normal = normalize(cross(b - a, c - a));
+    hits[task.meta.x].meta.z = triangle;
+    hits[task.meta.x].meta.w = floatBitsToUint(bary.x);
+    hits[task.meta.x].detail.x = floatBitsToUint(bary.y);
+    hits[task.meta.x].detail.y = floatBitsToUint(normal.x);
+    hits[task.meta.x].detail.z = floatBitsToUint(normal.y);
+    hits[task.meta.x].detail.w = floatBitsToUint(normal.z);
+}

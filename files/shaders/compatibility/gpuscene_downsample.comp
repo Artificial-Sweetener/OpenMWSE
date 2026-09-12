@@ -1,0 +1,63 @@
+#version 430
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+uniform sampler2D sourceDepth;
+layout(r32f, binding = 0) uniform readonly image2D previousLevel;
+layout(r32f, binding = 1) uniform writeonly image2D targetLevel;
+uniform int firstPass;
+
+float mergeDepth(float left, float right)
+{
+#if @reverseZ
+    return min(left, right);
+#else
+    return max(left, right);
+#endif
+}
+
+void main()
+{
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(targetLevel);
+    if (coord.x >= size.x || coord.y >= size.y)
+        return;
+#if @reverseZ
+    float depth = 1.0;
+#else
+    float depth = 0.0;
+#endif
+    if (firstPass != 0)
+    {
+        ivec2 sourceSize = textureSize(sourceDepth, 0);
+        ivec2 base = min(coord * 2, sourceSize - 1);
+        ivec2 span = ivec2(1);
+        if (coord.x == size.x - 1 && (sourceSize.x & 1) != 0)
+            span.x = 2;
+        if (coord.y == size.y - 1 && (sourceSize.y & 1) != 0)
+            span.y = 2;
+        for (int y = 0; y <= span.y; ++y)
+            for (int x = 0; x <= span.x; ++x)
+            {
+                ivec2 point = min(base + ivec2(x, y), sourceSize - 1);
+                depth = mergeDepth(depth, texelFetch(sourceDepth, point, 0).r);
+            }
+    }
+    else
+    {
+        ivec2 previousSize = imageSize(previousLevel);
+        ivec2 base = min(coord * 2, previousSize - 1);
+        ivec2 span = ivec2(1);
+        if (coord.x == size.x - 1 && (previousSize.x & 1) != 0)
+            span.x = 2;
+        if (coord.y == size.y - 1 && (previousSize.y & 1) != 0)
+            span.y = 2;
+        for (int y = 0; y <= span.y; ++y)
+            for (int x = 0; x <= span.x; ++x)
+            {
+                ivec2 point = min(base + ivec2(x, y), previousSize - 1);
+                depth = mergeDepth(depth, imageLoad(previousLevel, point).r);
+            }
+    }
+    imageStore(targetLevel, coord, vec4(depth));
+}

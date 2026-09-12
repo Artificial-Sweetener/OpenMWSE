@@ -6,7 +6,6 @@
 #endif
 
 #if @diffuseMap
-uniform sampler2D diffuseMap;
 varying vec2 diffuseMapUV;
 #endif
 
@@ -20,7 +19,6 @@ uniform vec2 screenRes;
 uniform bool useFalloff;
 uniform float far;
 uniform float near;
-uniform float alphaRef;
 
 #include "lib/core/fragment.h.glsl"
 #include "lib/material/alpha.glsl"
@@ -44,8 +42,13 @@ void main()
     Material material = getMaterial();
 
 #if @diffuseMap
-    gl_FragData[0] = texture2D(diffuseMap, diffuseMapUV);
-    gl_FragData[0].a *= coveragePreservingAlphaScale(diffuseMap, diffuseMapUV);
+    if (hasMap(@diffuseMapIndex))
+    {
+        gl_FragData[0] = sampleDiffuseMap(diffuseMapUV);
+        gl_FragData[0].a *= mapCoverageScale(@diffuseMapIndex, diffuseMapUV);
+    }
+    else
+        gl_FragData[0] = vec4(1.0);
 #else
     gl_FragData[0] = vec4(1.0);
 #endif
@@ -55,7 +58,7 @@ void main()
     if (useFalloff)
         gl_FragData[0].a *= passFalloff;
 
-    gl_FragData[0].a = alphaTest(gl_FragData[0].a, alphaRef);
+    gl_FragData[0].a = alphaTest(gl_FragData[0].a, getAlphaRef());
 
     gl_FragData[0] = applyFogAtDist(gl_FragData[0], passViewPos, euclideanDepth, linearDepth, near, far);
 

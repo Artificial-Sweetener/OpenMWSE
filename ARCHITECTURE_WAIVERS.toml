@@ -283,8 +283,8 @@ kind = "structural"
 justification = "LightManager owns the per-view light-selection and GPU-data lifecycle, from cull collection through object uniforms and clustered buffers to sunlight settings. These stages share frame-local indices and buffer layout, so separation would leak representation details across tightly ordered rendering phases."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:f4d346f510c1aa922b8ced758cbe74c34be965afa4ef85eca6ba867d2731e459"
-max_lines = 596
+fingerprint = "sha256:400f21ab489729ce40112e7ca0798f4942c28d05e34ecd7e60312a599b9b050d"
+max_lines = 597
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-028"
@@ -319,11 +319,11 @@ owner = "OpenMWSE rendering"
 rule = "STRUCT003"
 path = "components/shader/shadermanager.cpp"
 kind = "structural"
-justification = "ShaderManager owns one cached shader-program lifecycle from template preprocessing and define resolution through sampler allocation, compilation, linking, and reload invalidation. Each stage contributes to the same cache key and diagnostic context, so it remains a cohesive compilation owner."
+justification = "ShaderManager owns one cached shader-program lifecycle from template preprocessing and define resolution through material-mode program derivation, sampler allocation, compilation, linking, and reload invalidation. Each stage contributes to the same cache key and diagnostic context, so it remains a cohesive compilation owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:0b1f3ce815a4b652426924242ae1b1ca070046869e62a351b5bf37dc6695ab8c"
-max_lines = 777
+fingerprint = "sha256:1938350aa98b160b576bf55e34cbc639b7ace41a2531feebdbc8dff642b3e557"
+max_lines = 965
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-022"
@@ -335,8 +335,8 @@ kind = "structural"
 justification = "ShaderVisitor performs one scene traversal that infers shader requirements and applies the resulting program and material state, while retaining enough state to restore removals. Analysis and mutation share node-local facts and traversal order; splitting them would require a duplicate intermediate scene model."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:e8ff8419d8ccaf75550b0d7b4ce7e9ee374b5a783d71a8e73d6afebbfc73ad29"
-max_lines = 712
+fingerprint = "sha256:eaad0fb2550d13d532386a922e2cb616ae227cbc2a3491a550089756ff4ec086"
+max_lines = 714
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-023"

@@ -12,7 +12,6 @@
 #include "lib/sky/passes.glsl"
 
 uniform int pass;
-uniform sampler2D diffuseMap;
 uniform sampler2D maskMap;      // PASS_MOON
 uniform float opacity;          // PASS_CLOUDS, PASS_ATMOSPHERE_NIGHT
 uniform vec2 screenRes;
@@ -27,6 +26,8 @@ uniform vec4 diffuseColor;
 varying vec2 diffuseMapUV;
 varying vec4 passColor;
 varying vec3 passViewDirection;
+
+#include "lib/core/material_fragment.h.glsl"
 
 /// Render independent cloud transport or composite it with the full-resolution directional sky.
 void paintAtmosphere(inout vec4 color)
@@ -54,7 +55,7 @@ void paintAtmosphere(inout vec4 color)
 
 void paintAtmosphereNight(inout vec4 color)
 {
-    color = texture2D(diffuseMap, diffuseMapUV);
+    color = sampleDiffuseMap(diffuseMapUV);
     color.a *= passColor.a * opacity;
 }
 
@@ -66,7 +67,7 @@ void paintClouds(inout vec4 color)
         color = vec4(0.0);
         return;
     }
-    color = texture2D(diffuseMap, diffuseMapUV);
+    color = sampleDiffuseMap(diffuseMapUV);
     color.a *= passColor.a * opacity;
     color.xyz = clamp(color.xyz * diffuseColor.xyz, 0.0, 1.0);
 
@@ -75,7 +76,7 @@ void paintClouds(inout vec4 color)
 
 void paintMoon(inout vec4 color)
 {
-    vec4 phase = texture2D(diffuseMap, diffuseMapUV);
+    vec4 phase = sampleDiffuseMap(diffuseMapUV);
     vec4 mask = texture2D(maskMap, diffuseMapUV);
 
     // Morrowind does this in two passes
@@ -130,7 +131,7 @@ void paintSun(inout vec4 color)
         color.rgb = solar * transmission + bloom;
         return;
     }
-    color = texture2D(diffuseMap, diffuseMapUV);
+    color = sampleDiffuseMap(diffuseMapUV);
     color.a *= opacity;
     color.rgb *= color.a;
     color.a = 0.0;
@@ -145,7 +146,7 @@ void processSunflashQuery()
 {
     const float threshold = 0.8;
 
-    if (atmosphere.enabled || texture2D(diffuseMap, diffuseMapUV).a <= threshold)
+    if (atmosphere.enabled || sampleDiffuseMap(diffuseMapUV).a <= threshold)
         discard;
 }
 

@@ -6,9 +6,10 @@
 @link "lib/core/fragment.glsl" if !@useOVR_multiview
 @link "lib/core/fragment_multiview.glsl" if @useOVR_multiview
 @link "lib/core/lighting_fragment.glsl" if @lightingMethodClustered
-@link "lib/core/lighting_fragment_legacy.glsl" if !@lightingMethodClustered
+@link "lib/core/lighting_fragment_legacy.glsl" if @legacyLightList
+@link "lib/core/lighting_fragment_gpu.glsl" if @gpuLightList
 
-#include "lib/material/struct.glsl"
+#include "lib/core/material_fragment.h.glsl"
 
 vec4 sampleReflectionMap(vec2 uv);
 /// Sample current reflected cloud radiance and transmittance for this view.
@@ -25,7 +26,5 @@ vec4 sampleOpaqueColorTex(vec2 uv);
 void doLighting(vec2 screenCoord, vec3 viewPos, vec3 viewNormal, float shininess, float shadowing, out vec3 diffuseLight, out vec3 ambientLight, out vec3 specularLight);
 
 vec3 doSpecularLighting(vec2 screenCoord, vec3 viewPos, vec3 viewNormal);
-
-Material getMaterial();
 
 #endif  // OPENMW_FRAGMENT_H_GLSL

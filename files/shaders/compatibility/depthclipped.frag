@@ -1,17 +1,17 @@
 #version 120
 
-uniform sampler2D diffuseMap;
+#include "lib/core/material_fragment.h.glsl"
 
 varying vec2 diffuseMapUV;
 varying float alphaPassthrough;
 
 void main()
 {
-    float alpha = texture2D(diffuseMap, diffuseMapUV).a * alphaPassthrough;
+    float alpha = sampleDiffuseMap(diffuseMapUV).a * alphaPassthrough;
 
-    const float alphaRef = 0.499;
+    const float depthAlpha = 0.499;
 
-    if (alpha < alphaRef)
+    if (alpha < depthAlpha)
         discard;
 
     // DO NOT write to color!
