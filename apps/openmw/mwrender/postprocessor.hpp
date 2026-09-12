@@ -2,12 +2,9 @@
 #define OPENMW_MWRENDER_POSTPROCESSOR_H
 
 #include <array>
-#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-#include <filesystem>
 
 #include <osg/Camera>
 #include <osg/FrameBufferObject>
@@ -53,8 +50,7 @@ namespace MWRender
     class Water;
     class PingPongCull;
     class PingPongCanvas;
-    class AtmosphereDiagnostics;
-    class RenderFrameDiagnostics;
+    class PostProcessorDiagnostics;
     class TransparentDepthBinCallback;
     class DistortionCallback;
 
@@ -220,28 +216,11 @@ namespace MWRender
         void loadChain();
         void saveChain();
 
-        /// Request a one-shot production pass capture when OPENMW_ATMOSPHERE_DIAGNOSTICS_DIR is set.
-        void requestAtmosphereDiagnosticCapture();
-
-        /// Request a production capture in an explicitly owned artifact directory.
-        void requestAtmosphereDiagnosticCapture(
-            const std::filesystem::path& outputDirectory, bool captureComparisons = true);
-
-        /// Report whether the production multi-frame diagnostic capture still owns transient render state.
-        bool atmosphereDiagnosticCaptureInProgress() const;
-
-        /// Capture production composites from the first scheduled route frame at preview or native resolution.
-        void requestRenderFrameDiagnosticCapture(const std::filesystem::path& outputPath, std::uint32_t frameCount,
-            bool nativeResolution, std::uint64_t firstFrameNumber);
-
-        /// Report whether an exact final-composite sequence is being captured or serialized.
-        bool renderFrameDiagnosticCaptureInProgress() const;
+        /// Return the owner of post-processing capture and comparison state.
+        PostProcessorDiagnostics& diagnostics() { return *mDiagnostics; }
 
         /// Invalidate both frame canvases so controlled replay cannot consume bootstrap atmosphere history.
         void invalidateAtmosphereHistory();
-
-        /// Apply any transient render-state transition required by the diagnostic comparison.
-        void advanceAtmosphereDiagnosticComparison();
 
     private:
         /// Populate the internal atmosphere effect and target sizes before dispatch construction.
@@ -306,8 +285,7 @@ namespace MWRender
         int mSamples;
 
         osg::ref_ptr<Fx::StateUpdater> mStateUpdater;
-        std::shared_ptr<AtmosphereDiagnostics> mAtmosphereDiagnostics;
-        std::shared_ptr<RenderFrameDiagnostics> mRenderFrameDiagnostics;
+        std::unique_ptr<PostProcessorDiagnostics> mDiagnostics;
         osg::ref_ptr<PingPongCull> mPingPongCull;
         std::array<osg::ref_ptr<PingPongCanvas>, 2> mCanvases;
         osg::ref_ptr<TransparentDepthBinCallback> mTransparentDepthPostPass;

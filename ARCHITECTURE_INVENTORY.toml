@@ -4,8 +4,8 @@ schema_version = 1
 id = "OMWSE-INVENTORY-RENDERER"
 area = "renderer"
 owner = "OpenMWSE rendering"
-fingerprint = "sha256:95f0d1cc6df678894d0034885c72d759df23fe93f3724ec34d25c7a37eb1b881"
-file_count = 443
+fingerprint = "sha256:2c3384f83b5f250e32215c0cc837dac68abc21d668ebf04037764ad28e1e3437"
+file_count = 445
 assessed_on = 2026-09-12
 
 [[inventories]]
@@ -20,6 +20,6 @@ assessed_on = 2026-09-12
 id = "OMWSE-INVENTORY-DIAGNOSTICS"
 area = "diagnostics"
 owner = "OpenMWSE diagnostic bridge"
-fingerprint = "sha256:374e295ebb6fb1bb38739f044eb1e8017b670542e0f030e4c6df91a59026cc32"
+fingerprint = "sha256:18b88a2386945192dc0a5641acbf257075eb1f52a85b42bf380f3f37014f36ff"
 file_count = 49
 assessed_on = 2026-09-12

@@ -79,6 +79,7 @@
 #include "objectpaging.hpp"
 #include "pathgrid.hpp"
 #include "postprocessor.hpp"
+#include "postprocessordiagnostics.hpp"
 #include "recastmesh.hpp"
 #include "screenshotmanager.hpp"
 #include "sky.hpp"
@@ -768,7 +769,7 @@ namespace MWRender
     {
         reportStats();
 
-        mPostProcessor->advanceAtmosphereDiagnosticComparison();
+        mPostProcessor->diagnostics().advanceAtmosphereComparison();
 
         mResourceSystem->getSceneManager()->getShaderManager().update(*mViewer);
 

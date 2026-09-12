@@ -21,7 +21,7 @@ id = "OMWSE-DEBT-002"
 area = "diagnostics"
 owner = "OpenMWSE diagnostic bridge"
 paths = ["apps/openmw/diagnosticcommands.cpp"]
-fingerprint = "sha256:d268c2607fce4d8b45a1af80c6e827a6b2944411ef25982635b4ad9754ac74d2"
+fingerprint = "sha256:2c8ffa5797658005d800b32548c4312704cf6e13dcdce386e0dd3eea15b1b06c"
 issue = "architecture:omwse-debt-002"
 review_by = 2027-03-12
 responsibilities = [
@@ -49,27 +49,11 @@ responsibilities = [
 next_extraction = "Extract the video and graphics settings controller, including live application and diagnostic access, from the general settings window."
 
 [[debts]]
-id = "OMWSE-DEBT-004"
-area = "renderer"
-owner = "OpenMWSE rendering"
-paths = ["apps/openmw/mwrender/postprocessor.cpp"]
-fingerprint = "sha256:f476942c6209c5418b041cf3a2a8ea4e79462d2d763e5b791b1c10e6a79301a0"
-issue = "architecture:omwse-debt-004"
-review_by = 2027-03-12
-responsibilities = [
-  "post-process frame-resource lifecycle",
-  "effect-chain and attachment orchestration",
-  "atmosphere and exact-frame diagnostic capture",
-  "shader live reload",
-]
-next_extraction = "Extract diagnostic capture state and comparison sequencing from the production post-processing pipeline."
-
-[[debts]]
 id = "OMWSE-DEBT-005"
 area = "renderer"
 owner = "OpenMWSE rendering"
 paths = ["apps/openmw/mwrender/renderingmanager.cpp"]
-fingerprint = "sha256:1f039066224d49e7b7c4929a451a24b210bd47a921eeef39674d996a8e080102"
+fingerprint = "sha256:347926cd0fdda4f9798f7150eae79220099cc6bfbb54d88897736eafe63724d1"
 issue = "architecture:omwse-debt-005"
 review_by = 2027-03-12
 responsibilities = [

@@ -38,8 +38,8 @@ kind = "remediation"
 justification = "This file contains assessed mixed responsibility recorded by OMWSE-DEBT-002; the bounded waiver permits only the current source while the named extraction is completed."
 issue = "architecture:omwse-debt-002"
 review_by = 2027-03-12
-fingerprint = "sha256:d268c2607fce4d8b45a1af80c6e827a6b2944411ef25982635b4ad9754ac74d2"
-max_lines = 778
+fingerprint = "sha256:2c8ffa5797658005d800b32548c4312704cf6e13dcdce386e0dd3eea15b1b06c"
+max_lines = 779
 next_limit = 500
 debt = "OMWSE-DEBT-002"
 
@@ -137,19 +137,17 @@ fingerprint = "sha256:389d2462630228f0d71f4195aa9d2ec0fce75c3a96d2a183146dfdc518
 max_lines = 981
 
 [[waivers]]
-id = "OMWSE-REMEDIATION-004"
+id = "OMWSE-STRUCTURAL-026"
 area = "renderer"
 owner = "OpenMWSE rendering"
 rule = "STRUCT003"
 path = "apps/openmw/mwrender/postprocessor.cpp"
-kind = "remediation"
-justification = "This file contains assessed mixed responsibility recorded by OMWSE-DEBT-004; the bounded waiver permits only the current source while the named extraction is completed."
-issue = "architecture:omwse-debt-004"
+kind = "structural"
+justification = "PostProcessor now owns only the production post-process graph lifecycle: frame-local resources, attachment topology, effect-chain compilation, cull dispatch, and shader reload all share the same render targets and invalidation contract. Capture state and diagnostic comparison sequencing have an independent owner."
+issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:f476942c6209c5418b041cf3a2a8ea4e79462d2d763e5b791b1c10e6a79301a0"
-max_lines = 888
-next_limit = 500
-debt = "OMWSE-DEBT-004"
+fingerprint = "sha256:72932196a3f4b31ce24240c3d6491ea5f794aa83115b21bac2ac73103f139f73"
+max_lines = 808
 
 [[waivers]]
 id = "OMWSE-REMEDIATION-005"
@@ -161,8 +159,8 @@ kind = "remediation"
 justification = "This file contains assessed mixed responsibility recorded by OMWSE-DEBT-005; the bounded waiver permits only the current source while the named extraction is completed."
 issue = "architecture:omwse-debt-005"
 review_by = 2027-03-12
-fingerprint = "sha256:1f039066224d49e7b7c4929a451a24b210bd47a921eeef39674d996a8e080102"
-max_lines = 1621
+fingerprint = "sha256:347926cd0fdda4f9798f7150eae79220099cc6bfbb54d88897736eafe63724d1"
+max_lines = 1622
 next_limit = 500
 debt = "OMWSE-DEBT-005"
 

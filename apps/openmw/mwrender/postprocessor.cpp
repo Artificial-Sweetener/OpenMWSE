@@ -1,7 +1,5 @@
 #include "postprocessor.hpp"
 
-#include <cstdlib>
-
 #include <SDL_opengl_glext.h>
 #include <algorithm>
 #include <chrono>
@@ -25,7 +23,6 @@
 #include <components/sceneutil/depth.hpp>
 #include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/nodecallback.hpp>
-#include <components/sceneutil/shadow.hpp>
 #include <components/settings/values.hpp>
 #include <components/shader/shadermanager.hpp>
 #include <components/stereo/multiview.hpp>
@@ -39,12 +36,11 @@
 #include "../mwgui/postprocessorhud.hpp"
 
 #include "atmosphere.hpp"
-#include "atmospherediagnostics.hpp"
 #include "distortion.hpp"
 #include "opaqueblit.hpp"
 #include "pingpongcull.hpp"
+#include "postprocessordiagnostics.hpp"
 #include "renderbin.hpp"
-#include "renderframediagnostics.hpp"
 #include "renderingmanager.hpp"
 #include "renderworkcounter.hpp"
 #include "sky.hpp"
@@ -138,93 +134,10 @@ namespace
 
 namespace MWRender
 {
-    void PostProcessor::requestAtmosphereDiagnosticCapture()
-    {
-        const char* outputDirectory = std::getenv("OPENMW_ATMOSPHERE_DIAGNOSTICS_DIR");
-        if (!outputDirectory || outputDirectory[0] == '\0')
-            return;
-
-        requestAtmosphereDiagnosticCapture(std::filesystem::path(outputDirectory));
-    }
-
-    void PostProcessor::requestAtmosphereDiagnosticCapture(
-        const std::filesystem::path& outputDirectory, bool captureComparisons)
-    {
-        mAtmosphereDiagnostics->requestCapture(outputDirectory, captureComparisons);
-        Log(Debug::Info) << (captureComparisons
-                ? "Production atmosphere shader-stage comparison requested for the next screenshot frames"
-                : "Production atmosphere normal-frame capture requested for the next screenshot frame");
-    }
-
-    bool PostProcessor::atmosphereDiagnosticCaptureInProgress() const
-    {
-        return mAtmosphereDiagnostics->captureInProgress();
-    }
-
-    void PostProcessor::requestRenderFrameDiagnosticCapture(const std::filesystem::path& outputPath,
-        std::uint32_t frameCount, bool nativeResolution, std::uint64_t firstFrameNumber)
-    {
-        mRenderFrameDiagnostics->requestCapture(outputPath, frameCount, nativeResolution, firstFrameNumber);
-        Log(Debug::Info) << "Exact production-frame diagnostic sequence requested at " << outputPath;
-    }
-
-    bool PostProcessor::renderFrameDiagnosticCaptureInProgress() const
-    {
-        return mRenderFrameDiagnostics->captureInProgress();
-    }
-
     void PostProcessor::invalidateAtmosphereHistory()
     {
         for (const osg::ref_ptr<PingPongCanvas>& canvas : mCanvases)
             canvas->invalidateAtmosphereHistory();
-    }
-
-    void PostProcessor::advanceAtmosphereDiagnosticComparison()
-    {
-        switch (mAtmosphereDiagnostics->advanceComparison())
-        {
-            case AtmosphereDiagnostics::ComparisonAction::BypassShadows:
-                SceneUtil::ShadowManager::instance().setDiagnosticShadowRenderingEnabled(false);
-                Log(Debug::Info) << "Bypassing shadows for the second production diagnostic frame";
-                break;
-            case AtmosphereDiagnostics::ComparisonAction::BypassCloudSurfaceShadows:
-                SceneUtil::ShadowManager::instance().setDiagnosticShadowRenderingEnabled(true);
-                mRendering.setAtmosphereDiagnosticMode(7);
-                Log(Debug::Info) << "Bypassing cloud surface shadows for the production diagnostic frame";
-                break;
-            case AtmosphereDiagnostics::ComparisonAction::BypassCoveragePreservation:
-                SceneUtil::ShadowManager::instance().setDiagnosticShadowRenderingEnabled(true);
-                mRendering.setAtmosphereDiagnosticMode(1);
-                Log(Debug::Info) << "Bypassing alpha mip-coverage preservation for the production diagnostic frame";
-                break;
-            case AtmosphereDiagnostics::ComparisonAction::BypassCompatibilityFog:
-                mRendering.setAtmosphereDiagnosticMode(2);
-                Log(Debug::Info) << "Bypassing compatibility fog for the production diagnostic frame";
-                break;
-            case AtmosphereDiagnostics::ComparisonAction::ShowFogVisibility:
-                mRendering.setAtmosphereDiagnosticMode(3);
-                Log(Debug::Info) << "Showing compatibility fog visibility for the production diagnostic frame";
-                break;
-            case AtmosphereDiagnostics::ComparisonAction::ShowFogInScattering:
-                mRendering.setAtmosphereDiagnosticMode(4);
-                Log(Debug::Info) << "Showing compatibility fog in-scattering for the production diagnostic frame";
-                break;
-            case AtmosphereDiagnostics::ComparisonAction::ShowPreFogRadiance:
-                mRendering.setAtmosphereDiagnosticMode(5);
-                Log(Debug::Info) << "Showing object pre-fog radiance for the production diagnostic frame";
-                break;
-            case AtmosphereDiagnostics::ComparisonAction::ShowSampledSurfaceColor:
-                mRendering.setAtmosphereDiagnosticMode(6);
-                Log(Debug::Info) << "Showing object sampled surface color for the production diagnostic frame";
-                break;
-            case AtmosphereDiagnostics::ComparisonAction::RestoreNormalRendering:
-                SceneUtil::ShadowManager::instance().setDiagnosticShadowRenderingEnabled(true);
-                mRendering.setAtmosphereDiagnosticMode(0);
-                Log(Debug::Info) << "Restored normal rendering after production diagnostics";
-                break;
-            case AtmosphereDiagnostics::ComparisonAction::None:
-                break;
-        }
     }
 
     PostProcessor::PostProcessor(
@@ -274,11 +187,10 @@ namespace MWRender
 
         std::shared_ptr<LuminanceCalculator> luminanceCalculator = std::make_shared<LuminanceCalculator>(shaderManager);
 
-        mAtmosphereDiagnostics = std::make_shared<AtmosphereDiagnostics>();
-        mRenderFrameDiagnostics = std::make_shared<RenderFrameDiagnostics>();
+        mDiagnostics = std::make_unique<PostProcessorDiagnostics>(mRendering);
         for (auto& canvas : mCanvases)
-            canvas = new PingPongCanvas(
-                shaderManager, luminanceCalculator, mAtmosphereDiagnostics, mRenderFrameDiagnostics);
+            canvas = new PingPongCanvas(shaderManager, luminanceCalculator, mDiagnostics->atmosphereCapture(),
+                mDiagnostics->renderFrameCapture());
         mCanvases[0]->setPreviousCanvas(mCanvases[1]);
         mCanvases[1]->setPreviousCanvas(mCanvases[0]);
 

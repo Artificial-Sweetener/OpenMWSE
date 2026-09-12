@@ -26,6 +26,7 @@
 #include "mwgui/windowmanagerimp.hpp"
 #include "mwrender/camera.hpp"
 #include "mwrender/postprocessor.hpp"
+#include "mwrender/postprocessordiagnostics.hpp"
 #include "mwrender/renderingmanager.hpp"
 #include "mwrender/vismask.hpp"
 
@@ -280,12 +281,12 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << (mDiagnosticGameplayRoute ? mDiagnosticGameplayRoute->remainingReplayFrames() : 0) << '\n'
                            << "frame: " << frameNumber << '\n'
                            << "graphics-capture: "
-                           << (mWorld->getPostProcessor()->atmosphereDiagnosticCaptureInProgress() ? "in-progress"
-                                                                                                   : "idle")
+                           << (mWorld->getPostProcessor()->diagnostics().atmosphereCaptureInProgress() ? "in-progress"
+                                                                                                       : "idle")
                            << '\n'
                            << "render-frame-capture: "
-                           << (mWorld->getPostProcessor()->renderFrameDiagnosticCaptureInProgress() ? "in-progress"
-                                                                                                    : "idle")
+                           << (mWorld->getPostProcessor()->diagnostics().renderFrameCaptureInProgress() ? "in-progress"
+                                                                                                        : "idle")
                            << '\n'
                            << "performance-capture: " << (mDiagnosticCollection->active() ? "collecting" : "idle")
                            << '\n'
@@ -372,7 +373,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                     {
                         const std::filesystem::path outputPath = mDiagnosticArtifactRoot
                             / ("route-frames-" + std::to_string(command.mRequestId) + ".omwdiag");
-                        mWorld->getPostProcessor()->requestRenderFrameDiagnosticCapture(
+                        mWorld->getPostProcessor()->diagnostics().requestRenderFrames(
                             outputPath, count, nativeResolution, frameNumber + 1);
                     }
                     if (bypassShadows)
@@ -400,7 +401,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                         throw std::invalid_argument("unsupported graphics capture mode");
                     const std::filesystem::path outputDirectory
                         = mDiagnosticArtifactRoot / ("graphics-" + std::to_string(frameNumber));
-                    mWorld->getPostProcessor()->requestAtmosphereDiagnosticCapture(
+                    mWorld->getPostProcessor()->diagnostics().requestAtmosphereCapture(
                         outputDirectory, captureMode != "normal-only");
                     output << "capture-root: " << quoteDiagnosticYaml(outputDirectory.filename().string()) << '\n'
                            << "capture-mode: " << (captureMode.empty() ? "comparison" : captureMode) << '\n'
