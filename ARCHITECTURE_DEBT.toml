@@ -1,22 +1,6 @@
 schema_version = 1
 
 [[debts]]
-id = "OMWSE-DEBT-001"
-area = "diagnostics"
-owner = "OpenMWSE diagnostic bridge"
-paths = ["apps/openmw-diagnosticctl/main.cpp"]
-fingerprint = "sha256:b912e57c37eef6237cc99ae0b1613af400d973854cfcac5c73dcbd05d64a9811"
-issue = "architecture:omwse-debt-001"
-review_by = 2027-03-12
-responsibilities = [
-  "process isolation and temporary profile ownership",
-  "command-line parsing and validation",
-  "run, replay, inspection, and capsule-edit workflows",
-  "evidence serialization and child-process supervision",
-]
-next_extraction = "Extract operation parsing and execution into focused diagnosticctl command owners, leaving main responsible only for top-level dispatch and exit reporting."
-
-[[debts]]
 id = "OMWSE-DEBT-002"
 area = "diagnostics"
 owner = "OpenMWSE diagnostic bridge"

@@ -1,7 +1,10 @@
 openmw_add_executable(openmw-diagnosticctl
     main.cpp
+    controllerprotocol.cpp controllerprotocol.hpp
     gameplayrouteexecution.cpp gameplayrouteexecution.hpp
     isolatedsettings.cpp isolatedsettings.hpp
+    isolatedrun.cpp isolatedrun.hpp
+    isolatedworkspace.cpp isolatedworkspace.hpp
     replaystate.cpp replaystate.hpp
 )
 

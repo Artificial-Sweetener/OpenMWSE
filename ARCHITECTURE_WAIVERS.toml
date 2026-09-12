@@ -14,21 +14,6 @@ fingerprint = "sha256:204d90cf0665edb8489795f1acfac772e10c2acb823d12ce95ed187728
 max_lines = 675
 
 [[waivers]]
-id = "OMWSE-REMEDIATION-001"
-area = "diagnostics"
-owner = "OpenMWSE diagnostic bridge"
-rule = "STRUCT003"
-path = "apps/openmw-diagnosticctl/main.cpp"
-kind = "remediation"
-justification = "This file contains assessed mixed responsibility recorded by OMWSE-DEBT-001; the bounded waiver permits only the current source while the named extraction is completed."
-issue = "architecture:omwse-debt-001"
-review_by = 2027-03-12
-fingerprint = "sha256:b912e57c37eef6237cc99ae0b1613af400d973854cfcac5c73dcbd05d64a9811"
-max_lines = 1330
-next_limit = 500
-debt = "OMWSE-DEBT-001"
-
-[[waivers]]
 id = "OMWSE-REMEDIATION-002"
 area = "diagnostics"
 owner = "OpenMWSE diagnostic bridge"
