@@ -2,6 +2,7 @@
 #define ENGINE_H
 
 #include <filesystem>
+#include <iosfwd>
 
 #include <components/compiler/extensions.hpp>
 #include <components/debug/debuglog.hpp>
@@ -59,6 +60,8 @@ namespace Diagnostics
 {
     class Capsule;
     class Session;
+    struct Command;
+    struct Response;
 }
 
 namespace osgViewer
@@ -221,6 +224,10 @@ namespace OMW
 
         /// Execute validated bridge commands at the main-thread frame boundary.
         void processDiagnosticCommands(unsigned frameNumber);
+
+        /// Execute graphics-menu and atmosphere command families against isolated engine state.
+        void processDiagnosticGraphicsCommand(
+            const Diagnostics::Command& command, Diagnostics::Response& response, std::ostringstream& output);
 
         /// Capture the current initial state shared by one-shot and gameplay-route capsules.
         Diagnostics::Capsule createDiagnosticCapsule(unsigned frameNumber);
