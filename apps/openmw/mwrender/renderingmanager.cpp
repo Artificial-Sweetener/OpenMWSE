@@ -40,6 +40,7 @@
 #include <components/sceneutil/material.hpp>
 #include <components/sceneutil/mwshadowtechnique.hpp>
 #include <components/sceneutil/positionattitudetransform.hpp>
+#include <components/sceneutil/riggeometry.hpp>
 #include <components/sceneutil/rtt.hpp>
 #include <components/sceneutil/shadow.hpp>
 #include <components/sceneutil/stateupdater.hpp>
@@ -166,6 +167,12 @@ namespace
 
 namespace MWRender
 {
+    namespace
+    {
+        RenderingManager::RayResult makeGpuResult(
+            const GpuScene::RayHit& hit, const osg::Vec3f& origin, const osg::Vec3f& dest);
+    }
+
     class PreloadCommonAssetsWorkItem : public SceneUtil::WorkItem
     {
     public:
@@ -277,6 +284,7 @@ namespace MWRender
         globalDefines["particlePointLighting"] = Settings::shaders().mParticlePointLighting ? "1" : "0";
         globalDefines["gpuInstanced"] = "0";
         globalDefines["gpuMaterial"] = "0";
+        globalDefines["gpuUber"] = "0";
 
         for (auto itr = lightDefines.begin(); itr != lightDefines.end(); itr++)
             globalDefines[itr->first] = itr->second;
@@ -720,6 +728,13 @@ namespace MWRender
     {
         if (mGpuScene == nullptr)
             return;
+        if (osg::ref_ptr<osg::GraphicsOperation> probe = mGpuScene->createProbeOperation())
+        {
+            mViewer->getCamera()->getGraphicsContext()->add(probe);
+            const auto probeDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while (probe->getKeep() && std::chrono::steady_clock::now() < probeDeadline)
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
         mGpuScene->capture(*mSceneRoot);
         const unsigned int total = mGpuScene->getPendingWork();
         if (total == 0)
@@ -784,6 +799,7 @@ namespace MWRender
         else if (mode == Render_GpuDrivenPaging)
         {
             if (mGpuScene == nullptr)
+
             {
                 // Worldspace managers rewire on recreation.
                 if (!Settings::terrain().mObjectPaging || !createGpuScene())
@@ -816,9 +832,13 @@ namespace MWRender
         // Late construction repeats the setup-time wiring.
         if (mPostProcessor != nullptr)
             mGpuScene->setPostProcessor(mPostProcessor.get());
+        mGpuScene->setWorkQueue(mWorkQueue.get());
         mGpuScene->setPrepassCamera(mViewer->getCamera());
-        mGpuScene->getNode()->setNodeMask(Mask_Static | Mask_Object | Mask_Terrain);
+        mGpuScene->getNode()->setNodeMask(Mask_Actor | Mask_Player | Mask_Static | Mask_Object | Mask_Terrain);
         mSceneRoot->addChild(mGpuScene->getNode());
+        osg::ref_ptr<osg::GraphicsOperation> retire = mGpuScene->createRetireOperation();
+        if (retire != nullptr && mViewer->getCamera()->getGraphicsContext() != nullptr)
+            mViewer->getCamera()->getGraphicsContext()->add(retire);
         if (const SceneUtil::MWShadowTechnique* technique = mShadowManager->getShadowTechnique())
         {
             const auto& casting = technique->getCastingPrograms();
@@ -834,6 +854,8 @@ namespace MWRender
         mWater->setGpuScene(scene);
         mSky->setGpuScene(scene);
         mEffectManager->setGpuScene(scene);
+        if (mPlayerAnimation != nullptr)
+            mPlayerAnimation->setGpuScene(scene);
         for (auto& [_, chunkMgr] : mWorldspaceChunks)
         {
             chunkMgr.mTerrain->setGpuChunkFactory(scene, Mask_GpuProxy);
@@ -856,6 +878,8 @@ namespace MWRender
             chunkMgr.mTerrain->rebuildViews();
         }
         mObjects->refreshGpuInstances();
+        if (mPlayerAnimation != nullptr)
+            mPlayerAnimation->refreshGpuInstances();
         MWBase::Environment::get().getWindowManager()->fadeScreenIn(1.f);
     }
 
@@ -881,9 +905,46 @@ namespace MWRender
         mPostProcessor->invalidateAtmosphereHistory();
     }
 
+    void RenderingManager::updateRaycasts()
+    {
+        if (mGpuScene == nullptr)
+            return;
+        // Hits hold actor refs; drain them.
+        std::vector<GpuScene::RayHit> hits = mGpuScene->takeRayHits();
+        for (const GpuScene::RayHit& hit : hits)
+        {
+            const auto found = mPendingRays.find(hit.mId);
+            if (found == mPendingRays.end())
+                continue;
+            PendingRay pending = std::move(found->second);
+            mPendingRays.erase(found);
+
+            RayResult result;
+            if (!hit.mValid)
+                result = castSceneRay(pending.mOrigin, pending.mDest, pending.mIgnorePlayer, pending.mIgnoreActors,
+                    pending.mIgnoreTerrain, pending.mIgnoreList, false);
+            else if (!hit.mHit)
+                result = pending.mCpuResult;
+            else
+            {
+                RayResult gpu = makeGpuResult(hit, pending.mOrigin, pending.mDest);
+                if (!gpu.mHit)
+                    result = castSceneRay(pending.mOrigin, pending.mDest, pending.mIgnorePlayer, pending.mIgnoreActors,
+                        pending.mIgnoreTerrain, pending.mIgnoreList, false);
+                else if (!pending.mCpuResult.mHit || gpu.mRatio < pending.mCpuResult.mRatio)
+                    result = gpu;
+                else
+                    result = pending.mCpuResult;
+            }
+            pending.mCallback(result);
+        }
+    }
+
     void RenderingManager::update(float dt, bool paused)
     {
+        updateRaycasts();
         reportStats();
+        mObjects->flushGpuRefresh();
 
         mPostProcessor->diagnostics().advanceAtmosphereComparison();
 
@@ -1231,6 +1292,41 @@ namespace MWRender
         return result;
     }
 
+    namespace
+    {
+        std::vector<SceneUtil::PositionAttitudeTransform*> getActorNodes(std::span<const MWWorld::Ptr> ignore)
+        {
+            std::vector<SceneUtil::PositionAttitudeTransform*> result;
+            result.reserve(ignore.size());
+            for (const MWWorld::Ptr& ptr : ignore)
+                if (!ptr.isEmpty() && ptr.getRefData().getBaseNode() != nullptr)
+                    result.push_back(ptr.getRefData().getBaseNode());
+            return result;
+        }
+
+        RenderingManager::RayResult makeGpuResult(
+            const GpuScene::RayHit& hit, const osg::Vec3f& origin, const osg::Vec3f& dest)
+        {
+            RenderingManager::RayResult result{};
+            if (!hit.mHit || hit.mActor == nullptr || hit.mActor->getUserDataContainer() == nullptr)
+                return result;
+            const osg::UserDataContainer& data = *hit.mActor->getUserDataContainer();
+            for (unsigned int i = 0; i < data.getNumUserObjects(); ++i)
+                if (const auto* holder = dynamic_cast<const PtrHolder*>(data.getUserObject(i)))
+                {
+                    result.mHitObject = holder->mPtr;
+                    break;
+                }
+            if (result.mHitObject.isEmpty())
+                return result;
+            result.mHit = true;
+            result.mRatio = hit.mRatio;
+            result.mHitPointWorld = origin + (dest - origin) * hit.mRatio;
+            result.mHitNormalWorld = hit.mNormal;
+            return result;
+        }
+    }
+
     class IntersectionVisitorWithIgnoreList : public osgUtil::IntersectionVisitor
     {
     public:
@@ -1266,23 +1362,37 @@ namespace MWRender
             osgUtil::IntersectionVisitor::apply(transform);
         }
 
+        void apply(osg::Drawable& drawable) override
+        {
+            if (mSkipGpuRigs)
+            {
+                const auto* rig = dynamic_cast<const SceneUtil::RigGeometry*>(&drawable);
+                if (rig != nullptr && rig->getNodeMask() == Mask_GpuProxy)
+                    return;
+            }
+            osgUtil::IntersectionVisitor::apply(drawable);
+        }
+
         void setIgnoreList(std::span<const MWWorld::Ptr> ignoreList) { mIgnoreList = ignoreList; }
         void setContainsPagedRefs(bool contains) { mContainsPagedRefs = contains; }
+        void setSkipGpuRigs(bool skip) { mSkipGpuRigs = skip; }
 
     private:
         std::span<const MWWorld::Ptr> mIgnoreList;
         bool mContainsPagedRefs = false;
+        bool mSkipGpuRigs = false;
     };
 
     osg::ref_ptr<osgUtil::IntersectionVisitor> RenderingManager::getIntersectionVisitor(
         osgUtil::Intersector* intersector, bool ignorePlayer, bool ignoreActors, bool ignoreTerrain,
-        std::span<const MWWorld::Ptr> ignoreList)
+        std::span<const MWWorld::Ptr> ignoreList, bool skipGpuRigs)
     {
         if (!mIntersectionVisitor)
             mIntersectionVisitor = new IntersectionVisitorWithIgnoreList;
 
         mIntersectionVisitor->setIgnoreList(ignoreList);
         mIntersectionVisitor->setContainsPagedRefs(false);
+        mIntersectionVisitor->setSkipGpuRigs(skipGpuRigs);
 
         MWWorld::Scene* worldScene = MWBase::Environment::get().getWorldScene();
         for (const auto& ptr : ignoreList)
@@ -1298,7 +1408,7 @@ namespace MWRender
         mIntersectionVisitor->setTraversalNumber(mViewer->getFrameStamp()->getFrameNumber());
         mIntersectionVisitor->setFrameStamp(mViewer->getFrameStamp());
         mIntersectionVisitor->setIntersector(intersector);
-        // Terrain picks its LOD from the eye point.
+        // Terrain picks LOD from the eye point.
         mIntersectionVisitor->setReferenceEyePoint(osg::Vec3f());
         mIntersectionVisitor->setReferenceEyePointCoordinateFrame(osgUtil::Intersector::VIEW);
 
@@ -1319,17 +1429,52 @@ namespace MWRender
     RenderingManager::RayResult RenderingManager::castRay(const osg::Vec3f& origin, const osg::Vec3f& dest,
         bool ignorePlayer, bool ignoreActors, bool ignoreTerrain, std::span<const MWWorld::Ptr> ignoreList)
     {
+        return castSceneRay(origin, dest, ignorePlayer, ignoreActors, ignoreTerrain, ignoreList, false);
+    }
+
+    RenderingManager::RayResult RenderingManager::castSceneRay(const osg::Vec3f& origin, const osg::Vec3f& dest,
+        bool ignorePlayer, bool ignoreActors, bool ignoreTerrain, std::span<const MWWorld::Ptr> ignoreList,
+        bool skipGpuRigs)
+    {
         osg::ref_ptr<osgUtil::LineSegmentIntersector> intersector(
             new osgUtil::LineSegmentIntersector(osgUtil::LineSegmentIntersector::MODEL, origin, dest));
         intersector->setIntersectionLimit(osgUtil::LineSegmentIntersector::LIMIT_NEAREST);
 
         osg::ref_ptr<osgUtil::IntersectionVisitor> visitor
-            = getIntersectionVisitor(intersector, ignorePlayer, ignoreActors, ignoreTerrain, ignoreList);
+            = getIntersectionVisitor(intersector, ignorePlayer, ignoreActors, ignoreTerrain, ignoreList, skipGpuRigs);
         visitor->setReferenceEyePoint(origin);
         visitor->setReferenceEyePointCoordinateFrame(osgUtil::Intersector::MODEL);
         mRootNode->accept(*visitor);
 
         return getIntersectionResult(intersector, mIntersectionVisitor, ignoreList);
+    }
+
+    void RenderingManager::asyncCastRenderingRay(RayCallback callback, const osg::Vec3f& origin, const osg::Vec3f& dest,
+        bool ignorePlayer, bool ignoreActors, bool ignoreTerrain, std::span<const MWWorld::Ptr> ignoreList)
+    {
+        if (ignoreActors || mGpuScene == nullptr || !mGpuScene->isEnabled())
+        {
+            callback(castRay(origin, dest, ignorePlayer, ignoreActors, ignoreTerrain, ignoreList));
+            return;
+        }
+        const std::vector<SceneUtil::PositionAttitudeTransform*> ignored = getActorNodes(ignoreList);
+        const GpuScene::RayId id = mGpuScene->queueRay(origin, dest, ignorePlayer, ignored);
+        if (id == GpuScene::sInvalidRay)
+        {
+            callback(castRay(origin, dest, ignorePlayer, ignoreActors, ignoreTerrain, ignoreList));
+            return;
+        }
+
+        PendingRay pending;
+        pending.mCallback = std::move(callback);
+        pending.mCpuResult = castSceneRay(origin, dest, ignorePlayer, ignoreActors, ignoreTerrain, ignoreList, true);
+        pending.mOrigin = origin;
+        pending.mDest = dest;
+        pending.mIgnorePlayer = ignorePlayer;
+        pending.mIgnoreActors = ignoreActors;
+        pending.mIgnoreTerrain = ignoreTerrain;
+        pending.mIgnoreList.assign(ignoreList.begin(), ignoreList.end());
+        mPendingRays.emplace(id, std::move(pending));
     }
 
     RenderingManager::RayResult RenderingManager::castCameraToViewportRay(
@@ -1380,6 +1525,10 @@ namespace MWRender
     {
         mSky->setMoonColour(false);
 
+        mPendingRays.clear();
+        // Drops actor refs held by finished rays.
+        if (mGpuScene != nullptr)
+            mGpuScene->takeRayHits();
         notifyWorldSpaceChanged();
         if (mObjectPaging)
             mObjectPaging->clear();
@@ -1544,6 +1693,8 @@ namespace MWRender
 
         mTerrain->updateTextureFiltering();
         mWater->processChangedSettings({});
+        if (mGpuScene != nullptr)
+            mGpuScene->refreshSamplers();
 
         mViewer->startThreading();
     }
@@ -1622,6 +1773,8 @@ namespace MWRender
         if (stats->collectStats("resource"))
         {
             mTerrain->reportStats(frameNumber, stats);
+            if (mGpuScene != nullptr)
+                mGpuScene->reportStats(frameNumber, *stats);
         }
     }
 

@@ -49,8 +49,8 @@ kind = "structural"
 justification = "The animation implementation owns one model animation state machine: controller attachment, source selection, blending, playback advancement, and text-key delivery all operate on the same animation graph and timing state. Separating those mechanics would expose private invariants without establishing another authoritative owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:5b56df8e8d478867be73ab3cecf95ad4f390129043efa3a593a1dc3a31d8cf1a"
-max_lines = 1952
+fingerprint = "sha256:5b9cdd82ecb624a79dcbd8dc29c374ff869c8062031d905b9e4830c92be791a9"
+max_lines = 2057
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-004"
@@ -88,7 +88,7 @@ kind = "structural"
 justification = "NPCAnimation is the authoritative visual assembly and animation state for one actor. Body-part selection, equipment visibility, first-person presentation, speech, and blink state all mutate the same scene graph and must be synchronized during rebuilds, so they remain one cohesive owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:a2312a2a24cc596d23e2e03f33f439075212178130eec06c597cad191a8b460f"
+fingerprint = "sha256:a665e8ab3a7b85e02ba44e104c2402d46007e250d9473bc165aa0fdc26f27337"
 max_lines = 1077
 
 [[waivers]]
@@ -101,8 +101,8 @@ kind = "structural"
 justification = "Object paging is one chunk-production pipeline that gathers eligible records, builds and optimizes render nodes, and caches the resulting chunks with their statistics. Each stage shares paging keys, compile policy, and cache lifetime; extraction would create pass-through interfaces rather than an independent owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:b86ea8446a0f647e32ee72ce7d7f0914d435186c0fe8a89f881f4833b9b96d53"
-max_lines = 1073
+fingerprint = "sha256:26b41ff9dfda0878c713f2b289be67b9a429f1e9dfc0a7fed396894fca36cea8"
+max_lines = 1108
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-026"
@@ -127,8 +127,8 @@ kind = "structural"
 justification = "RenderingManager is the renderer composition root and scene-facing facade: subsystem construction, ordered frame advancement, scene mutation, settings propagation, and renderer queries all coordinate the same owned object graph. Atmosphere diagnostic policy and applied capture state now belong to a separate controller."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:b0258120670cf49f8ec4a25f042f345ffa635d6f7c57daf3f112b7c392cda22e"
-max_lines = 1709
+fingerprint = "sha256:5e6f1f8390669a9255fbf233df91efac07881ff47b7807bf85edd473194eae1e"
+max_lines = 1850
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-008"
@@ -192,8 +192,8 @@ kind = "structural"
 justification = "This file is the format adapter for NIF controller variants. The implementations share key interpolation, record dispatch, OSG update-callback conventions, and loader-facing construction; grouping the closed family preserves format locality and avoids a file-per-variant layout with no new ownership boundary."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:51db9a97793b1305e9e97c4008edadebb08289d42d46a451eee80086a632a4ec"
-max_lines = 651
+fingerprint = "sha256:e0b2bf1f37ec974ff9477633aa1e85f69655caa72daba34f6208bbf04e6a67b8"
+max_lines = 655
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-013"
@@ -205,8 +205,8 @@ kind = "structural"
 justification = "NIF loading is one graph-conversion transaction from a related record tree to an OSG scene graph. Node dispatch, render-state materialization, controller attachment, and particle handling depend on shared record context and caches, so the large visitor remains the authoritative conversion owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:bf68b812f82269e33a7400533e92b19a9cf18cef33a8459c41a884df9faaffd0"
-max_lines = 2580
+fingerprint = "sha256:8de21ec4060768b764b45a318dac62ae7c5f294584e031a74f7690b5629ac393"
+max_lines = 2581
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-014"
@@ -296,8 +296,8 @@ kind = "structural"
 justification = "MWShadowTechnique owns one view-dependent shadow-map algorithm from cascade slicing and caster-volume construction through shadow-camera culling and receiver-state publication. Those phases share light-space bounds, traversal-local resources, and cascade indices; the optional debug HUD and reusable diagnostic instrumentation live in separate owners."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:574915aaa65ca1d9eb97ad1d826a36dcf69e73feab164c5e30a9445caab41317"
-max_lines = 2581
+fingerprint = "sha256:be38ef7758672cbfef12b45e4e045b6ef333073fd8253c8ce899dd0d96dc3f9a"
+max_lines = 2582
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-020"
@@ -322,8 +322,8 @@ kind = "structural"
 justification = "ShaderManager owns one cached shader-program lifecycle from template preprocessing and define resolution through material-mode program derivation, sampler allocation, compilation, linking, and reload invalidation. Each stage contributes to the same cache key and diagnostic context, so it remains a cohesive compilation owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:1938350aa98b160b576bf55e34cbc639b7ace41a2531feebdbc8dff642b3e557"
-max_lines = 965
+fingerprint = "sha256:4175e4cf3920075eee02cd52382be101d8232ca3ed5c041ed10adc348482e147"
+max_lines = 968
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-022"
@@ -335,8 +335,8 @@ kind = "structural"
 justification = "ShaderVisitor performs one scene traversal that infers shader requirements and applies the resulting program and material state, while retaining enough state to restore removals. Analysis and mutation share node-local facts and traversal order; splitting them would require a duplicate intermediate scene model."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:eaad0fb2550d13d532386a922e2cb616ae227cbc2a3491a550089756ff4ec086"
-max_lines = 714
+fingerprint = "sha256:76d3f89848ec71d96b944ce6c11f435b998630da0b2405e734396250885a2e47"
+max_lines = 716
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-023"
@@ -387,5 +387,31 @@ kind = "structural"
 justification = "GpuScene owns one GPU-driven distant-scene lifecycle: compatible geometry normalization, shared buffer residency, view culling, indirect-command construction, and material-bucket submission use the same identifiers and render-thread resources. The stages form one backend contract while their internal data flow is still being established."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:e728d249457de54f4da5fda24de464495ddd2fc6b0d3c2817502b65225bf5e87"
-max_lines = 3131
+fingerprint = "sha256:7eb1524327309b02b51e6ddfddbfcdcd366c963e624ec8468b8a4e2fe4f89d70"
+max_lines = 6269
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-031"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "apps/openmw/mwrender/actoranimation.cpp"
+kind = "structural"
+justification = "ActorAnimation owns one actor's visual assembly lifecycle, including body-part construction, animation-source attachment, equipment-dependent rebuilds, and publication of the matching GPU proxy. These operations share the same actor scene graph and rebuild transaction."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:49742b2b3f0639c8e63208b6596d5a0367afec6f4ff55c4c241a6d79438a29d4"
+max_lines = 511
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-032"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "apps/openmw/mwrender/gpuscene.hpp"
+kind = "structural"
+justification = "The GPU scene header defines the single identifier, residency, material, instance, view, and asynchronous-ray contract shared by its implementation and contributor adapters. Keeping these interdependent records together makes binary layouts and lifetime relationships reviewable at one backend boundary."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:333303d5fd96398c33cfef02ec25c835deb43e5d4e310a3181fb8c0d60e65ff8"
+max_lines = 707

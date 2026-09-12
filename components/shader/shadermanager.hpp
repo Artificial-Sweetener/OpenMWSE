@@ -9,6 +9,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include <osg/Program>
@@ -80,10 +81,12 @@ namespace Shader
             const SamplerBindingMap& samplers = {}, ProgramCapability capabilities = ProgramCapability::None);
 
         static constexpr unsigned int sInstanceSlotAttribute = 6;
+        static constexpr unsigned int sVertexMaterialAttribute = 7;
 
         /// Compiles a GPU-instanced material variant.
         /// @note Returns nullptr when the program lacks the capabilities the mode needs.
-        osg::ref_ptr<osg::Program> getInstancedProgram(const osg::Program& program, MaterialMode mode);
+        osg::ref_ptr<osg::Program> getInstancedProgram(
+            const osg::Program& program, MaterialMode mode, bool full = false);
 
         /// Defines that select the instance and material bodies.
         static void applyInstancedDefines(DefineMap& defines, MaterialMode mode, bool clusteredLighting);
@@ -161,7 +164,7 @@ namespace Shader
         ProgramMap mPrograms;
 
         std::map<const osg::Shader*, MapKey> mShaderKeys;
-        std::map<std::pair<osg::ref_ptr<const osg::Program>, MaterialMode>, osg::ref_ptr<osg::Program>>
+        std::map<std::tuple<osg::ref_ptr<const osg::Program>, MaterialMode, bool>, osg::ref_ptr<osg::Program>>
             mInstancedPrograms;
 
         typedef std::vector<osg::ref_ptr<osg::Shader>> ShaderList;

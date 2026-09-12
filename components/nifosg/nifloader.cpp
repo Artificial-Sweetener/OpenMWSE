@@ -1147,6 +1147,7 @@ namespace NifOsg
             std::vector<unsigned int>& boundTextures)
         {
             osg::ref_ptr<osg::Texture2D> texture2d = new osg::Texture2D(image);
+            texture2d->setResizeNonPowerOfTwoHint(false);
             if (image)
                 texture2d->setTextureSize(image->s(), image->t());
             texture2d->setWrap(osg::Texture::WRAP_S, wrapS ? osg::Texture::REPEAT : osg::Texture::CLAMP_TO_EDGE);

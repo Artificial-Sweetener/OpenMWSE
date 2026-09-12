@@ -795,7 +795,8 @@ void SceneUtil::MWShadowTechnique::setupCastingShader(Shader::ShaderManager & sh
 
     osg::ref_ptr<osg::Shader> castingVertexShader
         = shaderManager.getShader("shadowcasting.vert",
-            { { "gpuInstanced", "0" }, { "gpuMaterial", "0" }, { "opaqueShadowCaster", "0" } });
+            { { "gpuInstanced", "0" }, { "gpuMaterial", "0" }, { "gpuUber", "0" },
+                { "opaqueShadowCaster", "0" } });
     std::string useGPUShader4 = SceneUtil::getGLExtensions().isGpuShader4Supported ? "1" : "0";
     for (int alphaFunc = GL_NEVER; alphaFunc <= GL_ALWAYS; ++alphaFunc)
     {
@@ -804,7 +805,7 @@ void SceneUtil::MWShadowTechnique::setupCastingShader(Shader::ShaderManager & sh
             shaderManager.getShader("shadowcasting.frag",
                 { { "alphaFunc", std::to_string(alphaFunc) }, { "alphaToCoverage", "0" }, { "adjustCoverage", "1" },
                     { "useGPUShader4", useGPUShader4 }, { "gpuInstanced", "0" }, { "gpuMaterial", "0" },
-                    { "opaqueShadowCaster", "0" } }),
+                    { "gpuUber", "0" }, { "opaqueShadowCaster", "0" } }),
             nullptr, {}, Shader::ProgramCapability::Instanced | Shader::ProgramCapability::ArrayMaterial);
     }
     _opaqueCastingProgram = shaderManager.getProgram(

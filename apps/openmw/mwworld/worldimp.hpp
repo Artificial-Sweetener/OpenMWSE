@@ -430,6 +430,9 @@ namespace MWWorld
         bool castRenderingRay(MWPhysics::RayCastingResult& res, const osg::Vec3f& from, const osg::Vec3f& to,
             bool ignorePlayer, bool ignoreActors, bool ignoreTerrain,
             std::span<const MWWorld::Ptr> ignoreList) override;
+        void asyncCastRenderingRay(MWBase::World::RenderingRayCallback callback, const osg::Vec3f& from,
+            const osg::Vec3f& to, bool ignorePlayer, bool ignoreActors, bool ignoreTerrain,
+            std::span<const MWWorld::Ptr> ignoreList) override;
 
         void setActorCollisionMode(const Ptr& ptr, bool internal, bool external) override;
         bool isActorCollisionEnabled(const Ptr& ptr) override;

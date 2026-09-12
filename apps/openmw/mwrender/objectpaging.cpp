@@ -14,6 +14,7 @@
 #include <osgParticle/ParticleSystemUpdater>
 #include <osgUtil/IncrementalCompileOperation>
 
+#include <components/debug/debuglog.hpp>
 #include <components/esm/path.hpp>
 #include <components/esm3/esmreader.hpp>
 #include <components/esm3/loadacti.hpp>
@@ -496,7 +497,8 @@ namespace MWRender
         std::erase_if(mGpuTemplates, [](const auto& item) { return !item.second.first.valid(); });
     }
 
-    const GpuTemplate* ObjectPaging::getGpuTemplate(const osg::Node& node, osg::Node::NodeMask mask, bool activeGrid)
+    std::shared_ptr<const GpuTemplate> ObjectPaging::getGpuTemplate(
+        const osg::Node& node, osg::Node::NodeMask mask, bool activeGrid)
     {
         std::lock_guard<std::mutex> lock(mGpuTemplateMutex);
         const auto key = std::make_pair(&node, activeGrid);
@@ -504,14 +506,16 @@ namespace MWRender
         if (found != mGpuTemplates.end())
         {
             osg::ref_ptr<const osg::Node> alive;
-            if (found->second.first.lock(alive) && alive == &node)
-                return found->second.second.get();
+            const std::shared_ptr<const GpuTemplate>& cached = found->second.second;
+            // Retired materials void the cached ids.
+            if (found->second.first.lock(alive) && alive == &node
+                && (cached == nullptr || mGpuScene->isTemplateLive(*cached)))
+                return cached;
             mGpuTemplates.erase(found);
         }
-        std::unique_ptr<const GpuTemplate> result = mGpuScene->extract(node, mask, !activeGrid);
-        const GpuTemplate* pointer = result.get();
-        mGpuTemplates.emplace(key, std::make_pair(osg::observer_ptr<const osg::Node>(&node), std::move(result)));
-        return pointer;
+        std::shared_ptr<const GpuTemplate> result = mGpuScene->extract(node, mask, !activeGrid);
+        mGpuTemplates.emplace(key, std::make_pair(osg::observer_ptr<const osg::Node>(&node), result));
+        return result;
     }
 
     namespace
@@ -525,6 +529,25 @@ namespace MWRender
             float mScale;
             int mType = 0;
         };
+
+        /// A reference the chunk rebuilds from.
+        struct GpuChunkRef
+        {
+            const osg::Node* mNode;
+            osg::Matrixf mMatrix;
+            float mScale;
+            LODRange mDistances;
+            bool mSmallFeatureCulling;
+        };
+
+        osg::ref_ptr<osg::Node> makeGpuChunk(
+            GpuScene& scene, std::vector<GpuScene::Instance>&& instances, const osg::Vec3f& worldCenter)
+        {
+            osg::BoundingSphere bound;
+            for (const GpuScene::Instance& instance : instances)
+                bound.expandBy(osg::BoundingSphere(instance.mBounds.center() - worldCenter, instance.mBounds.radius()));
+            return scene.createChunk(std::move(instances), bound);
+        }
 
         PagedCellRef makePagedCellRef(const ESM::CellRef& value)
         {
@@ -838,12 +861,14 @@ namespace MWRender
         CopyOp copyop(activeGrid, copyMask);
         const bool gpuDriven = mGpuScene != nullptr && mGpuScene->isEnabled();
         std::vector<GpuScene::Instance> gpuInstances;
+        std::vector<GpuChunkRef> gpuRefs;
         for (const auto& pair : nodes)
         {
             const osg::Node* cnode = pair.first;
 
             const AnalyzeVisitor::Result& analyzeResult = pair.second.mAnalyzeResult;
-            const GpuTemplate* gpuTemplate = gpuDriven ? getGpuTemplate(*cnode, copyMask, activeGrid) : nullptr;
+            const std::shared_ptr<const GpuTemplate> gpuTemplate
+                = gpuDriven ? getGpuTemplate(*cnode, copyMask, activeGrid) : nullptr;
 
             const float mergeCost = analyzeResult.mNumVerts * size;
             const float mergeBenefit = analyzeVisitor.getMergeBenefit(analyzeResult) * mMergeFactor;
@@ -880,8 +905,9 @@ namespace MWRender
                     refMatrix.preMultTranslate(ref.mPosition);
                     refMatrix.preMultRotate(nodeAttitude);
                     refMatrix.preMultScale(nodeScale);
-                    mGpuScene->appendInstances(
-                        *gpuTemplate, refMatrix, ref.mScale, lodDistances / ref.mScale, !merge, gpuInstances);
+                    const LODRange refDistances = lodDistances / ref.mScale;
+                    mGpuScene->appendInstances(*gpuTemplate, refMatrix, ref.mScale, refDistances, !merge, gpuInstances);
+                    gpuRefs.push_back(GpuChunkRef{ cnode, refMatrix, ref.mScale, refDistances, !merge });
                     ++numinstances;
                     if (activeGrid)
                     {
@@ -978,11 +1004,25 @@ namespace MWRender
 
         if (!gpuInstances.empty())
         {
-            osg::BoundingSphere localBound;
-            for (const GpuScene::Instance& instance : gpuInstances)
-                localBound.expandBy(
-                    osg::BoundingSphere(instance.mBounds.center() - worldCenter, instance.mBounds.radius()));
-            group->addChild(mGpuScene->createChunk(std::move(gpuInstances), localBound));
+            osg::ref_ptr<osg::Node> gpuChunk = makeGpuChunk(*mGpuScene, std::move(gpuInstances), worldCenter);
+            if (gpuChunk == nullptr)
+            {
+                // A material retired between lookup and build.
+                gpuInstances.clear();
+                for (const GpuChunkRef& gpuRef : gpuRefs)
+                {
+                    const std::shared_ptr<const GpuTemplate> fresh
+                        = getGpuTemplate(*gpuRef.mNode, copyMask, activeGrid);
+                    if (fresh != nullptr)
+                        mGpuScene->appendInstances(*fresh, gpuRef.mMatrix, gpuRef.mScale, gpuRef.mDistances,
+                            gpuRef.mSmallFeatureCulling, gpuInstances);
+                }
+                gpuChunk = makeGpuChunk(*mGpuScene, std::move(gpuInstances), worldCenter);
+                if (gpuChunk == nullptr)
+                    Log(Debug::Warning) << "GPU chunk rebuild failed; objects hidden.";
+            }
+            if (gpuChunk != nullptr)
+                group->addChild(gpuChunk);
         }
 
         if (mergeGroup->getNumChildren())

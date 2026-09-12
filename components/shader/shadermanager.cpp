@@ -813,10 +813,11 @@ namespace Shader
         defines["legacyLightList"] = "0";
     }
 
-    osg::ref_ptr<osg::Program> ShaderManager::getInstancedProgram(const osg::Program& program, MaterialMode mode)
+    osg::ref_ptr<osg::Program> ShaderManager::getInstancedProgram(
+        const osg::Program& program, MaterialMode mode, bool full)
     {
         std::lock_guard<std::mutex> lock(mMutex);
-        const auto cacheKey = std::make_pair(osg::ref_ptr<const osg::Program>(&program), mode);
+        const auto cacheKey = std::make_tuple(osg::ref_ptr<const osg::Program>(&program), mode, full);
         const auto cached = mInstancedPrograms.find(cacheKey);
         if (cached != mInstancedPrograms.end())
             return cached->second;
@@ -852,7 +853,8 @@ namespace Shader
         {
             const bool uber = hasCapability(capabilities, ProgramCapability::UberMaterial);
             // Diffuse-only materials get a cheaper variant.
-            const bool diffuseOnly = !uberBeyondDiffuse(vertexKey->second) && !uberBeyondDiffuse(fragmentKey->second);
+            const bool diffuseOnly
+                = !full && !uberBeyondDiffuse(vertexKey->second) && !uberBeyondDiffuse(fragmentKey->second);
             const bool clustered = defineValue(vertexKey->second, "lightingMethodClustered") == "1";
             const auto twin = [&](const MapKey& key) {
                 DefineMap defines = key.second;
@@ -880,6 +882,7 @@ namespace Shader
                 result = getProgramInternal(vertex, fragment, programTemplate, samplers, capabilities);
                 if (!result->getAttribBindingList().contains("instanceSlot"))
                     result->addBindAttribLocation("instanceSlot", sInstanceSlotAttribute);
+                result->addBindAttribLocation("vertexMaterial", sVertexMaterialAttribute);
             }
         }
         mInstancedPrograms.emplace(cacheKey, result);

@@ -84,13 +84,24 @@ void main()
         return;
 
     uint vertex = task.x + localVertex;
-    uint group = skinGroups[vertex];
-    if (group == 0xffffffffu)
-        return;
-
-    SkinMatrix transform = skinMatrices[task.z];
-    SkinMatrix skin = blendSkin(group, task.z);
     uint base = vertex * 28u;
+    uint palette = task.z;
+    uint flags = task.w;
+    bool batch = (flags & 4u) != 0u;
+    uint group = batch ? sourceVertices[base + 27u] : skinGroups[vertex];
+    if (group == (batch ? 0xfffffffeu : 0xffffffffu))
+        return;
+    if (batch)
+    {
+        uint encoded = sourceVertices[base + 26u];
+        palette += encoded & 0xffffffu;
+        flags = encoded >> 24u;
+    }
+    SkinMatrix transform = skinMatrices[palette];
+    SkinMatrix skin = SkinMatrix(vec4(1.0, 0.0, 0.0, 0.0),
+        vec4(0.0, 1.0, 0.0, 0.0), vec4(0.0, 0.0, 1.0, 0.0));
+    if (group != 0xffffffffu)
+        skin = blendSkin(group, palette);
     vec4 position = vec4(uintBitsToFloat(uvec3(sourceVertices[base], sourceVertices[base + 1u],
                                   sourceVertices[base + 2u])),
         1.0);
@@ -101,7 +112,7 @@ void main()
     vertices[base + 1u] = bits.y;
     vertices[base + 2u] = bits.z;
 
-    if ((task.w & 1u) != 0u)
+    if ((flags & 1u) != 0u)
     {
         vec3 normal = uintBitsToFloat(
             uvec3(sourceVertices[base + 3u], sourceVertices[base + 4u], sourceVertices[base + 5u]));
@@ -113,7 +124,7 @@ void main()
         vertices[base + 5u] = bits.z;
     }
 
-    if ((task.w & 2u) != 0u)
+    if ((flags & 2u) != 0u)
     {
         vec3 tangent = uintBitsToFloat(
             uvec3(sourceVertices[base + 21u], sourceVertices[base + 22u], sourceVertices[base + 23u]));

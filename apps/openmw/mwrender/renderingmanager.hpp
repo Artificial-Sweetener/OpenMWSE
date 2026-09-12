@@ -15,10 +15,12 @@
 
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <map>
 #include <memory>
 #include <span>
 #include <unordered_map>
+#include <vector>
 
 namespace osg
 {
@@ -189,8 +191,13 @@ namespace MWRender
             float mRatio;
         };
 
+        using RayCallback = std::function<void(RayResult)>;
+
         RayResult castRay(const osg::Vec3f& origin, const osg::Vec3f& dest, bool ignorePlayer,
             bool ignoreActors = false, bool ignoreTerrain = false, std::span<const MWWorld::Ptr> ignoreList = {});
+        void asyncCastRenderingRay(RayCallback callback, const osg::Vec3f& origin, const osg::Vec3f& dest,
+            bool ignorePlayer, bool ignoreActors = false, bool ignoreTerrain = false,
+            std::span<const MWWorld::Ptr> ignoreList = {});
 
         /// Return the object under the mouse cursor / crosshair position, given by nX and nY normalized screen
         /// coordinates, where (0,0) is the top left corner.
@@ -341,6 +348,7 @@ namespace MWRender
         void updateNavMesh();
 
         void updateRecastMesh();
+        void updateRaycasts();
 
         /// Create and attach the optional GPU scene when supported by the active graphics context.
         bool createGpuScene();
@@ -354,9 +362,25 @@ namespace MWRender
         const bool mSkyBlending;
 
         osg::ref_ptr<osgUtil::IntersectionVisitor> getIntersectionVisitor(osgUtil::Intersector* intersector,
-            bool ignorePlayer, bool ignoreActors, bool ignoreTerrain, std::span<const MWWorld::Ptr> ignoreList = {});
+            bool ignorePlayer, bool ignoreActors, bool ignoreTerrain, std::span<const MWWorld::Ptr> ignoreList = {},
+            bool skipGpuRigs = false);
+        RayResult castSceneRay(const osg::Vec3f& origin, const osg::Vec3f& dest, bool ignorePlayer, bool ignoreActors,
+            bool ignoreTerrain, std::span<const MWWorld::Ptr> ignoreList, bool skipGpuRigs);
+
+        struct PendingRay
+        {
+            RayCallback mCallback;
+            RayResult mCpuResult;
+            osg::Vec3f mOrigin;
+            osg::Vec3f mDest;
+            bool mIgnorePlayer = false;
+            bool mIgnoreActors = false;
+            bool mIgnoreTerrain = false;
+            std::vector<MWWorld::Ptr> mIgnoreList;
+        };
 
         osg::ref_ptr<IntersectionVisitorWithIgnoreList> mIntersectionVisitor;
+        std::unordered_map<std::uint64_t, PendingRay> mPendingRays;
 
         osg::ref_ptr<osgViewer::Viewer> mViewer;
         osg::ref_ptr<osg::Group> mRootNode;

@@ -30,6 +30,8 @@ namespace Settings
         SettingValue<bool> mObjectPaging{ mIndex, "Terrain", "object paging" };
         SettingValue<bool> mObjectPagingActiveGrid{ mIndex, "Terrain", "object paging active grid" };
         SettingValue<bool> mObjectPagingGpuDriven{ mIndex, "Terrain", "object paging gpu driven" };
+        SettingValue<int> mObjectPagingGpuTextureBudget{ mIndex, "Terrain", "object paging gpu texture budget",
+            makeMaxSanitizerInt(-1) };
         SettingValue<float> mObjectPagingMergeFactor{ mIndex, "Terrain", "object paging merge factor",
             makeMaxStrictSanitizerFloat(0) };
         SettingValue<float> mObjectPagingMinSize{ mIndex, "Terrain", "object paging min size",

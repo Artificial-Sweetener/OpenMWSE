@@ -1,6 +1,7 @@
 #ifndef COMPONENTS_NIFOSG_CONTROLLER_H
 #define COMPONENTS_NIFOSG_CONTROLLER_H
 
+#include <array>
 #include <set>
 #include <type_traits>
 
@@ -95,6 +96,8 @@ namespace NifOsg
                 mLastHighKey = mKeys->mKeys.end();
             }
         }
+
+        const MapT* getKeys() const { return mKeys.get(); }
 
         ValueT interpKey(float time) const
         {
@@ -280,6 +283,10 @@ namespace NifOsg
 
         void setDefaults(osg::StateSet* stateset) override;
         void apply(osg::StateSet* stateset, osg::NodeVisitor* nv) override;
+
+        /// Keyframe data and function shared by clones.
+        std::array<const void*, 5> getAnimationKey() const;
+        const std::set<unsigned int>& getTextureUnits() const { return mTextureUnits; }
 
     private:
         FloatInterpolator mUTrans;

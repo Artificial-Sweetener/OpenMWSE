@@ -4,6 +4,7 @@
 #include "rotationflags.hpp"
 
 #include <deque>
+#include <functional>
 #include <set>
 #include <span>
 #include <string_view>
@@ -320,6 +321,10 @@ namespace MWBase
         virtual const MWPhysics::RayCastingInterface* getRayCasting() const = 0;
 
         virtual bool castRenderingRay(MWPhysics::RayCastingResult& res, const osg::Vec3f& from, const osg::Vec3f& to,
+            bool ignorePlayer, bool ignoreActors, bool ignoreTerrain, std::span<const MWWorld::Ptr> ignoreList = {})
+            = 0;
+        using RenderingRayCallback = std::function<void(MWPhysics::RayCastingResult)>;
+        virtual void asyncCastRenderingRay(RenderingRayCallback callback, const osg::Vec3f& from, const osg::Vec3f& to,
             bool ignorePlayer, bool ignoreActors, bool ignoreTerrain, std::span<const MWWorld::Ptr> ignoreList = {})
             = 0;
 

@@ -59,14 +59,15 @@ namespace MWRender
         void getPagedRefnums(const osg::Vec4i& activeGrid, std::vector<ESM::RefNum>& out);
 
     private:
-        /// Return or build the GPU extraction template for a source node, traversal mask, and grid policy.
-        const GpuTemplate* getGpuTemplate(const osg::Node& node, osg::Node::NodeMask mask, bool activeGrid);
+        /// Return a shared GPU extraction template so callers retain replaced material-array state while building.
+        std::shared_ptr<const GpuTemplate> getGpuTemplate(
+            const osg::Node& node, osg::Node::NodeMask mask, bool activeGrid);
 
         Resource::SceneManager* mSceneManager;
         GpuScene* mGpuScene;
         std::mutex mGpuTemplateMutex;
         std::map<std::pair<const osg::Node*, bool>,
-            std::pair<osg::observer_ptr<const osg::Node>, std::unique_ptr<const GpuTemplate>>>
+            std::pair<osg::observer_ptr<const osg::Node>, std::shared_ptr<const GpuTemplate>>>
             mGpuTemplates;
         double mNextTemplateSweep = 0;
         bool mActiveGrid;

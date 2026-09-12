@@ -4,6 +4,7 @@
 #include "lib/core/gpuscene_types.glsl"
 
 in uint instanceSlot;
+in uint vertexMaterial;
 
 layout(std430, binding = 8) restrict readonly buffer InstanceBuffer
 {
@@ -31,7 +32,8 @@ uvec2 gpuLightRangeOf(uint slot)
 
 uint instanceMaterial()
 {
-    return instances[instanceSlot].material.x;
+    uint material = instances[instanceSlot].material.x;
+    return material == 0xffffffffu ? vertexMaterial : material;
 }
 
 uint instanceLight()
@@ -49,7 +51,7 @@ mat4 instanceWorld()
 {
     Instance inst = instances[instanceSlot];
 #if @gpuMaterial
-    gpuMaterialId = int(inst.material.x);
+    gpuMaterialId = int(instanceMaterial());
 #endif
 #if @gpuLightList
     gpuLightRangeData = gpuLightRangeOf(inst.material.y);

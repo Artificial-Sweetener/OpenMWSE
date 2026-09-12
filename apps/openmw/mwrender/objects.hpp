@@ -62,6 +62,7 @@ namespace MWRender
         typedef std::map<const MWWorld::CellStore*, osg::ref_ptr<osg::Group>> CellMap;
         CellMap mCellSceneNodes;
         PtrAnimationMap mObjects;
+        bool mGpuRefreshPending = false;
 
     public:
         void setGpuScene(GpuScene* scene);
@@ -72,6 +73,7 @@ namespace MWRender
         GpuScene* mGpuScene;
         SceneUtil::UnrefQueue& mUnrefQueue;
 
+        osg::Group* createCellNode(const MWWorld::CellStore* store);
         void insertBegin(const MWWorld::Ptr& ptr);
 
     public:
@@ -89,6 +91,7 @@ namespace MWRender
         const Animation* getAnimation(const MWWorld::ConstPtr& ptr) const;
 
         void refreshGpuInstances();
+        void flushGpuRefresh();
 
         bool removeObject(const MWWorld::Ptr& ptr);
         ///< \return found?

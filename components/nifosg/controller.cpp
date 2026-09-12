@@ -307,6 +307,11 @@ namespace NifOsg
     {
     }
 
+    std::array<const void*, 5> UVController::getAnimationKey() const
+    {
+        return { mUTrans.getKeys(), mVTrans.getKeys(), mUScale.getKeys(), mVScale.getKeys(), getFunction().get() };
+    }
+
     void UVController::setDefaults(osg::StateSet* stateset)
     {
         for (unsigned int unit : mTextureUnits)

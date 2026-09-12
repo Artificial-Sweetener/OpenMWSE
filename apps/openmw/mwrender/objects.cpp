@@ -39,6 +39,19 @@ namespace MWRender
         mCellSceneNodes.clear();
     }
 
+    osg::Group* Objects::createCellNode(const MWWorld::CellStore* store)
+    {
+        osg::ref_ptr<osg::Group> cellnode = new osg::Group;
+        cellnode->setName("Cell Root");
+        // GPU-resident objects park under one masked child.
+        osg::ref_ptr<osg::Group> proxy = new osg::Group;
+        proxy->setNodeMask(Mask_GpuProxy);
+        cellnode->addChild(proxy);
+        mRootNode->addChild(cellnode);
+        mCellSceneNodes[store] = cellnode;
+        return cellnode;
+    }
+
     void Objects::insertBegin(const MWWorld::Ptr& ptr)
     {
         assert(mObjects.find(ptr.mRef) == mObjects.end());
@@ -47,12 +60,7 @@ namespace MWRender
 
         CellMap::iterator found = mCellSceneNodes.find(ptr.getCell());
         if (found == mCellSceneNodes.end())
-        {
-            cellnode = new osg::Group;
-            cellnode->setName("Cell Root");
-            mRootNode->addChild(cellnode);
-            mCellSceneNodes[ptr.getCell()] = cellnode;
-        }
+            cellnode = createCellNode(ptr.getCell());
         else
             cellnode = found->second;
 
@@ -88,7 +96,7 @@ namespace MWRender
         }
 
         osg::ref_ptr<ObjectAnimation> anim(
-            new ObjectAnimation(ptr, animationMesh, mResourceSystem, animated, allowLight));
+            new ObjectAnimation(ptr, animationMesh, mResourceSystem, animated, allowLight, mGpuRefreshPending));
 
         anim->setGpuScene(mGpuScene);
         mObjects.emplace(ptr.mRef, std::move(anim));
@@ -209,6 +217,15 @@ namespace MWRender
         }
     }
 
+    void Objects::flushGpuRefresh()
+    {
+        if (mGpuScene == nullptr || !mGpuRefreshPending)
+            return;
+        mGpuRefreshPending = false;
+        for (auto& [_, animation] : mObjects)
+            animation->flushGpuRefresh();
+    }
+
     void Objects::refreshGpuInstances()
     {
         for (auto& [_, animation] : mObjects)
@@ -227,15 +244,9 @@ namespace MWRender
 
         osg::Group* cellnode;
         if (mCellSceneNodes.find(newCell) == mCellSceneNodes.end())
-        {
-            cellnode = new osg::Group;
-            mRootNode->addChild(cellnode);
-            mCellSceneNodes[newCell] = cellnode;
-        }
+            cellnode = createCellNode(newCell);
         else
-        {
             cellnode = mCellSceneNodes[newCell];
-        }
 
         osg::UserDataContainer* userDataContainer = objectNode->getUserDataContainer();
         if (userDataContainer)

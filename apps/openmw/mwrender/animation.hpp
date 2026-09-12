@@ -222,6 +222,7 @@ namespace MWRender
         Resource::ResourceSystem* mResourceSystem;
         GpuScene* mCaptureScene = nullptr;
         std::vector<osg::ref_ptr<osg::Node>> mBareBones;
+        std::vector<osg::ref_ptr<osg::Node>> mGpuBones;
 
         osg::Vec3f mAccumulate;
 
@@ -498,8 +499,11 @@ namespace MWRender
 
         virtual void setAccurateAiming(bool enabled) {}
         virtual void refreshGpuInstances();
+        virtual void flushGpuRefresh() {}
         /// Keeps drawable-free bone subtrees out of cull.
         void pruneBareBones();
+        /// Stamps collected bone subtree masks.
+        void maskBareBones();
         /// Resident GPU instances bake the world matrix.
         virtual void updateGpuTransform() {}
 
@@ -513,24 +517,39 @@ namespace MWRender
         void operator=(Animation&);
     };
 
+    /// Updaters that invalidate static GPU copies.
+    bool hasGeometryUpdaters(const osg::Node& node);
+
     class ObjectAnimation : public Animation
     {
     public:
         ObjectAnimation(const MWWorld::Ptr& ptr, const std::string& model, Resource::ResourceSystem* resourceSystem,
-            bool animated, bool allowLight);
+            bool animated, bool allowLight, bool& refreshPending);
         ~ObjectAnimation() override;
 
         bool canBeHarvested() const override;
         void harvest(const MWWorld::Ptr& ptr) override;
         void refreshGpuInstances() override;
+        void scheduleGpuRefresh()
+        {
+            mGpuRefreshPending = true;
+            mObjectRefreshPending = true;
+        }
+        void flushGpuRefresh() override;
         void updateGpuTransform() override;
         osg::Vec3f runAnimation(float duration) override;
+        void removeFromScene() override;
 
     private:
         void buildGpuInstances();
         void dropGpuInstances();
+        void parkInsert();
+        void unparkInsert();
 
+        bool& mObjectRefreshPending;
         bool mGpuRetry = true;
+        bool mGpuRefreshPending = false;
+        osg::ref_ptr<osg::Group> mParked;
         std::unique_ptr<const GpuTemplate> mGpuHidden;
         osg::ref_ptr<osg::Node> mGpuChunk;
         std::vector<std::pair<osg::ref_ptr<osg::Node>, unsigned int>> mHiddenNodes;

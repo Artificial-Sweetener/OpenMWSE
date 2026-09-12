@@ -179,10 +179,12 @@ namespace MWLua
 
             context.mLuaManager->addAction(
                 [context, ignore = std::move(ignore), callback = LuaUtil::Callback::fromLua(callback), from, to] {
-                    MWPhysics::RayCastingResult res;
-                    MWBase::Environment::get().getWorld()->castRenderingRay(res, from, to, false, false, false, ignore);
-                    context.mLuaManager->queueCallback(
-                        callback, sol::main_object(context.mLua->unsafeState(), sol::in_place, res));
+                    MWBase::Environment::get().getWorld()->asyncCastRenderingRay(
+                        [context, callback](MWPhysics::RayCastingResult result) {
+                            context.mLuaManager->queueCallback(
+                                callback, sol::main_object(context.mLua->unsafeState(), sol::in_place, result));
+                        },
+                        from, to, false, false, false, ignore);
                 });
         };
 

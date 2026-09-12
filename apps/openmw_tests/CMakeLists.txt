@@ -40,6 +40,10 @@ file(GLOB UNITTEST_SRC_FILES
     mwrender/testgroundcovernearfar.cpp
     mwrender/testreflectionsky.cpp
     mwrender/testreflectedclouds.cpp
+    mwrender/testanimation.cpp
+    mwrender/testgpuscenearrays.cpp
+    mwrender/testgpuscenekeys.cpp
+    mwrender/testgpuresidency.cpp
 
     mwinput/testdiagnosticinputmanager.cpp
 

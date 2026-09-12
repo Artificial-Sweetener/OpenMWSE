@@ -35,7 +35,7 @@ namespace MWRender
     public:
         ActorAnimation(
             const MWWorld::Ptr& ptr, osg::ref_ptr<osg::Group> parentNode, Resource::ResourceSystem* resourceSystem);
-        virtual ~ActorAnimation();
+        ~ActorAnimation() override;
 
         void itemAdded(const MWWorld::ConstPtr& item, int count) override;
         void itemRemoved(const MWWorld::ConstPtr& item, int count) override;
@@ -43,6 +43,7 @@ namespace MWRender
         bool useShieldAnimations() const override;
         bool updateCarriedLeftVisible(ESM::RefId weaptype) const override;
 
+        void refreshGpuInstances() override;
         void removeFromScene() override;
 
     protected:
@@ -67,6 +68,7 @@ namespace MWRender
         void addHiddenItemLight(const MWWorld::ConstPtr& item, const ESM::Light* esmLight);
         void removeHiddenItemLight(const MWWorld::ConstPtr& item);
         void resetControllers(osg::Node* node);
+        void detachGpuRigs();
         void removeFromSceneImpl();
 
         typedef std::map<MWWorld::ConstPtr, osg::ref_ptr<SceneUtil::LightSource>> ItemLightMap;

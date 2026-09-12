@@ -1753,6 +1753,24 @@ namespace MWWorld
         return res.mHit;
     }
 
+    void World::asyncCastRenderingRay(MWBase::World::RenderingRayCallback callback, const osg::Vec3f& from,
+        const osg::Vec3f& to, bool ignorePlayer, bool ignoreActors, bool ignoreTerrain,
+        std::span<const MWWorld::Ptr> ignoreList)
+    {
+        mRendering->asyncCastRenderingRay(
+            [callback = std::move(callback)](MWRender::RenderingManager::RayResult rayRes) mutable {
+                MWPhysics::RayCastingResult result;
+                result.mHit = rayRes.mHit;
+                result.mHitPos = rayRes.mHitPointWorld;
+                result.mHitNormal = rayRes.mHitNormalWorld;
+                result.mHitObject = rayRes.mHitObject;
+                if (result.mHitObject.isEmpty() && rayRes.mHitRefnum.isSet())
+                    result.mHitObject = MWBase::Environment::get().getWorldModel()->getPtr(rayRes.mHitRefnum);
+                callback(result);
+            },
+            from, to, ignorePlayer, ignoreActors, ignoreTerrain, ignoreList);
+    }
+
     bool World::isCellExterior() const
     {
         const CellStore* currentCell = mWorldScene->getCurrentCell();

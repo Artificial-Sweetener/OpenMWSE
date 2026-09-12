@@ -16,6 +16,7 @@
 #include <components/sceneutil/lightcommon.hpp>
 #include <components/sceneutil/lightmanager.hpp>
 #include <components/sceneutil/lightutil.hpp>
+#include <components/sceneutil/positionattitudetransform.hpp>
 #include <components/sceneutil/visitor.hpp>
 
 #include <components/misc/resourcehelpers.hpp>
@@ -36,6 +37,7 @@
 #include "../mwworld/ptr.hpp"
 
 #include "actorutil.hpp"
+#include "gpuscene.hpp"
 #include "vismask.hpp"
 
 namespace MWRender
@@ -63,6 +65,7 @@ namespace MWRender
 
     ActorAnimation::~ActorAnimation()
     {
+        detachGpuRigs();
         removeFromSceneImpl();
     }
 
@@ -83,6 +86,8 @@ namespace MWRender
         if (glowColor != nullptr)
             mGlowUpdater = SceneUtil::addEnchantedGlow(instance, mResourceSystem, *glowColor);
 
+        // New parts un-hide their holster bones.
+        pruneBareBones();
         return std::make_unique<PartHolder>(instance);
     }
 
@@ -595,8 +600,40 @@ namespace MWRender
 
     void ActorAnimation::removeFromScene()
     {
+        detachGpuRigs();
         removeFromSceneImpl();
         Animation::removeFromScene();
+    }
+
+    void ActorAnimation::refreshGpuInstances()
+    {
+        auto* actor = dynamic_cast<SceneUtil::PositionAttitudeTransform*>(mInsert.get());
+        if (mCaptureScene == nullptr || actor == nullptr)
+        {
+            Animation::refreshGpuInstances();
+            return;
+        }
+
+        mCaptureScene->removeActor(*actor);
+        if (mObjectRoot != nullptr)
+        {
+            if (mAlpha == 1.f && mObjectRoot->getNodeMask() != Mask_FirstPerson)
+                mCaptureScene->captureActor(*mObjectRoot, *actor);
+            else
+                mCaptureScene->capture(*mObjectRoot);
+        }
+        pruneBareBones();
+    }
+
+    void ActorAnimation::detachGpuRigs()
+    {
+        if (mCaptureScene == nullptr)
+            return;
+        auto* actor = dynamic_cast<SceneUtil::PositionAttitudeTransform*>(mInsert.get());
+        if (actor == nullptr)
+            return;
+        mCaptureScene->removeActor(*actor);
+        pruneBareBones();
     }
 
     void ActorAnimation::removeFromSceneImpl()

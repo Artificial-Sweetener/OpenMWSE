@@ -308,7 +308,6 @@ namespace MWRender
 
         mAmmunition.reset();
         rebuild();
-        setRenderBin();
 
         if (viewChange && Settings::game().mShieldSheathing)
         {
@@ -535,6 +534,14 @@ namespace MWRender
 
         setObjectRoot(smodel, true, true, false);
 
+        if (is1stPerson)
+        {
+            mObjectRoot->setNodeMask(Mask_FirstPerson);
+            mObjectRoot->addCullCallback(new OverrideFieldOfViewCallback(
+                mFirstPersonFieldOfView, MWBase::Environment::get().getWorld()->getRenderingManager()));
+        }
+
+        setRenderBin();
         updateParts();
 
         if (!base.empty())
@@ -549,13 +556,6 @@ namespace MWRender
         const bool customArgonianSwim = !is1stPerson && !isWerewolf && isBeast && mNpc->mRace.contains("argonian");
         if (customArgonianSwim)
             addAnimSource(Settings::models().mXargonianswimkna.get().value(), smodel);
-
-        if (is1stPerson)
-        {
-            mObjectRoot->setNodeMask(Mask_FirstPerson);
-            mObjectRoot->addCullCallback(new OverrideFieldOfViewCallback(
-                mFirstPersonFieldOfView, MWBase::Environment::get().getWorld()->getRenderingManager()));
-        }
 
         mWeaponAnimationTime->updateStartTime();
     }

@@ -356,6 +356,7 @@ namespace Shader
                 if (!hasNamesakeBumpMap && image)
                 {
                     osg::ref_ptr<osg::Texture2D> normalMapTex(new osg::Texture2D(image));
+                    normalMapTex->setResizeNonPowerOfTwoHint(false);
                     normalMapTex->setTextureSize(image->s(), image->t());
                     normalMapTex->setWrap(osg::Texture::WRAP_S, diffuseMap->getWrap(osg::Texture::WRAP_S));
                     normalMapTex->setWrap(osg::Texture::WRAP_T, diffuseMap->getWrap(osg::Texture::WRAP_T));
@@ -400,6 +401,7 @@ namespace Shader
                 {
                     osg::ref_ptr<osg::Image> image(mImageManager.getImage(specularMapPath));
                     osg::ref_ptr<osg::Texture2D> specularMapTex(new osg::Texture2D(image));
+                    specularMapTex->setResizeNonPowerOfTwoHint(false);
                     specularMapTex->setTextureSize(image->s(), image->t());
                     specularMapTex->setWrap(osg::Texture::WRAP_S, diffuseMap->getWrap(osg::Texture::WRAP_S));
                     specularMapTex->setWrap(osg::Texture::WRAP_T, diffuseMap->getWrap(osg::Texture::WRAP_T));

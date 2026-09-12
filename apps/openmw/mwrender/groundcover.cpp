@@ -15,6 +15,7 @@
 #include <osg/Program>
 #include <osg/VertexAttribDivisor>
 
+#include <components/debug/debuglog.hpp>
 #include <components/esm3/esmreader.hpp>
 #include <components/esm3/loadland.hpp>
 #include <components/esm3/readerscache.hpp>
@@ -284,7 +285,9 @@ namespace MWRender
         if (found != mGpuTemplates.end())
         {
             osg::ref_ptr<const osg::Node> alive;
-            if (found->second.mNode.lock(alive) && alive == &temp)
+            // Retired materials void the cached ids.
+            if (found->second.mNode.lock(alive) && alive == &temp
+                && (found->second.mTemplate == nullptr || mGpuScene->isTemplateLive(*found->second.mTemplate)))
                 return found->second;
             mGpuTemplates.erase(found);
         }
@@ -308,6 +311,16 @@ namespace MWRender
         osg::ref_ptr<osg::Group> group = new osg::Group;
         osg::Vec3f worldCenter = osg::Vec3f(center.x(), center.y(), 0) * ESM::Land::REAL_SIZE;
         std::vector<GpuScene::Instance> gpuInstances;
+        std::vector<std::pair<osg::ref_ptr<osg::Group>, const std::vector<GroundcoverEntry>*>> gpuRoots;
+        const auto appendModel
+            = [&](const GpuTemplate& gpuTemplate, const std::vector<GroundcoverEntry>& modelEntries) {
+                  for (const GroundcoverEntry& entry : modelEntries)
+                  {
+                      const osg::Matrixf matrix(computeGpuInstanceMatrix(entry));
+                      mGpuScene->appendInstances(gpuTemplate, matrix, entry.mScale,
+                          { 0.f, std::numeric_limits<float>::max() }, false, gpuInstances);
+                  }
+              };
         for (const auto& [model, entries] : instances)
         {
             const osg::Node* temp = mSceneManager->getTemplate(model);
@@ -319,11 +332,8 @@ namespace MWRender
                 const GpuModel gpuModel = lookupGpuModel(*temp);
                 if (gpuModel.mTemplate != nullptr && !gpuModel.mTemplate->mLegacy)
                 {
-                    for (const GroundcoverEntry& entry : entries)
-                    {
-                        mGpuScene->appendInstances(*gpuModel.mTemplate, computeGpuInstanceMatrix(entry), entry.mScale,
-                            { 0.f, std::numeric_limits<float>::max() }, false, gpuInstances);
-                    }
+                    appendModel(*gpuModel.mTemplate, entries);
+                    gpuRoots.emplace_back(gpuModel.mRoot, &entries);
                     continue;
                 }
             }
@@ -361,11 +371,30 @@ namespace MWRender
 
         if (!gpuInstances.empty())
         {
-            osg::BoundingSphere localBound;
-            for (const GpuScene::Instance& instance : gpuInstances)
-                localBound.expandBy(
-                    osg::BoundingSphere(instance.mBounds.center() - worldCenter, instance.mBounds.radius()));
-            group->addChild(mGpuScene->createChunk(std::move(gpuInstances), localBound));
+            const auto buildChunk = [&] {
+                osg::BoundingSphere localBound;
+                for (const GpuScene::Instance& instance : gpuInstances)
+                    localBound.expandBy(
+                        osg::BoundingSphere(instance.mBounds.center() - worldCenter, instance.mBounds.radius()));
+                return mGpuScene->createChunk(std::move(gpuInstances), localBound);
+            };
+            osg::ref_ptr<osg::Node> gpuChunk = buildChunk();
+            if (gpuChunk == nullptr)
+            {
+                // A material retired during the build.
+                gpuInstances.clear();
+                for (const auto& [root, modelEntries] : gpuRoots)
+                {
+                    const std::unique_ptr<const GpuTemplate> fresh = mGpuScene->extract(*root, ~0u, false);
+                    if (fresh != nullptr && !fresh->mLegacy)
+                        appendModel(*fresh, *modelEntries);
+                }
+                gpuChunk = buildChunk();
+                if (gpuChunk == nullptr)
+                    Log(Debug::Warning) << "Groundcover chunk rebuild failed; plants hidden.";
+            }
+            if (gpuChunk != nullptr)
+                group->addChild(gpuChunk);
         }
 
         osg::ComputeBoundsVisitor cbv;

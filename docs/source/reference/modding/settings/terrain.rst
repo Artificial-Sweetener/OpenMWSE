@@ -200,8 +200,23 @@ Terrain Settings
    A compute shader decides visibility and the instances are drawn with one indirect draw per material pipeline.
    Requires OpenGL 4.3 and has no effect unless ``object paging`` is enabled.
    Without ``distant terrain`` terrain stays on the regular path.
-   With ``GL_ARB_bindless_texture`` textures are indexed per instance, otherwise one draw per material is used.
+   With ``GL_ARB_bindless_texture`` textures are indexed per instance.
+   Without it, compatible textures batch through texture arrays and the rest uses one draw per material.
    Content the GPU path cannot represent keeps using the regular path.
+
+.. omw-setting::
+   :title: object paging gpu texture budget
+   :type: integer
+   :range: >= -1
+   :default: -1
+
+   Limits texture storage owned by GPU object paging, in MiB.
+   ``-1`` uses 75 percent of reported free texture memory.
+   ``0`` disables the managed storage limit.
+   Driver memory reports initialize the limit but do not measure usage.
+   Over the limit, paging samples smaller mip levels and frees the full-size storage.
+   The limit excludes UI, water, sky, post-processing and regular scene textures.
+
 .. omw-setting::
    :title: object paging min size cost multiplier
    :type: float32
