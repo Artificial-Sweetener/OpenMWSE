@@ -93,6 +93,7 @@ namespace MWRender
             updatePart(mWeapon, MWWorld::InventoryStore::Slot_CarriedRight);
         if (mShowCarriedLeft)
             updatePart(mShield, MWWorld::InventoryStore::Slot_CarriedLeft);
+        refreshGpuInstances();
     }
 
     void CreatureWeaponAnimation::updatePart(PartHolderPtr& scene, int slot)

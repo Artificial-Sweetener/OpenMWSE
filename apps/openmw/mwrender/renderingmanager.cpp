@@ -3,8 +3,11 @@
 #include <cstdlib>
 #include <limits>
 
+#include <thread>
+
 #include <osg/ClipControl>
 #include <osg/ComputeBoundsVisitor>
+#include <osg/GraphicsThread>
 #include <osg/Group>
 #include <osg/Matrix>
 #include <osg/Texture3D>
@@ -30,10 +33,12 @@
 
 #include <components/settings/values.hpp>
 
+#include <components/loadinglistener/loadinglistener.hpp>
 #include <components/sceneutil/cullsafeboundsvisitor.hpp>
 #include <components/sceneutil/depth.hpp>
 #include <components/sceneutil/lightmanager.hpp>
 #include <components/sceneutil/material.hpp>
+#include <components/sceneutil/mwshadowtechnique.hpp>
 #include <components/sceneutil/positionattitudetransform.hpp>
 #include <components/sceneutil/rtt.hpp>
 #include <components/sceneutil/shadow.hpp>
@@ -271,6 +276,7 @@ namespace MWRender
         globalDefines["skyBlending"] = mSkyBlending ? "1" : "0";
         globalDefines["particlePointLighting"] = Settings::shaders().mParticlePointLighting ? "1" : "0";
         globalDefines["gpuInstanced"] = "0";
+        globalDefines["gpuMaterial"] = "0";
 
         for (auto itr = lightDefines.begin(); itr != lightDefines.end(); itr++)
             globalDefines[itr->first] = itr->second;
@@ -296,7 +302,7 @@ namespace MWRender
         mRecastMesh = std::make_unique<RecastMesh>(mRootNode, Settings::navigator().mEnableRecastMeshRender);
         mPathgrid = std::make_unique<Pathgrid>(mRootNode);
 
-        mObjects = std::make_unique<Objects>(mResourceSystem, sceneRoot, unrefQueue);
+        mObjects = std::make_unique<Objects>(mResourceSystem, sceneRoot, mGpuScene.get(), unrefQueue);
 
         if (getenv("OPENMW_DONT_PRECOMPILE") == nullptr)
         {
@@ -310,7 +316,7 @@ namespace MWRender
 
         mResourceSystem->getSceneManager()->setIncrementalCompileOperation(mViewer->getIncrementalCompileOperation());
 
-        mEffectManager = std::make_unique<EffectManager>(sceneRoot, mResourceSystem);
+        mEffectManager = std::make_unique<EffectManager>(sceneRoot, mResourceSystem, mGpuScene.get());
 
         const std::string& normalMapPattern = Settings::shaders().mNormalMapPattern;
         const std::string& heightMapPattern = Settings::shaders().mNormalHeightMapPattern;
@@ -391,8 +397,8 @@ namespace MWRender
         resourceSystem->getSceneManager()->setWeatherParticleOcclusion(Settings::shaders().mWeatherParticleOcclusion);
 
         // water goes after terrain for correct waterculling order
-        mWater = std::make_unique<Water>(
-            sceneRoot->getParent(0), sceneRoot, mResourceSystem, mViewer->getIncrementalCompileOperation());
+        mWater = std::make_unique<Water>(sceneRoot->getParent(0), sceneRoot, mResourceSystem,
+            mViewer->getIncrementalCompileOperation(), mGpuScene.get());
         mPostProcessor->setupTransparentBin(mWater.get());
 
         mCamera = std::make_unique<Camera>(mViewer->getCamera());
@@ -413,6 +419,8 @@ namespace MWRender
         osg::ref_ptr<SceneUtil::Material> defaultMat(new SceneUtil::Material);
         defaultMat->updateStateSet(sceneRoot->getOrCreateStateSet());
         sceneRoot->getOrCreateStateSet()->setAttribute(defaultMat);
+        if (mGpuScene != nullptr)
+            mGpuScene->setDefaultMaterial(defaultMat);
         sceneRoot->getOrCreateStateSet()->addUniform(new osg::Uniform("distortionStrength", 0.f));
         sceneRoot->getOrCreateStateSet()->addUniform(new osg::Uniform("alpha", 1.f));
         sceneRoot->getOrCreateStateSet()->addUniform(new osg::Uniform("actorFade", 1.f));
@@ -421,8 +429,8 @@ namespace MWRender
 
         mFog = std::make_unique<FogManager>();
 
-        mSky = std::make_unique<SkyManager>(
-            sceneRoot, mRootNode, mViewer->getCamera(), resourceSystem->getSceneManager(), mSkyBlending);
+        mSky = std::make_unique<SkyManager>(sceneRoot, mRootNode, mViewer->getCamera(),
+            resourceSystem->getSceneManager(), mSkyBlending, mGpuScene.get());
         if (mSkyBlending)
         {
             int skyTextureUnit = mResourceSystem->getSceneManager()->getShaderManager().reserveGlobalTextureUnits(
@@ -444,7 +452,7 @@ namespace MWRender
         mViewer->getCamera()->setCullingMode(cullingMode);
         mViewer->getCamera()->setName(Constants::SceneCamera);
 
-        auto mask = ~(Mask_UpdateVisitor | Mask_SimpleWater);
+        auto mask = ~(Mask_UpdateVisitor | Mask_SimpleWater | Mask_GpuProxy);
         MWBase::Environment::get().getWindowManager()->setCullMask(mask);
         NifOsg::Loader::setHiddenNodeMask(Mask_UpdateVisitor);
         NifOsg::Loader::setIntersectionDisabledNodeMask(Mask_Effect);
@@ -706,6 +714,27 @@ namespace MWRender
         return borders;
     }
 
+    void RenderingManager::prepareGpuScene(Loading::Listener& listener)
+    {
+        if (mGpuScene == nullptr)
+            return;
+        mGpuScene->capture(*mSceneRoot);
+        const unsigned int total = mGpuScene->getPendingWork();
+        if (total == 0)
+            return;
+        listener.setLabel("#{OMWEngine:UploadingGpuScene}");
+        listener.setProgressRange(total);
+        osg::ref_ptr<osg::GraphicsOperation> operation = mGpuScene->createCompileOperation(total);
+        mViewer->getCamera()->getGraphicsContext()->add(operation);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+        while (operation->getKeep() && std::chrono::steady_clock::now() < deadline)
+        {
+            listener.setProgress(std::min(mGpuScene->getCompletedWork(), total));
+            listener.increaseProgress(0);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    }
+
     bool RenderingManager::toggleRenderMode(RenderMode mode)
     {
         if (mode == Render_CollisionDebug || mode == Render_Pathgrid)
@@ -754,6 +783,7 @@ namespace MWRender
                 // Worldspace managers rewire on recreation.
                 if (!Settings::terrain().mObjectPaging || !createGpuScene())
                     return false;
+                wireGpuScene();
                 rebuildPagedCaches();
                 return true;
             }
@@ -776,9 +806,32 @@ namespace MWRender
             return false;
         }
         mGpuScene->setEnabled(true);
-        mGpuScene->getNode()->setNodeMask(Mask_Static);
+        mGpuScene->setLightManager(mSceneRoot.get());
+        mGpuScene->getNode()->setNodeMask(Mask_Static | Mask_Object | Mask_Terrain);
         mSceneRoot->addChild(mGpuScene->getNode());
+        if (const SceneUtil::MWShadowTechnique* technique = mShadowManager->getShadowTechnique())
+        {
+            const auto& casting = technique->getCastingPrograms();
+            mGpuScene->setCastingPrograms(std::vector<osg::ref_ptr<osg::Program>>(casting.begin(), casting.end()));
+        }
         return true;
+    }
+
+    void RenderingManager::wireGpuScene()
+    {
+        GpuScene* const scene = mGpuScene.get();
+        mObjects->setGpuScene(scene);
+        mWater->setGpuScene(scene);
+        mSky->setGpuScene(scene);
+        mEffectManager->setGpuScene(scene);
+        for (auto& [_, chunkMgr] : mWorldspaceChunks)
+        {
+            chunkMgr.mTerrain->setGpuChunkFactory(scene, Mask_GpuProxy);
+            if (chunkMgr.mObjectPaging != nullptr)
+                chunkMgr.mObjectPaging->setGpuScene(scene);
+            if (chunkMgr.mGroundcover != nullptr)
+                chunkMgr.mGroundcover->setGpuScene(scene);
+        }
     }
 
     void RenderingManager::rebuildPagedCaches()
@@ -789,8 +842,10 @@ namespace MWRender
         {
             if (chunkMgr.mObjectPaging != nullptr)
                 chunkMgr.mObjectPaging->clearCache();
+            chunkMgr.mTerrain->clearChunkCache();
             chunkMgr.mTerrain->rebuildViews();
         }
+        mObjects->refreshGpuInstances();
         MWBase::Environment::get().getWindowManager()->fadeScreenIn(1.f);
     }
 
@@ -999,16 +1054,22 @@ namespace MWRender
         }
 
         ptr.getRefData().getBaseNode()->setAttitude(rot);
+        if (Animation* anim = mObjects->getAnimation(ptr))
+            anim->updateGpuTransform();
     }
 
     void RenderingManager::moveObject(const MWWorld::Ptr& ptr, const osg::Vec3f& pos)
     {
         ptr.getRefData().getBaseNode()->setPosition(pos);
+        if (Animation* anim = mObjects->getAnimation(ptr))
+            anim->updateGpuTransform();
     }
 
     void RenderingManager::scaleObject(const MWWorld::Ptr& ptr, const osg::Vec3f& scale)
     {
         ptr.getRefData().getBaseNode()->setScale(scale);
+        if (Animation* anim = mObjects->getAnimation(ptr))
+            anim->updateGpuTransform();
 
         if (ptr == mCamera->getTrackingPtr()) // update height of camera
             mCamera->processViewChange();
@@ -1351,6 +1412,7 @@ namespace MWRender
     {
         mPlayerAnimation = new NpcAnimation(player, player.getRefData().getBaseNode(), mResourceSystem, 0,
             NpcAnimation::VM_Normal, mFirstPersonFieldOfView);
+        mPlayerAnimation->setGpuScene(mGpuScene.get());
 
         mCamera->setAnimation(mPlayerAnimation.get());
         mCamera->attachTo(player);
@@ -1504,6 +1566,7 @@ namespace MWRender
             auto quadTreeWorld = std::make_unique<Terrain::QuadTreeWorld>(mSceneRoot, mRootNode, mResourceSystem,
                 mTerrainStorage.get(), Mask_Terrain, Mask_PreCompile, Mask_Debug, compMapResolution, compMapLevel,
                 lodFactor, vertexLodMod, maxCompGeometrySize, debugChunks, worldspace, expiryDelay);
+            quadTreeWorld->setGpuChunkFactory(mGpuScene.get(), Mask_GpuProxy);
             if (Settings::terrain().mObjectPaging)
             {
                 newChunkMgr.mObjectPaging
@@ -1516,8 +1579,8 @@ namespace MWRender
                 const float groundcoverDistance = Settings::groundcover().mRenderingDistance;
                 const float density = Settings::groundcover().mDensity;
 
-                newChunkMgr.mGroundcover = std::make_unique<Groundcover>(
-                    mResourceSystem->getSceneManager(), density, groundcoverDistance, mGroundCoverStore);
+                newChunkMgr.mGroundcover = std::make_unique<Groundcover>(mResourceSystem->getSceneManager(), density,
+                    groundcoverDistance, mGroundCoverStore, mGpuScene.get());
                 quadTreeWorld->addChunkManager(newChunkMgr.mGroundcover.get());
                 mResourceSystem->addResourceManager(newChunkMgr.mGroundcover.get());
             }

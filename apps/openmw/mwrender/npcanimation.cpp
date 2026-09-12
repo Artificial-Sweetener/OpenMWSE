@@ -661,7 +661,10 @@ namespace MWRender
                 addOrReplaceIndividualPart(ESM::PRT_Hair, -1, 1, mHairModel);
         }
         if (mViewMode == VM_HeadOnly)
+        {
+            refreshGpuInstances();
             return;
+        }
 
         if (mPartPriorities[ESM::PRT_Shield] < 1)
         {
@@ -697,6 +700,7 @@ namespace MWRender
 
         if (wasArrowAttached)
             attachArrow();
+        refreshGpuInstances();
     }
 
     PartHolderPtr NpcAnimation::insertBoundedPart(VFS::Path::NormalizedView model, std::string_view bonename,

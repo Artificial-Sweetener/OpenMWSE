@@ -34,6 +34,7 @@ namespace MWLua
                     { "NavMesh", MWRender::Render_NavMesh },
                     { "ActorsPaths", MWRender::Render_ActorsPaths },
                     { "RecastMesh", MWRender::Render_RecastMesh },
+                    { "GpuDrivenPaging", MWRender::Render_GpuDrivenPaging },
                 }));
 
         api["toggleRenderMode"] = [context](MWRender::RenderMode value) {

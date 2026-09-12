@@ -18,6 +18,7 @@
 #include <components/vfs/pathutil.hpp>
 
 #include <map>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -48,6 +49,8 @@ namespace SceneUtil
 
 namespace MWRender
 {
+    class GpuScene;
+    struct GpuTemplate;
 
     class ResetAccumRootCallback;
     class RotateController;
@@ -217,6 +220,8 @@ namespace MWRender
         MWWorld::Ptr mPtr;
 
         Resource::ResourceSystem* mResourceSystem;
+        GpuScene* mCaptureScene = nullptr;
+        std::vector<osg::ref_ptr<osg::Node>> mBareBones;
 
         osg::Vec3f mAccumulate;
 
@@ -444,6 +449,8 @@ namespace MWRender
 
         virtual osg::Vec3f runAnimation(float duration);
 
+        void setGpuScene(GpuScene* scene);
+
         void setLoopingEnabled(std::string_view groupname, bool enabled);
 
         /// This is typically called as part of runAnimation, but may be called manually if needed.
@@ -490,6 +497,12 @@ namespace MWRender
         virtual float getBodyPitchRadians() const { return mBodyPitchRadians; }
 
         virtual void setAccurateAiming(bool enabled) {}
+        virtual void refreshGpuInstances();
+        /// Keeps drawable-free bone subtrees out of cull.
+        void pruneBareBones();
+        /// Resident GPU instances bake the world matrix.
+        virtual void updateGpuTransform() {}
+
         virtual bool canBeHarvested() const { return false; }
         virtual void harvest(const MWWorld::Ptr& ptr) {}
 
@@ -504,10 +517,24 @@ namespace MWRender
     {
     public:
         ObjectAnimation(const MWWorld::Ptr& ptr, const std::string& model, Resource::ResourceSystem* resourceSystem,
-            bool animated, bool allowLight);
+            bool animated, bool allowLight, GpuScene* gpuScene);
+        ~ObjectAnimation() override;
 
         bool canBeHarvested() const override;
         void harvest(const MWWorld::Ptr& ptr) override;
+        void refreshGpuInstances() override;
+        void updateGpuTransform() override;
+        osg::Vec3f runAnimation(float duration) override;
+
+    private:
+        void buildGpuInstances();
+        void dropGpuInstances();
+
+        GpuScene* mGpuScene;
+        bool mGpuRetry = true;
+        std::unique_ptr<const GpuTemplate> mGpuHidden;
+        osg::ref_ptr<osg::Node> mGpuChunk;
+        std::vector<std::pair<osg::ref_ptr<osg::Node>, unsigned int>> mHiddenNodes;
     };
 
     class UpdateVfxCallback : public SceneUtil::NodeCallback<UpdateVfxCallback>

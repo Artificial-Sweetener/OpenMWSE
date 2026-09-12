@@ -110,6 +110,11 @@ namespace SceneUtil {
         /// Compile dedicated opaque and alpha-tested shadow-caster programs.
         virtual void setupCastingShader(Shader::ShaderManager &shaderManager);
 
+        const std::array<osg::ref_ptr<osg::Program>, GL_ALWAYS - GL_NEVER + 1>& getCastingPrograms() const
+        {
+            return _castingPrograms;
+        }
+
         class ComputeLightSpaceBounds : public osg::NodeVisitor, public osg::CullStack
         {
         public:

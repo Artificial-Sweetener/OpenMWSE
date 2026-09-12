@@ -8,6 +8,7 @@
 #include <components/sceneutil/controller.hpp>
 
 #include "animation.hpp"
+#include "gpuscene.hpp"
 #include "util.hpp"
 #include "vismask.hpp"
 
@@ -16,9 +17,11 @@
 namespace MWRender
 {
 
-    EffectManager::EffectManager(osg::ref_ptr<osg::Group> parent, Resource::ResourceSystem* resourceSystem)
-        : mParentNode(std::move(parent))
+    EffectManager::EffectManager(
+        const osg::ref_ptr<osg::Group>& parent, Resource::ResourceSystem* resourceSystem, GpuScene* gpuScene)
+        : mParentNode(parent)
         , mResourceSystem(resourceSystem)
+        , mGpuScene(gpuScene)
     {
     }
 
@@ -68,6 +71,8 @@ namespace MWRender
         }
 
         mResourceSystem->getSceneManager()->setUpNormalsRTForStateSet(node->getOrCreateStateSet(), false);
+        if (mGpuScene != nullptr)
+            mGpuScene->capture(*trans);
 
         mEffects.push_back(std::move(effect));
     }

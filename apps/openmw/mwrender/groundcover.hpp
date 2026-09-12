@@ -1,6 +1,11 @@
 #ifndef OPENMW_MWRENDER_GROUNDCOVER_H
 #define OPENMW_MWRENDER_GROUNDCOVER_H
 
+#include <map>
+#include <memory>
+#include <mutex>
+#include <osg/observer_ptr>
+
 #include <components/esm3/loadcell.hpp>
 #include <components/resource/scenemanager.hpp>
 #include <components/terrain/quadtreeworld.hpp>
@@ -19,6 +24,8 @@ namespace osg
 namespace MWRender
 {
     class GroundcoverDistance;
+    class GpuScene;
+    struct GpuTemplate;
     typedef std::tuple<osg::Vec2f, float> GroundcoverChunkId; // Center, Size
     class Groundcover : public Resource::GenericResourceManager<GroundcoverChunkId>,
                         public Terrain::QuadTreeWorld::ChunkManager
@@ -26,7 +33,7 @@ namespace MWRender
     public:
         /// Create immutable instance resources with a shared live distance for all cached chunks.
         Groundcover(Resource::SceneManager* sceneManager, float density, float viewDistance,
-            const MWWorld::GroundcoverStore& store);
+            const MWWorld::GroundcoverStore& store, GpuScene* gpuScene);
         ~Groundcover();
 
         /// Update existing chunks' visibility and shading after render threads and preload work have stopped.
@@ -34,6 +41,10 @@ namespace MWRender
 
         osg::ref_ptr<osg::Node> getChunk(float size, const osg::Vec2f& center, unsigned char lod, unsigned int lodFlags,
             bool activeGrid, const osg::Vec3f& viewPoint, bool compile) override;
+
+        void clearCache() override;
+        /// Replace the optional GPU scene used for newly built chunks.
+        void setGpuScene(GpuScene* gpuScene) { mGpuScene = gpuScene; }
 
         unsigned int getNodeMask() override;
 
@@ -60,6 +71,21 @@ namespace MWRender
         osg::ref_ptr<osg::StateSet> mStateset;
         osg::ref_ptr<osg::Program> mProgramTemplate;
         const MWWorld::GroundcoverStore& mGroundcoverStore;
+        GpuScene* mGpuScene;
+
+        std::mutex mGpuTemplateMutex;
+        /// Retains the shaded GPU extraction template and its source model lifetime.
+        struct GpuModel
+        {
+            osg::observer_ptr<const osg::Node> mNode;
+            osg::ref_ptr<osg::Group> mRoot;
+            std::shared_ptr<const GpuTemplate> mTemplate;
+        };
+        /// One shaded template per model file.
+        std::map<const osg::Node*, GpuModel> mGpuTemplates;
+
+        /// Return or build the shaded GPU extraction template for a model.
+        GpuModel lookupGpuModel(const osg::Node& temp);
 
         /// Build both LOD representations and attach live distance state outside the material-sharing cache.
         osg::ref_ptr<osg::Node> createChunk(InstanceMap& instances, const osg::Vec2f& center);

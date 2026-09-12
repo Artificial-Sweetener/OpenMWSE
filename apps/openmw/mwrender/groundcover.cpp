@@ -6,6 +6,8 @@
 #include "groundcoverlod.hpp"
 #include "groundcovernearfar.hpp"
 
+#include <limits>
+
 #include <osg/AlphaFunc>
 #include <osg/BlendFunc>
 #include <osg/ComputeBoundsVisitor>
@@ -16,6 +18,7 @@
 #include <components/esm3/esmreader.hpp>
 #include <components/esm3/loadland.hpp>
 #include <components/esm3/readerscache.hpp>
+#include <components/misc/convert.hpp>
 #include <components/sceneutil/lightmanager.hpp>
 #include <components/sceneutil/nodecallback.hpp>
 #include <components/settings/values.hpp>
@@ -24,12 +27,20 @@
 
 #include "../mwworld/groundcoverstore.hpp"
 
+#include "gpuscene.hpp"
 #include "vismask.hpp"
 
 namespace MWRender
 {
     namespace
     {
+        /// Build the world transform consumed by the GPU scene for one groundcover instance.
+        osg::Matrixf computeGpuInstanceMatrix(const Groundcover::GroundcoverEntry& entry)
+        {
+            return osg::Matrixf::scale(entry.mScale, entry.mScale, entry.mScale)
+                * osg::Matrixf(Misc::Convert::makeOsgQuat(entry.mPos)) * osg::Matrixf::translate(entry.mPos.asVec3());
+        }
+
         class InstancingVisitor : public osg::NodeVisitor
         {
         public:
@@ -166,14 +177,15 @@ namespace MWRender
         }
     }
 
-    Groundcover::Groundcover(
-        Resource::SceneManager* sceneManager, float density, float viewDistance, const MWWorld::GroundcoverStore& store)
+    Groundcover::Groundcover(Resource::SceneManager* sceneManager, float density, float viewDistance,
+        const MWWorld::GroundcoverStore& store, GpuScene* gpuScene)
         : GenericResourceManager<GroundcoverChunkId>(nullptr, Settings::cells().mCacheExpiryDelay)
         , mSceneManager(sceneManager)
         , mDensity(density)
         , mDistance(new GroundcoverDistance(viewDistance))
         , mStateset(new osg::StateSet)
         , mGroundcoverStore(store)
+        , mGpuScene(gpuScene)
     {
         setViewDistance(viewDistance);
         // MGE uses default alpha settings for groundcover, so we can not rely on alpha properties
@@ -258,19 +270,67 @@ namespace MWRender
         }
     }
 
+    void Groundcover::clearCache()
+    {
+        GenericResourceManager<GroundcoverChunkId>::clearCache();
+        std::lock_guard<std::mutex> lock(mGpuTemplateMutex);
+        mGpuTemplates.clear();
+    }
+
+    Groundcover::GpuModel Groundcover::lookupGpuModel(const osg::Node& temp)
+    {
+        std::lock_guard<std::mutex> lock(mGpuTemplateMutex);
+        const auto found = mGpuTemplates.find(&temp);
+        if (found != mGpuTemplates.end())
+        {
+            osg::ref_ptr<const osg::Node> alive;
+            if (found->second.mNode.lock(alive) && alive == &temp)
+                return found->second;
+            mGpuTemplates.erase(found);
+        }
+        GpuModel model;
+        model.mNode = &temp;
+        osg::ref_ptr<osg::Node> node
+            = static_cast<osg::Node*>(temp.clone(osg::CopyOp::DEEP_COPY_NODES | osg::CopyOp::DEEP_COPY_DRAWABLES
+                | osg::CopyOp::DEEP_COPY_USERDATA | osg::CopyOp::DEEP_COPY_ARRAYS | osg::CopyOp::DEEP_COPY_PRIMITIVES));
+        model.mRoot = new osg::Group;
+        model.mRoot->setStateSet(mStateset);
+        model.mRoot->addChild(node);
+        mSceneManager->recreateShaders(model.mRoot, "groundcover", mProgramTemplate);
+        mSceneManager->shareState(model.mRoot);
+        model.mTemplate = mGpuScene->extract(*model.mRoot, ~0u, false);
+        mGpuTemplates.emplace(&temp, model);
+        return model;
+    }
+
     osg::ref_ptr<osg::Node> Groundcover::createChunk(InstanceMap& instances, const osg::Vec2f& center)
     {
         osg::ref_ptr<osg::Group> group = new osg::Group;
         osg::Vec3f worldCenter = osg::Vec3f(center.x(), center.y(), 0) * ESM::Land::REAL_SIZE;
+        std::vector<GpuScene::Instance> gpuInstances;
         for (const auto& [model, entries] : instances)
         {
             const osg::Node* temp = mSceneManager->getTemplate(model);
+            // Keep link to original mesh to keep it in cache
+            group->getOrCreateUserDataContainer()->addUserObject(new Resource::TemplateRef(temp));
+
+            if (mGpuScene != nullptr && mGpuScene->isEnabled())
+            {
+                const GpuModel gpuModel = lookupGpuModel(*temp);
+                if (gpuModel.mTemplate != nullptr && !gpuModel.mTemplate->mLegacy)
+                {
+                    for (const GroundcoverEntry& entry : entries)
+                    {
+                        mGpuScene->appendInstances(*gpuModel.mTemplate, computeGpuInstanceMatrix(entry), entry.mScale,
+                            { 0.f, std::numeric_limits<float>::max() }, false, gpuInstances);
+                    }
+                    continue;
+                }
+            }
+
             osg::ref_ptr<osg::Node> node = static_cast<osg::Node*>(temp->clone(osg::CopyOp::DEEP_COPY_NODES
                 | osg::CopyOp::DEEP_COPY_DRAWABLES | osg::CopyOp::DEEP_COPY_USERDATA | osg::CopyOp::DEEP_COPY_ARRAYS
                 | osg::CopyOp::DEEP_COPY_PRIMITIVES));
-
-            // Keep link to original mesh to keep it in cache
-            group->getOrCreateUserDataContainer()->addUserObject(new Resource::TemplateRef(temp));
 
             constexpr float clusterSizeInCells = 4.f;
             const GroundcoverInstanceLayout layout
@@ -297,6 +357,15 @@ namespace MWRender
             lod->addChild(node);
             lod->addChild(farNode);
             group->addChild(lod);
+        }
+
+        if (!gpuInstances.empty())
+        {
+            osg::BoundingSphere localBound;
+            for (const GpuScene::Instance& instance : gpuInstances)
+                localBound.expandBy(
+                    osg::BoundingSphere(instance.mBounds.center() - worldCenter, instance.mBounds.radius()));
+            group->addChild(mGpuScene->createChunk(std::move(gpuInstances), localBound));
         }
 
         osg::ComputeBoundsVisitor cbv;

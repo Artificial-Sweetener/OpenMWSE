@@ -95,14 +95,18 @@ namespace MWRender
         auto found = nodeMap.find(bonename);
         if (found == nodeMap.end())
             throw std::runtime_error("Can't find attachment node " + std::string{ bonename });
+        osg::ref_ptr<osg::Node> attached;
         if (isLight)
         {
             osg::Quat rotation(osg::DegreesToRadians(-90.f), osg::Vec3f(1, 0, 0));
-            return SceneUtil::attach(
+            attached = SceneUtil::attach(
                 templateNode, mObjectRoot, bonefilter, found->second, mResourceSystem->getSceneManager(), &rotation);
         }
-        return SceneUtil::attach(
-            std::move(templateNode), mObjectRoot, bonefilter, found->second, mResourceSystem->getSceneManager());
+        else
+            attached = SceneUtil::attach(
+                templateNode, mObjectRoot, bonefilter, found->second, mResourceSystem->getSceneManager());
+        pruneBareBones();
+        return attached;
     }
 
     VFS::Path::Normalized ActorAnimation::getShieldMesh(const MWWorld::ConstPtr& shield, bool female) const

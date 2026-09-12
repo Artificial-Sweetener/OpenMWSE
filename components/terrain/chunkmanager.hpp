@@ -71,6 +71,16 @@ namespace Terrain
         return TemplateKey{ .mCenter = l.mCenter, .mLod = l.mLod } < r;
     }
 
+    /// Provides GPU-rendered terrain proxy geometry.
+    class GpuChunkFactory
+    {
+    public:
+        virtual ~GpuChunkFactory() = default;
+        virtual osg::ref_ptr<osg::Node> createTerrainChunk(
+            TerrainDrawable& drawable, const osg::Vec3f& worldOffset, bool lit)
+            = 0;
+    };
+
     /// @brief Handles loading and caching of terrain chunks
     class ChunkManager : public Resource::GenericResourceManager<ChunkKey>, public QuadTreeWorld::ChunkManager
     {
@@ -89,6 +99,12 @@ namespace Terrain
 
         void setNodeMask(unsigned int mask) { mNodeMask = mask; }
         unsigned int getNodeMask() override { return mNodeMask; }
+
+        void setGpuChunkFactory(GpuChunkFactory* factory, unsigned int proxyMask)
+        {
+            mGpuChunkFactory = factory;
+            mGpuProxyMask = proxyMask;
+        }
 
         void reportStats(unsigned int frameNumber, osg::Stats* stats) const override;
 
@@ -115,6 +131,8 @@ namespace Terrain
         BufferCache mBufferCache;
 
         osg::ref_ptr<osg::StateSet> mMultiPassRoot;
+        GpuChunkFactory* mGpuChunkFactory = nullptr;
+        unsigned int mGpuProxyMask = 0;
 
         unsigned int mNodeMask;
 

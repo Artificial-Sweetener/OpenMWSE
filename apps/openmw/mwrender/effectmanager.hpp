@@ -23,13 +23,15 @@ namespace Resource
 namespace MWRender
 {
     class EffectAnimationTime;
+    class GpuScene;
 
     // Note: effects attached to another object should be managed by MWRender::Animation::addEffect.
     // This class manages "free" effects, i.e. attached to a dedicated scene node in the world.
     class EffectManager
     {
     public:
-        EffectManager(osg::ref_ptr<osg::Group> parent, Resource::ResourceSystem* resourceSystem);
+        EffectManager(
+            const osg::ref_ptr<osg::Group>& parent, Resource::ResourceSystem* resourceSystem, GpuScene* gpuScene);
         EffectManager(const EffectManager&) = delete;
         ~EffectManager();
 
@@ -45,6 +47,8 @@ namespace MWRender
         /// Remove all effects
         void clear();
 
+        void setGpuScene(GpuScene* scene) { mGpuScene = scene; }
+
     private:
         struct Effect
         {
@@ -59,6 +63,7 @@ namespace MWRender
 
         osg::ref_ptr<osg::Group> mParentNode;
         Resource::ResourceSystem* mResourceSystem;
+        GpuScene* mGpuScene;
     };
 
 }

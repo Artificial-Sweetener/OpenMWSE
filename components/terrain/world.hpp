@@ -34,6 +34,7 @@ namespace Terrain
 
     class TextureManager;
     class ChunkManager;
+    class GpuChunkFactory;
     class CompositeMapRenderer;
     class View;
     class HeightCullCallback;
@@ -97,6 +98,9 @@ namespace Terrain
         }
 
         virtual void rebuildViews() {}
+
+        void setGpuChunkFactory(GpuChunkFactory* factory, unsigned int proxyMask);
+        void clearChunkCache();
 
         virtual void reportStats(unsigned int frameNumber, osg::Stats* stats) {}
 

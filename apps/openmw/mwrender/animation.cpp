@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <unordered_set>
 
 #include <osg/BlendFunc>
 #include <osg/Matrix>
@@ -11,6 +12,7 @@
 #include <osg/Vec4f>
 #include <osgParticle/ParticleProcessor>
 #include <osgParticle/ParticleSystem>
+#include <osgParticle/ParticleSystemUpdater>
 
 #include <osgAnimation/Bone>
 #include <osgAnimation/UpdateBone>
@@ -31,6 +33,8 @@
 #include <components/misc/constants.hpp>
 #include <components/misc/pathhelpers.hpp>
 #include <components/misc/resourcehelpers.hpp>
+
+#include <components/nifosg/matrixtransform.hpp>
 
 #include <components/vfs/manager.hpp>
 #include <components/vfs/pathutil.hpp>
@@ -60,12 +64,36 @@
 #include "../mwmechanics/weapontype.hpp"
 
 #include "actorutil.hpp"
+#include "gpuscene.hpp"
 #include "rotatecontroller.hpp"
 #include "util.hpp"
 #include "vismask.hpp"
 
 namespace
 {
+    bool isBareBone(const osg::Node& node)
+    {
+        if (dynamic_cast<const NifOsg::MatrixTransform*>(&node) == nullptr || node.getNodeMask() != ~0u)
+            return false;
+        const osg::Group& group = *node.asGroup();
+        bool bare = true;
+        for (unsigned int i = 0; i < group.getNumChildren(); ++i)
+            bare = isBareBone(*group.getChild(i)) && bare;
+        return bare;
+    }
+
+    void collectBareBones(osg::Group& group, std::vector<osg::ref_ptr<osg::Node>>& out)
+    {
+        for (unsigned int i = 0; i < group.getNumChildren(); ++i)
+        {
+            osg::Node& child = *group.getChild(i);
+            if (isBareBone(child))
+                out.emplace_back(&child);
+            else if (osg::Group* childGroup = child.asGroup())
+                collectBareBones(*childGroup, out);
+        }
+    }
+
     /// Removes all particle systems and related nodes in a subgraph.
     class RemoveParticlesVisitor : public osg::NodeVisitor
     {
@@ -107,8 +135,9 @@ namespace
     class DayNightCallback : public SceneUtil::NodeCallback<DayNightCallback, osg::Switch*>
     {
     public:
-        DayNightCallback()
-            : mCurrentState(0)
+        DayNightCallback(MWRender::ObjectAnimation& animation)
+            : mAnimation(animation)
+            , mCurrentState(0)
         {
         }
 
@@ -116,35 +145,43 @@ namespace
         {
             unsigned int state = MWBase::Environment::get().getWorld()->getNightDayMode();
             const unsigned int newState = node->getNumChildren() > state ? state : 0;
+            const bool changed = newState != mCurrentState;
 
-            if (newState != mCurrentState)
+            if (changed)
             {
                 mCurrentState = newState;
                 node->setSingleChildOn(mCurrentState);
             }
 
             traverse(node, nv);
+            if (changed)
+                mAnimation.refreshGpuInstances();
         }
 
     private:
+        MWRender::ObjectAnimation& mAnimation;
         unsigned int mCurrentState;
     };
 
     class AddSwitchCallbacksVisitor : public osg::NodeVisitor
     {
     public:
-        AddSwitchCallbacksVisitor()
+        AddSwitchCallbacksVisitor(MWRender::ObjectAnimation& animation)
             : osg::NodeVisitor(TRAVERSE_ALL_CHILDREN)
+            , mAnimation(animation)
         {
         }
 
         void apply(osg::Switch& switchNode) override
         {
             if (switchNode.getName() == Constants::NightDayLabel)
-                switchNode.addUpdateCallback(new DayNightCallback());
+                switchNode.addUpdateCallback(new DayNightCallback(mAnimation));
 
             traverse(switchNode);
         }
+
+    private:
+        MWRender::ObjectAnimation& mAnimation;
     };
 
     class HarvestVisitor : public osg::NodeVisitor
@@ -1449,6 +1486,31 @@ namespace MWRender
         return movement;
     }
 
+    void Animation::setGpuScene(GpuScene* scene)
+    {
+        mCaptureScene = scene;
+        if (mCaptureScene != nullptr && mObjectRoot != nullptr)
+            mCaptureScene->capture(*mObjectRoot);
+    }
+
+    void Animation::refreshGpuInstances()
+    {
+        if (mCaptureScene != nullptr && mObjectRoot != nullptr)
+            mCaptureScene->capture(*mObjectRoot);
+        pruneBareBones();
+    }
+
+    void Animation::pruneBareBones()
+    {
+        for (const osg::ref_ptr<osg::Node>& bone : mBareBones)
+            bone->setNodeMask(~0u);
+        mBareBones.clear();
+        if (mObjectRoot != nullptr)
+            collectBareBones(*mObjectRoot, mBareBones);
+        for (const osg::ref_ptr<osg::Node>& bone : mBareBones)
+            bone->setNodeMask(Mask_UpdateVisitor);
+    }
+
     void Animation::setLoopingEnabled(std::string_view groupname, bool enabled)
     {
         AnimStateMap::iterator state(mStates.find(groupname));
@@ -1654,6 +1716,7 @@ namespace MWRender
         mObjectRoot->addCullCallback(mLightListCallback);
         if (mTransparencyUpdater)
             mObjectRoot->addCullCallback(mTransparencyUpdater);
+        pruneBareBones();
     }
 
     osg::Group* Animation::getObjectRoot()
@@ -1792,6 +1855,7 @@ namespace MWRender
         mHasMagicEffects = true;
 
         overrideFirstRootTexture(VFS::Path::toNormalized(texture), mResourceSystem, *node);
+        Animation::refreshGpuInstances();
     }
 
     void Animation::removeEffect(std::string_view effectId)
@@ -2076,8 +2140,9 @@ namespace MWRender
     // --------------------------------------------------------------------------------
 
     ObjectAnimation::ObjectAnimation(const MWWorld::Ptr& ptr, const std::string& model,
-        Resource::ResourceSystem* resourceSystem, bool animated, bool allowLight)
+        Resource::ResourceSystem* resourceSystem, bool animated, bool allowLight, GpuScene* gpuScene)
         : Animation(ptr, osg::ref_ptr<osg::Group>(ptr.getRefData().getBaseNode()), resourceSystem)
+        , mGpuScene(gpuScene)
     {
         if (!model.empty())
         {
@@ -2103,7 +2168,7 @@ namespace MWRender
 
         if (Settings::game().mDayNightSwitches && SceneUtil::hasUserDescription(mObjectRoot, Constants::NightDayLabel))
         {
-            AddSwitchCallbacksVisitor visitor;
+            AddSwitchCallbacksVisitor visitor(*this);
             mObjectRoot->accept(visitor);
         }
 
@@ -2112,6 +2177,8 @@ namespace MWRender
         {
             harvest(ptr);
         }
+
+        buildGpuInstances();
     }
 
     void ObjectAnimation::harvest(const MWWorld::Ptr& ptr)
@@ -2121,7 +2188,147 @@ namespace MWRender
         {
             HarvestVisitor visitor;
             mObjectRoot->accept(visitor);
+            refreshGpuInstances();
         }
+    }
+
+    namespace
+    {
+        bool collectHideable(
+            osg::Node& node, const std::unordered_set<const osg::Drawable*>& claimed, std::vector<osg::Node*>& toHide)
+        {
+            if (dynamic_cast<SceneUtil::LightSource*>(&node) != nullptr
+                || dynamic_cast<osgParticle::ParticleProcessor*>(&node) != nullptr
+                || dynamic_cast<osgParticle::ParticleSystemUpdater*>(&node) != nullptr)
+                return false;
+            if (osg::Drawable* drawable = node.asDrawable())
+                return claimed.contains(drawable);
+            osg::Group* group = node.asGroup();
+            if (group == nullptr)
+                return false;
+            std::vector<osg::Node*> hideable;
+            bool all = true;
+            for (unsigned int i = 0; i < group->getNumChildren(); ++i)
+            {
+                if (collectHideable(*group->getChild(i), claimed, toHide))
+                    hideable.push_back(group->getChild(i));
+                else
+                    all = false;
+            }
+            if (all)
+                return true;
+            toHide.insert(toHide.end(), hideable.begin(), hideable.end());
+            return false;
+        }
+
+        class CollectDrawables : public osg::NodeVisitor
+        {
+        public:
+            CollectDrawables()
+                : osg::NodeVisitor(TRAVERSE_ALL_CHILDREN)
+            {
+            }
+            void apply(osg::Drawable& drawable) override { mDrawables.insert(&drawable); }
+            std::unordered_set<const osg::Drawable*> mDrawables;
+        };
+    }
+
+    ObjectAnimation::~ObjectAnimation() = default;
+
+    void ObjectAnimation::buildGpuInstances()
+    {
+        if (mGpuChunk != nullptr || mGpuScene == nullptr || !mGpuScene->isEnabled() || mObjectRoot == nullptr
+            || !mGpuRetry || !mStates.empty())
+            return;
+        mGpuRetry = false;
+        if (mGlowUpdater != nullptr || mObjectRoot->getNumChildrenRequiringUpdateTraversal() > 0)
+            return;
+        const auto* transform = dynamic_cast<const SceneUtil::PositionAttitudeTransform*>(mInsert.get());
+        if (transform == nullptr)
+            return;
+        const osg::Vec3f scale = transform->getScale();
+        if (std::abs(scale.x() - scale.y()) > 1e-4f || std::abs(scale.x() - scale.z()) > 1e-4f)
+            return;
+        const std::unique_ptr<const GpuTemplate> tmpl = mGpuScene->extract(*mObjectRoot, ~Mask_UpdateVisitor, false);
+        if (tmpl == nullptr)
+            return;
+        std::vector<osg::Node*> toHide;
+        if (collectHideable(*mObjectRoot, tmpl->mClaimed, toHide))
+            toHide.assign(1, mObjectRoot.get());
+        CollectDrawables collector;
+        for (osg::Node* node : toHide)
+            node->accept(collector);
+        auto hidden = std::make_unique<GpuTemplate>();
+        for (const GpuGeometry& geometry : tmpl->mGeometries)
+            if (collector.mDrawables.contains(geometry.mDrawable))
+                hidden->mGeometries.push_back(geometry);
+        if (hidden->mGeometries.empty())
+            return;
+        osg::Matrix base;
+        transform->computeLocalToWorldMatrix(base, nullptr);
+        std::vector<GpuScene::Instance> instances;
+        mGpuScene->appendInstances(*hidden, osg::Matrixf(base), scale.x(),
+            osg::LOD::MinMaxPair(0.f, std::numeric_limits<float>::max()), true, instances);
+        mGpuChunk = mGpuScene->createChunk(std::move(instances), mObjectRoot->getBound());
+        if (mGpuChunk == nullptr)
+            return;
+        mGpuHidden = std::move(hidden);
+        mInsert->addChild(mGpuChunk);
+        for (osg::Node* node : toHide)
+        {
+            mHiddenNodes.emplace_back(node, node->getNodeMask());
+            node->setNodeMask(Mask_GpuProxy);
+        }
+        mGpuRetry = true;
+    }
+
+    void ObjectAnimation::dropGpuInstances()
+    {
+        if (mGpuChunk == nullptr)
+            return;
+        mInsert->removeChild(mGpuChunk);
+        mGpuChunk = nullptr;
+        mGpuHidden = nullptr;
+        for (const auto& [node, mask] : mHiddenNodes)
+            node->setNodeMask(mask);
+        mHiddenNodes.clear();
+    }
+
+    osg::Vec3f ObjectAnimation::runAnimation(float duration)
+    {
+        const osg::Vec3f movement = Animation::runAnimation(duration);
+        if (!mStates.empty())
+            dropGpuInstances();
+        else
+            buildGpuInstances();
+        return movement;
+    }
+
+    void ObjectAnimation::updateGpuTransform()
+    {
+        if (mGpuChunk == nullptr)
+            return;
+        const auto* transform = static_cast<const SceneUtil::PositionAttitudeTransform*>(mInsert.get());
+        const osg::Vec3f scale = transform->getScale();
+        if (std::abs(scale.x() - scale.y()) <= 1e-4f && std::abs(scale.x() - scale.z()) <= 1e-4f)
+        {
+            osg::Matrix base;
+            transform->computeLocalToWorldMatrix(base, nullptr);
+            std::vector<GpuScene::Instance> instances;
+            mGpuScene->appendInstances(*mGpuHidden, osg::Matrixf(base), scale.x(),
+                osg::LOD::MinMaxPair(0.f, std::numeric_limits<float>::max()), true, instances);
+            if (mGpuScene->updateChunk(*mGpuChunk, instances))
+                return;
+        }
+        dropGpuInstances();
+        mGpuRetry = true;
+    }
+
+    void ObjectAnimation::refreshGpuInstances()
+    {
+        dropGpuInstances();
+        mGpuRetry = true;
+        buildGpuInstances();
     }
 
     bool ObjectAnimation::canBeHarvested() const

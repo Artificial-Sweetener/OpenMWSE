@@ -269,7 +269,8 @@ namespace Terrain
                 defineMap["reconstructNormalZ"] = reconstructNormalZ ? "1" : "0";
                 Stereo::shaderStereoDefines(defineMap);
 
-                stateset->setAttributeAndModes(shaderManager.getProgram("terrain", defineMap));
+                stateset->setAttributeAndModes(shaderManager.getProgram("terrain", defineMap, nullptr, {},
+                    Shader::ProgramCapability::Instanced | Shader::ProgramCapability::ArrayMaterial));
                 stateset->addUniform(UniformCollection::value().mColorMode);
             }
 

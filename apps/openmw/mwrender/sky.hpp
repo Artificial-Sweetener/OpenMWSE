@@ -42,6 +42,7 @@ namespace SceneUtil
 namespace MWRender
 {
     class ReflectedClouds;
+    class GpuScene;
 
     ///@brief The SkyManager handles rendering of the sky domes, celestial bodies as well as other objects that need to
     /// be rendered
@@ -50,13 +51,15 @@ namespace MWRender
     {
     public:
         SkyManager(osg::Group* parentNode, osg::Group* rootNode, osg::Camera* camera,
-            Resource::SceneManager* sceneManager, bool enableSkyRTT);
+            Resource::SceneManager* sceneManager, bool enableSkyRTT, GpuScene* gpuScene);
         ~SkyManager();
 
         /// Advance legacy sky animation only for rendering paths that remain active.
         void update(float duration);
 
         void setEnabled(bool enabled);
+
+        void setGpuScene(GpuScene* scene) { mGpuScene = scene; }
 
         int getMasserPhase() const;
         ///< 0 new moon, 1 waxing or waning cresecent, 2 waxing or waning half,
@@ -133,6 +136,7 @@ namespace MWRender
         void updateRainParameters();
 
         Resource::SceneManager* mSceneManager;
+        GpuScene* mGpuScene;
 
         osg::Camera* mCamera;
 

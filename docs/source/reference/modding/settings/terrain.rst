@@ -196,11 +196,12 @@ Terrain Settings
    :range: true, false
    :default: false
 
-   Renders distant paged objects as instances kept in GPU buffers.
-   Visibility is decided by a compute shader and the objects are drawn with one indirect draw per material,
-   which removes most of the per-object CPU work from the distant scene.
-   Requires OpenGL 4.3; the regular object paging path is used otherwise.
-   Objects the GPU path cannot represent (blended geometry, animated nodes) keep using the regular path.
+   Keeps paged objects, static objects of the loaded cells and terrain chunks as instances in GPU buffers.
+   Visibility is decided by a compute shader and the instances are drawn with one indirect draw per material pipeline,
+   which removes most of the per-object CPU work from the scene.
+   Requires OpenGL 4.3; with ``GL_ARB_bindless_texture`` textures are indexed per instance, otherwise one draw per material is used.
+   Without ``distant terrain`` terrain stays on the regular path.
+   Content the GPU path cannot represent (blended geometry, animated or scripted nodes, actors, particles) keeps using the regular path.
 .. omw-setting::
    :title: object paging min size cost multiplier
    :type: float32

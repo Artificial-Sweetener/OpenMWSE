@@ -46,6 +46,7 @@ namespace MWRender
 {
 
     class Reflection;
+    class GpuScene;
     class RippleSimulation;
     class RainSettingsUpdater;
     class Ripples;
@@ -60,6 +61,7 @@ namespace MWRender
         osg::ref_ptr<osg::PositionAttitudeTransform> mWaterNode;
         osg::ref_ptr<osg::Geometry> mWaterGeom;
         Resource::ResourceSystem* mResourceSystem;
+        GpuScene* mGpuScene;
         osg::ref_ptr<osgUtil::IncrementalCompileOperation> mIncrementalCompileOperation;
 
         std::unique_ptr<RippleSimulation> mSimulation;
@@ -87,7 +89,7 @@ namespace MWRender
 
     public:
         Water(osg::Group* parent, osg::Group* sceneRoot, Resource::ResourceSystem* resourceSystem,
-            osgUtil::IncrementalCompileOperation* ico);
+            osgUtil::IncrementalCompileOperation* ico, GpuScene* gpuScene);
         ~Water();
 
         void setCullCallback(osg::Callback* callback);
@@ -95,6 +97,8 @@ namespace MWRender
         void listAssetsToPreload(std::vector<VFS::Path::Normalized>& textures);
 
         void setEnabled(bool enabled);
+
+        void setGpuScene(GpuScene* scene) { mGpuScene = scene; }
 
         bool toggle();
 

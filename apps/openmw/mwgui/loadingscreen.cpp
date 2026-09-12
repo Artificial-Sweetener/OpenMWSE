@@ -148,6 +148,7 @@ namespace MWGui
             return;
 
         mLoadingOnTime = mTimer.time_m();
+        mLoadingBox->setVisible(false);
 
         // Assign dummy bounding sphere callback to avoid the bounding sphere of the entire scene being recomputed after
         // each frame of loading We are already using node masks to avoid the scene from being updated/rendered, but
@@ -177,7 +178,7 @@ namespace MWGui
         if (--mNestedLoadingCount > 0)
             return;
 
-        if (mLastRenderTime < mLoadingOnTime)
+        if (!mLoadingBox->getVisible())
         {
             // the loading was so fast that we didn't show loading screen at all
             // we may still want to show the label if the caller requested it
@@ -319,6 +320,8 @@ namespace MWGui
     {
         if (!needToDrawLoadingScreen())
             return;
+
+        mLoadingBox->setVisible(mTimer.time_m() - mLoadingOnTime > 1000.0);
 
         if (mShowWallpaper && mTimer.time_m() > mLastWallpaperChangeTime + 5000 * 1)
         {

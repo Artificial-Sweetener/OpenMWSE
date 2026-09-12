@@ -74,6 +74,9 @@ namespace SceneUtil
         /// Restore the configured outdoor caster mask after a diagnostic comparison.
         void restoreDiagnosticOutdoorShadowCastingMask() const;
 
+        /// Return the active shadow technique so optional render backends can reuse its casting programs.
+        const MWShadowTechnique* getShadowTechnique() const { return mShadowTechnique; }
+
     protected:
         static ShadowManager* sInstance;
 

@@ -14,6 +14,7 @@
 #include "animation.hpp"
 #include "creatureanimation.hpp"
 #include "esm4npcanimation.hpp"
+#include "gpuscene.hpp"
 #include "npcanimation.hpp"
 #include "vismask.hpp"
 
@@ -21,9 +22,10 @@ namespace MWRender
 {
 
     Objects::Objects(Resource::ResourceSystem* resourceSystem, const osg::ref_ptr<osg::Group>& rootNode,
-        SceneUtil::UnrefQueue& unrefQueue)
+        GpuScene* gpuScene, SceneUtil::UnrefQueue& unrefQueue)
         : mRootNode(rootNode)
         , mResourceSystem(resourceSystem)
+        , mGpuScene(gpuScene)
         , mUnrefQueue(unrefQueue)
     {
     }
@@ -86,8 +88,9 @@ namespace MWRender
         }
 
         osg::ref_ptr<ObjectAnimation> anim(
-            new ObjectAnimation(ptr, animationMesh, mResourceSystem, animated, allowLight));
+            new ObjectAnimation(ptr, animationMesh, mResourceSystem, animated, allowLight, mGpuScene));
 
+        anim->setGpuScene(mGpuScene);
         mObjects.emplace(ptr.mRef, std::move(anim));
     }
 
@@ -110,8 +113,16 @@ namespace MWRender
         else
             anim = new CreatureAnimation(ptr, animationMesh, mResourceSystem, animated);
 
+        anim->setGpuScene(mGpuScene);
         if (mObjects.emplace(ptr.mRef, anim).second)
             ptr.getClass().getContainerStore(ptr).setContListener(static_cast<ActorAnimation*>(anim.get()));
+    }
+
+    void Objects::setGpuScene(GpuScene* scene)
+    {
+        mGpuScene = scene;
+        for (const auto& [ref, anim] : mObjects)
+            anim->setGpuScene(scene);
     }
 
     void Objects::insertNPC(const MWWorld::Ptr& ptr)
@@ -123,12 +134,14 @@ namespace MWRender
         {
             osg::ref_ptr<ESM4NpcAnimation> anim(
                 new ESM4NpcAnimation(ptr, osg::ref_ptr<osg::Group>(ptr.getRefData().getBaseNode()), mResourceSystem));
+            anim->setGpuScene(mGpuScene);
             mObjects.emplace(ptr.mRef, anim);
         }
         else
         {
             osg::ref_ptr<NpcAnimation> anim(
                 new NpcAnimation(ptr, osg::ref_ptr<osg::Group>(ptr.getRefData().getBaseNode()), mResourceSystem));
+            anim->setGpuScene(mGpuScene);
 
             if (mObjects.emplace(ptr.mRef, anim).second)
             {
@@ -194,6 +207,14 @@ namespace MWRender
             cell->second->getParent(0)->removeChild(cell->second);
             mCellSceneNodes.erase(cell);
         }
+    }
+
+    void Objects::refreshGpuInstances()
+    {
+        for (auto& [_, animation] : mObjects)
+            animation->refreshGpuInstances();
+        if (mGpuScene != nullptr)
+            mGpuScene->capture(*mRootNode);
     }
 
     void Objects::updatePtr(const MWWorld::Ptr& old, const MWWorld::Ptr& cur)

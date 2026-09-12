@@ -31,6 +31,7 @@ namespace SceneUtil
 
 namespace MWRender
 {
+    class GpuScene;
 
     class Animation;
 
@@ -61,14 +62,20 @@ namespace MWRender
         typedef std::map<const MWWorld::CellStore*, osg::ref_ptr<osg::Group>> CellMap;
         CellMap mCellSceneNodes;
         PtrAnimationMap mObjects;
+
+    public:
+        void setGpuScene(GpuScene* scene);
+
+    private:
         osg::ref_ptr<osg::Group> mRootNode;
         Resource::ResourceSystem* mResourceSystem;
+        GpuScene* mGpuScene;
         SceneUtil::UnrefQueue& mUnrefQueue;
 
         void insertBegin(const MWWorld::Ptr& ptr);
 
     public:
-        Objects(Resource::ResourceSystem* resourceSystem, const osg::ref_ptr<osg::Group>& rootNode,
+        Objects(Resource::ResourceSystem* resourceSystem, const osg::ref_ptr<osg::Group>& rootNode, GpuScene* gpuScene,
             SceneUtil::UnrefQueue& unrefQueue);
         ~Objects();
 
@@ -80,6 +87,8 @@ namespace MWRender
 
         Animation* getAnimation(const MWWorld::Ptr& ptr);
         const Animation* getAnimation(const MWWorld::ConstPtr& ptr) const;
+
+        void refreshGpuInstances();
 
         bool removeObject(const MWWorld::Ptr& ptr);
         ///< \return found?

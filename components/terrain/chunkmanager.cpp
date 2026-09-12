@@ -1,5 +1,6 @@
 #include "chunkmanager.hpp"
 
+#include <osg/Group>
 #include <osg/Texture2D>
 
 #include <osgUtil/IncrementalCompileOperation>
@@ -73,7 +74,15 @@ namespace Terrain
         const TemplateKey templateKey{ .mCenter = center, .mLod = lod };
         const auto pair = mCache->lowerBound(templateKey);
         if (pair.has_value() && templateKey == TemplateKey{ .mCenter = pair->first.mCenter, .mLod = pair->first.mLod })
-            templateGeometry = static_cast<const TerrainDrawable*>(pair->second.get());
+        {
+            templateGeometry = dynamic_cast<const TerrainDrawable*>(pair->second.get());
+            if (templateGeometry == nullptr)
+            {
+                const osg::Group* group = dynamic_cast<const osg::Group*>(pair->second.get());
+                if (group != nullptr && group->getNumChildren() != 0)
+                    templateGeometry = dynamic_cast<const TerrainDrawable*>(group->getChild(0));
+            }
+        }
 
         osg::ref_ptr<osg::Node> node = createChunk(size, center, lod, lodFlags, compile, templateGeometry);
         mCache->addEntryToObjectCache(key, node.get());
@@ -302,6 +311,23 @@ namespace Terrain
         }
 
         geometry->setupWaterBoundingBox(-1, chunkSize * mStorage->getCellWorldSize(mWorldspace) / numVerts);
+
+        if (mGpuChunkFactory != nullptr)
+        {
+            const float cellWorldSize = mStorage->getCellWorldSize(mWorldspace);
+            const osg::Vec3f offset(chunkCenter.x() * cellWorldSize, chunkCenter.y() * cellWorldSize, 0.f);
+            if (osg::ref_ptr<osg::Node> gpu = mGpuChunkFactory->createTerrainChunk(*geometry, offset, chunkSize <= 1.f))
+            {
+                if (CompositeMap* compositeMap = geometry->getCompositeMap())
+                    mCompositeMapRenderer->setImmediate(compositeMap);
+                geometry->setNodeMask(mGpuProxyMask);
+                osg::ref_ptr<osg::Group> group = new osg::Group;
+                group->addChild(geometry);
+                group->addChild(gpu);
+                group->setNodeMask(mNodeMask);
+                return group;
+            }
+        }
 
         if (!templateGeometry && compile && mSceneManager->getIncrementalCompileOperation())
         {

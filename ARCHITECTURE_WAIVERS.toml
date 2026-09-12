@@ -49,8 +49,8 @@ kind = "structural"
 justification = "The animation implementation owns one model animation state machine: controller attachment, source selection, blending, playback advancement, and text-key delivery all operate on the same animation graph and timing state. Separating those mechanics would expose private invariants without establishing another authoritative owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:0ff8cd96cf18b9141fecd3efd8e399257b80f78743f9e6bc55dbea863b2ba559"
-max_lines = 1749
+fingerprint = "sha256:8e3a2363a39ef2bb7559ace5ad1ed3887c06fc0e16ae64a49bba39411fe6ef54"
+max_lines = 1940
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-004"
@@ -75,7 +75,7 @@ kind = "structural"
 justification = "Local map capture, coordinate tracking, and fog-of-war restoration together define the persisted local-map tile lifecycle. They share tile addressing, texture formats, cell bounds, and update cadence; separating storage mechanics would split one representation invariant across owners."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:281a8f7273d5ed662397208cf7579494c976f795e1158e006cc5f65908a00574"
+fingerprint = "sha256:8027cbeb839261198b0389d1230b0d34526c4a7b01e79e493401be15157e2485"
 max_lines = 614
 
 [[waivers]]
@@ -88,8 +88,8 @@ kind = "structural"
 justification = "NPCAnimation is the authoritative visual assembly and animation state for one actor. Body-part selection, equipment visibility, first-person presentation, speech, and blink state all mutate the same scene graph and must be synchronized during rebuilds, so they remain one cohesive owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:79524d14f9af3e5e25d26e4561c07d61bcda13a5ceeab7e0fddbb0d66a689f2d"
-max_lines = 1068
+fingerprint = "sha256:46c2615112ba3d7fd847cd26edfce21e1983e68e3c907b6d43c8ef0b109ae761"
+max_lines = 1072
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-007"
@@ -101,8 +101,8 @@ kind = "structural"
 justification = "Object paging is one chunk-production pipeline that gathers eligible records, builds and optimizes render nodes, and caches the resulting chunks with their statistics. Each stage shares paging keys, compile policy, and cache lifetime; extraction would create pass-through interfaces rather than an independent owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:2fb4d5193930c106926b378adef8ac8cbaa8d6fb3b4e34ccde4dedb74bc84432"
-max_lines = 1207
+fingerprint = "sha256:b86ea8446a0f647e32ee72ce7d7f0914d435186c0fe8a89f881f4833b9b96d53"
+max_lines = 1073
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-026"
@@ -127,8 +127,8 @@ kind = "structural"
 justification = "RenderingManager is the renderer composition root and scene-facing facade: subsystem construction, ordered frame advancement, scene mutation, settings propagation, and renderer queries all coordinate the same owned object graph. Atmosphere diagnostic policy and applied capture state now belong to a separate controller."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:89b6bbace350c94e7fbb64570f8a0f118b5e776f5c3ee3e07063b0c95d9a86ea"
-max_lines = 1634
+fingerprint = "sha256:d7f88db32b49a2735d39a022fdd9661ca4bfa0229407466a8ea0b44c03435f24"
+max_lines = 1694
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-008"
@@ -140,8 +140,8 @@ kind = "structural"
 justification = "SkyManager owns the complete runtime sky scene and weather-driven lifecycle. Celestial state, precipitation, occlusion, and water-facing sky state all update the same graph in ordered frame phases; keeping them together preserves that lifecycle and avoids hidden ordering across subsystem boundaries."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:f905852987d061fa0cf78a31884b987ea1c3ca2d07f32345f9ba63bb197d922c"
-max_lines = 814
+fingerprint = "sha256:f3edff59bfe1f8e4ff84d5faeee0aec2404a223911c1d6b4e5abfb659f5606f3"
+max_lines = 821
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-009"
@@ -166,8 +166,8 @@ kind = "structural"
 justification = "Water owns one surface-rendering lifecycle comprising geometry, reflection resources, material state, ripple emission, and cell transitions. These behaviors share the same water plane, cameras, masks, and settings invalidation, so splitting them would distribute one render invariant across coupled owners."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:2cbfbc12e9e9b677c456fe8fba51125166fee9a3ef4c00b65f74e0728935437c"
-max_lines = 620
+fingerprint = "sha256:4cfa037d31a1734d42c1beb4d7f4436d276198eadc08e2015600b44c6b9913ad"
+max_lines = 629
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-011"
@@ -296,8 +296,8 @@ kind = "structural"
 justification = "MWShadowTechnique owns one view-dependent shadow-map algorithm from cascade slicing and caster-volume construction through shadow-camera culling and receiver-state publication. Those phases share light-space bounds, traversal-local resources, and cascade indices; the optional debug HUD and reusable diagnostic instrumentation live in separate owners."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:6adf849268cff98ac50b7783c2cd75a4efac86d9e75e6c50cf4f6abcef74de9d"
-max_lines = 2578
+fingerprint = "sha256:574915aaa65ca1d9eb97ad1d826a36dcf69e73feab164c5e30a9445caab41317"
+max_lines = 2581
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-020"
@@ -361,8 +361,8 @@ kind = "structural"
 justification = "QuadtreeWorld owns the terrain quadtree view and chunk lifecycle, including cell adapters, preload behavior, debug borders, and statistics tied to those chunks. The operations share grid coordinates, view membership, and chunk-manager state and do not establish independent policy owners."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:ca374fc86c7f08b0a2a1b28e2c6efd55eb9e84200eb4a5bcbb8157f70115843a"
-max_lines = 547
+fingerprint = "sha256:f3ee673464a056e985ff8feb1884db17637b1b609b859b7f42585b2bc2573d48"
+max_lines = 562
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-025"
@@ -387,5 +387,5 @@ kind = "structural"
 justification = "GpuScene owns one GPU-driven distant-scene lifecycle: compatible geometry normalization, shared buffer residency, view culling, indirect-command construction, and material-bucket submission use the same identifiers and render-thread resources. The stages form one backend contract while their internal data flow is still being established."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:98d5ab89ddc8acb1f68e1de5d03caa438b4bf1131b85adadeb607c373bafa89d"
-max_lines = 968
+fingerprint = "sha256:5d529092f9a83599227558bcd45fae68a00a954b06d07d984158cb00b0e93739"
+max_lines = 2434

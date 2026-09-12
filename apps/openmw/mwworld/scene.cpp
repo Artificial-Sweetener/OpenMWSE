@@ -695,6 +695,8 @@ namespace MWWorld
 
         navigatorUpdateGuard.reset();
 
+        mRendering.prepareGpuScene(*loadingListener);
+
         CellStore& current = mWorld.getWorldModel().getExterior(playerCellIndex);
         MWBase::Environment::get().getWindowManager()->changeCell(&current);
 
@@ -1303,6 +1305,7 @@ namespace MWWorld
         loadingListener->setLabel("#{OMWEngine:InitializingData}");
 
         mPreloader->syncTerrainLoad(*loadingListener);
+        mRendering.prepareGpuScene(*loadingListener);
     }
 
     void Scene::reloadTerrain()

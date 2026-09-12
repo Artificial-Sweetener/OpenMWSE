@@ -37,6 +37,7 @@
 #include "../mwbase/world.hpp"
 
 #include "reflectedclouds.hpp"
+#include "gpuscene.hpp"
 #include "renderbin.hpp"
 #include "skyutil.hpp"
 #include "util.hpp"
@@ -238,8 +239,9 @@ namespace
 namespace MWRender
 {
     SkyManager::SkyManager(osg::Group* parentNode, osg::Group* rootNode, osg::Camera* camera,
-        Resource::SceneManager* sceneManager, bool enableSkyRTT)
+        Resource::SceneManager* sceneManager, bool enableSkyRTT, GpuScene* gpuScene)
         : mSceneManager(sceneManager)
+        , mGpuScene(gpuScene)
         , mCamera(camera)
         , mAtmosphereNightRoll(0.f)
         , mCreated(false)
@@ -376,7 +378,8 @@ namespace MWRender
 
         Shader::ShaderManager::DefineMap defines = {};
         Stereo::shaderStereoDefines(defines);
-        auto program = mSceneManager->getShaderManager().getProgram("sky", defines);
+        auto program = mSceneManager->getShaderManager().getProgram(
+            "sky", defines, nullptr, {}, Shader::ProgramCapability::Instanced);
         mEarlyRenderBinRoot->getOrCreateStateSet()->addUniform(new osg::Uniform("pass", -1));
         mEarlyRenderBinRoot->getOrCreateStateSet()->setAttributeAndModes(
             program, osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE);
@@ -477,6 +480,8 @@ namespace MWRender
         mSceneManager->recreateShaders(mRainNode);
 
         mSkyNode->addChild(mRainNode);
+        if (mGpuScene != nullptr)
+            mGpuScene->capture(*mRainNode);
         if (mPrecipitationOcclusion)
             mPrecipitationOccluder->enable();
     }
@@ -800,6 +805,8 @@ namespace MWRender
                 }
 
                 mSceneManager->recreateShaders(mParticleNode);
+                if (mGpuScene != nullptr)
+                    mGpuScene->capture(*mParticleNode);
 
                 if (mPrecipitationOcclusion && occlusionEnabledForEffect)
                 {

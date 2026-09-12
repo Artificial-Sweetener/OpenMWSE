@@ -41,6 +41,7 @@
 
 #include "../mwworld/cellstore.hpp"
 
+#include "gpuscene.hpp"
 #include "renderbin.hpp"
 #include "ripples.hpp"
 #include "ripplesimulation.hpp"
@@ -352,11 +353,12 @@ namespace MWRender
     };
 
     Water::Water(osg::Group* parent, osg::Group* sceneRoot, Resource::ResourceSystem* resourceSystem,
-        osgUtil::IncrementalCompileOperation* ico)
+        osgUtil::IncrementalCompileOperation* ico, GpuScene* gpuScene)
         : mRainSettingsUpdater(nullptr)
         , mParent(parent)
         , mSceneRoot(sceneRoot)
         , mResourceSystem(resourceSystem)
+        , mGpuScene(gpuScene)
         , mEnabled(true)
         , mToggled(true)
         , mTop(0)
@@ -368,7 +370,8 @@ namespace MWRender
         mSimulation = std::make_unique<RippleSimulation>(mSceneRoot, resourceSystem);
 
         mWaterGeom = SceneUtil::createWaterGeometry(Constants::CellSizeInUnits * 150, 40, 900);
-        mWaterGeom->setDrawCallback(new DepthClampCallback);
+        if (mGpuScene == nullptr || !mGpuScene->isEnabled())
+            mWaterGeom->setDrawCallback(new DepthClampCallback);
         mWaterGeom->setNodeMask(Mask_Water);
         mWaterGeom->setDataVariance(osg::Object::STATIC);
         mWaterGeom->setName("Water Geometry");
@@ -460,6 +463,11 @@ namespace MWRender
             createSimpleWaterStateSet(mWaterGeom, Fallback::Map::getFloat("Water_World_Alpha"));
 
         mResourceSystem->getSceneManager()->setUpNormalsRTForStateSet(mWaterGeom->getOrCreateStateSet(), true);
+        if (mGpuScene != nullptr && mGpuScene->isEnabled())
+        {
+            mWaterGeom->getOrCreateStateSet()->setMode(GL_DEPTH_CLAMP, osg::StateAttribute::ON);
+            mGpuScene->capture(*mWaterGeom);
+        }
 
         updateVisible();
     }
@@ -602,7 +610,8 @@ namespace MWRender
         Stereo::shaderStereoDefines(defineMap);
 
         Shader::ShaderManager& shaderMgr = mResourceSystem->getSceneManager()->getShaderManager();
-        osg::ref_ptr<osg::Program> program = shaderMgr.getProgram("water", defineMap);
+        osg::ref_ptr<osg::Program> program
+            = shaderMgr.getProgram("water", defineMap, nullptr, {}, Shader::ProgramCapability::Instanced);
 
         constexpr VFS::Path::NormalizedView waterImage("textures/omw/water_nm.png");
         osg::ref_ptr<osg::Texture2D> normalMap(

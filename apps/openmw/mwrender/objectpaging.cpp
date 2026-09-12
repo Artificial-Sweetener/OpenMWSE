@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <limits>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include <osg/LOD>
@@ -55,27 +54,6 @@
 
 namespace MWRender
 {
-    /// Describes compatible geometry extracted from one reusable source-node template.
-    struct GpuGeometry
-    {
-        GpuScene::Id mMesh;
-        GpuScene::Id mBucket;
-        osg::Matrixf mMatrix;
-        osg::BoundingBox mBounds;
-        const osg::LOD* mLod = nullptr;
-        unsigned int mLodChild = 0;
-        osg::Vec3f mLodCenter;
-        float mLodScale = 1.f;
-    };
-
-    /// Caches GPU-compatible geometry and the drawables removed from the legacy copied graph.
-    struct GpuTemplate
-    {
-        std::vector<GpuGeometry> mGeometries;
-        std::unordered_set<const osg::Drawable*> mClaimed;
-        bool mLegacy = false;
-    };
-
     namespace
     {
         bool typeFilter(int type, bool far)
@@ -466,136 +444,6 @@ namespace MWRender
             }
         };
 
-        float uniformScale(const osg::Matrixf& matrix)
-        {
-            const float x = osg::Matrixf::transform3x3(osg::Vec3f(1, 0, 0), matrix).length();
-            const float y = osg::Matrixf::transform3x3(osg::Vec3f(0, 1, 0), matrix).length();
-            const float z = osg::Matrixf::transform3x3(osg::Vec3f(0, 0, 1), matrix).length();
-            const float maxScale = std::max({ x, y, z });
-            const float minScale = std::min({ x, y, z });
-            if (maxScale <= 0.f || (maxScale - minScale) > maxScale * 1e-3f)
-                return -1.f;
-            return maxScale;
-        }
-
-        class GpuExtractor
-        {
-        public:
-            GpuExtractor(GpuScene& scene, osg::Node::NodeMask mask, GpuTemplate& out)
-                : mScene(scene)
-                , mMask(mask)
-                , mOut(out)
-            {
-            }
-
-            void visit(const osg::Node* node, const osg::Matrixf& matrix, const osg::LOD* lod, unsigned int lodChild,
-                const osg::Vec3f& lodCenter, float lodScale)
-            {
-                if (!(node->getNodeMask() & mMask))
-                    return;
-                if (dynamic_cast<const osgParticle::ParticleProcessor*>(node) != nullptr
-                    || dynamic_cast<const osgParticle::ParticleSystemUpdater*>(node) != nullptr)
-                    return;
-                if (node->getCullCallback() != nullptr)
-                {
-                    mOut.mLegacy = true;
-                    return;
-                }
-
-                const std::size_t depth = mStates.size();
-                if (node->getStateSet() != nullptr)
-                    mStates.push_back(node->getStateSet());
-
-                if (const osg::Drawable* drawable = node->asDrawable())
-                    visitDrawable(drawable, matrix, lod, lodChild, lodCenter, lodScale);
-                else if (const osg::Switch* sw = node->asSwitch())
-                {
-                    for (unsigned int i = 0; i < sw->getNumChildren(); ++i)
-                        if (sw->getValue(i))
-                            visit(sw->getChild(i), matrix, lod, lodChild, lodCenter, lodScale);
-                }
-                else if (const osg::LOD* nested = dynamic_cast<const osg::LOD*>(node))
-                {
-                    const float scale = uniformScale(matrix);
-                    if (lod != nullptr || nested->getRangeMode() != osg::LOD::DISTANCE_FROM_EYE_POINT || scale < 0.f)
-                        mOut.mLegacy = true;
-                    else
-                    {
-                        const osg::Vec3f center = nested->getCenter() * matrix;
-                        for (unsigned int i = 0; i < nested->getNumChildren(); ++i)
-                            visit(nested->getChild(i), matrix, nested, i, center, scale);
-                    }
-                }
-                else if (const osg::Sequence* sq = dynamic_cast<const osg::Sequence*>(node))
-                    visit(sq->getChild(sq->getValue() != -1 ? sq->getValue() : 0), matrix, lod, lodChild, lodCenter,
-                        lodScale);
-                else if (const osg::Transform* transform = node->asTransform())
-                {
-                    osg::Matrix local(matrix);
-                    if (const auto* autoTransform = dynamic_cast<const NifOsg::AutoTransform*>(node))
-                        local.preMult(autoTransform->computeMatrix(nullptr));
-                    else
-                        transform->computeLocalToWorldMatrix(local, nullptr);
-                    const osg::Matrixf localf(local);
-                    for (unsigned int i = 0; i < transform->getNumChildren(); ++i)
-                        visit(transform->getChild(i), localf, lod, lodChild, lodCenter, lodScale);
-                }
-                else if (const osg::Group* group = node->asGroup())
-                {
-                    for (unsigned int i = 0; i < group->getNumChildren(); ++i)
-                        visit(group->getChild(i), matrix, lod, lodChild, lodCenter, lodScale);
-                }
-                else
-                    mOut.mLegacy = true;
-
-                mStates.resize(depth);
-            }
-
-        private:
-            void visitDrawable(const osg::Drawable* drawable, const osg::Matrixf& matrix, const osg::LOD* lod,
-                unsigned int lodChild, const osg::Vec3f& lodCenter, float lodScale)
-            {
-                if (dynamic_cast<const osgParticle::ParticleSystem*>(drawable) != nullptr
-                    || dynamic_cast<const SceneUtil::OsgaRigGeometry*>(drawable) != nullptr)
-                    return;
-                const osg::Geometry* geometry = nullptr;
-                if (const auto* rig = dynamic_cast<const SceneUtil::RigGeometry*>(drawable))
-                    geometry = rig->getSourceGeometry();
-                else if (const auto* morph = dynamic_cast<const SceneUtil::MorphGeometry*>(drawable))
-                    geometry = morph->getSourceGeometry();
-                else
-                    geometry = drawable->asGeometry();
-
-                const float scale = geometry != nullptr ? uniformScale(matrix) : -1.f;
-                if (geometry == nullptr || scale < 0.f || geometry->getCullCallback() != nullptr)
-                {
-                    mOut.mLegacy = true;
-                    return;
-                }
-
-                const std::size_t depth = mStates.size();
-                if (geometry != drawable && geometry->getStateSet() != nullptr)
-                    mStates.push_back(geometry->getStateSet());
-                const GpuScene::Id mesh = mScene.getMesh(*geometry);
-                const GpuScene::Id bucket = mScene.getBucket(mStates);
-                mStates.resize(depth);
-                if (mesh == GpuScene::sInvalid || bucket == GpuScene::sInvalid)
-                {
-                    mOut.mLegacy = true;
-                    return;
-                }
-
-                mOut.mClaimed.insert(drawable);
-                mOut.mGeometries.push_back(GpuGeometry{
-                    mesh, bucket, matrix, geometry->getBoundingBox(), lod, lodChild, lodCenter, lodScale });
-            }
-
-            GpuScene& mScene;
-            osg::Node::NodeMask mMask;
-            GpuTemplate& mOut;
-            std::vector<const osg::StateSet*> mStates;
-        };
-
         class AddRefnumMarkerVisitor : public osg::NodeVisitor
         {
         public:
@@ -648,10 +496,11 @@ namespace MWRender
         std::erase_if(mGpuTemplates, [](const auto& item) { return !item.second.first.valid(); });
     }
 
-    const GpuTemplate* ObjectPaging::getGpuTemplate(const osg::Node& node, osg::Node::NodeMask mask)
+    const GpuTemplate* ObjectPaging::getGpuTemplate(const osg::Node& node, osg::Node::NodeMask mask, bool activeGrid)
     {
         std::lock_guard<std::mutex> lock(mGpuTemplateMutex);
-        auto found = mGpuTemplates.find(&node);
+        const auto key = std::make_pair(&node, activeGrid);
+        auto found = mGpuTemplates.find(key);
         if (found != mGpuTemplates.end())
         {
             osg::ref_ptr<const osg::Node> alive;
@@ -659,13 +508,10 @@ namespace MWRender
                 return found->second.second.get();
             mGpuTemplates.erase(found);
         }
-        auto result = std::make_shared<GpuTemplate>();
-        GpuExtractor extractor(*mGpuScene, mask, *result);
-        extractor.visit(&node, osg::Matrixf::identity(), nullptr, 0, osg::Vec3f(), 1.f);
-        if (result->mGeometries.empty())
-            result.reset();
-        mGpuTemplates.emplace(&node, std::make_pair(osg::observer_ptr<const osg::Node>(&node), result));
-        return result.get();
+        std::unique_ptr<const GpuTemplate> result = mGpuScene->extract(node, mask, !activeGrid);
+        const GpuTemplate* pointer = result.get();
+        mGpuTemplates.emplace(key, std::make_pair(osg::observer_ptr<const osg::Node>(&node), std::move(result)));
+        return pointer;
     }
 
     namespace
@@ -677,6 +523,7 @@ namespace MWRender
             osg::Vec3f mPosition;
             osg::Vec3f mRotation;
             float mScale;
+            int mType = 0;
         };
 
         PagedCellRef makePagedCellRef(const ESM::CellRef& value)
@@ -742,7 +589,9 @@ namespace MWRender
                                     refs.erase(ref.mRefNum);
                                     continue;
                                 }
-                                refs.insert_or_assign(ref.mRefNum, makePagedCellRef(ref));
+                                PagedCellRef pagedRef = makePagedCellRef(ref);
+                                pagedRef.mType = type;
+                                refs.insert_or_assign(ref.mRefNum, pagedRef);
                             }
                         }
                         catch (const std::exception& e)
@@ -762,7 +611,9 @@ namespace MWRender
                         int type = store.findStatic(ref.mRefID);
                         if (!typeFilter(type, size >= 2))
                             continue;
-                        refs.insert_or_assign(ref.mRefNum, makePagedCellRef(ref));
+                        PagedCellRef pagedRef = makePagedCellRef(ref);
+                        pagedRef.mType = type;
+                        refs.insert_or_assign(ref.mRefNum, pagedRef);
                     }
                 }
             }
@@ -801,7 +652,9 @@ namespace MWRender
                                     continue;
                             }
                         }
-                        refs.insert_or_assign(ref4->mId, makePagedCellRef(*ref4));
+                        PagedCellRef pagedRef = makePagedCellRef(*ref4);
+                        pagedRef.mType = type;
+                        refs.insert_or_assign(ref4->mId, pagedRef);
                     }
                 }
             }
@@ -983,15 +836,14 @@ namespace MWRender
         osg::ref_ptr<Resource::TemplateMultiRef> templateRefs = new Resource::TemplateMultiRef;
         osgUtil::StateToCompile stateToCompile(0, nullptr);
         CopyOp copyop(activeGrid, copyMask);
-        const bool gpuDriven = !activeGrid && mGpuScene != nullptr && mGpuScene->isEnabled();
+        const bool gpuDriven = mGpuScene != nullptr && mGpuScene->isEnabled();
         std::vector<GpuScene::Instance> gpuInstances;
         for (const auto& pair : nodes)
         {
             const osg::Node* cnode = pair.first;
 
             const AnalyzeVisitor::Result& analyzeResult = pair.second.mAnalyzeResult;
-            const GpuTemplate* gpuTemplate = gpuDriven ? getGpuTemplate(*cnode, copyMask) : nullptr;
-            copyop.mSkip = gpuTemplate != nullptr ? &gpuTemplate->mClaimed : nullptr;
+            const GpuTemplate* gpuTemplate = gpuDriven ? getGpuTemplate(*cnode, copyMask, activeGrid) : nullptr;
 
             const float mergeCost = analyzeResult.mNumVerts * size;
             const float mergeBenefit = analyzeVisitor.getMergeBenefit(analyzeResult) * mMergeFactor;
@@ -1018,44 +870,36 @@ namespace MWRender
                     * osg::Quat(ref.mRotation.x(), osg::Vec3f(-1, 0, 0));
                 const osg::Vec3f nodeScale(ref.mScale, ref.mScale, ref.mScale);
 
-                if (gpuTemplate != nullptr)
+                const bool refGpu = gpuTemplate != nullptr
+                    && (!activeGrid
+                        || ((ref.mType == ESM::REC_STAT || ref.mType == ESM::REC_STAT4) && !gpuTemplate->mLegacy));
+                copyop.mSkip = refGpu && !activeGrid ? &gpuTemplate->mClaimed : nullptr;
+                if (refGpu)
                 {
                     osg::Matrixf refMatrix;
                     refMatrix.preMultTranslate(ref.mPosition);
                     refMatrix.preMultRotate(nodeAttitude);
                     refMatrix.preMultScale(nodeScale);
-                    const LODRange refDistances = lodDistances / ref.mScale;
-                    for (const GpuGeometry& geometry : gpuTemplate->mGeometries)
-                    {
-                        GpuScene::Instance instance;
-                        if (geometry.mLod != nullptr)
-                        {
-                            const osg::LOD::RangeList& ranges = geometry.mLod->getRangeList();
-                            if (empty(intersection(ranges[geometry.mLodChild], refDistances)))
-                                continue;
-                            unsigned int survivors = 0;
-                            for (const LODRange& range : ranges)
-                                if (!empty(intersection(range, refDistances)))
-                                    ++survivors;
-                            if (survivors > 1)
-                            {
-                                const float lodScale = geometry.mLodScale * ref.mScale;
-                                instance.mLod = true;
-                                instance.mLodCenter = geometry.mLodCenter * refMatrix;
-                                instance.mLodMin = ranges[geometry.mLodChild].first * lodScale;
-                                instance.mLodMax = ranges[geometry.mLodChild].second * lodScale;
-                            }
-                        }
-                        instance.mWorld = geometry.mMatrix * refMatrix;
-                        const float scale = uniformScale(geometry.mMatrix) * ref.mScale;
-                        instance.mBounds = osg::BoundingSphere(
-                            geometry.mBounds.center() * instance.mWorld, geometry.mBounds.radius() * scale);
-                        instance.mSmallFeatureCulling = !merge;
-                        instance.mMesh = geometry.mMesh;
-                        instance.mBucket = geometry.mBucket;
-                        gpuInstances.push_back(instance);
-                    }
+                    mGpuScene->appendInstances(
+                        *gpuTemplate, refMatrix, ref.mScale, lodDistances / ref.mScale, !merge, gpuInstances);
                     ++numinstances;
+                    if (activeGrid)
+                    {
+                        // Keep geometry for intersection tests.
+                        osg::ref_ptr<SceneUtil::PositionAttitudeTransform> proxy
+                            = new SceneUtil::PositionAttitudeTransform;
+                        proxy->setPosition(nodePos);
+                        proxy->setScale(nodeScale);
+                        proxy->setAttitude(nodeAttitude);
+                        copyop.setCopyFlags(osg::CopyOp::DEEP_COPY_NODES);
+                        copyop.mDistances = lodDistances / ref.mScale;
+                        copyop.copy(cnode, proxy);
+                        osg::ref_ptr<RefnumMarker> marker = new RefnumMarker;
+                        marker->mRefnum = ref.mRefNum;
+                        proxy->getOrCreateUserDataContainer()->addUserObject(marker);
+                        proxy->setNodeMask(Mask_GpuProxy);
+                        group->addChild(proxy);
+                    }
                     if (!gpuTemplate->mLegacy)
                         continue;
                 }
@@ -1133,7 +977,13 @@ namespace MWRender
         const osg::Vec3f relativeViewPoint = viewPoint - worldCenter;
 
         if (!gpuInstances.empty())
-            group->addChild(mGpuScene->createChunk(std::move(gpuInstances), worldCenter));
+        {
+            osg::BoundingSphere localBound;
+            for (const GpuScene::Instance& instance : gpuInstances)
+                localBound.expandBy(
+                    osg::BoundingSphere(instance.mBounds.center() - worldCenter, instance.mBounds.radius()));
+            group->addChild(mGpuScene->createChunk(std::move(gpuInstances), localBound));
+        }
 
         if (mergeGroup->getNumChildren())
         {
@@ -1183,6 +1033,8 @@ namespace MWRender
             group->addCullCallback(new SceneUtil::LightListCallback);
         }
         udc->addUserObject(templateRefs);
+        if (mGpuScene != nullptr)
+            mGpuScene->capture(*group);
 
         return group;
     }

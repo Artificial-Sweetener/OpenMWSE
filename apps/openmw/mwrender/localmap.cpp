@@ -292,7 +292,7 @@ namespace MWRender
     void LocalMap::requestInteriorMap(const MWWorld::CellStore* cell)
     {
         osg::ComputeBoundsVisitor computeBoundsVisitor;
-        computeBoundsVisitor.setTraversalMask(Mask_Scene | Mask_Terrain | Mask_Object | Mask_Static);
+        computeBoundsVisitor.setTraversalMask(Mask_Scene | Mask_Terrain | Mask_Object | Mask_Static | Mask_GpuProxy);
         mSceneRoot->accept(computeBoundsVisitor);
 
         osg::BoundingBox bounds = computeBoundsVisitor.getBoundingBox();

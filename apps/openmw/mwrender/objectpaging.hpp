@@ -33,7 +33,7 @@ namespace MWRender
         void updateCache(double referenceTime) override;
         /// Clear both CPU chunks and cached GPU extraction templates.
         void clearCache() override;
-
+        void setGpuScene(GpuScene* gpuScene) { mGpuScene = gpuScene; }
         osg::ref_ptr<osg::Node> getChunk(float size, const osg::Vec2f& center, unsigned char lod, unsigned int lodFlags,
             bool activeGrid, const osg::Vec3f& viewPoint, bool compile) override;
 
@@ -59,13 +59,14 @@ namespace MWRender
         void getPagedRefnums(const osg::Vec4i& activeGrid, std::vector<ESM::RefNum>& out);
 
     private:
-        /// Return or build the GPU extraction template for a source node and traversal mask.
-        const GpuTemplate* getGpuTemplate(const osg::Node& node, osg::Node::NodeMask mask);
+        /// Return or build the GPU extraction template for a source node, traversal mask, and grid policy.
+        const GpuTemplate* getGpuTemplate(const osg::Node& node, osg::Node::NodeMask mask, bool activeGrid);
 
         Resource::SceneManager* mSceneManager;
         GpuScene* mGpuScene;
         std::mutex mGpuTemplateMutex;
-        std::map<const osg::Node*, std::pair<osg::observer_ptr<const osg::Node>, std::shared_ptr<GpuTemplate>>>
+        std::map<std::pair<const osg::Node*, bool>,
+            std::pair<osg::observer_ptr<const osg::Node>, std::unique_ptr<const GpuTemplate>>>
             mGpuTemplates;
         double mNextTemplateSweep = 0;
         bool mActiveGrid;

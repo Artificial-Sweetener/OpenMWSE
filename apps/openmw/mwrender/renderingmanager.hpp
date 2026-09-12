@@ -90,6 +90,11 @@ namespace Debug
     struct DebugDrawer;
 }
 
+namespace Loading
+{
+    class Listener;
+}
+
 namespace MWRender
 {
     class AtmosphereDiagnosticController;
@@ -198,6 +203,9 @@ namespace MWRender
         void setSkyEnabled(bool enabled);
 
         bool toggleRenderMode(RenderMode mode);
+
+        /// Completes GPU uploads during loading.
+        void prepareGpuScene(Loading::Listener& listener);
 
         SkyManager* getSkyManager();
 
@@ -337,6 +345,9 @@ namespace MWRender
         /// Create and attach the optional GPU scene when supported by the active graphics context.
         bool createGpuScene();
 
+        /// Hand a newly created GPU scene to every renderer that can contribute compatible geometry.
+        void wireGpuScene();
+
         /// Rebuild paged object and terrain caches after switching GPU-driven paging at runtime.
         void rebuildPagedCaches();
 
@@ -352,7 +363,6 @@ namespace MWRender
         osg::ref_ptr<SceneUtil::LightManager> mSceneRoot;
         Resource::ResourceSystem* mResourceSystem;
         std::unique_ptr<GpuScene> mGpuScene;
-
         osg::ref_ptr<SceneUtil::WorkQueue> mWorkQueue;
 
         osg::ref_ptr<SceneUtil::Light> mSunLight;

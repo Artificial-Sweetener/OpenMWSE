@@ -427,6 +427,20 @@ namespace Terrain
             return stateSet;
         }
 
+        namespace
+        {
+            const TerrainDrawable* findTerrainDrawable(const osg::Node* node)
+            {
+                if (const auto* drawable = dynamic_cast<const TerrainDrawable*>(node))
+                    return drawable;
+                if (const osg::Group* group = node->asGroup())
+                    for (unsigned int i = 0; i < group->getNumChildren(); ++i)
+                        if (const TerrainDrawable* found = findTerrainDrawable(group->getChild(i)))
+                            return found;
+                return nullptr;
+            }
+        }
+
         void updateWaterCullingView(
             HeightCullCallback* callback, ViewData* vd, osgUtil::CullVisitor* cv, float cellworldsize, bool outofworld)
         {
@@ -444,8 +458,10 @@ namespace Terrain
             for (unsigned int i = 0; i < vd->getNumEntries(); ++i)
             {
                 ViewDataEntry& entry = vd->getEntry(i);
-                osg::BoundingBox bb = static_cast<TerrainDrawable*>(entry.mRenderingNode->asGroup()->getChild(0))
-                                          ->getWaterBoundingBox();
+                const TerrainDrawable* drawable = findTerrainDrawable(entry.mRenderingNode->asGroup()->getChild(0));
+                if (drawable == nullptr)
+                    continue;
+                osg::BoundingBox bb = drawable->getWaterBoundingBox();
                 if (!bb.valid())
                     continue;
                 osg::Vec3f ofs(
