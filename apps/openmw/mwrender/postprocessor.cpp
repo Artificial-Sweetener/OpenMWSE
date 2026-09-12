@@ -110,6 +110,11 @@ namespace
         }
 
         auto texture = Stereo::createMultiviewCompatibleTexture(width, height, samples);
+        if (samples > 1 && !Stereo::getMultiview())
+        {
+            // Match renderbuffer sample locations.
+            static_cast<osg::Texture2DMultisample*>(texture.get())->setFixedSampleLocations(GL_TRUE);
+        }
         texture->setSourceFormat(textureTemplate->getSourceFormat());
         texture->setSourceType(textureTemplate->getSourceType());
         texture->setInternalFormat(textureTemplate->getInternalFormat());
@@ -636,11 +641,11 @@ namespace MWRender
                 fbos[FBO_Intercept]->setAttachment(osg::FrameBufferObject::BufferComponent::COLOR_BUFFER1,
                     Stereo::createMultiviewCompatibleAttachment(textures[Tex_Normal]));
             }
-            auto depthRB = createFrameBufferAttachmentFromTemplate(
-                Usage::RENDER_BUFFER, width, height, textures[Tex_Depth], mSamples);
+            auto depthAttachment
+                = createFrameBufferAttachmentFromTemplate(Usage::TEXTURE, width, height, textures[Tex_Depth], mSamples);
             fbos[FBO_Multisample]->setAttachment(osg::FrameBufferObject::BufferComponent::COLOR_BUFFER0, colorRB);
             fbos[FBO_Multisample]->setAttachment(
-                osg::FrameBufferObject::BufferComponent::PACKED_DEPTH_STENCIL_BUFFER, depthRB);
+                osg::FrameBufferObject::BufferComponent::PACKED_DEPTH_STENCIL_BUFFER, depthAttachment);
             fbos[FBO_FirstPerson]->setAttachment(osg::FrameBufferObject::BufferComponent::COLOR_BUFFER0, colorRB);
 
             fbos[FBO_Intercept]->setAttachment(osg::FrameBufferObject::BufferComponent::COLOR_BUFFER0,

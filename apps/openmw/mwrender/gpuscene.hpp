@@ -82,6 +82,7 @@ namespace MWRender
     class GpuCaptureCallback;
     class GpuChunkNode;
     class GpuSceneNode;
+    class PostProcessor;
     struct GpuTemplate;
 
     /// Stores GPU scene geometry and instances.
@@ -90,12 +91,14 @@ namespace MWRender
     public:
         using Id = std::uint32_t;
         static constexpr Id sInvalid = 0xffffffffu;
+        static constexpr Id sPrepass = 0xfffffffeu;
         static constexpr std::size_t sMapCount = Shader::sMaterialMapCount;
 
         struct Instance
         {
             osg::Matrixf mWorld;
             osg::BoundingSphere mBounds;
+            osg::BoundingBox mBox;
             osg::Vec3f mLodCenter;
             float mLodMin = 0.f;
             float mLodMax = 0.f;
@@ -139,6 +142,10 @@ namespace MWRender
         void removeResident(osg::Node& node);
         void setCastingPrograms(const std::vector<osg::ref_ptr<osg::Program>>& programs);
         void setLightManager(SceneUtil::LightManager* lightManager);
+        /// Camera for the depth prepass.
+        void setPrepassCamera(const osg::Camera* camera) { mPrepassCamera = camera; }
+        /// Depth texture owner.
+        void setPostProcessor(PostProcessor* postProcessor) { mPostProcessor = postProcessor; }
         /// Supplies inherited geometry material state.
         void setDefaultMaterial(const SceneUtil::Material* material);
 
@@ -258,6 +265,17 @@ namespace MWRender
 
         static GpuInstance makeRecord(const Instance& instance, Id batch, Id slot, Id generation);
 
+        struct GpuOcclusion
+        {
+            float mMin[3];
+            std::uint32_t mPad0;
+            float mMax[3];
+            std::uint32_t mPad1;
+        };
+        static_assert(sizeof(GpuOcclusion) == 32);
+
+        static GpuOcclusion makeOcclusion(const Instance& instance);
+
         struct GpuBatch
         {
             std::uint32_t mFirstIndex;
@@ -284,6 +302,7 @@ namespace MWRender
         {
             std::uint32_t mFirst;
             std::vector<GpuInstance> mRecords;
+            std::vector<GpuOcclusion> mOcclusion;
         };
 
         struct GpuSkinMatrix
@@ -365,6 +384,7 @@ namespace MWRender
             osg::Vec4f mViewPoint;
             osg::Vec4f mParams;
             std::array<std::uint32_t, 4> mMeta;
+            std::array<osg::Vec4f, 4> mViewProj;
         };
 
         struct ViewRecord
@@ -379,6 +399,8 @@ namespace MWRender
             float mSmallFeaturePixelSize = 0.f;
             osg::Vec3f mViewPoint;
             float mLodScale = 1.f;
+            osg::Matrixf mViewProj;
+            bool mOcclusion = false;
             std::vector<std::pair<Id, Id>> mChunks;
             std::vector<DynamicInstance> mDynamic;
             std::vector<SkinUpdate> mSkins;
@@ -401,6 +423,13 @@ namespace MWRender
         };
 
         using SurfacePath = std::vector<osg::ref_ptr<const osg::StateSet>>;
+
+        enum class CullPass
+        {
+            Full,
+            Seed,
+            Resolve,
+        };
 
         struct PathHash
         {
@@ -430,8 +459,10 @@ namespace MWRender
         void takePendingWork(PendingWork& work, std::size_t limit);
         void upload(osg::State& state, PendingWork& work);
         static GpuView makeView(const ViewRecord& record);
+        bool buildPyramid(osg::State& state, const osg::Texture& source);
         bool dispatch(osg::State& state, const std::vector<GpuView>& views, std::uint32_t viewBase,
-            std::uint32_t instanceExtent, const std::vector<std::uint32_t>& chunkData);
+            std::uint32_t instanceExtent, const std::vector<std::uint32_t>& chunkData, CullPass pass,
+            bool occlusionReady = false);
         bool record(osgUtil::CullVisitor& cv, osg::Geometry& geometry, bool updateMesh,
             const GpuCaptureCallback& callback, SkinUpdate* skin = nullptr);
         bool recordRig(osgUtil::CullVisitor& cv, SceneUtil::RigGeometry& rig, const GpuCaptureCallback& callback);
@@ -471,6 +502,9 @@ namespace MWRender
         RangeAllocator mSkinInfluences;
         std::unordered_map<SurfacePath, Surface, PathHash, PathEqual> mSurfaces;
         std::vector<Bucket> mBuckets;
+        const osg::Camera* mPrepassCamera = nullptr;
+        PostProcessor* mPostProcessor = nullptr;
+        osg::ref_ptr<osg::Drawable> mPrepassDrawable;
         std::vector<osg::StateAttribute::GLMode> mDeltaModes;
         std::vector<osg::StateAttribute::TypeMemberPair> mDeltaAttributes;
         std::vector<Dispatcher> mDispatchers;

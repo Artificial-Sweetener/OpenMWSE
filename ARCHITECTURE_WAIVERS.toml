@@ -114,8 +114,8 @@ kind = "structural"
 justification = "PostProcessor now owns only the production post-process graph lifecycle: frame-local resources, attachment topology, effect-chain compilation, cull dispatch, and shader reload all share the same render targets and invalidation contract. Capture state and diagnostic comparison sequencing have an independent owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:72932196a3f4b31ce24240c3d6491ea5f794aa83115b21bac2ac73103f139f73"
-max_lines = 808
+fingerprint = "sha256:5c056240a3f30ffc598bf11645ab6521adba890595d9182f1e240a6a8e432c3c"
+max_lines = 812
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-027"
@@ -127,8 +127,8 @@ kind = "structural"
 justification = "RenderingManager is the renderer composition root and scene-facing facade: subsystem construction, ordered frame advancement, scene mutation, settings propagation, and renderer queries all coordinate the same owned object graph. Atmosphere diagnostic policy and applied capture state now belong to a separate controller."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:77a928520a693c9390ded9758960e830af20b3e5dd72bbbd2c63d69fae056a9d"
-max_lines = 1694
+fingerprint = "sha256:158b81e65d123c9a86983bd8d2ff30ad0748f4aa9d5ba7365dc971e27d724b8a"
+max_lines = 1699
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-008"
@@ -387,5 +387,5 @@ kind = "structural"
 justification = "GpuScene owns one GPU-driven distant-scene lifecycle: compatible geometry normalization, shared buffer residency, view culling, indirect-command construction, and material-bucket submission use the same identifiers and render-thread resources. The stages form one backend contract while their internal data flow is still being established."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:b23605739e6a1bfaf29881d5bea32c811252a6190652381f45167279516033d6"
-max_lines = 2818
+fingerprint = "sha256:be1b1dd1a94913cb93f6ae6123f33291e96ae3eefa32a62b7ac7529c7dec3a61"
+max_lines = 3131

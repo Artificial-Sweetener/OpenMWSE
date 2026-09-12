@@ -387,6 +387,8 @@ namespace MWRender
         rootNode->addCullCallback(mPerViewUniformStateUpdater);
 
         mPostProcessor = new PostProcessor(*this, viewer, mRootNode, resourceSystem->getVFS());
+        if (mGpuScene != nullptr)
+            mGpuScene->setPostProcessor(mPostProcessor.get());
         resourceSystem->getSceneManager()->setOpaqueDepthTex(
             mPostProcessor->getTexture(PostProcessor::Tex_OpaqueDepth, 0),
             mPostProcessor->getTexture(PostProcessor::Tex_OpaqueDepth, 1));
@@ -807,6 +809,10 @@ namespace MWRender
         }
         mGpuScene->setEnabled(true);
         mGpuScene->setLightManager(mSceneRoot.get());
+        // Late construction repeats the setup-time wiring.
+        if (mPostProcessor != nullptr)
+            mGpuScene->setPostProcessor(mPostProcessor.get());
+        mGpuScene->setPrepassCamera(mViewer->getCamera());
         mGpuScene->getNode()->setNodeMask(Mask_Static | Mask_Object | Mask_Terrain);
         mSceneRoot->addChild(mGpuScene->getNode());
         if (const SceneUtil::MWShadowTechnique* technique = mShadowManager->getShadowTechnique())

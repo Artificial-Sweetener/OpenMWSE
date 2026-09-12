@@ -2,7 +2,13 @@
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
+#if @multisample
+uniform sampler2DMS sourceDepth;
+uniform int sourceSamples;
+#else
 uniform sampler2D sourceDepth;
+const int sourceSamples = 1;
+#endif
 layout(r32f, binding = 0) uniform readonly image2D previousLevel;
 layout(r32f, binding = 1) uniform writeonly image2D targetLevel;
 uniform int firstPass;
@@ -29,7 +35,11 @@ void main()
 #endif
     if (firstPass != 0)
     {
+#if @multisample
+        ivec2 sourceSize = textureSize(sourceDepth);
+#else
         ivec2 sourceSize = textureSize(sourceDepth, 0);
+#endif
         ivec2 base = min(coord * 2, sourceSize - 1);
         ivec2 span = ivec2(1);
         if (coord.x == size.x - 1 && (sourceSize.x & 1) != 0)
@@ -40,7 +50,8 @@ void main()
             for (int x = 0; x <= span.x; ++x)
             {
                 ivec2 point = min(base + ivec2(x, y), sourceSize - 1);
-                depth = mergeDepth(depth, texelFetch(sourceDepth, point, 0).r);
+                for (int sampleIndex = 0; sampleIndex < sourceSamples; ++sampleIndex)
+                    depth = mergeDepth(depth, texelFetch(sourceDepth, point, sampleIndex).r);
             }
     }
     else

@@ -19,7 +19,7 @@ struct Occlusion
 
 layout(std430, binding = 16) restrict buffer OcclusionBuffer { Occlusion occlusion[]; };
 
-uniform sampler2D depthPyramid;
+layout(binding = 30) uniform sampler2D depthPyramid;
 uniform int pyramidLevels;
 uniform float occluderPixelSize;
 uniform uint cullPass;
