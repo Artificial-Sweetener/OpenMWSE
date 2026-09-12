@@ -63,6 +63,7 @@ namespace SceneUtil
                 vertexArray->setVertexBufferObject(vbo);
                 to.setVertexArray(vertexArray);
             }
+            mGeometry[i]->setCullCallback(mInnerCull);
         }
     }
 
@@ -83,6 +84,14 @@ namespace SceneUtil
     osg::ref_ptr<osg::Geometry> MorphGeometry::getSourceGeometry() const
     {
         return mSourceGeometry;
+    }
+
+    void MorphGeometry::setInnerCull(osg::DrawableCullCallback* callback)
+    {
+        mInnerCull = callback;
+        for (osg::ref_ptr<osg::Geometry>& geometry : mGeometry)
+            if (geometry != nullptr)
+                geometry->setCullCallback(callback);
     }
 
     void MorphGeometry::accept(osg::NodeVisitor& nv)

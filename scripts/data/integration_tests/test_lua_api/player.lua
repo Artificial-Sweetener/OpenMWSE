@@ -160,6 +160,14 @@ testing.registerLocalTest('player diagonal walking',
         testing.expectEqualWithDelta(direction.y, -0.707, 0.1, 'Walk diagonally, Y coord')
     end)
 
+local function waitForNavigation(position, options)
+    local deadline = core.getRealTime() + 10
+    while not nearby.findNearestNavMeshPosition(position, options) do
+        testing.expect(core.getRealTime() < deadline, 'Navigation mesh unavailable')
+        coroutine.yield()
+    end
+end
+
 testing.registerLocalTest('findPath',
     function()
         local src = util.vector3(4096, 4096, 1745)
@@ -175,6 +183,7 @@ testing.registerLocalTest('findPath',
             },
             destinationTolerance = 1,
         }
+        waitForNavigation(src, options)
         local status, path = nearby.findPath(src, dst, options)
         testing.expectEqual(status, nearby.FIND_PATH_STATUS.Success, 'Status')
         testing.expectLessOrEqual((path[#path] - dst):length(), 1,
@@ -203,6 +212,7 @@ testing.registerLocalTest('findPath with checkpoints',
                 util.vector3(4200, 4100, 1750),
             },
         }
+        waitForNavigation(src, options)
         local status, path = nearby.findPath(src, dst, options)
         testing.expectEqual(status, nearby.FIND_PATH_STATUS.Success, 'Status')
         testing.expectLessOrEqual((path[#path] - dst):length(), 1,
@@ -222,6 +232,7 @@ testing.registerLocalTest('findRandomPointAroundCircle',
             agentBounds = types.Actor.getPathfindingAgentBounds(self),
             includeFlags = nearby.NAVIGATOR_FLAGS.Walk,
         }
+        waitForNavigation(position, options)
         local result = nearby.findRandomPointAroundCircle(position, maxRadius, options)
         testing.expectGreaterThan((result - position):length(), 1,
             'Random point ' .. testing.formatActualExpected(result, position))
@@ -235,6 +246,7 @@ testing.registerLocalTest('castNavigationRay',
             agentBounds = types.Actor.getPathfindingAgentBounds(self),
             includeFlags = nearby.NAVIGATOR_FLAGS.Walk + nearby.NAVIGATOR_FLAGS.Swim,
         }
+        waitForNavigation(src, options)
         local result = nearby.castNavigationRay(src, dst, options)
         testing.expectLessOrEqual((result - dst):length(), 1,
             'Navigation hit point ' .. testing.formatActualExpected(result, dst))
@@ -248,6 +260,7 @@ testing.registerLocalTest('findNearestNavMeshPosition',
             includeFlags = nearby.NAVIGATOR_FLAGS.Walk + nearby.NAVIGATOR_FLAGS.Swim,
             searchAreaHalfExtents = util.vector3(1000, 1000, 1000),
         }
+        waitForNavigation(position, options)
         local result = nearby.findNearestNavMeshPosition(position, options)
         local expected = util.vector3(4096, 4096, 1746.27099609375)
         testing.expectLessOrEqual((result - expected):length(), 1,

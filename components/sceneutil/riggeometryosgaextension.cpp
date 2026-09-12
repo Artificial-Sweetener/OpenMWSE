@@ -1,6 +1,7 @@
 #include "riggeometryosgaextension.hpp"
 
 #include <osgAnimation/RigGeometry>
+#include <osgAnimation/RigTransformSoftware>
 
 #include <osg/Drawable>
 #include <osg/NodeVisitor>
@@ -14,6 +15,33 @@
 
 namespace SceneUtil
 {
+    namespace
+    {
+        class RigTransformSoftware : public osgAnimation::RigTransformSoftware
+        {
+        public:
+            RigTransformSoftware() = default;
+            RigTransformSoftware(const RigTransformSoftware& copy, const osg::CopyOp& copyop)
+                : osgAnimation::RigTransformSoftware(copy, copyop)
+            {
+            }
+
+            META_Object(SceneUtil, RigTransformSoftware)
+
+            bool prepareData(osgAnimation::RigGeometry& geometry) override
+            {
+                auto* vertices = dynamic_cast<osg::Vec3Array*>(geometry.getVertexArray());
+                auto* normals = dynamic_cast<osg::Vec3Array*>(geometry.getNormalArray());
+                if (!vertices || vertices->empty() || (normals && normals->size() != vertices->size()))
+                    return false;
+                vertices->setDataVariance(osg::Object::DYNAMIC);
+                if (normals)
+                    normals->setDataVariance(osg::Object::DYNAMIC);
+                buildMinimumUpdateSet(geometry);
+                return true;
+            }
+        };
+    }
 
     OsgaRigGeometry::OsgaRigGeometry()
         : osgAnimation::RigGeometry()
@@ -175,6 +203,8 @@ namespace SceneUtil
                                     << geom->getName() << " )";
                 return;
             }
+            if (dynamic_cast<osgAnimation::RigTransformSoftware*>(geom->getRigTransformImplementation()))
+                geom->setRigTransformImplementation(new RigTransformSoftware);
             geom->getRigTransformImplementation()->prepareData(*geom);
             geom->setSkeleton(finder._root.get());
         }

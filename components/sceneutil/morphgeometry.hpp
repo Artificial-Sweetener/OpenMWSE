@@ -66,6 +66,8 @@ namespace SceneUtil
         inline MorphTarget& getMorphTarget(unsigned int i) { return mMorphTargets[i]; }
 
         osg::ref_ptr<osg::Geometry> getSourceGeometry() const;
+        void setInnerCull(osg::DrawableCullCallback* callback);
+        osg::DrawableCullCallback* getInnerCull() { return mInnerCull; }
 
         void accept(osg::NodeVisitor& nv) override;
         bool supports(const osg::PrimitiveFunctor&) const override { return true; }
@@ -82,6 +84,7 @@ namespace SceneUtil
 
         osg::ref_ptr<osg::Geometry> mGeometry[2];
         osg::Geometry* getGeometry(unsigned int frame) const;
+        osg::ref_ptr<osg::DrawableCullCallback> mInnerCull;
 
         unsigned int mLastFrameNumber;
         bool mDirty; // Have any morph targets changed?

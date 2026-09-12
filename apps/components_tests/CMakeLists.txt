@@ -108,6 +108,7 @@ file(GLOB UNITTEST_SRC_FILES
     sceneutil/osgacontroller.cpp
     sceneutil/offscreencontext.cpp
     sceneutil/optimizeroptions.cpp
+    sceneutil/riggeometry.cpp
     sceneutil/shadowsbin.cpp
 
     bsa/testbsafile.cpp

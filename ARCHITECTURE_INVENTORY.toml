@@ -4,8 +4,8 @@ schema_version = 1
 id = "OMWSE-INVENTORY-RENDERER"
 area = "renderer"
 owner = "OpenMWSE rendering"
-fingerprint = "sha256:ed06ed2963c4fd245d68d956217ae987d1747dae9b97d007b6ff62c886e917a3"
-file_count = 480
+fingerprint = "sha256:91d63c0925d4058dafaa4b857246c4dc8a988966bdeb0a99109aff1875dff147"
+file_count = 481
 assessed_on = 2026-09-12
 
 [[inventories]]

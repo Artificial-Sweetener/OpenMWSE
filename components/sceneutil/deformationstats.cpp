@@ -30,6 +30,8 @@ namespace SceneUtil
             return;
 
         osgUtil::CullVisitor& cullVisitor = static_cast<osgUtil::CullVisitor&>(visitor);
+        if (cullVisitor.getCurrentRenderBin() == nullptr)
+            return;
         osg::Camera* camera = cullVisitor.getCurrentCamera();
         if (!camera)
             return;

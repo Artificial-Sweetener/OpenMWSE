@@ -4,9 +4,11 @@
 
 #include <osgUtil/CullVisitor>
 
+#include <algorithm>
+#include <limits>
+
 #include <components/debug/debuglog.hpp>
 #include <components/misc/strings/algorithm.hpp>
-#include <components/resource/scenemanager.hpp>
 
 #include "deformationstats.hpp"
 #include "skeleton.hpp"
@@ -31,66 +33,80 @@ namespace SceneUtil
 
     void RigGeometry::setSourceGeometry(osg::ref_ptr<osg::Geometry> sourceGeometry)
     {
+        mGpuGeometry = nullptr;
         for (unsigned int i = 0; i < 2; ++i)
             mGeometry[i] = nullptr;
+        mQueryGeometry = nullptr;
+        mQueryValid = false;
 
         mSourceGeometry = sourceGeometry;
+        mSourceTangents = dynamic_cast<const osg::Vec4Array*>(sourceGeometry->getTexCoordArray(7));
+    }
 
-        for (unsigned int i = 0; i < 2; ++i)
+    osg::ref_ptr<osg::Geometry> RigGeometry::makeGeometry() const
+    {
+        osg::ref_ptr<osg::Geometry> geometry = makeGpuGeometry();
+        geometry->setSupportsDisplayList(false);
+        geometry->setUseVertexBufferObjects(true);
+        geometry->setCullingActive(false);
+        osg::ref_ptr<CopyBoundingBoxCallback> box = new CopyBoundingBoxCallback;
+        box->boundingBox = _boundingBox;
+        geometry->setComputeBoundingBoxCallback(box);
+        osg::ref_ptr<CopyBoundingSphereCallback> sphere = new CopyBoundingSphereCallback;
+        sphere->boundingSphere = _boundingSphere;
+        geometry->setComputeBoundingSphereCallback(sphere);
+        copyArrays(*geometry);
+        return geometry;
+    }
+
+    void RigGeometry::copyArrays(osg::Geometry& geometry) const
+    {
+        // Source arrays outlive both clones.
+
+        // Mutable arrays use dedicated VBOs.
+        osg::ref_ptr<osg::VertexBufferObject> vbo = new osg::VertexBufferObject;
+        vbo->setUsage(GL_DYNAMIC_DRAW_ARB);
+
+        osg::ref_ptr<osg::Array> vertices
+            = static_cast<osg::Array*>(mSourceGeometry->getVertexArray()->clone(osg::CopyOp::DEEP_COPY_ALL));
+        vertices->setVertexBufferObject(vbo);
+        geometry.setVertexArray(vertices);
+
+        if (const osg::Array* source = mSourceGeometry->getNormalArray())
         {
-            const osg::Geometry& from = *sourceGeometry;
-
-            // DO NOT COPY AND PASTE THIS CODE. Cloning osg::Geometry without also cloning its contained Arrays is
-            // generally unsafe. In this specific case the operation is safe under the following two assumptions:
-            // - When Arrays are removed or replaced in the cloned geometry, the original Arrays in their place must
-            // outlive the cloned geometry regardless. (ensured by mSourceGeometry)
-            // - Arrays that we add or replace in the cloned geometry must be explicitely forbidden from reusing
-            // BufferObjects of the original geometry. (ensured by vbo below)
-            mGeometry[i] = new osg::Geometry(from, osg::CopyOp::SHALLOW_COPY);
-            mGeometry[i]->getOrCreateUserDataContainer()->addUserObject(new Resource::TemplateRef(mSourceGeometry));
-
-            osg::Geometry& to = *mGeometry[i];
-            to.setSupportsDisplayList(false);
-            to.setUseVertexBufferObjects(true);
-            to.setCullingActive(false); // make sure to disable culling since that's handled by this class
-            to.setComputeBoundingBoxCallback(new CopyBoundingBoxCallback());
-            to.setComputeBoundingSphereCallback(new CopyBoundingSphereCallback());
-
-            // vertices and normals are modified every frame, so we need to deep copy them.
-            // assign a dedicated VBO to make sure that modifications don't interfere with source geometry's VBO.
-            osg::ref_ptr<osg::VertexBufferObject> vbo(new osg::VertexBufferObject);
-            vbo->setUsage(GL_DYNAMIC_DRAW_ARB);
-
-            osg::ref_ptr<osg::Array> vertexArray
-                = static_cast<osg::Array*>(from.getVertexArray()->clone(osg::CopyOp::DEEP_COPY_ALL));
-            if (vertexArray)
-            {
-                vertexArray->setVertexBufferObject(vbo);
-                to.setVertexArray(vertexArray);
-            }
-
-            if (const osg::Array* normals = from.getNormalArray())
-            {
-                osg::ref_ptr<osg::Array> normalArray
-                    = static_cast<osg::Array*>(normals->clone(osg::CopyOp::DEEP_COPY_ALL));
-                if (normalArray)
-                {
-                    normalArray->setVertexBufferObject(vbo);
-                    to.setNormalArray(normalArray, osg::Array::BIND_PER_VERTEX);
-                }
-            }
-
-            if (const osg::Vec4Array* tangents = dynamic_cast<const osg::Vec4Array*>(from.getTexCoordArray(7)))
-            {
-                mSourceTangents = tangents;
-                osg::ref_ptr<osg::Array> tangentArray
-                    = static_cast<osg::Array*>(tangents->clone(osg::CopyOp::DEEP_COPY_ALL));
-                tangentArray->setVertexBufferObject(vbo);
-                to.setTexCoordArray(7, tangentArray, osg::Array::BIND_PER_VERTEX);
-            }
-            else
-                mSourceTangents = nullptr;
+            osg::ref_ptr<osg::Array> normals = static_cast<osg::Array*>(source->clone(osg::CopyOp::DEEP_COPY_ALL));
+            normals->setVertexBufferObject(vbo);
+            geometry.setNormalArray(normals, osg::Array::BIND_PER_VERTEX);
         }
+        else
+            geometry.setNormalArray(nullptr);
+
+        if (mSourceTangents != nullptr)
+        {
+            osg::ref_ptr<osg::Array> tangents
+                = static_cast<osg::Array*>(mSourceTangents->clone(osg::CopyOp::DEEP_COPY_ALL));
+            tangents->setVertexBufferObject(vbo);
+            geometry.setTexCoordArray(7, tangents, osg::Array::BIND_PER_VERTEX);
+        }
+    }
+
+    void RigGeometry::ensureGeometry()
+    {
+        if (mGeometry[0] != nullptr || mSourceGeometry == nullptr || !mCpuSkinning)
+            return;
+        mGeometry[0] = makeGeometry();
+        mGeometry[1] = makeGeometry();
+        mLastFrameNumber = 0;
+    }
+
+    void RigGeometry::setCpuSkinning(bool enabled)
+    {
+        mCpuSkinning = enabled;
+        if (enabled || mGeometry[0] == nullptr)
+            return;
+        mGeometry[0] = nullptr;
+        mGeometry[1] = nullptr;
+        std::vector<osg::Matrixf>().swap(mCpuMatrices);
     }
 
     osg::ref_ptr<osg::Geometry> RigGeometry::getSourceGeometry() const
@@ -138,6 +154,12 @@ namespace SceneUtil
 
     void RigGeometry::cull(osg::NodeVisitor* nv)
     {
+        if (!mCpuSkinning)
+            return;
+        if (mOuterCull != nullptr && mOuterCull->cull(nv, this, static_cast<osg::RenderInfo*>(nullptr)))
+            return;
+        ensureGeometry();
+
         if (!mSkeleton)
         {
             Log(Debug::Error)
@@ -160,8 +182,6 @@ namespace SceneUtil
         osg::Geometry& geom = *getGeometry(mLastFrameNumber);
         DeformationStats deformationStats(*nv);
 
-        mSkeleton->updateBoneMatrices(traversalNumber);
-
         // skinning
         const osg::Vec3Array* positionSrc = static_cast<osg::Vec3Array*>(mSourceGeometry->getVertexArray());
         const osg::Vec3Array* normalSrc = static_cast<osg::Vec3Array*>(mSourceGeometry->getNormalArray());
@@ -171,41 +191,14 @@ namespace SceneUtil
         osg::Vec3Array* normalDst = static_cast<osg::Vec3Array*>(geom.getNormalArray());
         osg::Vec4Array* tangentDst = static_cast<osg::Vec4Array*>(geom.getTexCoordArray(7));
 
-        std::vector<osg::Matrixf> boneMatrices(mNodes.size());
-        std::vector<Bone*>::const_iterator bone = mNodes.begin();
-        std::vector<BoneInfo>::const_iterator boneInfo = mData->mBones.begin();
-        for (osg::Matrixf& boneMat : boneMatrices)
+        mSkeleton->updateBoneMatrices(nv->getTraversalNumber());
+        buildSkinMatrices(mCpuMatrices);
+        std::size_t group = 0;
+        for (const auto& influence : mData->mInfluences)
         {
-            if (*bone != nullptr)
-                boneMat = boneInfo->mInvBindMatrix * (*bone)->mMatrixInSkeletonSpace;
-            ++bone;
-            ++boneInfo;
-        }
+            const osg::Matrixf& resultMat = mCpuMatrices[group++];
 
-        osg::Matrixf transform;
-        if (mSkinToSkelMatrix)
-            transform = (*mSkinToSkelMatrix) * mData->mTransform;
-        else
-            transform = mData->mTransform;
-
-        for (const auto& [influences, vertices] : mData->mInfluences)
-        {
-            osg::Matrixf resultMat(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
-
-            for (const auto& [index, weight] : influences)
-            {
-                if (mNodes[index] == nullptr)
-                    continue;
-                const float* boneMatPtr = boneMatrices[index].ptr();
-                float* resultMatPtr = resultMat.ptr();
-                for (int i = 0; i < 16; ++i, ++resultMatPtr, ++boneMatPtr)
-                    if (i % 4 != 3)
-                        *resultMatPtr += *boneMatPtr * weight;
-            }
-
-            resultMat *= transform;
-
-            for (unsigned short vertex : vertices)
+            for (unsigned short vertex : influence.second)
             {
                 (*positionDst)[vertex] = resultMat.preMult((*positionSrc)[vertex]);
                 if (normalDst)
@@ -241,6 +234,38 @@ namespace SceneUtil
         nv->popFromNodePath();
     }
 
+    void RigGeometry::buildSkinMatrices(std::vector<osg::Matrixf>& out) const
+    {
+        std::vector<osg::Matrixf> boneMatrices(mNodes.size());
+        for (std::size_t i = 0; i < boneMatrices.size(); ++i)
+            if (mNodes[i] != nullptr)
+                boneMatrices[i] = mData->mBones[i].mInvBindMatrix * mNodes[i]->mMatrixInSkeletonSpace;
+
+        osg::Matrixf transform;
+        if (mSkinToSkelMatrix)
+            transform = (*mSkinToSkelMatrix) * mData->mTransform;
+        else
+            transform = mData->mTransform;
+        out.clear();
+        out.reserve(mData->mInfluences.size());
+        for (const auto& influence : mData->mInfluences)
+        {
+            osg::Matrixf result(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
+            for (const auto& [index, weight] : influence.first)
+            {
+                if (mNodes[index] == nullptr)
+                    continue;
+                const float* bone = boneMatrices[index].ptr();
+                float* value = result.ptr();
+                for (int i = 0; i < 16; ++i, ++value, ++bone)
+                    if (i % 4 != 3)
+                        *value += *bone * weight;
+            }
+            result *= transform;
+            out.push_back(result);
+        }
+    }
+
     void RigGeometry::updateBounds(osg::NodeVisitor* nv)
     {
         if (!mSkeleton)
@@ -255,14 +280,20 @@ namespace SceneUtil
 
         mSkeleton->updateBoneMatrices(nv->getTraversalNumber());
 
-        updateSkinToSkelMatrix(nv->getNodePath());
-
-        osg::BoundingBox box;
+        const osg::Matrixf pathTransform = updateSkinToSkelMatrix(nv->getNodePath());
+        const bool gpuSkinning = mGpuSkinning.load(std::memory_order_relaxed);
         osg::Matrixf transform;
         if (mSkinToSkelMatrix)
             transform = (*mSkinToSkelMatrix) * mData->mTransform;
         else
             transform = mData->mTransform;
+        std::vector<osg::Matrixf> matrices;
+        // GPU skinning works in skeleton space.
+        if (gpuSkinning)
+            buildSkinPalette(matrices, transform * pathTransform);
+
+        osg::BoundingBox box;
+        osg::BoundingBox skeletonBox;
 
         size_t index = 0;
         for (const BoneInfo& info : mData->mBones)
@@ -274,6 +305,23 @@ namespace SceneUtil
             osg::BoundingSpheref bs = info.mBoundSphere;
             transformBoundingSphere(bone->mMatrixInSkeletonSpace * transform, bs);
             box.expandBy(bs);
+
+            if (gpuSkinning)
+            {
+                transformBoundingSphere(pathTransform, bs);
+                skeletonBox.expandBy(bs);
+            }
+        }
+
+        if (gpuSkinning)
+        {
+            std::lock_guard<std::mutex> lock(mGpuSkinMutex);
+            GpuSkinFrame& snapshot = mGpuFrames[nv->getTraversalNumber() % mGpuFrames.size()];
+            snapshot.mFrame = nv->getTraversalNumber();
+            snapshot.mMatrices.swap(matrices);
+            snapshot.mBounds = skeletonBox;
+            snapshot.mLocalTransform = transform;
+            snapshot.mValid = true;
         }
 
         if (box != _boundingBox)
@@ -284,24 +332,29 @@ namespace SceneUtil
             for (unsigned int i = 0; i < getNumParents(); ++i)
                 getParent(i)->dirtyBound();
 
-            for (unsigned int i = 0; i < 2; ++i)
-            {
-                osg::Geometry& geom = *mGeometry[i];
-                static_cast<CopyBoundingBoxCallback*>(geom.getComputeBoundingBoxCallback())->boundingBox = _boundingBox;
-                static_cast<CopyBoundingSphereCallback*>(geom.getComputeBoundingSphereCallback())->boundingSphere
+            const auto copyBound = [&](osg::Geometry* geometry) {
+                if (geometry == nullptr)
+                    return;
+                static_cast<CopyBoundingBoxCallback*>(geometry->getComputeBoundingBoxCallback())->boundingBox
+                    = _boundingBox;
+                static_cast<CopyBoundingSphereCallback*>(geometry->getComputeBoundingSphereCallback())->boundingSphere
                     = _boundingSphere;
-                geom.dirtyBound();
+                geometry->dirtyBound();
+            };
+            for (const osg::ref_ptr<osg::Geometry>& geometry : mGeometry)
+            {
+                copyBound(geometry);
             }
         }
     }
 
-    void RigGeometry::updateSkinToSkelMatrix(const osg::NodePath& nodePath)
+    osg::Matrixf RigGeometry::updateSkinToSkelMatrix(const osg::NodePath& nodePath)
     {
         if (mSkinToSkelMatrix)
             mSkinToSkelMatrix->makeIdentity();
         auto skeletonRoot = std::find(nodePath.begin(), nodePath.end(), mSkeleton);
         if (skeletonRoot == nodePath.end())
-            return;
+            return osg::Matrixf::identity();
         skeletonRoot++;
         auto skinRoot = nodePath.end();
         if (!mData->mRootBone.empty())
@@ -330,6 +383,14 @@ namespace SceneUtil
                 trans->computeWorldToLocalMatrix(*mSkinToSkelMatrix, nullptr);
             }
         }
+        if (mCpuSkinning)
+            return osg::Matrixf::identity();
+        osg::Matrix path;
+        path.makeIdentity();
+        for (auto it = skeletonRoot; it != nodePath.end(); ++it)
+            if (const osg::Transform* transform = (*it)->asTransform())
+                transform->computeLocalToWorldMatrix(path, nullptr);
+        return osg::Matrixf(path);
     }
 
     void RigGeometry::setBoneInfo(std::vector<BoneInfo>&& bones)
@@ -340,6 +401,30 @@ namespace SceneUtil
         mData->mBones = std::move(bones);
     }
 
+    namespace
+    {
+        constexpr std::size_t sMaxInfluences = 4;
+
+        // Four per vertex, as hardware skinning does.
+        RigGeometry::BoneWeights capInfluences(RigGeometry::BoneWeights weights)
+        {
+            std::erase_if(weights, [](const RigGeometry::BoneWeight& weight) { return weight.second <= 0.f; });
+            std::stable_sort(weights.begin(), weights.end(),
+                [](const RigGeometry::BoneWeight& lhs, const RigGeometry::BoneWeight& rhs) {
+                    return lhs.second > rhs.second;
+                });
+            if (weights.size() > sMaxInfluences)
+                weights.resize(sMaxInfluences);
+            float sum = 0.f;
+            for (const auto& [bone, weight] : weights)
+                sum += weight;
+            if (sum > 0.f)
+                for (auto& [bone, weight] : weights)
+                    weight /= sum;
+            return weights;
+        }
+    }
+
     void RigGeometry::setInfluences(const std::vector<BoneWeights>& influences)
     {
         if (!mData)
@@ -347,11 +432,15 @@ namespace SceneUtil
 
         std::map<BoneWeights, VertexList> influencesToVertices;
         for (size_t i = 0; i < influences.size(); i++)
-            influencesToVertices[influences[i]].emplace_back(static_cast<VertexList::value_type>(i));
+            influencesToVertices[capInfluences(influences[i])].emplace_back(static_cast<VertexList::value_type>(i));
         influencesToVertices.erase(BoneWeights());
 
         mData->mInfluences.reserve(influencesToVertices.size());
         mData->mInfluences.assign(influencesToVertices.begin(), influencesToVertices.end());
+        mData->mGroups.assign(influences.size(), std::numeric_limits<std::uint32_t>::max());
+        for (std::uint32_t group = 0; group < mData->mInfluences.size(); ++group)
+            for (const unsigned short vertex : mData->mInfluences[group].second)
+                mData->mGroups[vertex] = group;
     }
 
     void RigGeometry::setTransform(osg::Matrixf&& transform)
@@ -398,7 +487,12 @@ namespace SceneUtil
 
     void RigGeometry::accept(osg::PrimitiveFunctor& func) const
     {
-        getGeometry(mLastFrameNumber)->accept(func);
+        if (acceptQuery(func))
+            return;
+        if (osg::Geometry* geometry = getGeometry(mLastFrameNumber))
+            geometry->accept(func);
+        else if (mSourceGeometry != nullptr)
+            mSourceGeometry->accept(func);
     }
 
     osg::Geometry* RigGeometry::getGeometry(unsigned int frame) const
