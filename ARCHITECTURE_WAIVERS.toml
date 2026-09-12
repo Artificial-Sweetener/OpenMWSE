@@ -38,8 +38,8 @@ kind = "remediation"
 justification = "This file contains assessed mixed responsibility recorded by OMWSE-DEBT-002; the bounded waiver permits only the current source while the named extraction is completed."
 issue = "architecture:omwse-debt-002"
 review_by = 2027-03-12
-fingerprint = "sha256:2c8ffa5797658005d800b32548c4312704cf6e13dcdce386e0dd3eea15b1b06c"
-max_lines = 779
+fingerprint = "sha256:e323ebb9202b6ac99cea6e6f1e0ad4d88f17a114bc52bf4f353fea0b3cca5034"
+max_lines = 780
 next_limit = 500
 debt = "OMWSE-DEBT-002"
 
@@ -150,19 +150,17 @@ fingerprint = "sha256:72932196a3f4b31ce24240c3d6491ea5f794aa83115b21bac2ac73103f
 max_lines = 808
 
 [[waivers]]
-id = "OMWSE-REMEDIATION-005"
+id = "OMWSE-STRUCTURAL-027"
 area = "renderer"
 owner = "OpenMWSE rendering"
 rule = "STRUCT003"
 path = "apps/openmw/mwrender/renderingmanager.cpp"
-kind = "remediation"
-justification = "This file contains assessed mixed responsibility recorded by OMWSE-DEBT-005; the bounded waiver permits only the current source while the named extraction is completed."
-issue = "architecture:omwse-debt-005"
+kind = "structural"
+justification = "RenderingManager is the renderer composition root and scene-facing facade: subsystem construction, ordered frame advancement, scene mutation, settings propagation, and renderer queries all coordinate the same owned object graph. Atmosphere diagnostic policy and applied capture state now belong to a separate controller."
+issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:347926cd0fdda4f9798f7150eae79220099cc6bfbb54d88897736eafe63724d1"
-max_lines = 1622
-next_limit = 500
-debt = "OMWSE-DEBT-005"
+fingerprint = "sha256:d19c29f3af2aeaeb176b35a56db6b9ac7f6d7f69456dd9daa9eefc4630abe8c2"
+max_lines = 1590
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-008"

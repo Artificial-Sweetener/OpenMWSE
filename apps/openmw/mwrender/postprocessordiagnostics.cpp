@@ -5,6 +5,7 @@
 #include <components/debug/debuglog.hpp>
 #include <components/sceneutil/shadow.hpp>
 
+#include "atmospherediagnosticcontroller.hpp"
 #include "atmospherediagnostics.hpp"
 #include "renderframediagnostics.hpp"
 #include "renderingmanager.hpp"
@@ -73,37 +74,37 @@ namespace MWRender
                 break;
             case AtmosphereDiagnostics::ComparisonAction::BypassCloudSurfaceShadows:
                 SceneUtil::ShadowManager::instance().setDiagnosticShadowRenderingEnabled(true);
-                mRendering.setAtmosphereDiagnosticMode(7);
+                mRendering.atmosphereDiagnostics().setMode(7);
                 Log(Debug::Info) << "Bypassing cloud surface shadows for the production diagnostic frame";
                 break;
             case AtmosphereDiagnostics::ComparisonAction::BypassCoveragePreservation:
                 SceneUtil::ShadowManager::instance().setDiagnosticShadowRenderingEnabled(true);
-                mRendering.setAtmosphereDiagnosticMode(1);
+                mRendering.atmosphereDiagnostics().setMode(1);
                 Log(Debug::Info) << "Bypassing alpha mip-coverage preservation for the production diagnostic frame";
                 break;
             case AtmosphereDiagnostics::ComparisonAction::BypassCompatibilityFog:
-                mRendering.setAtmosphereDiagnosticMode(2);
+                mRendering.atmosphereDiagnostics().setMode(2);
                 Log(Debug::Info) << "Bypassing compatibility fog for the production diagnostic frame";
                 break;
             case AtmosphereDiagnostics::ComparisonAction::ShowFogVisibility:
-                mRendering.setAtmosphereDiagnosticMode(3);
+                mRendering.atmosphereDiagnostics().setMode(3);
                 Log(Debug::Info) << "Showing compatibility fog visibility for the production diagnostic frame";
                 break;
             case AtmosphereDiagnostics::ComparisonAction::ShowFogInScattering:
-                mRendering.setAtmosphereDiagnosticMode(4);
+                mRendering.atmosphereDiagnostics().setMode(4);
                 Log(Debug::Info) << "Showing compatibility fog in-scattering for the production diagnostic frame";
                 break;
             case AtmosphereDiagnostics::ComparisonAction::ShowPreFogRadiance:
-                mRendering.setAtmosphereDiagnosticMode(5);
+                mRendering.atmosphereDiagnostics().setMode(5);
                 Log(Debug::Info) << "Showing object pre-fog radiance for the production diagnostic frame";
                 break;
             case AtmosphereDiagnostics::ComparisonAction::ShowSampledSurfaceColor:
-                mRendering.setAtmosphereDiagnosticMode(6);
+                mRendering.atmosphereDiagnostics().setMode(6);
                 Log(Debug::Info) << "Showing object sampled surface color for the production diagnostic frame";
                 break;
             case AtmosphereDiagnostics::ComparisonAction::RestoreNormalRendering:
                 SceneUtil::ShadowManager::instance().setDiagnosticShadowRenderingEnabled(true);
-                mRendering.setAtmosphereDiagnosticMode(0);
+                mRendering.atmosphereDiagnostics().setMode(0);
                 Log(Debug::Info) << "Restored normal rendering after production diagnostics";
                 break;
             case AtmosphereDiagnostics::ComparisonAction::None:

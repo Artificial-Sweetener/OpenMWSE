@@ -24,6 +24,7 @@
 #include <limits>
 
 #include "mwgui/windowmanagerimp.hpp"
+#include "mwrender/atmospherediagnosticcontroller.hpp"
 #include "mwrender/camera.hpp"
 #include "mwrender/postprocessor.hpp"
 #include "mwrender/postprocessordiagnostics.hpp"
@@ -413,7 +414,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                 case Diagnostics::CommandType::TraceGameplay:
                 {
                     const MWRender::AtmosphereDiagnosticState& atmosphere
-                        = mWorld->getRenderingManager()->getAtmosphereDiagnosticState();
+                        = mWorld->getRenderingManager()->atmosphereDiagnostics().state();
                     const MWRender::AtmosphereVolumeState& volumes = atmosphere.mVolumes;
                     const auto& cloudTravel = mWorld->getRenderingManager()->getCloudAdvectionOffsetWorldUnits();
                     const auto atmosphereRuntime = indentDiagnosticYaml(mWorld->captureAtmosphereRuntimeState());
@@ -692,9 +693,9 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                         mWorld->setDiagnosticWeatherEffects(weatherEffects.mPrecipitation, weatherEffects.mLightning);
                         const Diagnostics::DiagnosticAtmosphereMedia media
                             = scenario.mMedia.value_or(Diagnostics::DiagnosticAtmosphereMedia{});
-                        mWorld->getRenderingManager()->setAtmosphereDiagnosticMedia(
+                        mWorld->getRenderingManager()->atmosphereDiagnostics().setMedia(
                             { media.mMainClouds, media.mLowClouds, media.mMist, media.mFog });
-                        mWorld->getRenderingManager()->setAtmosphereDiagnosticDistanceFogEnabled(
+                        mWorld->getRenderingManager()->atmosphereDiagnostics().setDistanceFogEnabled(
                             scenario.mDistanceFog.value_or(true));
                     }
                     catch (const std::exception& error)

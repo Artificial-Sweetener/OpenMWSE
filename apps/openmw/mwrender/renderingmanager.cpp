@@ -70,6 +70,7 @@
 #include "../mwbase/world.hpp"
 
 #include "actorspaths.hpp"
+#include "atmospherediagnosticcontroller.hpp"
 #include "camera.hpp"
 #include "effectmanager.hpp"
 #include "fogmanager.hpp"
@@ -361,6 +362,7 @@ namespace MWRender
             atmosphereNoiseTextureUnit + 2, atmosphereWeatherTexture, atmosphereNoiseTextureUnit + 3,
             mResourceSystem->getSceneManager()->getShaderManager().reserveGlobalTextureUnits(
                 Shader::ShaderManager::Slot::TexturedCloudOpacity, 2));
+        mAtmosphereDiagnostics = std::make_unique<AtmosphereDiagnosticController>(*mStateUpdater);
         sceneRoot->addUpdateCallback(mStateUpdater);
 
         mSharedUniformStateUpdater = new SceneUtil::SharedUniformStateUpdater(Settings::fog().mSkyBlendingStart);
@@ -804,11 +806,6 @@ namespace MWRender
         float fogStart = mFog->getFogStart(false);
         float fogEnd = mFog->getFogEnd(false);
         osg::Vec4f fogColor = mFog->getFogColor(false);
-        if (!mAtmosphereDiagnosticDistanceFogEnabled)
-        {
-            fogStart = std::max(mViewDistance * 100.f, 1000000.f);
-            fogEnd = fogStart * 2.f;
-        }
 
         float fogUnderwaterStart = mFog->getFogStart(true);
         float fogUnderwaterEnd = mFog->getFogEnd(true);
@@ -817,34 +814,11 @@ namespace MWRender
         bool isUnderwater = mWater->isUnderwater(mCamera->getPosition());
 
         mStateUpdater->setFogColor(fogColor);
-        mStateUpdater->setFogStart(fogStart);
-        mStateUpdater->setFogEnd(fogEnd);
         mStateUpdater->setUnderwaterFogStart(fogUnderwaterStart);
         mStateUpdater->setUnderwaterFogEnd(fogUnderwaterEnd);
         mStateUpdater->setUnderwaterFogColor(fogUnderwaterColor);
 
         const AtmosphereState& atmosphere = mSky->getAtmosphereState();
-        AtmosphereVolumeState diagnosticVolumes = atmosphere.mVolumes;
-        AtmosphereVolumeState outgoingCloudVolumes = atmosphere.mOutgoingCloudVolumes;
-        AtmosphereVolumeState incomingCloudVolumes = atmosphere.mIncomingCloudVolumes;
-        if (!Settings::shaders().mVolumetricClouds || !mAtmosphereDiagnosticMedia.mMainClouds)
-        {
-            diagnosticVolumes.mCloudDeckCoverage = 0.f;
-            diagnosticVolumes.mCloudDensity = 0.f;
-            outgoingCloudVolumes.mCloudDeckCoverage = 0.f;
-            outgoingCloudVolumes.mCloudDensity = 0.f;
-            incomingCloudVolumes.mCloudDeckCoverage = 0.f;
-            incomingCloudVolumes.mCloudDensity = 0.f;
-        }
-        if (!Settings::shaders().mVolumetricClouds || !mAtmosphereDiagnosticMedia.mLowClouds)
-        {
-            diagnosticVolumes.mLowCloudCoverage = 0.f;
-            diagnosticVolumes.mLowCloudDensity = 0.f;
-        }
-        if (!Settings::shaders().mAtmosphericScattering || !mAtmosphereDiagnosticMedia.mMist)
-            diagnosticVolumes.mMistDensity = 0.f;
-        if (!Settings::shaders().mAtmosphericScattering || !mAtmosphereDiagnosticMedia.mFog)
-            diagnosticVolumes.mFogDensity = 0.f;
         const CloudAdvectionState& cloudAdvection = mCloudAdvection.getState();
         const osg::Vec2f cloudFieldOffset = cloudAdvection.mOffsetWorldUnits;
         const bool atmosphereEnabled
@@ -871,6 +845,16 @@ namespace MWRender
         mPostProcessor->getStateUpdater()->setAtmosphereAppearance(Settings::shaders().mAtmosphereAppearance.get());
         const osg::Vec4f skyColor = mSky->getSkyColor();
         const osg::Vec3f scatteringSunDirection = getScatteringSunDirection(mSky->getSunDirection(), !mNight);
+        const AtmosphereDiagnosticFrame diagnosticFrame = mAtmosphereDiagnostics->resolveFrame(fogStart, fogEnd,
+            mNearClip, mViewDistance, atmosphereEnabled, Settings::shaders().mVolumetricClouds,
+            Settings::shaders().mAtmosphericScattering, atmosphere, scatteringSunDirection, cloudFieldOffset);
+        fogStart = diagnosticFrame.mFogStartWorldUnits;
+        fogEnd = diagnosticFrame.mFogEndWorldUnits;
+        mStateUpdater->setFogStart(fogStart);
+        mStateUpdater->setFogEnd(fogEnd);
+        const AtmosphereVolumeState& diagnosticVolumes = diagnosticFrame.mVolumes;
+        const AtmosphereVolumeState& outgoingCloudVolumes = diagnosticFrame.mOutgoingCloudVolumes;
+        const AtmosphereVolumeState& incomingCloudVolumes = diagnosticFrame.mIncomingCloudVolumes;
         const auto cloudParameters = [](const AtmosphereVolumeState& volumes) {
             return osg::Vec4f(volumes.mCloudDeckCoverage, volumes.mCloudDensity, volumes.mCloudBaseAltitudeWorldUnits,
                 volumes.mCloudThicknessWorldUnits);
@@ -883,8 +867,6 @@ namespace MWRender
             getCloudScenarioFieldPhase(outgoingCloudVolumes.mCloudScenarioIdentity),
             getCloudScenarioFieldPhase(incomingCloudVolumes.mCloudScenarioIdentity),
             atmosphere.mCloudScenarioTransition, atmosphere.mCloudScenarioTransition > 0.f ? 1.f : 0.f);
-        mAtmosphereDiagnosticState = { fogStart, fogEnd, mNearClip, mViewDistance, atmosphereEnabled, diagnosticVolumes,
-            scatteringSunDirection, atmosphere.mLighting, atmosphere.mSunDiscColor, cloudFieldOffset };
         const float atmosphereHistoryLightingWeight = mAtmosphereHistoryLighting.update(
             { atmosphere.mLighting.mSolarRadiance, atmosphere.mLighting.mSkyIrradiance,
                 atmosphere.mLighting.mGroundIrradiance, atmosphere.mInScattering, atmosphere.mOutScattering,
@@ -943,23 +925,6 @@ namespace MWRender
             atmosphereHistoryLightingWeight, atmosphere.mWeatherWeight, Settings::shaders().mAtmosphericQuality.get(),
             getAtmosphereVolumeResolutionScale(Settings::shaders().mAtmosphericQuality.get()), atmosphereEnabled);
         mPostProcessor->setUnderwaterFlag(isUnderwater);
-    }
-
-    void RenderingManager::setAtmosphereDiagnosticMode(int mode)
-    {
-        mStateUpdater->setAtmosphereDiagnosticMode(mode);
-    }
-
-    void RenderingManager::setAtmosphereDiagnosticMedia(const AtmosphereDiagnosticMedia& media)
-    {
-        mAtmosphereDiagnosticMedia = media;
-        invalidateAtmosphereHistory();
-    }
-
-    void RenderingManager::setAtmosphereDiagnosticDistanceFogEnabled(bool enabled)
-    {
-        mAtmosphereDiagnosticDistanceFogEnabled = enabled;
-        invalidateAtmosphereHistory();
     }
 
     void RenderingManager::updatePlayerPtr(const MWWorld::Ptr& ptr)

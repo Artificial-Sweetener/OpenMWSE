@@ -29,6 +29,7 @@
 #include <osgViewer/Viewer>
 
 #include "apps/openmw/mwrender/atmosphere.hpp"
+#include "apps/openmw/mwrender/atmospherediagnosticcontroller.hpp"
 #include "apps/openmw/mwrender/skyutil.hpp"
 
 #include <algorithm>
@@ -2200,5 +2201,42 @@ namespace MWRender
             std::runtime_error);
         EXPECT_EQ(terrain.mHeights, heights);
         EXPECT_EQ(terrain.mHeightBounds, osg::Vec2f(100.f, 100.f));
+    }
+
+    /// Apply diagnostic fog and medium masks without mutating the production atmosphere input.
+    TEST(MWRenderAtmosphereTest, atmosphereDiagnosticControllerOwnsIsolatedFramePolicy)
+    {
+        SceneUtil::StateUpdater stateUpdater;
+        MWRender::AtmosphereDiagnosticController diagnostics(stateUpdater);
+        MWRender::AtmosphereState atmosphere;
+        atmosphere.mVolumes.mCloudDeckCoverage = 0.7f;
+        atmosphere.mVolumes.mCloudDensity = 0.8f;
+        atmosphere.mVolumes.mLowCloudCoverage = 0.4f;
+        atmosphere.mVolumes.mLowCloudDensity = 0.5f;
+        atmosphere.mVolumes.mMistDensity = 0.2f;
+        atmosphere.mVolumes.mFogDensity = 0.3f;
+        atmosphere.mOutgoingCloudVolumes.mCloudDeckCoverage = 0.6f;
+        atmosphere.mOutgoingCloudVolumes.mCloudDensity = 0.65f;
+        atmosphere.mIncomingCloudVolumes.mCloudDeckCoverage = 0.9f;
+        atmosphere.mIncomingCloudVolumes.mCloudDensity = 0.95f;
+
+        diagnostics.setMedia({ false, false, false, false });
+        diagnostics.setDistanceFogEnabled(false);
+        const MWRender::AtmosphereDiagnosticFrame frame = diagnostics.resolveFrame(
+            100.f, 200.f, 1.f, 30000.f, true, true, true, atmosphere, { 0.f, 1.f, 0.f }, { 2.f, 3.f });
+
+        EXPECT_FLOAT_EQ(frame.mFogStartWorldUnits, 3000000.f);
+        EXPECT_FLOAT_EQ(frame.mFogEndWorldUnits, 6000000.f);
+        EXPECT_FLOAT_EQ(frame.mVolumes.mCloudDeckCoverage, 0.f);
+        EXPECT_FLOAT_EQ(frame.mVolumes.mCloudDensity, 0.f);
+        EXPECT_FLOAT_EQ(frame.mVolumes.mLowCloudCoverage, 0.f);
+        EXPECT_FLOAT_EQ(frame.mVolumes.mLowCloudDensity, 0.f);
+        EXPECT_FLOAT_EQ(frame.mVolumes.mMistDensity, 0.f);
+        EXPECT_FLOAT_EQ(frame.mVolumes.mFogDensity, 0.f);
+        EXPECT_FLOAT_EQ(frame.mOutgoingCloudVolumes.mCloudDensity, 0.f);
+        EXPECT_FLOAT_EQ(frame.mIncomingCloudVolumes.mCloudDensity, 0.f);
+        EXPECT_FLOAT_EQ(atmosphere.mVolumes.mCloudDensity, 0.8f);
+        EXPECT_EQ(diagnostics.state().mVolumes.mCloudDensity, frame.mVolumes.mCloudDensity);
+        EXPECT_EQ(diagnostics.state().mCloudFieldOffsetWorldUnits, osg::Vec2f(2.f, 3.f));
     }
 }

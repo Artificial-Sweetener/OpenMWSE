@@ -92,30 +92,7 @@ namespace Debug
 
 namespace MWRender
 {
-    /// Select the production atmosphere media retained by an isolated diagnostic scenario.
-    struct AtmosphereDiagnosticMedia
-    {
-        bool mMainClouds = true;
-        bool mLowClouds = true;
-        bool mMist = true;
-        bool mFog = true;
-    };
-
-    /// Captures the range, media, and canonical illumination sent to atmosphere shaders for the latest rendered frame.
-    struct AtmosphereDiagnosticState
-    {
-        float mFogStartWorldUnits = 0.f;
-        float mFogEndWorldUnits = 0.f;
-        float mNearClipWorldUnits = 0.f;
-        float mViewDistanceWorldUnits = 0.f;
-        bool mEnabled = false;
-        AtmosphereVolumeState mVolumes;
-        osg::Vec3f mSunDirection{ 0.f, 0.f, 1.f };
-        AtmosphereLightingState mLighting;
-        osg::Vec4f mSunDiscColor{ 1.f, 1.f, 1.f, 0.f };
-        osg::Vec2f mCloudFieldOffsetWorldUnits;
-    };
-
+    class AtmosphereDiagnosticController;
     class IntersectionVisitorWithIgnoreList;
 
     class EffectManager;
@@ -238,17 +215,8 @@ namespace MWRender
         /// Advance render subsystems and publish one canonical atmosphere and cloud-advection frame state.
         void update(float dt, bool paused);
 
-        /// Select the inert or capture-only compatibility-shader diagnostic output.
-        void setAtmosphereDiagnosticMode(int mode);
-
-        /// Apply an isolated diagnostic medium mask without mutating weather or content state.
-        void setAtmosphereDiagnosticMedia(const AtmosphereDiagnosticMedia& media);
-
-        /// Select distance-atmosphere fog for an isolated diagnostic without changing volumetric media.
-        void setAtmosphereDiagnosticDistanceFogEnabled(bool enabled);
-
-        /// Return the atmosphere values actually applied during the latest rendered frame.
-        const AtmosphereDiagnosticState& getAtmosphereDiagnosticState() const { return mAtmosphereDiagnosticState; }
+        /// Return the owner of isolated atmosphere diagnostic policy and frame state.
+        AtmosphereDiagnosticController& atmosphereDiagnostics() { return *mAtmosphereDiagnostics; }
 
         /// Capture wind travel independently of simulation time and the current weather's speed.
         const osg::Vec2d& getCloudAdvectionOffsetWorldUnits() const
@@ -410,9 +378,7 @@ namespace MWRender
         osg::ref_ptr<SceneUtil::PerViewUniformStateUpdater> mPerViewUniformStateUpdater;
         CloudAdvectionController mCloudAdvection;
         AtmosphereHistoryLightingController mAtmosphereHistoryLighting;
-        AtmosphereDiagnosticMedia mAtmosphereDiagnosticMedia;
-        AtmosphereDiagnosticState mAtmosphereDiagnosticState;
-        bool mAtmosphereDiagnosticDistanceFogEnabled = true;
+        std::unique_ptr<AtmosphereDiagnosticController> mAtmosphereDiagnostics;
 
         osg::Vec4f mAmbientColor;
         float mNightEyeFactor;
