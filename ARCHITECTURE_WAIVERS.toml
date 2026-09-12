@@ -399,21 +399,6 @@ fingerprint = "sha256:ca374fc86c7f08b0a2a1b28e2c6efd55eb9e84200eb4a5bcbb8157f701
 max_lines = 547
 
 [[waivers]]
-id = "OMWSE-REMEDIATION-007"
-area = "renderer"
-owner = "OpenMWSE rendering"
-rule = "STRUCT003"
-path = "files/shaders/lib/atmosphere/clouds.glsl"
-kind = "remediation"
-justification = "This file contains assessed mixed responsibility recorded by OMWSE-DEBT-007; the bounded waiver permits only the current source while the named extraction is completed."
-issue = "architecture:omwse-debt-007"
-review_by = 2027-03-12
-fingerprint = "sha256:f58038bbc9af175eacf3be32d04f22eb3a75ce13f51514a133c620f22eaff978"
-max_lines = 840
-next_limit = 500
-debt = "OMWSE-DEBT-007"
-
-[[waivers]]
 id = "OMWSE-STRUCTURAL-025"
 area = "diagnostics"
 owner = "OpenMWSE diagnostic bridge"

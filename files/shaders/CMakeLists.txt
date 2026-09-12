@@ -23,6 +23,10 @@ set(SHADER_FILES
     lib/atmosphere/cloud_shadow.glsl
     lib/atmosphere/cloud_shadow_column.glsl
     lib/atmosphere/cloud_shadow_column.h.glsl
+    lib/atmosphere/cloud_geometry.glsl
+    lib/atmosphere/cloud_density.glsl
+    lib/atmosphere/cloud_lighting.glsl
+    lib/atmosphere/cloud_raymarch.glsl
     lib/atmosphere/clouds.glsl
     lib/atmosphere/volume_lighting_vertex.glsl
     lib/atmosphere/participating_media.glsl

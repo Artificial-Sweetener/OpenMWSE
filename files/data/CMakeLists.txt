@@ -282,6 +282,14 @@ copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/volume
     "resources/vfs/shaders/lib/atmosphere/volume_lighting_vertex.glsl")
 copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/clouds.glsl" "${OPENMW_RESOURCES_ROOT}"
     "resources/vfs/shaders/lib/atmosphere/clouds.glsl")
+copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/cloud_geometry.glsl" "${OPENMW_RESOURCES_ROOT}"
+    "resources/vfs/shaders/lib/atmosphere/cloud_geometry.glsl")
+copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/cloud_density.glsl" "${OPENMW_RESOURCES_ROOT}"
+    "resources/vfs/shaders/lib/atmosphere/cloud_density.glsl")
+copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/cloud_lighting.glsl" "${OPENMW_RESOURCES_ROOT}"
+    "resources/vfs/shaders/lib/atmosphere/cloud_lighting.glsl")
+copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/cloud_raymarch.glsl" "${OPENMW_RESOURCES_ROOT}"
+    "resources/vfs/shaders/lib/atmosphere/cloud_raymarch.glsl")
 copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/participating_media.glsl" "${OPENMW_RESOURCES_ROOT}"
     "resources/vfs/shaders/lib/atmosphere/participating_media.glsl")
 copy_resource_file("${CMAKE_CURRENT_SOURCE_DIR}/../shaders/lib/atmosphere/cloud_field.glsl" "${OPENMW_RESOURCES_ROOT}"

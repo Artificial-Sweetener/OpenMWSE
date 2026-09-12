@@ -63,19 +63,3 @@ responsibilities = [
   "debug visualization and diagnostic instrumentation",
 ]
 next_extraction = "Extract debug visualization and diagnostic instrumentation from the runtime shadow-map technique."
-
-[[debts]]
-id = "OMWSE-DEBT-007"
-area = "renderer"
-owner = "OpenMWSE rendering"
-paths = ["files/shaders/lib/atmosphere/clouds.glsl"]
-fingerprint = "sha256:f58038bbc9af175eacf3be32d04f22eb3a75ce13f51514a133c620f22eaff978"
-issue = "architecture:omwse-debt-007"
-review_by = 2027-03-12
-responsibilities = [
-  "cloud geometry and terrain coupling",
-  "density and procedural noise shaping",
-  "optical transport and phase evaluation",
-  "raymarch integration and presentation",
-]
-next_extraction = "Split cloud field geometry, density, optical transport, and raymarch integration into authoritative shared shader includes."
