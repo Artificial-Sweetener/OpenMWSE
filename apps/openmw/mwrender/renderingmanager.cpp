@@ -248,10 +248,10 @@ namespace MWRender
 
         mShadowManager = std::make_unique<SceneUtil::ShadowManager>(sceneRoot, mRootNode, getOutdoorShadowCastingMask(),
             getIndoorShadowCastingMask(), Mask_Terrain | Mask_Object | Mask_Static, Settings::shadows(),
-            mResourceSystem->getSceneManager()->getShaderManager());
+            Settings::openmwseShadows(), mResourceSystem->getSceneManager()->getShaderManager());
 
         Shader::ShaderManager::DefineMap globalDefines = Shader::getDefaultDefines();
-        mAppliedShadowDefines = mShadowManager->getShadowDefines(Settings::shadows());
+        mAppliedShadowDefines = mShadowManager->getShadowDefines(Settings::shadows(), Settings::openmwseShadows());
         Shader::ShaderManager::DefineMap lightDefines = sceneRoot->getLightDefines();
 
         for (const auto& [key, value] : mAppliedShadowDefines)
@@ -860,7 +860,9 @@ namespace MWRender
         mPostProcessor->getStateUpdater()->setSunGlareEnabled(Settings::shaders().mSunGlare);
         mPostProcessor->getStateUpdater()->setCloudSunOcclusion(Settings::shaders().mCloudSunOcclusion);
         mStateUpdater->setAtmosphereFeatures(Settings::shaders().mAtmosphericScattering,
-            Settings::shaders().mVolumetricClouds, Settings::shadows().mCloudShadows, Settings::water().mReflectClouds);
+            Settings::shaders().mVolumetricClouds, Settings::shadows().mCloudShadows,
+            Settings::openmwseShadows().mFilteringQuality.get() == "legacy",
+            Settings::openmwseShadows().mCloudShadowIntensity, Settings::water().mReflectClouds);
         mPostProcessor->getStateUpdater()->setAtmosphereScatteringEnabled(Settings::shaders().mAtmosphericScattering);
         mPostProcessor->getStateUpdater()->setVolumetricCloudsEnabled(Settings::shaders().mVolumetricClouds);
         mStateUpdater->setAtmosphereAppearance(Settings::shaders().mAtmosphereAppearance.get());
@@ -1539,6 +1541,8 @@ namespace MWRender
         const bool atmosphereChanged
             = volumesChanged || std::any_of(changed.begin(), changed.end(), [](const auto& setting) {
                   return (setting.first == "Shadows" && setting.second == "cloud shadows")
+                      || (setting.first == "OpenMWSE Shadows" && setting.second == "cloud shadow intensity")
+                      || (setting.first == "OpenMWSE Shadows" && setting.second == "quality")
                       || (setting.first == "Water" && setting.second == "reflect clouds");
               });
         if (atmosphereChanged)
@@ -1650,11 +1654,12 @@ namespace MWRender
                 if (!lightManagersUpdated)
                     mViewer->getSceneData()->accept(visitor);
             }
-            else if (it->first == "Shadows" && it->second != "cloud shadows")
+            else if ((it->first == "Shadows" && it->second != "cloud shadows")
+                || (it->first == "OpenMWSE Shadows" && it->second == "quality"))
             {
                 mViewer->stopThreading();
-                mShadowManager->setupShadowSettings(
-                    Settings::shadows(), mResourceSystem->getSceneManager()->getShaderManager());
+                mShadowManager->setupShadowSettings(Settings::shadows(), Settings::openmwseShadows(),
+                    mResourceSystem->getSceneManager()->getShaderManager());
                 mShadowManager->setIndoorShadowCastingMask(getIndoorShadowCastingMask());
                 mShadowManager->setOutdoorShadowCastingMask(getOutdoorShadowCastingMask());
                 if (mSky->isEnabled())
@@ -1662,7 +1667,8 @@ namespace MWRender
                 else
                     mShadowManager->enableIndoorMode(Settings::shadows());
 
-                Shader::ShaderManager::DefineMap shadowDefines = mShadowManager->getShadowDefines(Settings::shadows());
+                Shader::ShaderManager::DefineMap shadowDefines
+                    = mShadowManager->getShadowDefines(Settings::shadows(), Settings::openmwseShadows());
                 if (mAppliedShadowDefines != shadowDefines)
                 {
                     auto defines = mResourceSystem->getSceneManager()->getShaderManager().getGlobalDefines();

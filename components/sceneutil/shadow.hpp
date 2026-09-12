@@ -17,6 +17,7 @@ namespace osgShadow
 
 namespace Settings
 {
+    struct OpenMWSEShadowsCategory;
     struct ShadowsCategory;
 }
 
@@ -35,11 +36,13 @@ namespace SceneUtil
 
         explicit ShadowManager(osg::ref_ptr<osg::Group> sceneRoot, osg::ref_ptr<osg::Group> rootNode,
             unsigned int outdoorShadowCastingMask, unsigned int indoorShadowCastingMask, unsigned int worldMask,
-            const Settings::ShadowsCategory& settings, Shader::ShaderManager& shaderManager);
+            const Settings::ShadowsCategory& settings, const Settings::OpenMWSEShadowsCategory& presentationSettings,
+            Shader::ShaderManager& shaderManager);
         ~ShadowManager();
 
         /// Apply shadow policy and texture dimensions while render threads are quiescent.
-        void setupShadowSettings(const Settings::ShadowsCategory& settings, Shader::ShaderManager& shaderManager);
+        void setupShadowSettings(const Settings::ShadowsCategory& settings,
+            const Settings::OpenMWSEShadowsCategory& presentationSettings, Shader::ShaderManager& shaderManager);
         void setOutdoorShadowCastingMask(unsigned int mask);
         void setIndoorShadowCastingMask(unsigned int mask);
 
@@ -47,7 +50,9 @@ namespace SceneUtil
 
         void disableShadowsForStateSet(osg::StateSet& stateset) const;
 
-        Shader::ShaderManager::DefineMap getShadowDefines(const Settings::ShadowsCategory& settings) const;
+        /// Return receiver-shader specializations for the shared and fork-owned shadow settings.
+        Shader::ShaderManager::DefineMap getShadowDefines(const Settings::ShadowsCategory& settings,
+            const Settings::OpenMWSEShadowsCategory& presentationSettings) const;
 
         void enableIndoorMode(const Settings::ShadowsCategory& settings);
 

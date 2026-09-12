@@ -28,6 +28,8 @@
 #include <osg/Depth>
 #include <osg/ClipControl>
 
+#include <algorithm>
+#include <cmath>
 #include <sstream>
 #include <vector>
 
@@ -947,6 +949,23 @@ void SceneUtil::MWShadowTechnique::setShadowFadeStart(float shadowFadeStart)
     }
 }
 
+void SceneUtil::MWShadowTechnique::setShadowMapTexelSize(const osg::Vec2f& texelSize)
+{
+    mShadowMapTexelSize = texelSize;
+
+    osg::ref_ptr<osg::Uniform> replacement = new osg::Uniform("shadowMapTexelSize", texelSize);
+    for (auto& list : _uniforms)
+        for (auto& uniform : list)
+            if (uniform->getName() == "shadowMapTexelSize")
+                uniform = replacement;
+}
+
+void SceneUtil::MWShadowTechnique::setFilteredProjection(bool enabled, double guardTexels)
+{
+    mFilteredProjection = enabled;
+    mShadowFilterGuardTexels = enabled ? std::max(guardTexels, 0.0) : 0.0;
+}
+
 void SceneUtil::MWShadowTechnique::enableFrontFaceCulling()
 {
     _useFrontFaceCulling = true;
@@ -1721,6 +1740,7 @@ void MWShadowTechnique::createShaders()
 
     osg::ref_ptr<osg::Uniform> maxDistance = new osg::Uniform("maximumShadowMapDistance", (float)settings->getMaximumShadowMapDistance());
     osg::ref_ptr<osg::Uniform> fadeStart = new osg::Uniform("shadowFadeStart", (float)_shadowFadeStart);
+    osg::ref_ptr<osg::Uniform> shadowMapTexelSize = new osg::Uniform("shadowMapTexelSize", mShadowMapTexelSize);
 
     for (auto& perFrameUniformList : _uniforms)
     {
@@ -1729,6 +1749,7 @@ void MWShadowTechnique::createShaders()
         perFrameUniformList.emplace_back(baseTextureUnit.get());
         perFrameUniformList.push_back(maxDistance);
         perFrameUniformList.push_back(fadeStart);
+        perFrameUniformList.push_back(shadowMapTexelSize);
     }
 
     for(unsigned int sm_i=0; sm_i<settings->getNumShadowMapsPerLight(); ++sm_i)
@@ -2723,6 +2744,16 @@ bool MWShadowTechnique::cropShadowCameraToMainFrustum(Frustum& frustum, osg::Cam
         // Retain the light-facing depth range for casters and crop only behind the receiver volume.
         zMin = -1.0;
         zMax = osg::minimum(1.0, convexHull.max(2));
+        if (mFilteredProjection)
+        {
+            const osg::Vec2s textureSize = getShadowedScene()->getShadowSettings()->getTextureSize();
+            const double xPadding = (xMax - xMin) * mShadowFilterGuardTexels / std::max<int>(textureSize.x(), 1);
+            const double yPadding = (yMax - yMin) * mShadowFilterGuardTexels / std::max<int>(textureSize.y(), 1);
+            xMin = osg::maximum(-1.0, xMin - xPadding);
+            xMax = osg::minimum(1.0, xMax + xPadding);
+            yMin = osg::maximum(-1.0, yMin - yPadding);
+            yMax = osg::minimum(1.0, yMax + yPadding);
+        }
     }
     else
         return false;
@@ -2742,6 +2773,21 @@ bool MWShadowTechnique::cropShadowCameraToMainFrustum(Frustum& frustum, osg::Cam
                                    2.0 / (zMax - zMin)));
 
         light_p.postMult(m);
+
+        if (mFilteredProjection)
+        {
+            const osg::Vec2s textureSize = getShadowedScene()->getShadowSettings()->getTextureSize();
+            const osg::Vec3d worldOriginInShadowSpace = osg::Vec3d() * light_v * light_p;
+            const double texelsPerClipX = std::max<int>(textureSize.x(), 1) * 0.5;
+            const double texelsPerClipY = std::max<int>(textureSize.y(), 1) * 0.5;
+            const double xOffset
+                = std::round(worldOriginInShadowSpace.x() * texelsPerClipX) / texelsPerClipX
+                - worldOriginInShadowSpace.x();
+            const double yOffset
+                = std::round(worldOriginInShadowSpace.y() * texelsPerClipY) / texelsPerClipY
+                - worldOriginInShadowSpace.y();
+            light_p.postMult(osg::Matrixd::translate(xOffset, yOffset, 0.0));
+        }
         camera->setProjectionMatrix(light_p);
 
         convexHull.transform(osg::Matrixd::inverse(oldLightP));

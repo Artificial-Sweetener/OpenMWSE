@@ -70,9 +70,11 @@ namespace MWGui
         MyGUI::Widget* mMinimumBrightnessScroll;
 
         MyGUI::Button* mCloudShadowsButton;
+        MyGUI::ScrollBar* mCloudShadowIntensity;
         MyGUI::Button* mReflectCloudsButton;
         MyGUI::ComboBox* mVolumetricQuality;
         MyGUI::ComboBox* mAtmosphereAppearance;
+        MyGUI::ComboBox* mShadowFilteringQuality;
         MyGUI::Button* mActorShadowsButton;
         MyGUI::Button* mPlayerShadowsButton;
         MyGUI::Button* mTerrainShadowsButton;
@@ -126,6 +128,8 @@ namespace MWGui
         void onWaterReflectionDetailChanged(MyGUI::ComboBox* sender, size_t pos);
         /// Apply the selected quality preset immediately through the standard settings notification path.
         void onVolumetricQualityChanged(MyGUI::ComboBox* sender, size_t pos);
+        /// Apply the selected geometry-shadow filtering policy immediately.
+        void onShadowFilteringQualityChanged(MyGUI::ComboBox* sender, size_t pos);
         /// Apply the selected atmospheric color response immediately.
         void onAtmosphereAppearanceChanged(MyGUI::ComboBox* sender, size_t pos);
         void onWaterRainRippleDetailChanged(MyGUI::ComboBox* sender, size_t pos);

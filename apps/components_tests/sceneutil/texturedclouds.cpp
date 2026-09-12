@@ -1,3 +1,4 @@
+#include <components/sceneutil/stateupdater.hpp>
 #include <components/sceneutil/texturedclouds.hpp>
 
 #include <osg/Geometry>
@@ -77,6 +78,8 @@ namespace
             {
                 EXPECT_EQ(opacity->data(x, y)[0], 64);
                 EXPECT_EQ(opacity->data(x, y)[1], 192);
+                EXPECT_NEAR(opacity->data(x, y)[2], 64, 1);
+                EXPECT_NEAR(opacity->data(x, y)[3], 192, 1);
             }
         clouds.setImages(outgoing, nullptr);
         EXPECT_EQ(clouds.getOpacity()->getImage()->data()[0], 64);
@@ -120,5 +123,46 @@ namespace
         EXPECT_EQ(clouds.getOpacity()->getImage()->s(), 1024);
         EXPECT_EQ(clouds.getOpacity()->getImage()->t(), 1);
         EXPECT_EQ(clouds.getOpacity()->getImage()->data()[0], 255);
+    }
+
+    /// Blur projected opacity across the periodic tile seam without altering authored source channels.
+    TEST(TexturedClouds, PrefiltersCloudShadowsAcrossPeriodicWeatherSeams)
+    {
+        auto weather = makeWeatherImage(64, 1, 0);
+        weather->data(0, 0)[3] = 255;
+        SceneUtil::TexturedClouds clouds;
+        clouds.setImages(weather, nullptr);
+        const osg::Image* opacity = clouds.getOpacity()->getImage();
+        ASSERT_NE(opacity, nullptr);
+        EXPECT_EQ(opacity->data(0, 0)[0], 255);
+        EXPECT_EQ(opacity->data(63, 0)[0], 0);
+        EXPECT_GT(opacity->data(63, 0)[2], 0);
+        EXPECT_EQ(opacity->data(63, 0)[2], opacity->data(1, 0)[2]);
+        EXPECT_GT(opacity->data(0, 0)[2], opacity->data(1, 0)[2]);
+        EXPECT_EQ(opacity->data(0, 0)[1], 0);
+        EXPECT_EQ(opacity->data(0, 0)[3], 0);
+    }
+
+    /// Publish a bounded cloud-shadow strength through the scene uniform contract.
+    TEST(TexturedClouds, PublishesBoundedCloudShadowIntensity)
+    {
+        SceneUtil::StateUpdater updater;
+        osg::ref_ptr<osg::StateSet> state = new osg::StateSet;
+        updater.setAtmosphereFeatures(true, true, true, true, 2.f, true);
+        updater.setDefaults(state);
+        updater.apply(state, nullptr);
+        float intensity = 0.f;
+        ASSERT_TRUE(state->getUniform("atmosphere.cloudShadowIntensity")->get(intensity));
+        EXPECT_FLOAT_EQ(intensity, 1.f);
+        bool legacy = false;
+        ASSERT_TRUE(state->getUniform("atmosphere.legacyCloudShadows")->get(legacy));
+        EXPECT_TRUE(legacy);
+
+        updater.setAtmosphereFeatures(true, true, true, false, -1.f, true);
+        updater.apply(state, nullptr);
+        ASSERT_TRUE(state->getUniform("atmosphere.cloudShadowIntensity")->get(intensity));
+        EXPECT_FLOAT_EQ(intensity, 0.f);
+        ASSERT_TRUE(state->getUniform("atmosphere.legacyCloudShadows")->get(legacy));
+        EXPECT_FALSE(legacy);
     }
 }

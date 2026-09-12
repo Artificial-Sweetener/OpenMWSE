@@ -6,12 +6,13 @@ Shadows Settings
    :type: boolean
    :range: true, false
    :default: true
-   :location: :bdg-info:`In Game > Settings > Video > Shadows`
+   :location: :bdg-info:`In Game > Settings > Options > Video > Shadows` :bdg-success:`Launcher > Settings > Visuals > Shadows`
 
    Allows textured or volumetric clouds to shade direct sunlight on terrain and objects independently of geometry
-   shadow maps. Textured shadows sample the active weather assets, including their transitions and animation, through
-   a continuous world-space projection at every terrain altitude. The visible textured sky retains its camera-relative
-   dome placement. Volumetric cloud self-shading remains active independently.
+   shadow maps. Natural textured shadows sample a softly prefiltered representation of the active weather assets, including
+   their transitions and animation, through a continuous world-space projection at every terrain altitude. The visible
+   textured sky retains its camera-relative dome placement. Volumetric cloud self-shading remains active independently.
+   Shadow quality and strength are controlled by :doc:`OpenMWSE Shadows <openmwseshadows>`.
    Applies immediately.
 
 .. omw-setting::
@@ -101,7 +102,8 @@ Shadows Settings
    the graphics hardware texture-size limit and the renderer's 32767-pixel dimension limit.
    Arrows adjust each dimension by 256 pixels; direct entry also accepts other whole-pixel sizes.
    Changes apply immediately and may briefly pause rendering while textures are resized.
-   Higher values improve detail but increase GPU memory use and may reduce performance.
+   Higher values improve detail but increase GPU memory use and may reduce performance. Geometry-shadow filtering can
+   improve edge quality at the same resolution; see :doc:`OpenMWSE Shadows <openmwseshadows>`.
    Increasing shadow distance spreads the available texture detail over a larger area.
 
 .. omw-setting::

@@ -138,6 +138,21 @@ namespace Settings
             EXPECT_EQ(Manager::getString("retained preference", "Another OpenMW Version"), "value");
         }
 
+        /// Preserve fork-owned shadow preferences while editing shared upstream shadow keys.
+        TEST_F(SettingsStartupTest, preservesNamespacedShadowPreferencesAcrossSharedSettingsSave)
+        {
+            std::ofstream(mDirectory / "settings.cfg")
+                << "[OpenMWSE Shadows]\nquality = legacy\ncloud shadow intensity = 0.35\n"
+                   "[Shadows]\nshadow map resolution = 2048\n";
+            ASSERT_NO_FATAL_FAILURE(load());
+            shadows().mShadowMapResolution.set(1024);
+            Manager::saveUser(mDirectory / "settings.cfg");
+            ASSERT_NO_FATAL_FAILURE(load());
+            EXPECT_EQ(openmwseShadows().mFilteringQuality.get(), "legacy");
+            EXPECT_FLOAT_EQ(openmwseShadows().mCloudShadowIntensity.get(), 0.35f);
+            EXPECT_EQ(shadows().mShadowMapResolution.get(), 1024);
+        }
+
         struct SettingsValuesTest : Test
         {
             CategorySettingValueMap mSavedDefaults = Manager::mDefaultSettings;
@@ -180,6 +195,19 @@ namespace Settings
             EXPECT_EQ(values.mShaders.mAtmosphericQuality.get(), 3);
             values.mShaders.mAtmosphericQuality.set(-1);
             EXPECT_EQ(values.mShaders.mAtmosphericQuality.get(), 0);
+        }
+
+        /// Keep fork shadow controls bounded and represented by stable human-readable values.
+        TEST_F(SettingsValuesTest, openmwseShadowControlsUseStableDefaultsAndSanitizers)
+        {
+            Index index;
+            Values values(index);
+            EXPECT_EQ(values.mOpenMWSEShadows.mFilteringQuality.get(), "medium");
+            EXPECT_FLOAT_EQ(values.mOpenMWSEShadows.mCloudShadowIntensity.get(), 1.f);
+            EXPECT_THROW(values.mOpenMWSEShadows.mFilteringQuality.set("invalid"), std::runtime_error);
+            values.mOpenMWSEShadows.mCloudShadowIntensity.set(2.f);
+            EXPECT_EQ(values.mOpenMWSEShadows.mFilteringQuality.get(), "medium");
+            EXPECT_FLOAT_EQ(values.mOpenMWSEShadows.mCloudShadowIntensity.get(), 1.f);
         }
 
         TEST_F(SettingsValuesTest, migrateBundledAtmosphereWithoutOverwritingExplicitChoices)

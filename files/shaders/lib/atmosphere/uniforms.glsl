@@ -16,6 +16,8 @@ struct Atmosphere
     bool cloudSunOcclusion;
     bool cloudsEnabled;
     bool cloudShadowsEnabled;
+    bool legacyCloudShadows;
+    float cloudShadowIntensity;
     bool cloudReflectionsEnabled;
     vec4 skyColor;
     vec3 inScattering;

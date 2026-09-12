@@ -14,6 +14,7 @@
 #include "categories/map.hpp"
 #include "categories/models.hpp"
 #include "categories/navigator.hpp"
+#include "categories/openmwseshadows.hpp"
 #include "categories/physics.hpp"
 #include "categories/postprocessing.hpp"
 #include "categories/saves.hpp"
@@ -56,6 +57,7 @@ namespace Settings
         WindowsCategory mWindows{ mIndex };
         NavigatorCategory mNavigator{ mIndex };
         ShadowsCategory mShadows{ mIndex };
+        OpenMWSEShadowsCategory mOpenMWSEShadows{ mIndex };
         PhysicsCategory mPhysics{ mIndex };
         ModelsCategory mModels{ mIndex };
         GroundcoverCategory mGroundcover{ mIndex };
@@ -182,6 +184,12 @@ namespace Settings
     inline ShadowsCategory& shadows()
     {
         return values().mShadows;
+    }
+
+    /// Return fork-owned shadow presentation settings kept separate from upstream configuration keys.
+    inline OpenMWSEShadowsCategory& openmwseShadows()
+    {
+        return values().mOpenMWSEShadows;
     }
 
     inline PhysicsCategory& physics()

@@ -963,6 +963,16 @@
                  </property>
                 </widget>
                </item>
+               <item row="2" column="1">
+                <widget class="QCheckBox" name="cloudShadowsCheckBox">
+                 <property name="toolTip">
+                  <string>Allow textured or volumetric clouds to cast diffuse shadows on the world independently of geometry shadow maps.</string>
+                 </property>
+                 <property name="text">
+                  <string>Enable Cloud Shadows</string>
+                 </property>
+                </widget>
+               </item>
                <item row="8" column="1">
                 <widget class="QDoubleSpinBox" name="fadeStartSpinBox">
                  <property name="enabled">
@@ -985,7 +995,46 @@
                  </property>
                 </widget>
                </item>
+               <item row="9" column="0">
+                <widget class="QLabel" name="shadowFilteringQualityLabel">
+                 <property name="toolTip">
+                  <string>Controls geometry filtering, cascade stability, and cloud-shadow presentation. Legacy (OpenMW) exactly preserves the original presentation.</string>
+                 </property>
+                 <property name="text">
+                  <string>Shadow Quality</string>
+                 </property>
+                </widget>
+               </item>
                <item row="9" column="1">
+                <widget class="QComboBox" name="shadowFilteringQualityComboBox">
+                 <item><property name="text"><string>Legacy (OpenMW)</string></property></item>
+                 <item><property name="text"><string>Low</string></property></item>
+                 <item><property name="text"><string>Medium</string></property></item>
+                 <item><property name="text"><string>High</string></property></item>
+                 <item><property name="text"><string>Ultra</string></property></item>
+                </widget>
+               </item>
+               <item row="10" column="0">
+                <widget class="QLabel" name="cloudShadowIntensityLabel">
+                 <property name="toolTip">
+                  <string>Scales natural cloud-shadow optical depth without changing visible cloud density. Legacy shadow quality preserves OpenMW's original response.</string>
+                 </property>
+                 <property name="text">
+                  <string>Cloud Shadow Intensity</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="10" column="1">
+                <widget class="QDoubleSpinBox" name="cloudShadowIntensitySpinBox">
+                 <property name="suffix"><string>%</string></property>
+                 <property name="decimals"><number>0</number></property>
+                 <property name="minimum"><double>0.000000000000000</double></property>
+                 <property name="maximum"><double>100.000000000000000</double></property>
+                 <property name="singleStep"><double>5.000000000000000</double></property>
+                 <property name="value"><double>100.000000000000000</double></property>
+                </widget>
+               </item>
+               <item row="11" column="1">
                 <spacer name="verticalSpacer_8">
                  <property name="orientation">
                   <enum>Qt::Vertical</enum>

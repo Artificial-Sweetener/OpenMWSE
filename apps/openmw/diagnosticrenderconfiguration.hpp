@@ -19,6 +19,7 @@ namespace OMW
         bool mAtmosphericScattering = false;
         bool mVolumetricClouds = false;
         bool mCloudShadows = false;
+        float mCloudShadowIntensity = 0.f;
         bool mReflectClouds = false;
         int mAtmosphericQuality = 0;
         int mAtmosphereAppearance = 0;
@@ -43,6 +44,7 @@ namespace OMW
         bool mTerrainShadows = false;
         bool mObjectShadows = false;
         bool mIndoorShadows = false;
+        std::string mShadowQuality;
     };
 
     /// Snapshot the effective render settings used by the current engine instance.

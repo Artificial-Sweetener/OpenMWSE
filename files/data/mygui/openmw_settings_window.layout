@@ -1097,7 +1097,11 @@
                     <Widget type="TabItem" name="ShadowsPage">
                         <Property key="Caption" value=" #{OMWEngine:Shadows} "/>
 
-                        <Widget type="VBox" position_real="0 0 1 1" align="Stretch">
+                        <Widget type="ScrollView" skin="MW_ScrollView" position_real="0 0 1 1" align="Stretch">
+                            <Property key="CanvasSize" value="352 530"/>
+                            <Property key="CanvasAlign" value="Left Top"/>
+                            <Property key="VisibleHScroll" value="false"/>
+                            <Widget type="VBox" position="0 0 352 530" align="Left Top">
                             <Widget type="HBox" align="Stretch">
                                 <UserString key="HStretch" value="true"/>
                                 <UserString key="VStretch" value="false"/>
@@ -1179,6 +1183,50 @@
                                     <UserString key="ToolTipLayout" value="TextToolTip"/>
                                     <UserString key="Caption_Text" value="#{OMWEngine:CloudShadowsTooltip}"/>
                                 </Widget>
+                            </Widget>
+
+                            <Widget type="TextBox" skin="NormalText" position="0 0 352 24" align="HStretch Top">
+                                <Property key="Caption" value="#{OMWEngine:ShadowFilteringQuality}"/>
+                                <UserString key="ToolTipType" value="Layout"/>
+                                <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                <UserString key="Caption_Text" value="#{OMWEngine:ShadowFilteringQualityTooltip}"/>
+                            </Widget>
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/>
+                                <UserString key="VStretch" value="false"/>
+                                <Widget type="ComboBox" skin="MW_ComboBox" position="0 0 200 24" align="Left Top" name="ShadowFilteringQuality">
+                                    <Property key="AddItem" value="#{OMWEngine:ShadowFilteringLegacy}"/>
+                                    <Property key="AddItem" value="#{OMWEngine:QualityLow}"/>
+                                    <Property key="AddItem" value="#{OMWEngine:QualityMedium}"/>
+                                    <Property key="AddItem" value="#{OMWEngine:QualityHigh}"/>
+                                    <Property key="AddItem" value="#{OMWEngine:QualityUltra}"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:ShadowFilteringQualityTooltip}"/>
+                                </Widget>
+                                <Widget type="Spacer"/>
+                            </Widget>
+
+                            <Widget type="Widget" position="0 0 352 18" align="HStretch Top">
+                                <UserString key="HStretch" value="true"/>
+                                <Widget type="TextBox" skin="NormalText" position_real="0 0 1 1" align="Stretch" name="CloudShadowIntensityText">
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:CloudShadowIntensityTooltip}"/>
+                                </Widget>
+                            </Widget>
+                            <Widget type="ScrollBar" skin="MW_HScroll" position="0 0 352 18" align="HStretch Top" name="CloudShadowIntensity">
+                                <Property key="Range" value="101"/>
+                                <Property key="Page" value="1"/>
+                                <Property key="WheelPage" value="5"/>
+                                <UserString key="SettingType" value="Slider"/>
+                                <UserString key="SettingCategory" value="OpenMWSE Shadows"/>
+                                <UserString key="SettingName" value="cloud shadow intensity"/>
+                                <UserString key="SettingValueType" value="Float"/>
+                                <UserString key="SettingMin" value="0"/>
+                                <UserString key="SettingMax" value="1"/>
+                                <UserString key="SettingLabelWidget" value="CloudShadowIntensityText"/>
+                                <UserString key="SettingLabelCaption" value="CloudShadowIntensityValue"/>
                             </Widget>
 
                             <Widget type="HBox" align="Stretch">
@@ -1335,6 +1383,7 @@
                                     <Property key="WordWrap" value="true"/>
                                 </Widget>
                             </Widget>
+                        </Widget>
                         </Widget>
                     </Widget>
                 </Widget>

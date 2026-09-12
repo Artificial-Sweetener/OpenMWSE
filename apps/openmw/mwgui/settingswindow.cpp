@@ -1,6 +1,8 @@
 #include "settingswindow.hpp"
 
+#include <algorithm>
 #include <array>
+#include <string>
 
 #include <unicode/locid.h>
 
@@ -74,6 +76,7 @@ namespace
 
     const std::string_view checkButtonType = "CheckButton";
     const std::string_view sliderType = "Slider";
+    constexpr std::array<std::string_view, 5> shadowFilteringQualities{ "legacy", "low", "medium", "high", "ultra" };
 
     std::string_view getSettingType(MyGUI::Widget* widget)
     {
@@ -291,9 +294,11 @@ namespace MWGui
         getWidget(mMinimumBrightnessText, "MinimumBrightnessText");
         getWidget(mMinimumBrightnessScroll, "MinimumBrightnessScroll");
         getWidget(mCloudShadowsButton, "CloudShadowsButton");
+        getWidget(mCloudShadowIntensity, "CloudShadowIntensity");
         getWidget(mReflectCloudsButton, "ReflectCloudsButton");
         getWidget(mVolumetricQuality, "VolumetricQuality");
         getWidget(mAtmosphereAppearance, "AtmosphereAppearance");
+        getWidget(mShadowFilteringQuality, "ShadowFilteringQuality");
         getWidget(mActorShadowsButton, "ActorShadowsButton");
         getWidget(mPlayerShadowsButton, "PlayerShadowsButton");
         getWidget(mTerrainShadowsButton, "TerrainShadowsButton");
@@ -332,6 +337,8 @@ namespace MWGui
             += MyGUI::newDelegate(this, &SettingsWindow::onWaterReflectionDetailChanged);
         mVolumetricQuality->eventComboChangePosition
             += MyGUI::newDelegate(this, &SettingsWindow::onVolumetricQualityChanged);
+        mShadowFilteringQuality->eventComboChangePosition
+            += MyGUI::newDelegate(this, &SettingsWindow::onShadowFilteringQualityChanged);
         mAtmosphereAppearance->eventComboChangePosition
             += MyGUI::newDelegate(this, &SettingsWindow::onAtmosphereAppearanceChanged);
         mWaterRainRippleDetail->eventComboChangePosition
@@ -572,6 +579,14 @@ namespace MWGui
         if (pos >= sender->getItemCount())
             return;
         Settings::shaders().mAtmosphericQuality.set(static_cast<int>(pos));
+        apply();
+    }
+
+    void SettingsWindow::onShadowFilteringQualityChanged(MyGUI::ComboBox* sender, size_t pos)
+    {
+        if (pos >= sender->getItemCount() || pos >= shadowFilteringQualities.size())
+            return;
+        Settings::openmwseShadows().mFilteringQuality.set(std::string(shadowFilteringQualities[pos]));
         apply();
     }
 
@@ -964,6 +979,13 @@ namespace MWGui
             clouds || Settings::shaders().mAtmosphericScattering || Settings::shaders().mGodrays);
         mAtmosphereAppearance->setIndexSelected(Settings::shaders().mAtmosphereAppearance.get());
         mAtmosphereAppearance->setEnabled(Settings::shaders().mAtmosphericScattering);
+
+        const auto quality = Settings::openmwseShadows().mFilteringQuality.get();
+        const auto qualityIt = std::find(shadowFilteringQualities.begin(), shadowFilteringQualities.end(), quality);
+        mShadowFilteringQuality->setIndexSelected(qualityIt == shadowFilteringQualities.end()
+                ? 2
+                : static_cast<size_t>(qualityIt - shadowFilteringQualities.begin()));
+        mCloudShadowIntensity->setEnabled(Settings::shadows().mCloudShadows && quality != "legacy");
     }
 
     void SettingsWindow::updateLightSettings()

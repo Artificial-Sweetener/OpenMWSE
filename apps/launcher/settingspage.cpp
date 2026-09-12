@@ -1,8 +1,10 @@
 #include "settingspage.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <string>
+#include <string_view>
 
 #include <QCompleter>
 #include <QDesktopServices>
@@ -297,6 +299,25 @@ bool Launcher::SettingsPage::loadSettings()
         loadSettingBool(Settings::shadows().mTerrainShadows, *terrainShadowsCheckBox);
         loadSettingBool(Settings::shadows().mObjectShadows, *objectShadowsCheckBox);
         loadSettingBool(Settings::shadows().mEnableIndoorShadows, *indoorShadowsCheckBox);
+        loadSettingBool(Settings::shadows().mCloudShadows, *cloudShadowsCheckBox);
+
+        static constexpr std::array<std::string_view, 5> shadowFilteringQualities{ "legacy", "low", "medium", "high",
+            "ultra" };
+        const auto shadowFilteringQuality = Settings::openmwseShadows().mFilteringQuality.get();
+        const auto quality
+            = std::find(shadowFilteringQualities.begin(), shadowFilteringQualities.end(), shadowFilteringQuality);
+        shadowFilteringQualityComboBox->setCurrentIndex(quality == shadowFilteringQualities.end()
+                ? 2
+                : static_cast<int>(quality - shadowFilteringQualities.begin()));
+        cloudShadowIntensitySpinBox->setValue(Settings::openmwseShadows().mCloudShadowIntensity * 100.0);
+        const auto updateCloudShadowIntensityAvailability = [this]() {
+            cloudShadowIntensitySpinBox->setEnabled(
+                cloudShadowsCheckBox->isChecked() && shadowFilteringQualityComboBox->currentIndex() != 0);
+        };
+        connect(cloudShadowsCheckBox, &QCheckBox::toggled, this, updateCloudShadowIntensityAvailability);
+        connect(shadowFilteringQualityComboBox, &QComboBox::currentIndexChanged, this,
+            updateCloudShadowIntensityAvailability);
+        updateCloudShadowIntensityAvailability();
 
         const auto& boundMethod = Settings::shadows().mComputeSceneBounds.get();
         if (boundMethod == "bounds")
@@ -601,7 +622,16 @@ void Launcher::SettingsPage::saveSettings()
         }
 
         Settings::shadows().mEnableIndoorShadows.set(indoorShadowsCheckBox->checkState() != Qt::Unchecked);
+        saveSettingBool(*cloudShadowsCheckBox, Settings::shadows().mCloudShadows);
         Settings::shadows().mShadowMapResolution.set(shadowResolutionComboBox->currentText().toInt());
+
+        static constexpr std::array<std::string_view, 5> shadowFilteringQualities{ "legacy", "low", "medium", "high",
+            "ultra" };
+        const auto filteringQualityIndex = std::clamp(shadowFilteringQualityComboBox->currentIndex(), 0, 4);
+        Settings::openmwseShadows().mFilteringQuality.set(
+            std::string(shadowFilteringQualities[static_cast<std::size_t>(filteringQualityIndex)]));
+        Settings::openmwseShadows().mCloudShadowIntensity.set(
+            static_cast<float>(cloudShadowIntensitySpinBox->value() / 100.0));
 
         auto index = shadowComputeSceneBoundsComboBox->currentIndex();
         if (index == 0)

@@ -1,7 +1,10 @@
 #include "shadow.hpp"
 
-#include <components/settings/shadowresolution.hpp>
+#include <array>
+#include <cstddef>
 #include <limits>
+#include <string_view>
+
 #include <osg/GLExtensions>
 #include <osg/GraphicsContext>
 
@@ -9,7 +12,9 @@
 #include <osgShadow/ShadowedScene>
 
 #include <components/misc/strings/algorithm.hpp>
+#include <components/settings/categories/openmwseshadows.hpp>
 #include <components/settings/categories/shadows.hpp>
+#include <components/settings/shadowresolution.hpp>
 #include <components/stereo/stereomanager.hpp>
 
 #include "mwshadowtechnique.hpp"
@@ -17,6 +22,30 @@
 namespace SceneUtil
 {
     using namespace osgShadow;
+
+    namespace
+    {
+        /// Convert the validated user-facing quality name into a compact shader specialization level.
+        int shadowFilteringQuality(std::string_view quality)
+        {
+            if (quality == "legacy")
+                return 0;
+            if (quality == "low")
+                return 1;
+            if (quality == "medium")
+                return 2;
+            if (quality == "high")
+                return 3;
+            return 4;
+        }
+
+        /// Return the maximum texel radius that must remain valid around filtered receivers.
+        double shadowFilterGuardTexels(int quality)
+        {
+            constexpr std::array<double, 5> guardTexels{ 0.0, 1.0, 1.5, 2.0, 2.5 };
+            return guardTexels[static_cast<std::size_t>(quality)];
+        }
+    }
 
     ShadowManager* ShadowManager::sInstance = nullptr;
 
@@ -45,8 +74,8 @@ namespace SceneUtil
         return found ? maximum : 0;
     }
 
-    void ShadowManager::setupShadowSettings(
-        const Settings::ShadowsCategory& settings, Shader::ShaderManager& shaderManager)
+    void ShadowManager::setupShadowSettings(const Settings::ShadowsCategory& settings,
+        const Settings::OpenMWSEShadowsCategory& presentationSettings, Shader::ShaderManager& shaderManager)
     {
         mEnableShadows = settings.mEnableShadows;
 
@@ -86,6 +115,9 @@ namespace SceneUtil
 
         const short mapres = static_cast<short>(settings.mShadowMapResolution);
         mShadowSettings->setTextureSize(osg::Vec2s(mapres, mapres));
+        mShadowTechnique->setShadowMapTexelSize(osg::Vec2f(1.f / mapres, 1.f / mapres));
+        const int filteringQuality = shadowFilteringQuality(presentationSettings.mFilteringQuality.get());
+        mShadowTechnique->setFilteredProjection(filteringQuality != 0, shadowFilterGuardTexels(filteringQuality));
 
         mShadowTechnique->setSplitPointUniformLogarithmicRatio(settings.mSplitPointUniformLogarithmicRatio);
         mShadowTechnique->setSplitPointDeltaBias(settings.mSplitPointBias);
@@ -143,11 +175,13 @@ namespace SceneUtil
         }
         stateset.addUniform(new osg::Uniform("maximumShadowMapDistance", 0.00001f));
         stateset.addUniform(new osg::Uniform("shadowFadeStart", 0.0f));
+        stateset.addUniform(new osg::Uniform("shadowMapTexelSize", osg::Vec2f(1.f, 1.f)));
     }
 
     ShadowManager::ShadowManager(osg::ref_ptr<osg::Group> sceneRoot, osg::ref_ptr<osg::Group> rootNode,
         unsigned int outdoorShadowCastingMask, unsigned int indoorShadowCastingMask, unsigned int worldMask,
-        const Settings::ShadowsCategory& settings, Shader::ShaderManager& shaderManager)
+        const Settings::ShadowsCategory& settings, const Settings::OpenMWSEShadowsCategory& presentationSettings,
+        Shader::ShaderManager& shaderManager)
         : mShadowedScene(new osgShadow::ShadowedScene)
         , mShadowTechnique(new MWShadowTechnique)
         , mOutdoorShadowCastingMask(outdoorShadowCastingMask)
@@ -166,7 +200,7 @@ namespace SceneUtil
         mShadowedScene->setNodeMask(sceneRoot->getNodeMask());
 
         mShadowSettings = mShadowedScene->getShadowSettings();
-        setupShadowSettings(settings, shaderManager);
+        setupShadowSettings(settings, presentationSettings, shaderManager);
 
         mShadowTechnique->setWorldMask(worldMask);
 
@@ -181,7 +215,8 @@ namespace SceneUtil
             Stereo::Manager::instance().setShadowTechnique(nullptr);
     }
 
-    Shader::ShaderManager::DefineMap ShadowManager::getShadowDefines(const Settings::ShadowsCategory& settings) const
+    Shader::ShaderManager::DefineMap ShadowManager::getShadowDefines(
+        const Settings::ShadowsCategory& settings, const Settings::OpenMWSEShadowsCategory& presentationSettings) const
     {
         if (!settings.mEnableShadows)
             return getShadowsDisabledDefines();
@@ -208,6 +243,9 @@ namespace SceneUtil
 
         definesWithShadows["limitShadowMapDistance"] = settings.mMaximumShadowMapDistance > 0 ? "1" : "0";
 
+        definesWithShadows["shadowFilteringQuality"]
+            = std::to_string(shadowFilteringQuality(presentationSettings.mFilteringQuality.get()));
+
         return definesWithShadows;
     }
 
@@ -228,6 +266,8 @@ namespace SceneUtil
         definesWithoutShadows["shadowNormalOffset"] = "0.0";
 
         definesWithoutShadows["limitShadowMapDistance"] = "0";
+
+        definesWithoutShadows["shadowFilteringQuality"] = "0";
 
         return definesWithoutShadows;
     }

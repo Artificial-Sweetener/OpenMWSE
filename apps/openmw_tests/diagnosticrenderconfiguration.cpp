@@ -19,6 +19,7 @@ namespace OMW
         configuration.mAtmosphericScattering = false;
         configuration.mVolumetricClouds = true;
         configuration.mCloudShadows = true;
+        configuration.mCloudShadowIntensity = 0.65f;
         configuration.mReflectClouds = false;
         configuration.mAtmosphereAppearance = 1;
         configuration.mGodrays = true;
@@ -40,6 +41,7 @@ namespace OMW
         configuration.mTerrainShadows = true;
         configuration.mObjectShadows = true;
         configuration.mIndoorShadows = true;
+        configuration.mShadowQuality = "high";
 
         const std::string serialized = serializeDiagnosticRenderConfiguration(configuration);
 
@@ -48,6 +50,7 @@ namespace OMW
         EXPECT_NE(serialized.find("atmospheric-scattering: false"), std::string::npos);
         EXPECT_NE(serialized.find("volumetric-clouds: true"), std::string::npos);
         EXPECT_NE(serialized.find("cloud-shadows: true"), std::string::npos);
+        EXPECT_NE(serialized.find("cloud-shadow-intensity: 0.65"), std::string::npos);
         EXPECT_NE(serialized.find("reflect-clouds: false"), std::string::npos);
         EXPECT_NE(serialized.find("atmosphere-appearance: 1"), std::string::npos);
         EXPECT_NE(serialized.find("godrays: true"), std::string::npos);
@@ -58,5 +61,6 @@ namespace OMW
         EXPECT_NE(serialized.find("scene-bounds: \"bounds\""), std::string::npos);
         EXPECT_NE(serialized.find("map-resolution: 16384"), std::string::npos);
         EXPECT_NE(serialized.find("object-casters: true"), std::string::npos);
+        EXPECT_NE(serialized.find("quality: \"high\""), std::string::npos);
     }
 }

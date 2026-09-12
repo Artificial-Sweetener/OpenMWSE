@@ -25,18 +25,29 @@ float openmwseTexturedCloudTransmission(float alpha)
     return clearFraction * clearFraction * clearFraction * clearFraction;
 }
 
-/// Project the weather opacity onto surfaces without changing the camera-relative visible dome.
-float openmwseTexturedCloudTransmittance(vec3 origin, vec3 direction)
+/// Project softly prefiltered weather opacity onto surfaces as bounded Beer transmission.
+float openmwseTexturedCloudTransmittance(vec3 origin, vec3 direction, bool legacyCloudShadows)
 {
     if (!openmwseTexturedCloudsEnabled)
         return 1.0;
     vec3 point = openmwseTexturedCloudShadowProjection(origin, direction);
+    if (legacyCloudShadows)
+    {
+        float outgoing = texture2D(openmwseTexturedCloudOpacity,
+            openmwseTexturedCloudShadowUv(point, openmwseTexturedCloudTransforms[0])).r;
+        float incoming = texture2D(openmwseTexturedCloudOpacity,
+            openmwseTexturedCloudShadowUv(point, openmwseTexturedCloudTransforms[1])).g;
+        return openmwseTexturedCloudTransmission(outgoing * openmwseTexturedCloudWeights.x)
+            * openmwseTexturedCloudTransmission(incoming * openmwseTexturedCloudWeights.y);
+    }
     float outgoing = texture2D(openmwseTexturedCloudOpacity,
-        openmwseTexturedCloudShadowUv(point, openmwseTexturedCloudTransforms[0])).r;
+        openmwseTexturedCloudShadowUv(point, openmwseTexturedCloudTransforms[0])).b;
     float incoming = texture2D(openmwseTexturedCloudOpacity,
-        openmwseTexturedCloudShadowUv(point, openmwseTexturedCloudTransforms[1])).g;
-    return openmwseTexturedCloudTransmission(outgoing * openmwseTexturedCloudWeights.x)
-        * openmwseTexturedCloudTransmission(incoming * openmwseTexturedCloudWeights.y);
+        openmwseTexturedCloudShadowUv(point, openmwseTexturedCloudTransforms[1])).a;
+    const float maximumOpticalDepth = 1.05;
+    float opticalDepth = maximumOpticalDepth * (outgoing * openmwseTexturedCloudWeights.x
+        + incoming * openmwseTexturedCloudWeights.y);
+    return exp(-opticalDepth);
 }
 
 /// Recover the loaded dome's authored UVs and vertex opacity in its unrotated local direction.

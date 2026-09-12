@@ -22,7 +22,7 @@ vec2 openmwseTexturedCloudShadowUv(vec3 point, vec4 transform);
 float openmwseTexturedCloudTransmission(float alpha);
 
 /// Project the weather opacity onto surfaces without changing the camera-relative visible dome.
-float openmwseTexturedCloudTransmittance(vec3 origin, vec3 direction);
+float openmwseTexturedCloudTransmittance(vec3 origin, vec3 direction, bool legacyCloudShadows);
 
 /// Recover the loaded dome's authored UVs and vertex opacity in its unrotated local direction.
 vec3 openmwseTexturedCloudDomeSample(vec3 direction, vec4 transform);

@@ -28,7 +28,9 @@ float openmwseCloudSunTransmittance(vec3 worldPosition)
 
     vec3 sunDirection = normalize(atmosphere.sunDirection);
     if (openmwseTexturedCloudsEnabled)
-        return sunDirection.z > 0.01 ? openmwseTexturedCloudTransmittance(worldPosition, sunDirection) : 1.0;
+        return sunDirection.z > 0.01
+            ? openmwseTexturedCloudTransmittance(worldPosition, sunDirection, atmosphere.legacyCloudShadows)
+            : 1.0;
     float incomingWeight = clamp(atmosphere.cloudScenarioParameters.z, 0.0, 1.0)
         * step(0.5, atmosphere.cloudScenarioParameters.w);
     float outgoingWeight = 1.0 - incomingWeight;
@@ -75,6 +77,12 @@ void openmwseApplyCloudLighting(vec3 worldPosition, inout vec3 diffuseLight, ino
         || (!openmwseTexturedCloudsEnabled && (!atmosphere.cloudsEnabled || !atmosphere.enabled)))
         return;
     float sunTransmittance = openmwseCloudSunTransmittance(worldPosition);
+    if (!atmosphere.legacyCloudShadows)
+    {
+        float horizonWeight = smoothstep(0.015, 0.08, normalize(atmosphere.sunDirection).z);
+        float opticalDepthScale = atmosphere.cloudShadowIntensity * horizonWeight;
+        sunTransmittance = pow(max(sunTransmittance, 0.25), opticalDepthScale);
+    }
     diffuseLight *= sunTransmittance;
     specularLight *= sunTransmittance;
 

@@ -22,6 +22,7 @@ namespace OMW
             .mAtmosphericScattering = Settings::shaders().mAtmosphericScattering,
             .mVolumetricClouds = Settings::shaders().mVolumetricClouds,
             .mCloudShadows = shadows.mCloudShadows,
+            .mCloudShadowIntensity = Settings::openmwseShadows().mCloudShadowIntensity,
             .mReflectClouds = Settings::water().mReflectClouds,
             .mAtmosphericQuality = Settings::shaders().mAtmosphericQuality,
             .mAtmosphereAppearance = Settings::shaders().mAtmosphereAppearance,
@@ -46,6 +47,7 @@ namespace OMW
             .mTerrainShadows = shadows.mTerrainShadows,
             .mObjectShadows = shadows.mObjectShadows,
             .mIndoorShadows = shadows.mEnableIndoorShadows,
+            .mShadowQuality = Settings::openmwseShadows().mFilteringQuality,
         };
     }
 
@@ -86,7 +88,9 @@ namespace OMW
                << "\n  player-caster: " << boolean(configuration.mPlayerShadows)
                << "\n  terrain-casters: " << boolean(configuration.mTerrainShadows)
                << "\n  object-casters: " << boolean(configuration.mObjectShadows)
-               << "\n  indoor: " << boolean(configuration.mIndoorShadows) << '\n';
+               << "\n  indoor: " << boolean(configuration.mIndoorShadows)
+               << "\nopenmwse-shadows:\n  quality: " << std::quoted(configuration.mShadowQuality)
+               << "\n  cloud-shadow-intensity: " << configuration.mCloudShadowIntensity << '\n';
         return output.str();
     }
 }

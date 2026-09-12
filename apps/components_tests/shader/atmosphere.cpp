@@ -164,6 +164,7 @@ namespace
         bool sunGlareEnabled = false;
         bool sunGlareAllowed = true;
         bool cloudSunOcclusion = true;
+        bool legacyCloudShadows = false;
         SceneUtil::TexturedCloudState texturedClouds;
         osg::ref_ptr<osg::Texture2D> sunGlareTexture;
         bool reverseZ = false;
@@ -748,7 +749,9 @@ void main()
                     source += R"glsl(
 void main()
 {
-    float transmission = openmwseTexturedCloudTransmittance(omw.eyePos.xyz, normalize(omw.eyeVec.xyz));
+    float transmission = openmwseTexturedCloudTransmittance(omw.eyePos.xyz, normalize(omw.eyeVec.xyz), )glsl";
+                    source += inputs.legacyCloudShadows ? "true" : "false";
+                    source += R"glsl();
     omw_FragColor = vec4(transmission);
     omw_FragColor1 = vec4(0.0);
 }
@@ -1910,6 +1913,8 @@ void main()
         state->addUniform(new osg::Uniform("atmosphere.scatteringEnabled", true));
         state->addUniform(new osg::Uniform("atmosphere.cloudsEnabled", true));
         state->addUniform(new osg::Uniform("atmosphere.cloudShadowsEnabled", true));
+        state->addUniform(new osg::Uniform("atmosphere.legacyCloudShadows", inputs.legacyCloudShadows));
+        state->addUniform(new osg::Uniform("atmosphere.cloudShadowIntensity", 1.f));
         state->addUniform(new osg::Uniform("atmosphere.cloudReflectionsEnabled", true));
         state->addUniform(new osg::Uniform("atmosphere.skyColor", inputs.skyColor));
         state->addUniform(new osg::Uniform("atmosphere.inScattering", inputs.inScattering));
@@ -2015,7 +2020,7 @@ void main()
                 "diffuseParallax", "emissiveMap", "envMap", "glossMap", "normalMap", "parallax", "particleOcclusion",
                 "reconstructNormalZ", "softParticles", "specularMap", "shadows_enabled", "simpleLighting",
                 "adjustCoverage", "alphaToCoverage", "alphaFunc", "useShadowDebugOverlay", "perspectiveShadowMaps",
-                "disableNormalOffsetShadows", "limitShadowMapDistance" })
+                "disableNormalOffsetShadows", "limitShadowMapDistance", "shadowFilteringQuality" })
             defines[std::string(name)] = "0";
         return defines;
     }
@@ -2627,6 +2632,7 @@ void main()
         context->close();
     }
 
+    /// The packaged technique must preserve the complete production pass graph while resolving every shared include.
     TEST(AtmosphereShaderTest, packagedNativeAtmosphereTechniqueResolvesEveryShaderInclude)
     {
         VFS::Manager vfs;
@@ -2638,7 +2644,7 @@ void main()
             "internal_atmosphere", 128, 128, false, true);
 
         ASSERT_TRUE(technique.compile()) << technique.getLastError();
-        EXPECT_EQ(technique.getPasses().size(), 5);
+        EXPECT_EQ(technique.getPasses().size(), 8);
         EXPECT_EQ(technique.getPasses().front()->getSecondaryTarget(), "AtmosphereVolumeMetadataRaw");
     }
 
@@ -6839,8 +6845,8 @@ void main()
             EXPECT_EQ(frame.mResolvedVolume.height, static_cast<int>(sceneHeight * volumeScale));
             EXPECT_EQ(frame.mMetadata.width, frame.mResolvedVolume.width);
             EXPECT_EQ(frame.mMetadata.height, frame.mResolvedVolume.height);
-            EXPECT_EQ(frame.mShafts.width, static_cast<int>(sceneWidth * volumeScale * 0.5f));
-            EXPECT_EQ(frame.mShafts.height, static_cast<int>(sceneHeight * volumeScale * 0.5f));
+            EXPECT_EQ(frame.mShafts.width, sceneWidth);
+            EXPECT_EQ(frame.mShafts.height, sceneHeight);
             EXPECT_EQ(frame.mComposite.width, sceneWidth);
             EXPECT_EQ(frame.mComposite.height, sceneHeight);
         }
@@ -8870,7 +8876,7 @@ void main()
         inputs.texturedClouds.mEnabled = true;
         inputs.texturedClouds.mWeights = { 1.f, 0.f };
         inputs.texturedClouds.mOpacity
-            = makeColorTexture(4, 4, [](int, int) { return osg::Vec4f(0.5f, 0.f, 0.f, 1.f); });
+            = makeColorTexture(4, 4, [](int, int) { return osg::Vec4f(0.5f, 0.f, 0.5f, 0.f); });
         for (const osg::Vec3f direction : { osg::Vec3f(0.2f, 0.3f, 1.f), osg::Vec3f(1.f, 0.f, 0.011f) })
         {
             inputs.viewDirection = direction;
@@ -8880,9 +8886,16 @@ void main()
                 inputs.eyePosition = { 30000.f, 24000.f, altitude };
                 const auto actual = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
                 ASSERT_EQ(actual.pixels.size(), 1u);
-                EXPECT_NEAR(actual.pixels[0].x(), 0.0625f, 0.00001f);
+                EXPECT_NEAR(actual.pixels[0].x(), std::exp(-0.525f), 0.00001f);
             }
         }
+
+        inputs.legacyCloudShadows = true;
+        inputs.viewDirection = { 0.2f, 0.3f, 1.f };
+        inputs.eyePosition = { 30000.f, 24000.f, 0.f };
+        const auto legacy = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_EQ(legacy.pixels.size(), 1u);
+        EXPECT_NEAR(legacy.pixels[0].x(), 0.0625f, 0.00001f);
     }
 
     /// The production textured cloud pass must preserve mesh UVs and vertex fade at ground and flying altitudes.

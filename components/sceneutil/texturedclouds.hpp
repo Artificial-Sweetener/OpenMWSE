@@ -12,7 +12,7 @@
 
 namespace SceneUtil
 {
-    /// Share weather opacity, authored dome mapping, and animation with sunlight and surface shaders.
+    /// Share authored and prefiltered weather opacity, dome mapping, and animation with lighting shaders.
     struct TexturedCloudState
     {
         osg::ref_ptr<osg::Texture2D> mOpacity;
@@ -23,7 +23,7 @@ namespace SceneUtil
         bool mEnabled = false;
     };
 
-    /// Cache an immutable two-channel opacity texture; weather transitions do not rebuild it every frame.
+    /// Cache immutable authored and prefiltered opacity channels; weather transitions do not rebuild them every frame.
     class TexturedClouds
     {
     public:

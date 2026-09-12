@@ -118,7 +118,8 @@ namespace SceneUtil
         void setAtmosphereTerrain(const AtmosphereTerrainGrid& terrain) { mAtmosphereTerrain = terrain; }
 
         /// Select atmospheric rendering features without changing the shared weather field.
-        void setAtmosphereFeatures(bool scattering, bool clouds, bool shadows, bool reflections);
+        void setAtmosphereFeatures(bool scattering, bool clouds, bool shadows, bool legacyCloudShadows,
+            float cloudShadowIntensity, bool reflections);
 
         /// Publish the authored cloud field without sharing mutable frame state.
         void setTexturedClouds(const TexturedCloudState& clouds) { mTexturedClouds = clouds; }
@@ -180,6 +181,8 @@ namespace SceneUtil
         int mAtmosphereAppearance = 0;
         bool mAtmosphereCloudsEnabled = true;
         bool mAtmosphereCloudShadowsEnabled = true;
+        bool mAtmosphereLegacyCloudShadows = false;
+        float mAtmosphereCloudShadowIntensity = 1.f;
         bool mAtmosphereCloudReflectionsEnabled = true;
         osg::Vec4f mAtmosphereSkyColor;
         osg::Vec3f mAtmosphereInScattering;

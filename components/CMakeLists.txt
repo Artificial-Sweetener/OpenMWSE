@@ -82,6 +82,7 @@ add_component_dir (settings
     categories/map
     categories/models
     categories/navigator
+    categories/openmwseshadows
     categories/physics
     categories/postprocessing
     categories/saves

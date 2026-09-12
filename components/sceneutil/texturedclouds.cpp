@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 #include <osg/Geometry>
 #include <osgUtil/IntersectionVisitor>
@@ -27,6 +28,95 @@ namespace SceneUtil
             };
             return std::lerp(std::lerp(alpha(x0, y0), alpha(x0 + 1, y0), fx),
                 std::lerp(alpha(x0, y0 + 1), alpha(x0 + 1, y0 + 1), fx), fy);
+        }
+
+        /// Return the box radius for a three-pass Gaussian approximation with a stable world-space footprint.
+        int cloudShadowBoxRadius(int textureExtent)
+        {
+            constexpr float tileSizeWorldUnits = 16000.f;
+            constexpr float softnessWorldUnits = 140.f;
+            const float sigma = std::max(textureExtent * softnessWorldUnits / tileSizeWorldUnits, 0.5f);
+            const float idealWidth = std::sqrt(4.f * sigma * sigma + 1.f);
+            const int minimumRadius = textureExtent > 1 ? 1 : 0;
+            return std::clamp(static_cast<int>(std::round((idealWidth - 1.f) * 0.5f)), minimumRadius, 32);
+        }
+
+        /// Apply one constant-time-per-texel periodic horizontal box pass to both weather layers.
+        void blurCloudShadowRows(
+            const std::vector<float>& source, std::vector<float>& destination, int width, int height, int radius)
+        {
+            for (int y = 0; y < height; ++y)
+                for (int layer = 0; layer < 2; ++layer)
+                {
+                    float sum = 0.f;
+                    for (int offset = -radius; offset <= radius; ++offset)
+                        sum += source[static_cast<std::size_t>((y * width + (offset + width) % width) * 2 + layer)];
+                    const float inverseWidth = 1.f / (radius * 2 + 1);
+                    for (int x = 0; x < width; ++x)
+                    {
+                        destination[static_cast<std::size_t>((y * width + x) * 2 + layer)] = sum * inverseWidth;
+                        const int removedX = (x - radius + width) % width;
+                        const int addedX = (x + radius + 1) % width;
+                        sum += source[static_cast<std::size_t>((y * width + addedX) * 2 + layer)]
+                            - source[static_cast<std::size_t>((y * width + removedX) * 2 + layer)];
+                    }
+                }
+        }
+
+        /// Apply one constant-time-per-texel periodic vertical box pass to both weather layers.
+        void blurCloudShadowColumns(
+            const std::vector<float>& source, std::vector<float>& destination, int width, int height, int radius)
+        {
+            for (int x = 0; x < width; ++x)
+                for (int layer = 0; layer < 2; ++layer)
+                {
+                    float sum = 0.f;
+                    for (int offset = -radius; offset <= radius; ++offset)
+                        sum += source[static_cast<std::size_t>((((offset + height) % height) * width + x) * 2 + layer)];
+                    const float inverseWidth = 1.f / (radius * 2 + 1);
+                    for (int y = 0; y < height; ++y)
+                    {
+                        destination[static_cast<std::size_t>((y * width + x) * 2 + layer)] = sum * inverseWidth;
+                        const int removedY = (y - radius + height) % height;
+                        const int addedY = (y + radius + 1) % height;
+                        sum += source[static_cast<std::size_t>((addedY * width + x) * 2 + layer)]
+                            - source[static_cast<std::size_t>((removedY * width + x) * 2 + layer)];
+                    }
+                }
+        }
+
+        /// Store wrap-aware prefiltered outgoing and incoming opacity in the unused blue and alpha channels.
+        void filterCloudShadowOpacity(osg::Image& opacity)
+        {
+            const int width = opacity.s();
+            const int height = opacity.t();
+            std::vector<float> filtered(static_cast<std::size_t>(width * height * 2));
+            std::vector<float> scratch(filtered.size());
+            for (int y = 0; y < height; ++y)
+                for (int x = 0; x < width; ++x)
+                    for (int layer = 0; layer < 2; ++layer)
+                        filtered[static_cast<std::size_t>((y * width + x) * 2 + layer)]
+                            = opacity.data(x, y)[layer] / 255.f;
+
+            constexpr int approximationPasses = 3;
+            for (int pass = 0; pass < approximationPasses; ++pass)
+            {
+                blurCloudShadowRows(filtered, scratch, width, height, cloudShadowBoxRadius(width));
+                filtered.swap(scratch);
+            }
+            for (int pass = 0; pass < approximationPasses; ++pass)
+            {
+                blurCloudShadowColumns(filtered, scratch, width, height, cloudShadowBoxRadius(height));
+                filtered.swap(scratch);
+            }
+
+            for (int y = 0; y < height; ++y)
+                for (int x = 0; x < width; ++x)
+                    for (int layer = 0; layer < 2; ++layer)
+                        opacity.data(x, y)[layer + 2] = static_cast<unsigned char>(
+                            std::clamp(filtered[static_cast<std::size_t>((y * width + x) * 2 + layer)], 0.f, 1.f)
+                                * 255.f
+                            + 0.5f);
         }
     }
 
@@ -117,8 +207,9 @@ namespace SceneUtil
                     pixel[layer] = static_cast<unsigned char>(std::clamp(alpha, 0.f, 1.f) * 255.f + 0.5f);
                 }
                 pixel[2] = 0;
-                pixel[3] = 255;
+                pixel[3] = 0;
             }
+        filterCloudShadowOpacity(*opacity);
         mOpacity = new osg::Texture2D(opacity);
         mOpacity->setName("Weather cloud opacity");
         mOpacity->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);

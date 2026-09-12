@@ -27,6 +27,7 @@
 #include <osg/Camera>
 #include <osg/MatrixTransform>
 #include <osg/PolygonOffset>
+#include <osg/Vec2f>
 
 #include <osgShadow/ShadowTechnique>
 
@@ -85,6 +86,12 @@ namespace SceneUtil {
         virtual void setMaximumShadowMapDistance(float distance);
 
         virtual void setShadowFadeStart(float shadowFadeStart);
+
+        /// Publish the reciprocal shadow-map dimensions used by receiver-side filters.
+        virtual void setShadowMapTexelSize(const osg::Vec2f& texelSize);
+
+        /// Select stable filtered projections and reserve their sampling footprint at cascade edges.
+        virtual void setFilteredProjection(bool enabled, double guardTexels);
 
         virtual void enableFrontFaceCulling();
 
@@ -312,6 +319,9 @@ namespace SceneUtil {
         bool                                    _useFrontFaceCulling = true;
 
         float                                   _shadowFadeStart = 0.0f;
+        osg::Vec2f                              mShadowMapTexelSize{ 1.f, 1.f };
+        bool                                    mFilteredProjection = false;
+        double                                  mShadowFilterGuardTexels = 0.0;
 
         unsigned int                            _worldMask = ~0u;
 

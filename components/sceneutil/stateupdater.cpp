@@ -1,5 +1,7 @@
 #include "stateupdater.hpp"
 
+#include <algorithm>
+
 #include <osg/Fog>
 #include <osg/PolygonMode>
 
@@ -209,6 +211,8 @@ namespace SceneUtil
         stateset->addUniform(new osg::Uniform("atmosphere.cloudSunOcclusion", mCloudSunOcclusion));
         stateset->addUniform(new osg::Uniform("atmosphere.cloudsEnabled", mAtmosphereCloudsEnabled));
         stateset->addUniform(new osg::Uniform("atmosphere.cloudShadowsEnabled", mAtmosphereCloudShadowsEnabled));
+        stateset->addUniform(new osg::Uniform("atmosphere.legacyCloudShadows", mAtmosphereLegacyCloudShadows));
+        stateset->addUniform(new osg::Uniform("atmosphere.cloudShadowIntensity", mAtmosphereCloudShadowIntensity));
         stateset->addUniform(
             new osg::Uniform("atmosphere.cloudReflectionsEnabled", mAtmosphereCloudReflectionsEnabled));
         stateset->addUniform(new osg::Uniform("atmosphere.enabled", mAtmosphereEnabled));
@@ -273,6 +277,8 @@ namespace SceneUtil
                 *stateset, mTexturedClouds, mTexturedCloudTextureUnit, mTexturedCloudTextureUnit + 1);
         stateset->getUniform("atmosphere.cloudsEnabled")->set(mAtmosphereCloudsEnabled);
         stateset->getUniform("atmosphere.cloudShadowsEnabled")->set(mAtmosphereCloudShadowsEnabled);
+        stateset->getUniform("atmosphere.legacyCloudShadows")->set(mAtmosphereLegacyCloudShadows);
+        stateset->getUniform("atmosphere.cloudShadowIntensity")->set(mAtmosphereCloudShadowIntensity);
         stateset->getUniform("atmosphere.cloudReflectionsEnabled")->set(mAtmosphereCloudReflectionsEnabled);
         stateset->getUniform("atmosphere.enabled")->set(mAtmosphereEnabled);
         stateset->getUniform("atmosphere.skyColor")->set(mAtmosphereSkyColor);
@@ -330,11 +336,14 @@ namespace SceneUtil
         mFogEnd = end;
     }
 
-    void StateUpdater::setAtmosphereFeatures(bool scattering, bool clouds, bool shadows, bool reflections)
+    void StateUpdater::setAtmosphereFeatures(bool scattering, bool clouds, bool shadows, bool legacyCloudShadows,
+        float cloudShadowIntensity, bool reflections)
     {
         mAtmosphereScatteringEnabled = scattering;
         mAtmosphereCloudsEnabled = clouds;
         mAtmosphereCloudShadowsEnabled = shadows;
+        mAtmosphereLegacyCloudShadows = legacyCloudShadows;
+        mAtmosphereCloudShadowIntensity = std::clamp(cloudShadowIntensity, 0.f, 1.f);
         mAtmosphereCloudReflectionsEnabled = reflections;
     }
 

@@ -1232,6 +1232,42 @@ Logs and settings changed through the launcher and in-game will be saved here.</
         <translation></translation>
     </message>
     <message>
+        <source>Allow textured or volumetric clouds to cast diffuse shadows on the world independently of geometry shadow maps.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Enable Cloud Shadows</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Legacy (OpenMW)</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Low</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Medium</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>High</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Ultra</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Cloud Shadow Intensity</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>%</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Due to limitations with Morrowind&apos;s data, only actors can cast shadows indoors, which some might feel is distracting.&lt;/p&gt;&lt;p&gt;Has no effect if actor/player shadows are not enabled.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</source>
         <translation></translation>
     </message>
@@ -1290,6 +1326,18 @@ Logs and settings changed through the launcher and in-game will be saved here.</
     <message>
         <source>In third-person view, use the camera as the sound listener instead of the player character.</source>
         <translation></translation>
+    </message>
+    <message>
+        <source>Controls geometry filtering, cascade stability, and cloud-shadow presentation. Legacy (OpenMW) exactly preserves the original presentation.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Shadow Quality</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Scales natural cloud-shadow optical depth without changing visible cloud density. Legacy shadow quality preserves OpenMW&apos;s original response.</source>
+        <translation type="unfinished"></translation>
     </message>
     <message>
         <source>Use the Camera as the Sound Listener</source>
