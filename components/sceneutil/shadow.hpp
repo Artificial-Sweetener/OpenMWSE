@@ -24,6 +24,8 @@ namespace Settings
 namespace SceneUtil
 {
     class MWShadowTechnique;
+
+    /// Own shadow-map policy, resources, shader specialization, and indoor/outdoor mode transitions.
     class ShadowManager
     {
     public:
@@ -34,15 +36,20 @@ namespace SceneUtil
         /// Return the common texture dimension limit of realized graphics contexts, or zero before discovery.
         static int getMaximumShadowMapResolution();
 
+        /// Return the active detailed plus optional distant cascade count.
+        int getEffectiveShadowMapCount() const;
+
+        /// Attach shadow rendering to the scene and reserve sampler capacity for the initial visible distance.
         explicit ShadowManager(osg::ref_ptr<osg::Group> sceneRoot, osg::ref_ptr<osg::Group> rootNode,
             unsigned int outdoorShadowCastingMask, unsigned int indoorShadowCastingMask, unsigned int worldMask,
             const Settings::ShadowsCategory& settings, const Settings::OpenMWSEShadowsCategory& presentationSettings,
-            Shader::ShaderManager& shaderManager);
+            float visibleDistance, Shader::ShaderManager& shaderManager);
         ~ShadowManager();
 
         /// Apply shadow policy and texture dimensions while render threads are quiescent.
         void setupShadowSettings(const Settings::ShadowsCategory& settings,
-            const Settings::OpenMWSEShadowsCategory& presentationSettings, Shader::ShaderManager& shaderManager);
+            const Settings::OpenMWSEShadowsCategory& presentationSettings, float visibleDistance,
+            Shader::ShaderManager& shaderManager);
         void setOutdoorShadowCastingMask(unsigned int mask);
         void setIndoorShadowCastingMask(unsigned int mask);
 
@@ -78,6 +85,7 @@ namespace SceneUtil
 
         unsigned int mOutdoorShadowCastingMask;
         unsigned int mIndoorShadowCastingMask;
+        int mReservedShadowMapCapacity = 0;
     };
 }
 

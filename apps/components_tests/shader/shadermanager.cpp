@@ -3,6 +3,7 @@
 #include <components/testing/util.hpp>
 
 #include <fstream>
+#include <stdexcept>
 
 #include <gtest/gtest.h>
 
@@ -230,5 +231,31 @@ namespace
         withShaderFile(content, [&](const std::filesystem::path& templateName) {
             EXPECT_FALSE(mManager.getShader(Files::pathToUnicodeString(templateName), mDefines));
         });
+    }
+
+    /// Grow one global sampler owner without leaking its old range or moving established owners.
+    TEST_F(ShaderManagerTest, growsGlobalTextureReservationWithoutLeakingUnits)
+    {
+        mManager.setMaxTextureUnits(32);
+        EXPECT_EQ(mManager.reserveGlobalTextureUnits(ShaderManager::Slot::ShadowMaps, 3), 29);
+        const int atmosphere = mManager.reserveGlobalTextureUnits(ShaderManager::Slot::AtmosphereNoise, 4);
+        EXPECT_EQ(atmosphere, 25);
+        EXPECT_EQ(mManager.getAvailableTextureUnits(), 25);
+        const int expandedShadows = mManager.reserveGlobalTextureUnits(ShaderManager::Slot::ShadowMaps, 8);
+        EXPECT_EQ(expandedShadows, 17);
+        EXPECT_EQ(mManager.getAvailableTextureUnits(), 20);
+        EXPECT_EQ(mManager.reserveGlobalTextureUnits(ShaderManager::Slot::AtmosphereNoise, 4), atmosphere);
+        EXPECT_EQ(mManager.reserveGlobalTextureUnits(ShaderManager::Slot::ShadowMaps, 3), expandedShadows);
+        EXPECT_EQ(mManager.getAvailableTextureUnits(), 20);
+    }
+
+    /// Reject invalid, exhausted, and fragmented global sampler requests deterministically.
+    TEST_F(ShaderManagerTest, rejectsInvalidGlobalTextureReservations)
+    {
+        mManager.setMaxTextureUnits(8);
+        EXPECT_THROW(mManager.reserveGlobalTextureUnits(ShaderManager::Slot::ShadowMaps, 0), std::invalid_argument);
+        EXPECT_EQ(mManager.reserveGlobalTextureUnits(ShaderManager::Slot::ShadowMaps, 3), 5);
+        EXPECT_EQ(mManager.reserveGlobalTextureUnits(ShaderManager::Slot::AtmosphereNoise, 2), 3);
+        EXPECT_THROW(mManager.reserveGlobalTextureUnits(ShaderManager::Slot::ShadowMaps, 6), std::runtime_error);
     }
 }

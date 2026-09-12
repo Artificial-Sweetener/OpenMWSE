@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <sstream>
 #include <string>
 
 namespace
@@ -60,6 +61,42 @@ void main()
         osg::ref_ptr<osg::Program> program = new osg::Program;
         program->addShader(new osg::Shader(osg::Shader::VERTEX, vertexSource));
         program->addShader(new osg::Shader(osg::Shader::FRAGMENT, fragmentSource));
+        program->compileGLObjects(state);
+        return program;
+    }
+
+    /// Compile the production coordinate include after expanding a representative shadow-map list.
+    osg::ref_ptr<osg::Program> compileShadowCoordinates(
+        Shader::ShaderManager& manager, osg::State& state, unsigned int shadowMapCount)
+    {
+        std::string shadowMapList;
+        for (unsigned int index = 0; index < shadowMapCount; ++index)
+        {
+            if (!shadowMapList.empty())
+                shadowMapList += ',';
+            shadowMapList += std::to_string(index);
+        }
+        const Shader::ShaderManager::DefineMap defines{ { "shadows_enabled", "1" },
+            { "shadow_texture_unit_list", shadowMapList }, { "perspectiveShadowMaps", "0" },
+            { "disableNormalOffsetShadows", "0" }, { "shadowNormalOffset", "1.0" }, { "shadowFilteringQuality", "3" } };
+        const auto processed = manager.getShader("compatibility/shadows_vertex.glsl", defines, osg::Shader::VERTEX);
+        std::string vertexSource = "#version 120\n" + processed->getShaderSource();
+        vertexSource += R"glsl(
+void main()
+{
+    vec4 viewPosition = gl_ModelViewMatrix * gl_Vertex;
+    setupShadowCoords(viewPosition, normalize(gl_NormalMatrix * gl_Normal));
+    gl_Position = gl_ProjectionMatrix * viewPosition;
+}
+)glsl";
+        std::ostringstream fragmentSource;
+        fragmentSource << "#version 120\n";
+        for (unsigned int index = 0; index < shadowMapCount; ++index)
+            fragmentSource << "varying vec4 shadowSpaceCoords" << index << ";\n";
+        fragmentSource << "void main() { gl_FragColor = vec4(1.0); }\n";
+        osg::ref_ptr<osg::Program> program = new osg::Program;
+        program->addShader(new osg::Shader(osg::Shader::VERTEX, vertexSource));
+        program->addShader(new osg::Shader(osg::Shader::FRAGMENT, fragmentSource.str()));
         program->compileGLObjects(state);
         return program;
     }
@@ -161,6 +198,33 @@ TEST(ShadowCastingShaderTest, ReceiverFilteringLevelsLinkInARealContext)
         SCOPED_TRACE(filteringQuality);
         const osg::ref_ptr<osg::Program> program
             = compileShadowReceiver(manager, *context->getState(), filteringQuality);
+        ASSERT_TRUE(program);
+        const osg::Program::PerContextProgram* linkedProgram = program->getPCP(*context->getState());
+        ASSERT_NE(linkedProgram, nullptr);
+        std::string informationLog;
+        linkedProgram->getInfoLog(informationLog);
+        EXPECT_TRUE(linkedProgram->isLinked()) << informationLog;
+    }
+
+    context->releaseContext();
+    context->close();
+}
+
+/// Production coordinate expansion must keep per-cascade declarations unique at normal and maximum counts.
+TEST(ShadowCastingShaderTest, MultipleCascadeCoordinatesLinkInARealContext)
+{
+    osg::ref_ptr<osg::GraphicsContext> context = SceneUtil::createOffscreenContext({ .mWidth = 32, .mHeight = 32 });
+    ASSERT_TRUE(context);
+    ASSERT_TRUE(context->realize());
+    ASSERT_TRUE(context->makeCurrent());
+
+    Shader::ShaderManager manager;
+    manager.setShaderPath(std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/shaders");
+    for (const unsigned int shadowMapCount : { 3u, 8u })
+    {
+        SCOPED_TRACE(shadowMapCount);
+        const osg::ref_ptr<osg::Program> program
+            = compileShadowCoordinates(manager, *context->getState(), shadowMapCount);
         ASSERT_TRUE(program);
         const osg::Program::PerContextProgram* linkedProgram = program->getPCP(*context->getState());
         ASSERT_NE(linkedProgram, nullptr);

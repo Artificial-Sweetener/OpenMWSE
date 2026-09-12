@@ -248,7 +248,8 @@ namespace MWRender
 
         mShadowManager = std::make_unique<SceneUtil::ShadowManager>(sceneRoot, mRootNode, getOutdoorShadowCastingMask(),
             getIndoorShadowCastingMask(), Mask_Terrain | Mask_Object | Mask_Static, Settings::shadows(),
-            Settings::openmwseShadows(), mResourceSystem->getSceneManager()->getShaderManager());
+            Settings::openmwseShadows(), Settings::camera().mViewingDistance,
+            mResourceSystem->getSceneManager()->getShaderManager());
 
         Shader::ShaderManager::DefineMap globalDefines = Shader::getDefaultDefines();
         mAppliedShadowDefines = mShadowManager->getShadowDefines(Settings::shadows(), Settings::openmwseShadows());
@@ -1559,6 +1560,7 @@ namespace MWRender
 
         // Only perform a projection matrix update once if a relevant setting is changed.
         bool updateProjection = false;
+        bool updateShadows = false;
 
         for (Settings::CategorySettingVector::const_iterator it = changed.begin(); it != changed.end(); ++it)
         {
@@ -1574,6 +1576,9 @@ namespace MWRender
             else if (it->first == "Camera" && it->second == "viewing distance")
             {
                 setViewDistance(Settings::camera().mViewingDistance);
+                updateShadows = updateShadows
+                    || (Settings::openmwseShadows().mDistantShadows
+                        && Settings::openmwseShadows().mFilteringQuality.get() != "legacy");
             }
             else if (it->first == "Groundcover" && it->second == "rendering distance")
             {
@@ -1655,31 +1660,11 @@ namespace MWRender
                     mViewer->getSceneData()->accept(visitor);
             }
             else if ((it->first == "Shadows" && it->second != "cloud shadows")
-                || (it->first == "OpenMWSE Shadows" && it->second == "quality"))
+                || (it->first == "OpenMWSE Shadows"
+                    && (it->second == "quality" || it->second == "distant shadows"
+                        || it->second == "distant shadow quality")))
             {
-                mViewer->stopThreading();
-                mShadowManager->setupShadowSettings(Settings::shadows(), Settings::openmwseShadows(),
-                    mResourceSystem->getSceneManager()->getShaderManager());
-                mShadowManager->setIndoorShadowCastingMask(getIndoorShadowCastingMask());
-                mShadowManager->setOutdoorShadowCastingMask(getOutdoorShadowCastingMask());
-                if (mSky->isEnabled())
-                    mShadowManager->enableOutdoorMode();
-                else
-                    mShadowManager->enableIndoorMode(Settings::shadows());
-
-                Shader::ShaderManager::DefineMap shadowDefines
-                    = mShadowManager->getShadowDefines(Settings::shadows(), Settings::openmwseShadows());
-                if (mAppliedShadowDefines != shadowDefines)
-                {
-                    auto defines = mResourceSystem->getSceneManager()->getShaderManager().getGlobalDefines();
-                    for (const auto& [key, value] : mAppliedShadowDefines)
-                        defines.erase(key);
-                    for (const auto& [key, value] : shadowDefines)
-                        defines[key] = value;
-                    mResourceSystem->getSceneManager()->getShaderManager().setGlobalDefines(defines);
-                    mAppliedShadowDefines = shadowDefines;
-                }
-                mViewer->startThreading();
+                updateShadows = true;
             }
             else if (it->first == "Post Processing" && it->second == "enabled")
             {
@@ -1692,6 +1677,33 @@ namespace MWRender
                         hud->setVisible(false);
                 }
             }
+        }
+
+        if (updateShadows)
+        {
+            mViewer->stopThreading();
+            mShadowManager->setupShadowSettings(Settings::shadows(), Settings::openmwseShadows(),
+                Settings::camera().mViewingDistance, mResourceSystem->getSceneManager()->getShaderManager());
+            mShadowManager->setIndoorShadowCastingMask(getIndoorShadowCastingMask());
+            mShadowManager->setOutdoorShadowCastingMask(getOutdoorShadowCastingMask());
+            if (mSky->isEnabled())
+                mShadowManager->enableOutdoorMode();
+            else
+                mShadowManager->enableIndoorMode(Settings::shadows());
+
+            Shader::ShaderManager::DefineMap shadowDefines
+                = mShadowManager->getShadowDefines(Settings::shadows(), Settings::openmwseShadows());
+            if (mAppliedShadowDefines != shadowDefines)
+            {
+                auto defines = mResourceSystem->getSceneManager()->getShaderManager().getGlobalDefines();
+                for (const auto& [key, value] : mAppliedShadowDefines)
+                    defines.erase(key);
+                for (const auto& [key, value] : shadowDefines)
+                    defines[key] = value;
+                mResourceSystem->getSceneManager()->getShaderManager().setGlobalDefines(defines);
+                mAppliedShadowDefines = shadowDefines;
+            }
+            mViewer->startThreading();
         }
 
         if (updateProjection)

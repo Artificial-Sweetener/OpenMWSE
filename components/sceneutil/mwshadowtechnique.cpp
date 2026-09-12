@@ -20,6 +20,7 @@
 #include "mwshadowtechnique.hpp"
 #include "diagnosticgputiming.hpp"
 #include "diagnosticshadowwork.hpp"
+#include "shadowcascade.hpp"
 
 #include <osgShadow/ShadowedScene>
 #include <osg/CullFace>
@@ -641,8 +642,13 @@ void MWShadowTechnique::ShadowData::updateTextureSize()
 {
     const ShadowSettings* settings = _viewDependentData->getViewDependentShadowMap()->getShadowedScene()->getShadowSettings();
 
-    const osg::Vec2s textureSize = settings->getDebugDraw() ? osg::Vec2s(512, 512) : settings->getTextureSize();
-    if (_texture->getTextureWidth() == textureSize.x() || _texture->getTextureHeight() == textureSize.y())
+    osg::Vec2s textureSize = settings->getDebugDraw() ? osg::Vec2s(512, 512) : settings->getTextureSize();
+    if (_stableCascade && _cascade.mDistant)
+    {
+        textureSize.x() = static_cast<short>(std::max<int>(textureSize.x() / _cascade.mResolutionDivisor, 128));
+        textureSize.y() = static_cast<short>(std::max<int>(textureSize.y() / _cascade.mResolutionDivisor, 128));
+    }
+    if (_texture->getTextureWidth() == textureSize.x() && _texture->getTextureHeight() == textureSize.y())
         return;
 
     _texture->setTextureSize(textureSize.x(), textureSize.y());
@@ -651,160 +657,6 @@ void MWShadowTechnique::ShadowData::updateTextureSize()
 
     _camera->setViewport(0, 0, textureSize.x(), textureSize.y());
 }
-
-///////////////////////////////////////////////////////////////////////////////////////////////
-//
-// Frustum
-//
-MWShadowTechnique::Frustum::Frustum(osgUtil::CullVisitor* cv, double minZNear, double maxZFar):
-    useCustomClipSpace(false),
-    corners(8),
-    faces(6),
-    edges(12)
-{
-    projectionMatrix = *(cv->getProjectionMatrix());
-    modelViewMatrix = *(cv->getModelViewMatrix());
-
-    OSG_INFO<<"Projection matrix "<<projectionMatrix<<std::endl;
-
-    if (cv->getComputeNearFarMode()!=osg::CullSettings::DO_NOT_COMPUTE_NEAR_FAR)
-    {
-        osg::Matrix::value_type zNear = osg::maximum<osg::Matrix::value_type>(cv->getCalculatedNearPlane(),minZNear);
-        osg::Matrix::value_type zFar = osg::minimum<osg::Matrix::value_type>(cv->getCalculatedFarPlane(),maxZFar);
-        if (zFar < 0)
-            zFar = minZNear;
-        zNear = std::min(zNear, zFar);
-
-        cv->clampProjectionMatrix(projectionMatrix, zNear, zFar);
-
-        OSG_INFO<<"zNear = "<<zNear<<", zFar = "<<zFar<<std::endl;
-        OSG_INFO<<"Projection matrix after clamping "<<projectionMatrix<<std::endl;
-    }
-}
-
-void SceneUtil::MWShadowTechnique::Frustum::setCustomClipSpace(const osg::BoundingBoxd& clipCornersOverride)
-{
-    useCustomClipSpace = true;
-    customClipSpace = clipCornersOverride;
-}
-
-void SceneUtil::MWShadowTechnique::Frustum::init()
-{
-    osg::Matrixd clipToWorld;
-    clipToWorld.invert(modelViewMatrix * projectionMatrix);
-
-    if (useCustomClipSpace)
-    {
-        corners.clear();
-        // Add corners in the same order OSG expects them
-        for (int i : {0, 1, 5, 4, 2, 3, 7, 6})
-        {
-            corners.push_back(customClipSpace.corner(i));
-        }
-    }
-    else
-    {
-        corners[0].set(-1.0, -1.0, -1.0);
-        corners[1].set(1.0, -1.0, -1.0);
-        corners[2].set(1.0, -1.0, 1.0);
-        corners[3].set(-1.0, -1.0, 1.0);
-        corners[4].set(-1.0, 1.0, -1.0);
-        corners[5].set(1.0, 1.0, -1.0);
-        corners[6].set(1.0, 1.0, 1.0);
-        corners[7].set(-1.0, 1.0, 1.0);
-    }
-
-    // transform frustum corners from clipspace to world coords, and compute center
-    for(Vertices::iterator itr = corners.begin();
-        itr != corners.end();
-        ++itr)
-    {
-        *itr = (*itr) * clipToWorld;
-
-        OSG_INFO<<"   corner "<<*itr<<std::endl;
-    }
-
-    // compute eye point
-    eye = osg::Vec3d(0.0,0.0,0.0) * osg::Matrix::inverse(modelViewMatrix);
-
-    // compute center and the frustumCenterLine
-    centerNearPlane = (corners[0]+corners[1]+corners[5]+corners[4])*0.25;
-    centerFarPlane = (corners[3]+corners[2]+corners[6]+corners[7])*0.25;
-    center = (centerNearPlane+centerFarPlane)*0.5;
-    frustumCenterLine = centerFarPlane-centerNearPlane;
-    frustumCenterLine.normalize();
-
-    OSG_INFO<<"   center "<<center<<std::endl;
-
-    faces[0].push_back(0);
-    faces[0].push_back(3);
-    faces[0].push_back(7);
-    faces[0].push_back(4);
-
-    faces[1].push_back(1);
-    faces[1].push_back(5);
-    faces[1].push_back(6);
-    faces[1].push_back(2);
-
-    faces[2].push_back(0);
-    faces[2].push_back(1);
-    faces[2].push_back(2);
-    faces[2].push_back(3);
-
-    faces[3].push_back(4);
-    faces[3].push_back(7);
-    faces[3].push_back(6);
-    faces[3].push_back(5);
-
-    faces[4].push_back(0);
-    faces[4].push_back(4);
-    faces[4].push_back(5);
-    faces[4].push_back(1);
-
-    faces[5].push_back(2);
-    faces[5].push_back(6);
-    faces[5].push_back(7);
-    faces[5].push_back(3);
-
-    edges[0].push_back(0); edges[0].push_back(1); // corner points on edge
-    edges[0].push_back(2); edges[0].push_back(4); // faces on edge
-
-    edges[1].push_back(1); edges[1].push_back(2); // corner points on edge
-    edges[1].push_back(2); edges[1].push_back(1); // faces on edge
-
-    edges[2].push_back(2); edges[2].push_back(3); // corner points on edge
-    edges[2].push_back(2); edges[2].push_back(5); // faces on edge
-
-    edges[3].push_back(3); edges[3].push_back(0); // corner points on edge
-    edges[3].push_back(2); edges[3].push_back(0); // faces on edge
-
-
-    edges[4].push_back(0); edges[4].push_back(4); // corner points on edge
-    edges[4].push_back(0); edges[4].push_back(4); // faces on edge
-
-    edges[5].push_back(1); edges[5].push_back(5); // corner points on edge
-    edges[5].push_back(4); edges[5].push_back(1); // faces on edge
-
-    edges[6].push_back(2); edges[6].push_back(6); // corner points on edge
-    edges[6].push_back(1); edges[6].push_back(5); // faces on edge
-
-    edges[7].push_back(3); edges[7].push_back(7); // corner points on edge
-    edges[7].push_back(5); edges[7].push_back(0); // faces on edge
-
-
-    edges[8].push_back(4); edges[8].push_back(5); // corner points on edge
-    edges[8].push_back(3); edges[8].push_back(4); // faces on edge
-
-    edges[9].push_back(5); edges[9].push_back(6); // corner points on edge
-    edges[9].push_back(3); edges[9].push_back(1); // faces on edge
-
-    edges[10].push_back(6);edges[10].push_back(7); // corner points on edge
-    edges[10].push_back(3);edges[10].push_back(5); // faces on edge
-
-    edges[11].push_back(7); edges[11].push_back(4); // corner points on edge
-    edges[11].push_back(3); edges[11].push_back(0); // faces on edge
-}
-
 
 ///////////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -844,6 +696,7 @@ MWShadowTechnique::MWShadowTechnique():
 
 MWShadowTechnique::MWShadowTechnique(const MWShadowTechnique& vdsm, const osg::CopyOp& copyop):
     ShadowTechnique(vdsm,copyop)
+    , mCascadePlanSettings(vdsm.mCascadePlanSettings)
     , _castingPrograms(vdsm._castingPrograms)
     , _opaqueCastingProgram(vdsm._opaqueCastingProgram)
 {
@@ -960,10 +813,34 @@ void SceneUtil::MWShadowTechnique::setShadowMapTexelSize(const osg::Vec2f& texel
                 uniform = replacement;
 }
 
+void SceneUtil::MWShadowTechnique::setShadowTextureUnits(
+    unsigned int baseTextureUnit, unsigned int shadowMapCount)
+{
+    for (auto& uniforms : _uniforms)
+    {
+        std::erase_if(uniforms, [](const osg::ref_ptr<osg::Uniform>& uniform) {
+            return uniform->getName().starts_with("shadowTexture");
+        });
+        for (unsigned int index = 0; index < shadowMapCount; ++index)
+            uniforms.emplace_back(
+                new osg::Uniform(("shadowTexture" + std::to_string(index)).c_str(),
+                    static_cast<int>(baseTextureUnit + index)));
+    }
+}
+
 void SceneUtil::MWShadowTechnique::setFilteredProjection(bool enabled, double guardTexels)
 {
     mFilteredProjection = enabled;
     mShadowFilterGuardTexels = enabled ? std::max(guardTexels, 0.0) : 0.0;
+    mStabilizeAlphaTestedCasters = enabled;
+    if (_shadowCastingStateSet)
+        if (osg::Uniform* uniform = _shadowCastingStateSet->getUniform("stabilizeShadowCoverage"))
+            uniform->set(mStabilizeAlphaTestedCasters);
+}
+
+void SceneUtil::MWShadowTechnique::setCascadePlanSettings(const ShadowCascadePlanSettings& settings)
+{
+    mCascadePlanSettings = settings;
 }
 
 void SceneUtil::MWShadowTechnique::enableFrontFaceCulling()
@@ -1062,6 +939,12 @@ void SceneUtil::MWShadowTechnique::copyShadowMap(osgUtil::CullVisitor& cv, ViewD
         lhs_sd->_textureUnit = rhs_sd->_textureUnit;
         lhs_sd->_texture = rhs_sd->_texture;
         lhs_sd->_sm_i = rhs_sd->_sm_i;
+        lhs_sd->_cascade = rhs_sd->_cascade;
+        lhs_sd->_stableCascade = rhs_sd->_stableCascade;
+        lhs_sd->_worldUnitsPerTexel = rhs_sd->_worldUnitsPerTexel;
+        lhs_sd->_filterRadiusScale = rhs_sd->_filterRadiusScale;
+        lhs_sd->_normalOffsetScale = rhs_sd->_normalOffsetScale;
+        lhs_sd->_lightDirection = rhs_sd->_lightDirection;
         sdl.push_back(lhs_sd);
     }
 
@@ -1083,7 +966,7 @@ void SceneUtil::MWShadowTechnique::copyShadowStateSettings(osgUtil::CullVisitor&
     for (const auto& sd : vdd->getShadowDataList())
     {
         assignValidRegionSettings(cv, sd->_camera, sd->_sm_i, vdd->_uniforms[cv.getTraversalNumber()%2]);
-        assignShadowStateSettings(cv, sd->_camera, sd->_sm_i, vdd->_uniforms[cv.getTraversalNumber()%2]);
+        assignShadowStateSettings(cv, *sd, vdd->_uniforms[cv.getTraversalNumber()%2]);
     }
 }
 
@@ -1204,7 +1087,7 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
     // Workaround for absurdly huge viewing distances where OSG would otherwise push the near plane out.
     cv.setNearFarRatio(minZNear / maxZFar);
 
-    Frustum frustum(&cv, minZNear, maxZFar);
+    ShadowFrustum frustum(cv, minZNear, maxZFar);
     if (_customFrustumCallback)
     {
         OSG_INFO << "Calling custom frustum callback" << std::endl;
@@ -1234,11 +1117,11 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
         }
     }
 
-    frustum.init();
+    frustum.initialize();
     if (_debugHud)
     {
         osg::ref_ptr<osg::Vec3Array> vertexArray = new osg::Vec3Array();
-        for (osg::Vec3d &vertex : frustum.corners)
+        for (osg::Vec3d &vertex : frustum.mCorners)
             vertexArray->push_back((osg::Vec3)vertex);
         _debugHud->setFrustumVertices(vertexArray, cv.getTraversalNumber());
     }
@@ -1258,7 +1141,7 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
     // return compute near far mode back to it's original settings
     cv.setComputeNearFarMode(cachedNearFarMode);
 
-    OSG_INFO<<"frustum.eye="<<frustum.eye<<", frustum.centerNearPlane, "<<frustum.centerNearPlane<<" distance = "<<(frustum.eye-frustum.centerNearPlane).length()<<std::endl;
+    OSG_INFO<<"frustum.eye="<<frustum.mEye<<", frustum.centerNearPlane, "<<frustum.mCenterNearPlane<<" distance = "<<(frustum.mEye-frustum.mCenterNearPlane).length()<<std::endl;
 
 
     // 2. select active light sources
@@ -1288,10 +1171,12 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
 
         // 3.1 compute light space polytope
         //
-        osg::Polytope polytope = computeLightViewFrustumPolytope(frustum, pl);
+        osg::Polytope polytope;
+        if (!mFilteredProjection || !pl.directionalLight)
+            polytope = computeLightViewFrustumPolytope(frustum, pl);
 
         // if polytope is empty then no rendering.
-        if (polytope.empty())
+        if ((!mFilteredProjection || !pl.directionalLight) && polytope.empty())
         {
             OSG_NOTICE<<"Polytope empty no shadow to render"<<std::endl;
             continue;
@@ -1387,8 +1272,8 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
 
         if (numShadowMapsPerLight>1)
         {
-            osg::Vec3d eye_v = frustum.eye * viewMatrix;
-            osg::Vec3d center_v = frustum.center * viewMatrix;
+            osg::Vec3d eye_v = frustum.mEye * viewMatrix;
+            osg::Vec3d center_v = frustum.mCenter * viewMatrix;
             osg::Vec3d viewdir_v = center_v-eye_v; viewdir_v.normalize();
             osg::Vec3d lightdir(0.0,0.0,-1.0);
 
@@ -1421,6 +1306,32 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
 
         const bool debug = settings->getDebugDraw();
 
+        std::vector<ShadowCascade> cascadePlan;
+        if (mFilteredProjection)
+        {
+            double stableNear = std::max(frustum.mCameraNearDistance, 0.005);
+            double stableDetailedFar
+                = std::min(mCascadePlanSettings.mDetailedDistance, frustum.mCameraFarDistance);
+            double stableVisibleFar
+                = std::min(mCascadePlanSettings.mVisibleDistance, frustum.mCameraFarDistance);
+            if (!std::isfinite(stableDetailedFar) || stableDetailedFar <= stableNear)
+            {
+                stableNear = std::max(std::min(reducedNear, reducedFar * 0.5), 0.005);
+                stableDetailedFar = reducedFar;
+                stableVisibleFar = reducedFar;
+            }
+            ShadowCascadePlanSettings runtimeSettings = mCascadePlanSettings;
+            runtimeSettings.mNearDistance = stableNear;
+            runtimeSettings.mDetailedDistance = stableDetailedFar;
+            runtimeSettings.mVisibleDistance = runtimeSettings.mExtendToVisibleDistance
+                ? std::max(stableDetailedFar, mCascadePlanSettings.mVisibleDistance)
+                : std::max(stableDetailedFar, stableVisibleFar);
+            runtimeSettings.mMaximumCascadeCount = numShadowMapsPerLight;
+            cascadePlan = makeShadowCascadePlan(runtimeSettings);
+        }
+
+        double referenceWorldUnitsPerTexel = 0.0;
+
         // 4. For each light/shadow map
         for (unsigned int sm_i=0; sm_i<numShadowMapsPerLight; ++sm_i)
         {
@@ -1436,9 +1347,6 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
                 OSG_INFO<<"Taking ShadowData from from of previous_sdl"<<std::endl;
                 sd = previous_sdl.front();
                 previous_sdl.erase(previous_sdl.begin());
-
-                if (!debug)
-                    sd->updateTextureSize();
             }
 
             osg::ref_ptr<osg::Camera> camera = sd->_camera;
@@ -1458,16 +1366,26 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
             else
                 camera->setCullingMode(camera->getCullingMode() & ~osg::CullSettings::CLUSTER_CULLING);
 
-            // transform polytope in model coords into light spaces eye coords.
+            double cascadeNear = reducedNear;
+            double cascadeFar = reducedFar;
+            if (mFilteredProjection)
+            {
+                cascadeNear = cascadePlan[sm_i].mRenderNearDistance;
+                cascadeFar = cascadePlan[sm_i].mRenderFarDistance;
+            }
+
+            osg::Polytope cascadePolytope = polytope;
+            if (mFilteredProjection && pl.directionalLight)
+            {
+                const auto receiverCorners = frustum.sliceCorners(cascadeNear, cascadeFar);
+                cascadePolytope = makeDirectionalShadowCullVolume(receiverCorners, pl.lightDir);
+            }
             osg::Matrixd invertModelView;
             invertModelView.invert(camera->getViewMatrix());
-
-            osg::Polytope local_polytope(polytope);
+            osg::Polytope local_polytope(cascadePolytope);
             local_polytope.transformProvidingInverse(invertModelView);
 
-            double cascaseNear = reducedNear;
-            double cascadeFar = reducedFar;
-            if (numShadowMapsPerLight>1)
+            if (!mFilteredProjection && numShadowMapsPerLight>1)
             {
                 // compute the start and end range in non-dimensional coords
 #if 0
@@ -1494,10 +1412,10 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
                     double ciLog = n * pow(f / n, i / m);
                     double ciUniform = n + (f - n) * i / m;
                     double ci = _splitPointUniformLogRatio * ciLog + (1.0 - _splitPointUniformLogRatio) * ciUniform + _splitPointDeltaBias;
-                    cascaseNear = ci;
+                    cascadeNear = ci;
 
                     // work out where this is in light space
-                    osg::Vec3d worldSpacePos = frustum.eye + frustum.frustumCenterLine * ci;
+                    osg::Vec3d worldSpacePos = frustum.mEye + frustum.mCenterLine * ci;
                     osg::Vec3d lightSpacePos = worldSpacePos * viewMatrix * projectionMatrix;
                     r_start = lightSpacePos.y();
                 }
@@ -1513,7 +1431,7 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
                     cascadeFar = ci;
                     
                     // work out where this is in light space
-                    osg::Vec3d worldSpacePos = frustum.eye + frustum.frustumCenterLine * ci;
+                    osg::Vec3d worldSpacePos = frustum.mEye + frustum.mCenterLine * ci;
                     osg::Vec3d lightSpacePos = worldSpacePos * viewMatrix * projectionMatrix;
                     r_end = lightSpacePos.y();
                 }
@@ -1574,16 +1492,50 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
                 }
             }
 
+            sd->_sm_i = sm_i;
+            sd->_stableCascade = mFilteredProjection;
+            if (mFilteredProjection)
+                sd->_cascade = cascadePlan[sm_i];
+            if (sd->_stableCascade && sd->_cascade.mDistant)
+            {
+                camera->setSmallFeatureCullingPixelSize(sd->_cascade.mMinimumCasterPixels);
+                camera->setCullingMode(camera->getCullingMode() | osg::CullSettings::SMALL_FEATURE_CULLING);
+            }
+            else
+                camera->setCullingMode(camera->getCullingMode() & ~osg::CullSettings::SMALL_FEATURE_CULLING);
+            if (!debug)
+                sd->updateTextureSize();
+
             std::vector<osg::Plane> extraPlanes;
             if (settings->getMultipleShadowMapHint() == ShadowSettings::CASCADED)
             {
-                cropShadowCameraToMainFrustum(frustum, camera, cascaseNear, cascadeFar, extraPlanes);
+                cropShadowCameraToMainFrustum(frustum, camera, cascadeNear, cascadeFar, extraPlanes,
+                    sd->_stableCascade ? &sd->_worldUnitsPerTexel : nullptr);
                 for (const auto& plane : extraPlanes)
                     local_polytope.getPlaneList().push_back(plane);
                 local_polytope.setupMask();
             }
             else
                 cropShadowCameraToMainFrustum(frustum, camera, reducedNear, reducedFar, extraPlanes);
+
+            if (sd->_stableCascade)
+            {
+                if (std::isfinite(sd->_worldUnitsPerTexel) && sd->_worldUnitsPerTexel > 0.0)
+                {
+                    if (referenceWorldUnitsPerTexel == 0.0)
+                        referenceWorldUnitsPerTexel = sd->_worldUnitsPerTexel;
+                    const ShadowCascadeSampling sampling
+                        = makeShadowCascadeSampling(referenceWorldUnitsPerTexel, sd->_worldUnitsPerTexel);
+                    sd->_filterRadiusScale = sampling.mFilterRadiusScale;
+                    sd->_normalOffsetScale = sampling.mNormalOffsetScale;
+                }
+                else
+                {
+                    sd->_filterRadiusScale = 1.f;
+                    sd->_normalOffsetScale = 1.f;
+                }
+                sd->_lightDirection = pl.lightDir;
+            }
 
             osg::ref_ptr<VDSMCameraCullCallback> vdsmCallback = new VDSMCameraCullCallback(this, local_polytope);
             camera->setCullCallback(vdsmCallback.get());
@@ -1593,7 +1545,10 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
 
             cv.pushStateSet(_shadowCastingStateSet.get());
 
-            cullShadowCastingScene(&cv, camera.get());
+            const unsigned int distantWorldTraversalMask = _worldMask | _shadowedScene->getNodeMask();
+            const unsigned int casterTraversalMask = makeShadowCasterTraversalMask(settings->getCastsShadowTraversalMask(),
+                distantWorldTraversalMask, sd->_stableCascade && sd->_cascade.mDistant);
+            cullShadowCastingScene(&cv, camera.get(), casterTraversalMask);
 
             cv.popStateSet();
 
@@ -1602,7 +1557,7 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
                 assignValidRegionSettings(cv, camera, sm_i, vddUniforms);
 
                 if (settings->getMultipleShadowMapHint() == ShadowSettings::CASCADED)
-                    adjustPerspectiveShadowMapCameraSettings(vdsmCallback->getRenderStage(), frustum, pl, camera.get(), cascaseNear, cascadeFar);
+                    adjustPerspectiveShadowMapCameraSettings(vdsmCallback->getRenderStage(), frustum, pl, camera.get(), cascadeNear, cascadeFar);
                 else
                     adjustPerspectiveShadowMapCameraSettings(vdsmCallback->getRenderStage(), frustum, pl, camera.get(), reducedNear, reducedFar);
                 if (vdsmCallback->getProjectionMatrix())
@@ -1613,16 +1568,13 @@ void MWShadowTechnique::cull(osgUtil::CullVisitor& cv)
  
             // 4.4 compute main scene graph TexGen + uniform settings + setup state
             //
-            {
-                assignShadowStateSettings(cv, camera, sm_i, vddUniforms);
-            }
+            assignShadowStateSettings(cv, *sd, vddUniforms);
 
             // mark the light as one that has active shadows and requires shaders
             pl.textureUnits.push_back(textureUnit);
 
             // pass on shadow data to ShadowDataList
             sd->_textureUnit = textureUnit;
-            sd->_sm_i = sm_i;
             SceneUtil::setDiagnosticGpuPassInstance(*camera, sm_i);
             SceneUtil::setDiagnosticShadowLightState(*camera, pl.lightDir, pl.light->getDiffuse());
 
@@ -1819,6 +1771,8 @@ void MWShadowTechnique::createShaders()
     _shadowCastingStateSet->setTextureAttribute(0, _fallbackBaseTexture.get(), osg::StateAttribute::ON);
     _shadowCastingStateSet->addUniform(new osg::Uniform("useDiffuseMapForShadowAlpha", true));
     _shadowCastingStateSet->addUniform(new osg::Uniform("alphaTestShadows", false));
+    _shadowCastingStateSet->addUniform(
+        new osg::Uniform("stabilizeShadowCoverage", mStabilizeAlphaTestedCasters));
     osg::ref_ptr<osg::Depth> depth = new osg::Depth;
     depth->setWriteMask(true);
     osg::ref_ptr<osg::ClipControl> clipcontrol = new osg::ClipControl(osg::ClipControl::LOWER_LEFT, osg::ClipControl::NEGATIVE_ONE_TO_ONE);
@@ -1828,22 +1782,22 @@ void MWShadowTechnique::createShaders()
     // TODO: compare performance when alpha testing is handled here versus using a discard in the fragment shader
 }
 
-osg::Polytope MWShadowTechnique::computeLightViewFrustumPolytope(Frustum& frustum, LightData& positionedLight)
+osg::Polytope MWShadowTechnique::computeLightViewFrustumPolytope(ShadowFrustum& frustum, LightData& positionedLight)
 {
     OSG_INFO<<"computeLightViewFrustumPolytope()"<<std::endl;
 
     osg::Polytope polytope;
-    if (frustum.useCustomClipSpace)
+    if (frustum.mUseCustomClipSpace)
     {
-        polytope.setToBoundingBox(frustum.customClipSpace);
+        polytope.setToBoundingBox(frustum.mCustomClipSpace);
     }
     else
     {
         polytope.setToUnitFrustum();
     }
 
-    polytope.transformProvidingInverse( frustum.projectionMatrix );
-    polytope.transformProvidingInverse( frustum.modelViewMatrix );
+    polytope.transformProvidingInverse( frustum.mProjectionMatrix );
+    polytope.transformProvidingInverse( frustum.mModelViewMatrix );
 
     osg::Polytope lightVolumePolytope;
 
@@ -1902,7 +1856,7 @@ osg::Polytope MWShadowTechnique::computeLightViewFrustumPolytope(Frustum& frustu
     OSG_INFO<<"Which frustum edges are active?"<<std::endl;
     for(unsigned int i=0; i<12; ++i)
     {
-        Frustum::Indices& indices = frustum.edges[i];
+        ShadowFrustum::Indices& indices = frustum.mEdges[i];
 
         unsigned int corner_a = indices[0];
         unsigned int corner_b = indices[1];
@@ -1920,17 +1874,17 @@ osg::Polytope MWShadowTechnique::computeLightViewFrustumPolytope(Frustum& frustu
 
             if (positionedLight.directionalLight)
             {
-                osg::Vec3d normal = (frustum.corners[corner_b]-frustum.corners[corner_a])^positionedLight.lightDir;
+                osg::Vec3d normal = (frustum.mCorners[corner_b]-frustum.mCorners[corner_a])^positionedLight.lightDir;
                 normal.normalize();
-                boundaryPlane.set(normal, frustum.corners[corner_a]);
+                boundaryPlane.set(normal, frustum.mCorners[corner_a]);
             }
             else
             {
-                boundaryPlane.set(positionedLight.lightPos3, frustum.corners[corner_a], frustum.corners[corner_b]);
+                boundaryPlane.set(positionedLight.lightPos3, frustum.mCorners[corner_a], frustum.mCorners[corner_b]);
             }
 
             OSG_INFO<<"Boundary Edge "<<i<<", corner_a="<<corner_a<<", corner_b="<<corner_b<<", face_a_active="<<face_a_active<<", face_b_active="<<face_b_active;
-            if (boundaryPlane.distance(frustum.center)<0.0)
+            if (boundaryPlane.distance(frustum.mCenter)<0.0)
             {
                 boundaryPlane.flip();
                 OSG_INFO<<", flipped boundary edge "<<boundaryPlane<<std::endl;
@@ -1954,7 +1908,7 @@ osg::Polytope MWShadowTechnique::computeLightViewFrustumPolytope(Frustum& frustu
     return lightVolumePolytope;
 }
 
-bool MWShadowTechnique::computeShadowCameraSettings(Frustum& frustum, LightData& positionedLight, osg::Matrixd& projectionMatrix, osg::Matrixd& viewMatrix)
+bool MWShadowTechnique::computeShadowCameraSettings(ShadowFrustum& frustum, LightData& positionedLight, osg::Matrixd& projectionMatrix, osg::Matrixd& viewMatrix)
 {
     OSG_INFO<<"standardShadowMapCameraSettings()"<<std::endl;
 
@@ -1962,19 +1916,27 @@ bool MWShadowTechnique::computeShadowCameraSettings(Frustum& frustum, LightData&
 
     const ShadowSettings* settings = getShadowedScene()->getShadowSettings();
 
-    double dotProduct_v = positionedLight.lightDir * frustum.frustumCenterLine;
-    double gamma_v = acos(dotProduct_v);
-    if (gamma_v<osg::DegreesToRadians(settings->getPerspectiveShadowMapCutOffAngle()) || gamma_v>osg::DegreesToRadians(180.0-settings->getPerspectiveShadowMapCutOffAngle()))
+    if (mFilteredProjection && positionedLight.directionalLight)
     {
-        OSG_INFO<<"View direction and Light direction below tolerance"<<std::endl;
-        osg::Vec3d viewSide = osg::Matrixd::transform3x3(frustum.modelViewMatrix, osg::Vec3d(1.0,0.0,0.0));
-        lightSide = positionedLight.lightDir ^ (viewSide ^ positionedLight.lightDir);
-        lightSide.normalize();
+        const StableDirectionalLightBasis lightBasis = makeStableDirectionalLightBasis(positionedLight.lightDir);
+        lightSide = lightBasis.mSide;
     }
     else
     {
-        lightSide = positionedLight.lightDir ^ frustum.frustumCenterLine;
-        lightSide.normalize();
+        double dotProduct_v = positionedLight.lightDir * frustum.mCenterLine;
+        double gamma_v = acos(dotProduct_v);
+        if (gamma_v<osg::DegreesToRadians(settings->getPerspectiveShadowMapCutOffAngle()) || gamma_v>osg::DegreesToRadians(180.0-settings->getPerspectiveShadowMapCutOffAngle()))
+        {
+            OSG_INFO<<"View direction and Light direction below tolerance"<<std::endl;
+            osg::Vec3d viewSide = osg::Matrixd::transform3x3(frustum.mModelViewMatrix, osg::Vec3d(1.0,0.0,0.0));
+            lightSide = positionedLight.lightDir ^ (viewSide ^ positionedLight.lightDir);
+            lightSide.normalize();
+        }
+        else
+        {
+            lightSide = positionedLight.lightDir ^ frustum.mCenterLine;
+            lightSide.normalize();
+        }
     }
 
     osg::Vec3d lightUp = lightSide ^ positionedLight.lightDir;
@@ -1992,11 +1954,11 @@ bool MWShadowTechnique::computeShadowCameraSettings(Frustum& frustum, LightData&
         double yMin=0.0, yMax=0.0;
         double zMin=0.0, zMax=0.0;
 
-        for(Frustum::Vertices::iterator itr = frustum.corners.begin();
-            itr != frustum.corners.end();
+        for(ShadowFrustum::Vertices::iterator itr = frustum.mCorners.begin();
+            itr != frustum.mCorners.end();
             ++itr)
         {
-            osg::Vec3d cornerDelta(*itr - frustum.center);
+            osg::Vec3d cornerDelta(*itr - frustum.mCenter);
             osg::Vec3d cornerInLightCoords(cornerDelta*lightSide,
                                            cornerDelta*lightUp,
                                            cornerDelta*positionedLight.lightDir);
@@ -2014,7 +1976,7 @@ bool MWShadowTechnique::computeShadowCameraSettings(Frustum& frustum, LightData&
         OSG_INFO<<"before bs xMin="<<xMin<<", xMax="<<xMax<<", yMin="<<yMin<<", yMax="<<yMax<<", zMin="<<zMin<<", zMax="<<zMax<<std::endl;
 
         osg::BoundingSphere bs = _shadowedScene->getBound();
-        osg::Vec3d modelCenterRelativeFrustumCenter(bs.center()-frustum.center);
+        osg::Vec3d modelCenterRelativeFrustumCenter(bs.center()-frustum.mCenter);
         osg::Vec3d modelCenterInLightCoords(modelCenterRelativeFrustumCenter*lightSide,
                                             modelCenterRelativeFrustumCenter*lightUp,
                                             modelCenterRelativeFrustumCenter*positionedLight.lightDir);
@@ -2039,7 +2001,7 @@ bool MWShadowTechnique::computeShadowCameraSettings(Frustum& frustum, LightData&
         else
         {
             projectionMatrix.makeOrtho(xMin,xMax, yMin, yMax,0.0,zMax-zMin);
-            viewMatrix.makeLookAt(frustum.center+positionedLight.lightDir*zMin, frustum.center+positionedLight.lightDir*zMax, lightUp);
+            viewMatrix.makeLookAt(frustum.mCenter+positionedLight.lightDir*zMin, frustum.mCenter+positionedLight.lightDir*zMax, lightUp);
         }
     }
     else
@@ -2048,8 +2010,8 @@ bool MWShadowTechnique::computeShadowCameraSettings(Frustum& frustum, LightData&
 
         OSG_INFO<<"lightDir = "<<positionedLight.lightDir<<std::endl;
         OSG_INFO<<"lightPos3 = "<<positionedLight.lightPos3<<std::endl;
-        for(Frustum::Vertices::iterator itr = frustum.corners.begin();
-            itr != frustum.corners.end();
+        for(ShadowFrustum::Vertices::iterator itr = frustum.mCorners.begin();
+            itr != frustum.mCorners.end();
             ++itr)
         {
             osg::Vec3d cornerDelta(*itr - positionedLight.lightPos3);
@@ -2090,8 +2052,8 @@ bool MWShadowTechnique::computeShadowCameraSettings(Frustum& frustum, LightData&
             fov = 0.0;
 
             // calculate the max FOV from the corners of the frustum relative to the light position
-            for(Frustum::Vertices::iterator itr = frustum.corners.begin();
-                itr != frustum.corners.end();
+            for(ShadowFrustum::Vertices::iterator itr = frustum.mCorners.begin();
+                itr != frustum.mCorners.end();
                 ++itr)
             {
                 osg::Vec3d cornerDelta(*itr - positionedLight.lightPos3);
@@ -2134,22 +2096,22 @@ struct ConvexHull
 
     bool valid() const { return !_edges.empty(); }
 
-    void setToFrustum(MWShadowTechnique::Frustum& frustum)
+    void setToFrustum(ShadowFrustum& frustum)
     {
-        _edges.emplace_back(frustum.corners[0], frustum.corners[1]);
-        _edges.emplace_back(frustum.corners[1], frustum.corners[2]);
-        _edges.emplace_back(frustum.corners[2], frustum.corners[3]);
-        _edges.emplace_back(frustum.corners[3], frustum.corners[0]);
+        _edges.emplace_back(frustum.mCorners[0], frustum.mCorners[1]);
+        _edges.emplace_back(frustum.mCorners[1], frustum.mCorners[2]);
+        _edges.emplace_back(frustum.mCorners[2], frustum.mCorners[3]);
+        _edges.emplace_back(frustum.mCorners[3], frustum.mCorners[0]);
 
-        _edges.emplace_back(frustum.corners[4], frustum.corners[5]);
-        _edges.emplace_back(frustum.corners[5], frustum.corners[6]);
-        _edges.emplace_back(frustum.corners[6], frustum.corners[7]);
-        _edges.emplace_back(frustum.corners[7], frustum.corners[4]);
+        _edges.emplace_back(frustum.mCorners[4], frustum.mCorners[5]);
+        _edges.emplace_back(frustum.mCorners[5], frustum.mCorners[6]);
+        _edges.emplace_back(frustum.mCorners[6], frustum.mCorners[7]);
+        _edges.emplace_back(frustum.mCorners[7], frustum.mCorners[4]);
 
-        _edges.emplace_back(frustum.corners[0], frustum.corners[4]);
-        _edges.emplace_back(frustum.corners[1], frustum.corners[5]);
-        _edges.emplace_back(frustum.corners[2], frustum.corners[6]);
-        _edges.emplace_back(frustum.corners[3], frustum.corners[7]);
+        _edges.emplace_back(frustum.mCorners[0], frustum.mCorners[4]);
+        _edges.emplace_back(frustum.mCorners[1], frustum.mCorners[5]);
+        _edges.emplace_back(frustum.mCorners[2], frustum.mCorners[6]);
+        _edges.emplace_back(frustum.mCorners[3], frustum.mCorners[7]);
     }
 
     struct ConvexHull2D
@@ -2710,8 +2672,11 @@ struct RenderLeafBounds
     double min_z, max_z;
 };
 
-bool MWShadowTechnique::cropShadowCameraToMainFrustum(Frustum& frustum, osg::Camera* camera, double viewNear, double viewFar, std::vector<osg::Plane>& planeList)
+bool MWShadowTechnique::cropShadowCameraToMainFrustum(ShadowFrustum& frustum, osg::Camera* camera,
+    double viewNear, double viewFar, std::vector<osg::Plane>& planeList, double* worldUnitsPerTexel)
 {
+    if (worldUnitsPerTexel)
+        *worldUnitsPerTexel = 0.0;
     osg::Matrixd light_p = camera->getProjectionMatrix();
     osg::Matrixd light_v = camera->getViewMatrix();
     osg::Matrixd light_vp = light_v * light_p;
@@ -2720,39 +2685,61 @@ bool MWShadowTechnique::cropShadowCameraToMainFrustum(Frustum& frustum, osg::Cam
     ConvexHull convexHull;
     convexHull.setToFrustum(frustum);
 
-    osg::Vec3d nearPoint = frustum.eye + frustum.frustumCenterLine * viewNear;
-    osg::Vec3d farPoint = frustum.eye + frustum.frustumCenterLine * viewFar;
+    osg::Vec3d nearPoint = frustum.mEye + frustum.mCenterLine * viewNear;
+    osg::Vec3d farPoint = frustum.mEye + frustum.mCenterLine * viewFar;
 
-    double nearDist = -frustum.frustumCenterLine * nearPoint;
-    double farDist = frustum.frustumCenterLine * farPoint;
+    double nearDist = -frustum.mCenterLine * nearPoint;
+    double farDist = frustum.mCenterLine * farPoint;
 
-    convexHull.clip(osg::Plane(frustum.frustumCenterLine, nearDist));
-    convexHull.clip(osg::Plane(-frustum.frustumCenterLine, farDist));
+    convexHull.clip(osg::Plane(frustum.mCenterLine, nearDist));
+    convexHull.clip(osg::Plane(-frustum.mCenterLine, farDist));
 
     convexHull.transform(light_vp);
 
     double xMin = -1.0, xMax = 1.0;
     double yMin = -1.0, yMax = 1.0;
     double zMin = -1.0, zMax = 1.0;
+    osg::Vec3d stableCenterInLightSpace;
+    double stableRadius = 0.0;
 
     if (convexHull.valid())
     {
-        xMin = osg::maximum(-1.0, convexHull.min(0));
-        xMax = osg::minimum(1.0, convexHull.max(0));
-        yMin = osg::maximum(-1.0, convexHull.min(1));
-        yMax = osg::minimum(1.0, convexHull.max(1));
         // Retain the light-facing depth range for casters and crop only behind the receiver volume.
         zMin = -1.0;
         zMax = osg::minimum(1.0, convexHull.max(2));
         if (mFilteredProjection)
         {
-            const osg::Vec2s textureSize = getShadowedScene()->getShadowSettings()->getTextureSize();
-            const double xPadding = (xMax - xMin) * mShadowFilterGuardTexels / std::max<int>(textureSize.x(), 1);
-            const double yPadding = (yMax - yMin) * mShadowFilterGuardTexels / std::max<int>(textureSize.y(), 1);
-            xMin = osg::maximum(-1.0, xMin - xPadding);
-            xMax = osg::minimum(1.0, xMax + xPadding);
-            yMin = osg::maximum(-1.0, yMin - yPadding);
-            yMax = osg::minimum(1.0, yMax + yPadding);
+            const unsigned int resolution = static_cast<unsigned int>(std::max(
+                std::min(camera->getViewport()->width(), camera->getViewport()->height()), 1.0));
+            const auto receiverPoints = frustum.sliceCorners(viewNear, viewFar);
+            const auto unguarded = makeStableShadowFootprint(receiverPoints, 0.0, 1.0 / 16.0);
+            const double guardScale = 1.0
+                / std::max(1.0 - 2.0 * mShadowFilterGuardTexels / resolution, 0.5);
+            const auto footprint = makeStableShadowFootprint(
+                receiverPoints, unguarded.mRadius * (guardScale - 1.0), 1.0 / 16.0);
+            const double nestedWorldUnitsPerTexel
+                = makeNestedShadowTexelSize(footprint.mRadius, resolution, 1.0 / 64.0);
+            stableRadius = 0.5 * nestedWorldUnitsPerTexel * resolution;
+            if (worldUnitsPerTexel)
+                *worldUnitsPerTexel = nestedWorldUnitsPerTexel;
+            const osg::Vec3d viewRelativeCenter = footprint.mCenter * light_v;
+            const osg::Vec3d worldOriginCenter = osg::Matrixd::transform3x3(footprint.mCenter, light_v);
+            stableCenterInLightSpace = alignShadowFootprintToWorldTexels(
+                viewRelativeCenter, worldOriginCenter, stableRadius, resolution);
+            const osg::Vec3d centerInClipSpace = stableCenterInLightSpace * light_p;
+            const double radiusInClipX = stableRadius * std::abs(light_p(0, 0));
+            const double radiusInClipY = stableRadius * std::abs(light_p(1, 1));
+            xMin = centerInClipSpace.x() - radiusInClipX;
+            xMax = centerInClipSpace.x() + radiusInClipX;
+            yMin = centerInClipSpace.y() - radiusInClipY;
+            yMax = centerInClipSpace.y() + radiusInClipY;
+        }
+        else
+        {
+            xMin = osg::maximum(-1.0, convexHull.min(0));
+            xMax = osg::minimum(1.0, convexHull.max(0));
+            yMin = osg::maximum(-1.0, convexHull.min(1));
+            yMax = osg::minimum(1.0, convexHull.max(1));
         }
     }
     else
@@ -2774,28 +2761,24 @@ bool MWShadowTechnique::cropShadowCameraToMainFrustum(Frustum& frustum, osg::Cam
 
         light_p.postMult(m);
 
-        if (mFilteredProjection)
-        {
-            const osg::Vec2s textureSize = getShadowedScene()->getShadowSettings()->getTextureSize();
-            const osg::Vec3d worldOriginInShadowSpace = osg::Vec3d() * light_v * light_p;
-            const double texelsPerClipX = std::max<int>(textureSize.x(), 1) * 0.5;
-            const double texelsPerClipY = std::max<int>(textureSize.y(), 1) * 0.5;
-            const double xOffset
-                = std::round(worldOriginInShadowSpace.x() * texelsPerClipX) / texelsPerClipX
-                - worldOriginInShadowSpace.x();
-            const double yOffset
-                = std::round(worldOriginInShadowSpace.y() * texelsPerClipY) / texelsPerClipY
-                - worldOriginInShadowSpace.y();
-            light_p.postMult(osg::Matrixd::translate(xOffset, yOffset, 0.0));
-        }
         camera->setProjectionMatrix(light_p);
 
         convexHull.transform(osg::Matrixd::inverse(oldLightP));
 
-        xMin = convexHull.min(0);
-        xMax = convexHull.max(0);
-        yMin = convexHull.min(1);
-        yMax = convexHull.max(1);
+        if (mFilteredProjection)
+        {
+            xMin = stableCenterInLightSpace.x() - stableRadius;
+            xMax = stableCenterInLightSpace.x() + stableRadius;
+            yMin = stableCenterInLightSpace.y() - stableRadius;
+            yMax = stableCenterInLightSpace.y() + stableRadius;
+        }
+        else
+        {
+            xMin = convexHull.min(0);
+            xMax = convexHull.max(0);
+            yMin = convexHull.min(1);
+            yMax = convexHull.max(1);
+        }
         zMin = convexHull.min(2);
         const double zMaxInViewSpace = convexHull.max(2);
         setDiagnosticShadowCasterCullState(*camera, zMin, zMaxInViewSpace);
@@ -2812,7 +2795,7 @@ bool MWShadowTechnique::cropShadowCameraToMainFrustum(Frustum& frustum, osg::Cam
     return true;
 }
 
-bool MWShadowTechnique::adjustPerspectiveShadowMapCameraSettings(osgUtil::RenderStage* renderStage, Frustum& frustum, LightData& /*positionedLight*/, osg::Camera* camera, double viewNear, double viewFar)
+bool MWShadowTechnique::adjustPerspectiveShadowMapCameraSettings(osgUtil::RenderStage* renderStage, ShadowFrustum& frustum, LightData& /*positionedLight*/, osg::Camera* camera, double viewNear, double viewFar)
 {
     const ShadowSettings* settings = getShadowedScene()->getShadowSettings();
 
@@ -2840,14 +2823,14 @@ bool MWShadowTechnique::adjustPerspectiveShadowMapCameraSettings(osgUtil::Render
     ConvexHull convexHull;
     convexHull.setToFrustum(frustum);
 
-    osg::Vec3d nearPoint = frustum.eye + frustum.frustumCenterLine * viewNear;
-    osg::Vec3d farPoint = frustum.eye + frustum.frustumCenterLine * viewFar;
+    osg::Vec3d nearPoint = frustum.mEye + frustum.mCenterLine * viewNear;
+    osg::Vec3d farPoint = frustum.mEye + frustum.mCenterLine * viewFar;
 
-    double nearDist = -frustum.frustumCenterLine * nearPoint;
-    double farDist = frustum.frustumCenterLine * farPoint;
+    double nearDist = -frustum.mCenterLine * nearPoint;
+    double farDist = frustum.mCenterLine * farPoint;
 
-    convexHull.clip(osg::Plane(frustum.frustumCenterLine, nearDist));
-    convexHull.clip(osg::Plane(-frustum.frustumCenterLine, farDist));
+    convexHull.clip(osg::Plane(frustum.mCenterLine, nearDist));
+    convexHull.clip(osg::Plane(-frustum.mCenterLine, farDist));
 
 #if 0
     OSG_NOTICE<<"ws ConvexHull xMin="<<convexHull.min(0)<<", xMax="<<convexHull.max(0)<<std::endl;
@@ -3020,9 +3003,9 @@ bool MWShadowTechnique::adjustPerspectiveShadowMapCameraSettings(osgUtil::Render
 
 #endif
 
-    osg::Vec3d eye_v = frustum.eye * light_v;
-    //osg::Vec3d centerNearPlane_v = frustum.centerNearPlane * light_v;
-    osg::Vec3d center_v = frustum.center * light_v;
+    osg::Vec3d eye_v = frustum.mEye * light_v;
+    //osg::Vec3d centerNearPlane_v = frustum.mCenterNearPlane * light_v;
+    osg::Vec3d center_v = frustum.mCenter * light_v;
     osg::Vec3d viewdir_v = center_v-eye_v; viewdir_v.normalize();
 
     double dotProduct_v = lightdir * viewdir_v;
@@ -3037,7 +3020,7 @@ bool MWShadowTechnique::adjustPerspectiveShadowMapCameraSettings(osgUtil::Render
     //OSG_NOTICE<<"eye_v="<<eye_v<<std::endl;
     //OSG_NOTICE<<"viewdir_v="<<viewdir_v<<std::endl;
 
-    osg::Vec3d eye_ls = frustum.eye * light_vp;
+    osg::Vec3d eye_ls = frustum.mEye * light_vp;
 #if 0
     if (eye_ls.y()>-1.0)
     {
@@ -3046,9 +3029,9 @@ bool MWShadowTechnique::adjustPerspectiveShadowMapCameraSettings(osgUtil::Render
     }
 #endif
 
-    //osg::Vec3d centerNearPlane_ls = frustum.centerNearPlane * light_vp;
-    //osg::Vec3d centerFarPlane_ls = frustum.centerFarPlane * light_vp;
-    osg::Vec3d center_ls = frustum.center * light_vp;
+    //osg::Vec3d centerNearPlane_ls = frustum.mCenterNearPlane * light_vp;
+    //osg::Vec3d centerFarPlane_ls = frustum.mCenterFarPlane * light_vp;
+    osg::Vec3d center_ls = frustum.mCenter * light_vp;
     osg::Vec3d viewdir_ls = center_ls-eye_ls; viewdir_ls.normalize();
 
     osg::Vec3d side = lightdir ^ viewdir_ls; side.normalize();
@@ -3060,7 +3043,7 @@ bool MWShadowTechnique::adjustPerspectiveShadowMapCameraSettings(osgUtil::Render
     double n = tan(alpha)*tan(osg::PI_2-gamma_v)*tan(osg::PI_2-gamma_v);
     //double n = tan(alpha)*tan(osg::PI_2-gamma_v);
 
-    //OSG_NOTICE<<"n = "<<n<<", eye_ls.y()="<<eye_ls.y()<<", eye_v="<<eye_v<<", eye="<<frustum.eye<<std::endl;
+    //OSG_NOTICE<<"n = "<<n<<", eye_ls.y()="<<eye_ls.y()<<", eye_v="<<eye_v<<", eye="<<frustum.mEye<<std::endl;
     double min_n = osg::maximum(-1.0-eye_ls.y(), settings->getMinimumShadowMapNearFarRatio());
     if (n<min_n)
     {
@@ -3087,7 +3070,7 @@ bool MWShadowTechnique::adjustPerspectiveShadowMapCameraSettings(osgUtil::Render
 #if 0
     OSG_NOTICE<<"n = "<<n<<", f="<<f<<std::endl;
     OSG_NOTICE<<"eye_ls = "<<eye_ls<<", virtual_eye="<<virtual_eye<<std::endl;
-    OSG_NOTICE<<"frustum.eyes="<<frustum.eye<<std::endl;
+    OSG_NOTICE<<"frustum.eyes="<<frustum.mEye<<std::endl;
 #endif
 
     double min_x_ratio = 0.0;
@@ -3203,16 +3186,17 @@ bool MWShadowTechnique::adjustPerspectiveShadowMapCameraSettings(osgUtil::Render
     return true;
 }
 
-void MWShadowTechnique::assignShadowStateSettings(osgUtil::CullVisitor& cv, osg::Camera* camera, unsigned int sm_i, Uniforms& uniforms)
+void MWShadowTechnique::assignShadowStateSettings(
+    osgUtil::CullVisitor& cv, ShadowData& shadowData, Uniforms& uniforms)
 {
     osg::Matrix inverseViewMatrix = osg::Matrix::inverse(*cv.getModelViewMatrix());
     osg::Matrix shadowSpaceMatrix = inverseViewMatrix *
-        camera->getViewMatrix() *
-        camera->getProjectionMatrix() *
+        shadowData._camera->getViewMatrix() *
+        shadowData._camera->getProjectionMatrix() *
         osg::Matrix::translate(1.0,1.0,1.0) *
         osg::Matrix::scale(0.5,0.5,0.5);
 
-    std::string shadowSpaceUniformName = "shadowSpaceMatrix" + std::to_string(sm_i);
+    std::string shadowSpaceUniformName = "shadowSpaceMatrix" + std::to_string(shadowData._sm_i);
     osg::ref_ptr<osg::Uniform> shadowSpaceUniform;
 
     for (const auto & uniform : uniforms)
@@ -3231,6 +3215,70 @@ void MWShadowTechnique::assignShadowStateSettings(osgUtil::CullVisitor& cv, osg:
     }
 
     shadowSpaceUniform->set(shadowSpaceMatrix);
+
+    if (!shadowData._stableCascade)
+        return;
+    const auto setRange = [&](const std::string& name, const osg::Vec2f& value) {
+        osg::ref_ptr<osg::Uniform> rangeUniform;
+        for (const auto& uniform : uniforms)
+            if (uniform->getName() == name)
+            {
+                rangeUniform = uniform;
+                break;
+            }
+        if (!rangeUniform)
+        {
+            rangeUniform = new osg::Uniform(osg::Uniform::FLOAT_VEC2, name);
+            uniforms.push_back(rangeUniform);
+        }
+        rangeUniform->set(value);
+    };
+    const auto setFloat = [&](const std::string& name, float value) {
+        osg::ref_ptr<osg::Uniform> valueUniform;
+        for (const auto& uniform : uniforms)
+            if (uniform->getName() == name)
+            {
+                valueUniform = uniform;
+                break;
+            }
+        if (!valueUniform)
+        {
+            valueUniform = new osg::Uniform(osg::Uniform::FLOAT, name);
+            uniforms.push_back(valueUniform);
+        }
+        valueUniform->set(value);
+    };
+    const auto setDirection = [&](const std::string& name, const osg::Vec3f& value) {
+        osg::ref_ptr<osg::Uniform> directionUniform;
+        for (const auto& uniform : uniforms)
+            if (uniform->getName() == name)
+            {
+                directionUniform = uniform;
+                break;
+            }
+        if (!directionUniform)
+        {
+            directionUniform = new osg::Uniform(osg::Uniform::FLOAT_VEC3, name);
+            uniforms.push_back(directionUniform);
+        }
+        directionUniform->set(value);
+    };
+    const std::string index = std::to_string(shadowData._sm_i);
+    setRange("shadowCascadeRange" + index,
+        osg::Vec2f(static_cast<float>(shadowData._cascade.mRenderNearDistance),
+            static_cast<float>(shadowData._cascade.mRenderFarDistance)));
+    setRange("shadowCascadeTransition" + index,
+        osg::Vec2f(static_cast<float>(shadowData._cascade.mTransitionStartDistance),
+            static_cast<float>(shadowData._cascade.mTransitionEndDistance)));
+    setRange("shadowMapTexelSize" + index,
+        osg::Vec2f(1.f / std::max(shadowData._texture->getTextureWidth(), 1),
+            1.f / std::max(shadowData._texture->getTextureHeight(), 1)));
+    setFloat("shadowFilterRadiusScale" + index, shadowData._filterRadiusScale);
+    setFloat("shadowNormalOffsetScale" + index, shadowData._normalOffsetScale);
+    osg::Vec3d lightDirection
+        = osg::Matrixd::transform3x3(shadowData._lightDirection, *cv.getModelViewMatrix());
+    lightDirection.normalize();
+    setDirection("shadowLightDirection" + index, osg::Vec3f(lightDirection));
 }
 
 void SceneUtil::MWShadowTechnique::assignValidRegionSettings(osgUtil::CullVisitor & cv, osg::Camera* camera, unsigned int sm_i, Uniforms & uniforms)
@@ -3274,14 +3322,15 @@ void MWShadowTechnique::cullShadowReceivingScene(osgUtil::CullVisitor* cv) const
     return;
 }
 
-void MWShadowTechnique::cullShadowCastingScene(osgUtil::CullVisitor* cv, osg::Camera* camera) const
+void MWShadowTechnique::cullShadowCastingScene(
+    osgUtil::CullVisitor* cv, osg::Camera* camera, unsigned int casterTraversalMask) const
 {
     OSG_INFO<<"cullShadowCastingScene()"<<std::endl;
 
     // record the traversal mask on entry so we can reapply it later.
     unsigned int traversalMask = cv->getTraversalMask();
 
-    cv->setTraversalMask( traversalMask & _shadowedScene->getShadowSettings()->getCastsShadowTraversalMask() );
+    cv->setTraversalMask(traversalMask & casterTraversalMask);
 
         if (camera) camera->accept(*cv);
 

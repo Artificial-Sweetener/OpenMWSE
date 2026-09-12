@@ -10,6 +10,7 @@
 #include <regex>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <system_error>
 #include <unordered_map>
 
@@ -803,20 +804,38 @@ namespace Shader
     /// Reserve contiguous sampler units for an owned global input, rejecting exhausted hardware capacity.
     int ShaderManager::reserveGlobalTextureUnits(Slot slot, int count)
     {
-        // TODO: Reuse units when count increase forces reallocation
         // TODO: Warn if trampling on the ~8 units needed by model textures
-        auto unit = mReservedTextureUnitsBySlot[static_cast<int>(slot)];
+        if (count < 1)
+            throw std::invalid_argument("Global texture unit reservation count must be positive");
+        const int slotIndex = static_cast<int>(slot);
+        auto unit = mReservedTextureUnitsBySlot[slotIndex];
         if (unit.index >= 0 && unit.count >= count)
             return unit.index;
 
-        if (getAvailableTextureUnits() < count + 1)
+        if (getAvailableTextureUnits() + unit.count < count + 1)
             throw std::runtime_error("Can't reserve texture unit; no available units");
-        mReservedTextureUnits += count;
+        std::vector<bool> occupied(static_cast<std::size_t>(mMaxTextureUnits));
+        for (int otherSlot = 0; otherSlot < static_cast<int>(Slot::SLOT_COUNT); ++otherSlot)
+            if (otherSlot != slotIndex)
+            {
+                const auto& other = mReservedTextureUnitsBySlot[otherSlot];
+                for (int index = other.index; index >= 0 && index < other.index + other.count; ++index)
+                    occupied[static_cast<std::size_t>(index)] = true;
+            }
+        int rangeStart = -1;
+        for (int candidate = mMaxTextureUnits - count; candidate >= 0; --candidate)
+            if (std::none_of(occupied.begin() + candidate, occupied.begin() + candidate + count,
+                    [](bool value) { return value; }))
+            {
+                rangeStart = candidate;
+                break;
+            }
+        if (rangeStart < 0)
+            throw std::runtime_error("Can't reserve contiguous texture units; global ranges are fragmented");
 
-        unit.index = mMaxTextureUnits - mReservedTextureUnits;
-        unit.count = count;
-
-        mReservedTextureUnitsBySlot[static_cast<int>(slot)] = unit;
+        mReservedTextureUnits += count - unit.count;
+        unit = { rangeStart, count };
+        mReservedTextureUnitsBySlot[slotIndex] = unit;
 
         std::string_view slotDescr;
         switch (slot)

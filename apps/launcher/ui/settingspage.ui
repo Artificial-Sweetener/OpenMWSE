@@ -1015,6 +1015,34 @@
                 </widget>
                </item>
                <item row="10" column="0">
+                <widget class="QCheckBox" name="distantShadowsCheckBox">
+                 <property name="toolTip">
+                  <string>Extend outdoor geometry shadows beyond the detailed range to the visible horizon. Available for filtered OpenMWSE shadow qualities.</string>
+                 </property>
+                 <property name="text">
+                  <string>Distant Shadows</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="11" column="0">
+                <widget class="QLabel" name="distantShadowQualityLabel">
+                 <property name="toolTip">
+                  <string>Controls how quickly distant cascades expand, reduce resolution, and discard insignificant casters.</string>
+                 </property>
+                 <property name="text">
+                  <string>Distant Shadow Quality</string>
+                 </property>
+                </widget>
+               </item>
+               <item row="11" column="1">
+                <widget class="QComboBox" name="distantShadowQualityComboBox">
+                 <item><property name="text"><string>Low</string></property></item>
+                 <item><property name="text"><string>Medium</string></property></item>
+                 <item><property name="text"><string>High</string></property></item>
+                 <item><property name="text"><string>Ultra</string></property></item>
+                </widget>
+               </item>
+               <item row="12" column="0">
                 <widget class="QLabel" name="cloudShadowIntensityLabel">
                  <property name="toolTip">
                   <string>Scales natural cloud-shadow optical depth without changing visible cloud density. Legacy shadow quality preserves OpenMW's original response.</string>
@@ -1024,7 +1052,7 @@
                  </property>
                 </widget>
                </item>
-               <item row="10" column="1">
+               <item row="12" column="1">
                 <widget class="QDoubleSpinBox" name="cloudShadowIntensitySpinBox">
                  <property name="suffix"><string>%</string></property>
                  <property name="decimals"><number>0</number></property>
@@ -1034,7 +1062,7 @@
                  <property name="value"><double>100.000000000000000</double></property>
                 </widget>
                </item>
-               <item row="11" column="1">
+               <item row="13" column="1">
                 <spacer name="verticalSpacer_8">
                  <property name="orientation">
                   <enum>Qt::Vertical</enum>

@@ -18,6 +18,7 @@
 #include <components/stereo/stereomanager.hpp>
 
 #include "mwshadowtechnique.hpp"
+#include "shadowcascade.hpp"
 
 namespace SceneUtil
 {
@@ -44,6 +45,18 @@ namespace SceneUtil
         {
             constexpr std::array<double, 5> guardTexels{ 0.0, 1.0, 1.5, 2.0, 2.5 };
             return guardTexels[static_cast<std::size_t>(quality)];
+        }
+
+        /// Convert the validated distant-shadow quality name into the cascade planner's owned policy tier.
+        DistantShadowQuality distantShadowQuality(std::string_view quality)
+        {
+            if (quality == "low")
+                return DistantShadowQuality::Low;
+            if (quality == "high")
+                return DistantShadowQuality::High;
+            if (quality == "ultra")
+                return DistantShadowQuality::Ultra;
+            return DistantShadowQuality::Medium;
         }
     }
 
@@ -74,8 +87,14 @@ namespace SceneUtil
         return found ? maximum : 0;
     }
 
+    int ShadowManager::getEffectiveShadowMapCount() const
+    {
+        return mShadowSettings->getNumShadowMapsPerLight();
+    }
+
     void ShadowManager::setupShadowSettings(const Settings::ShadowsCategory& settings,
-        const Settings::OpenMWSEShadowsCategory& presentationSettings, Shader::ShaderManager& shaderManager)
+        const Settings::OpenMWSEShadowsCategory& presentationSettings, float visibleDistance,
+        Shader::ShaderManager& shaderManager)
     {
         mEnableShadows = settings.mEnableShadows;
 
@@ -86,13 +105,40 @@ namespace SceneUtil
 
         mShadowSettings->setReceivesShadowTraversalMask(~0u);
 
-        const int numberOfShadowMapsPerLight = settings.mNumberOfShadowMaps;
+        const int filteringQuality = shadowFilteringQuality(presentationSettings.mFilteringQuality.get());
+        const bool filteredProjection = filteringQuality != 0;
+        const double configuredDistance = std::max(settings.mMaximumShadowMapDistance > 0
+                ? static_cast<double>(settings.mMaximumShadowMapDistance.get())
+                : static_cast<double>(visibleDistance),
+            1.0);
+        const bool extendToVisibleDistance
+            = filteredProjection && presentationSettings.mDistantShadows && visibleDistance > configuredDistance;
+        const int availableShadowMapCapacity = shaderManager.getAvailableTextureUnits() + mReservedShadowMapCapacity;
+        const unsigned int maximumCascadeCount
+            = static_cast<unsigned int>(std::clamp(availableShadowMapCapacity, settings.mNumberOfShadowMaps.get(), 8));
+        ShadowCascadePlanSettings cascadePlanSettings{ .mNearDistance = 0.005,
+            .mDetailedDistance = configuredDistance,
+            .mVisibleDistance = std::max<double>(configuredDistance, visibleDistance),
+            .mSplitLogarithmicRatio = settings.mSplitPointUniformLogarithmicRatio,
+            .mSplitBias = settings.mSplitPointBias,
+            .mTransitionFraction = 0.08,
+            .mDetailedCascadeCount = static_cast<unsigned int>(settings.mNumberOfShadowMaps),
+            .mMaximumCascadeCount = maximumCascadeCount,
+            .mExtendToVisibleDistance = extendToVisibleDistance,
+            .mDistantQuality = distantShadowQuality(presentationSettings.mDistantShadowQuality.get()) };
+        const int numberOfShadowMapsPerLight = filteredProjection
+            ? static_cast<int>(makeShadowCascadePlan(cascadePlanSettings).size())
+            : settings.mNumberOfShadowMaps.get();
 
         mShadowSettings->setNumShadowMapsPerLight(numberOfShadowMapsPerLight);
-        mShadowSettings->setBaseShadowTextureUnit(shaderManager.reserveGlobalTextureUnits(
-            Shader::ShaderManager::Slot::ShadowMaps, numberOfShadowMapsPerLight));
+        const unsigned int baseShadowTextureUnit = shaderManager.reserveGlobalTextureUnits(
+            Shader::ShaderManager::Slot::ShadowMaps, numberOfShadowMapsPerLight);
+        mReservedShadowMapCapacity = std::max(mReservedShadowMapCapacity, numberOfShadowMapsPerLight);
+        mShadowSettings->setBaseShadowTextureUnit(baseShadowTextureUnit);
+        mShadowTechnique->setShadowTextureUnits(baseShadowTextureUnit, numberOfShadowMapsPerLight);
 
-        const float maximumShadowMapDistance = settings.mMaximumShadowMapDistance;
+        const float maximumShadowMapDistance
+            = extendToVisibleDistance ? visibleDistance : settings.mMaximumShadowMapDistance.get();
         if (maximumShadowMapDistance > 0)
         {
             const float shadowFadeStart = settings.mShadowFadeStart;
@@ -116,8 +162,8 @@ namespace SceneUtil
         const short mapres = static_cast<short>(settings.mShadowMapResolution);
         mShadowSettings->setTextureSize(osg::Vec2s(mapres, mapres));
         mShadowTechnique->setShadowMapTexelSize(osg::Vec2f(1.f / mapres, 1.f / mapres));
-        const int filteringQuality = shadowFilteringQuality(presentationSettings.mFilteringQuality.get());
         mShadowTechnique->setFilteredProjection(filteringQuality != 0, shadowFilterGuardTexels(filteringQuality));
+        mShadowTechnique->setCascadePlanSettings(cascadePlanSettings);
 
         mShadowTechnique->setSplitPointUniformLogarithmicRatio(settings.mSplitPointUniformLogarithmicRatio);
         mShadowTechnique->setSplitPointDeltaBias(settings.mSplitPointBias);
@@ -181,7 +227,7 @@ namespace SceneUtil
     ShadowManager::ShadowManager(osg::ref_ptr<osg::Group> sceneRoot, osg::ref_ptr<osg::Group> rootNode,
         unsigned int outdoorShadowCastingMask, unsigned int indoorShadowCastingMask, unsigned int worldMask,
         const Settings::ShadowsCategory& settings, const Settings::OpenMWSEShadowsCategory& presentationSettings,
-        Shader::ShaderManager& shaderManager)
+        float visibleDistance, Shader::ShaderManager& shaderManager)
         : mShadowedScene(new osgShadow::ShadowedScene)
         , mShadowTechnique(new MWShadowTechnique)
         , mOutdoorShadowCastingMask(outdoorShadowCastingMask)
@@ -200,7 +246,7 @@ namespace SceneUtil
         mShadowedScene->setNodeMask(sceneRoot->getNodeMask());
 
         mShadowSettings = mShadowedScene->getShadowSettings();
-        setupShadowSettings(settings, presentationSettings, shaderManager);
+        setupShadowSettings(settings, presentationSettings, visibleDistance, shaderManager);
 
         mShadowTechnique->setWorldMask(worldMask);
 

@@ -1260,6 +1260,22 @@ Logs and settings changed through the launcher and in-game will be saved here.</
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Extend outdoor geometry shadows beyond the detailed range to the visible horizon. Available for filtered OpenMWSE shadow qualities.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Distant Shadows</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Controls how quickly distant cascades expand, reduce resolution, and discard insignificant casters.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Distant Shadow Quality</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Cloud Shadow Intensity</source>
         <translation type="unfinished"></translation>
     </message>

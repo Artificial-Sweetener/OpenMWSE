@@ -17,10 +17,18 @@ namespace osg
 
 namespace MWRender
 {
+    class ShadowMapDiagnosticMetadataWriter;
+
     /// Own a bounded sequence of exact production-frame composites and their submitted shadow maps.
     class RenderFrameDiagnostics
     {
     public:
+        /// Initialize an idle frame-sequence capture without opening diagnostic artifacts.
+        RenderFrameDiagnostics();
+
+        /// Clean up unpublished frame and metadata streams after cancellation.
+        ~RenderFrameDiagnostics();
+
         /// Stream a bounded sequence beginning at the scheduled route boundary, excluding older queued draw work.
         void requestCapture(std::filesystem::path outputPath, std::uint32_t frameCount, bool nativeResolution,
             std::uint64_t firstFrameNumber);
@@ -43,6 +51,7 @@ namespace MWRender
         std::uint64_t mFirstFrameNumber = 0;
         bool mNativeResolution = false;
         std::unique_ptr<RenderDiagnosticBundleWriter> mWriter;
+        std::unique_ptr<ShadowMapDiagnosticMetadataWriter> mShadowMetadataWriter;
     };
 }
 

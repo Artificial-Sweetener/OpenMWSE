@@ -1,5 +1,6 @@
 #include <apps/openmw/mwrender/renderdiagnosticbundle.hpp>
 #include <apps/openmw/mwrender/renderframediagnostics.hpp>
+#include <apps/openmw/mwrender/shadowmapdiagnostics.hpp>
 
 #include <gtest/gtest.h>
 
@@ -82,6 +83,28 @@ namespace
         EXPECT_FALSE(capture.captureInProgress());
         EXPECT_FALSE(std::filesystem::exists(path));
         EXPECT_FALSE(std::filesystem::exists(mDirectory / "scheduled.omwdiag.partial"));
+        EXPECT_FALSE(std::filesystem::exists(mDirectory / "scheduled.shadow.yaml"));
+        EXPECT_FALSE(std::filesystem::exists(mDirectory / "scheduled.shadow.yaml.partial"));
+    }
+
+    /// Publish route-frame shadow transforms in a parseable sidecar without exposing partial output.
+    TEST_F(RenderDiagnosticBundleTest, StreamsFrameMatchedShadowMetadata)
+    {
+        const auto path = mDirectory / "route-frames.shadow.yaml";
+        MWRender::ShadowMapDiagnosticMetadataWriter writer(path);
+        writer.append(0, 42,
+            "shadow-map-diagnostics-version: 1\nframe: 42\ncontext: 0\nmaps:\n"
+            "  - cascade: 0\n    receiver-crop: [-1, 1, -1, 1, -1, 1]\n");
+        EXPECT_FALSE(std::filesystem::exists(path));
+        writer.finish();
+        ASSERT_TRUE(std::filesystem::exists(path));
+        std::ifstream stream(path, std::ios::binary);
+        const std::string actual(std::istreambuf_iterator<char>{ stream }, {});
+        EXPECT_NE(actual.find("shadow-route-diagnostics-version: 1\nframes:\n"), std::string::npos);
+        EXPECT_NE(actual.find("  - route-ordinal: 0\n    render-frame: 42\n    capture:\n"), std::string::npos);
+        EXPECT_NE(actual.find("      shadow-map-diagnostics-version: 1\n"), std::string::npos);
+        EXPECT_NE(actual.find("        - cascade: 0\n"), std::string::npos);
+        EXPECT_THROW(writer.finish(), std::logic_error);
     }
 
     /// Discard incomplete output and reject attachments whose dimensions contradict their payload.

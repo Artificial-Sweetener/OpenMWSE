@@ -27,6 +27,7 @@ namespace OMW
         configuration.mCloudSunOcclusion = false;
         configuration.mShadowsEnabled = true;
         configuration.mShadowMapCount = 3;
+        configuration.mEffectiveShadowMapCount = 7;
         configuration.mMaximumShadowMapDistance = 16384.f;
         configuration.mShadowFadeStart = 0.9f;
         configuration.mShadowSplitRatio = 0.5f;
@@ -42,6 +43,8 @@ namespace OMW
         configuration.mObjectShadows = true;
         configuration.mIndoorShadows = true;
         configuration.mShadowQuality = "high";
+        configuration.mDistantShadows = true;
+        configuration.mDistantShadowQuality = "ultra";
 
         const std::string serialized = serializeDiagnosticRenderConfiguration(configuration);
 
@@ -57,10 +60,13 @@ namespace OMW
         EXPECT_NE(serialized.find("sun-glare: true"), std::string::npos);
         EXPECT_NE(serialized.find("cloud-sun-occlusion: false"), std::string::npos);
         EXPECT_NE(serialized.find("map-count: 3"), std::string::npos);
+        EXPECT_NE(serialized.find("effective-map-count: 7"), std::string::npos);
         EXPECT_NE(serialized.find("maximum-distance: 16384"), std::string::npos);
         EXPECT_NE(serialized.find("scene-bounds: \"bounds\""), std::string::npos);
         EXPECT_NE(serialized.find("map-resolution: 16384"), std::string::npos);
         EXPECT_NE(serialized.find("object-casters: true"), std::string::npos);
         EXPECT_NE(serialized.find("quality: \"high\""), std::string::npos);
+        EXPECT_NE(serialized.find("distant-shadows: true"), std::string::npos);
+        EXPECT_NE(serialized.find("distant-shadow-quality: \"ultra\""), std::string::npos);
     }
 }

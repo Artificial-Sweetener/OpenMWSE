@@ -141,14 +141,17 @@ namespace Settings
         /// Preserve fork-owned shadow preferences while editing shared upstream shadow keys.
         TEST_F(SettingsStartupTest, preservesNamespacedShadowPreferencesAcrossSharedSettingsSave)
         {
-            std::ofstream(mDirectory / "settings.cfg")
-                << "[OpenMWSE Shadows]\nquality = legacy\ncloud shadow intensity = 0.35\n"
-                   "[Shadows]\nshadow map resolution = 2048\n";
+            std::ofstream(mDirectory / "settings.cfg") << "[OpenMWSE Shadows]\nquality = legacy\ndistant shadows "
+                                                          "= true\ndistant shadow quality = high\n"
+                                                          "cloud shadow intensity = 0.35\n"
+                                                          "[Shadows]\nshadow map resolution = 2048\n";
             ASSERT_NO_FATAL_FAILURE(load());
             shadows().mShadowMapResolution.set(1024);
             Manager::saveUser(mDirectory / "settings.cfg");
             ASSERT_NO_FATAL_FAILURE(load());
             EXPECT_EQ(openmwseShadows().mFilteringQuality.get(), "legacy");
+            EXPECT_TRUE(openmwseShadows().mDistantShadows.get());
+            EXPECT_EQ(openmwseShadows().mDistantShadowQuality.get(), "high");
             EXPECT_FLOAT_EQ(openmwseShadows().mCloudShadowIntensity.get(), 0.35f);
             EXPECT_EQ(shadows().mShadowMapResolution.get(), 1024);
         }
@@ -203,8 +206,11 @@ namespace Settings
             Index index;
             Values values(index);
             EXPECT_EQ(values.mOpenMWSEShadows.mFilteringQuality.get(), "medium");
+            EXPECT_FALSE(values.mOpenMWSEShadows.mDistantShadows.get());
+            EXPECT_EQ(values.mOpenMWSEShadows.mDistantShadowQuality.get(), "medium");
             EXPECT_FLOAT_EQ(values.mOpenMWSEShadows.mCloudShadowIntensity.get(), 1.f);
             EXPECT_THROW(values.mOpenMWSEShadows.mFilteringQuality.set("invalid"), std::runtime_error);
+            EXPECT_THROW(values.mOpenMWSEShadows.mDistantShadowQuality.set("invalid"), std::runtime_error);
             values.mOpenMWSEShadows.mCloudShadowIntensity.set(2.f);
             EXPECT_EQ(values.mOpenMWSEShadows.mFilteringQuality.get(), "medium");
             EXPECT_FLOAT_EQ(values.mOpenMWSEShadows.mCloudShadowIntensity.get(), 1.f);

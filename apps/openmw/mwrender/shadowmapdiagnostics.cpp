@@ -88,4 +88,66 @@ namespace MWRender
         if (!output)
             throw std::runtime_error("failed writing shadow-map diagnostic metadata");
     }
+
+    ShadowMapDiagnosticMetadataWriter::ShadowMapDiagnosticMetadataWriter(const std::filesystem::path& path)
+        : mPath(path)
+        , mPartialPath(path.native() + std::filesystem::path(".partial").native())
+    {
+        if (std::filesystem::exists(mPath) || std::filesystem::exists(mPartialPath))
+            throw std::runtime_error("shadow-map diagnostic metadata output already exists");
+        if (!path.parent_path().empty())
+            std::filesystem::create_directories(path.parent_path());
+        mStream.open(mPartialPath, std::ios::binary | std::ios::trunc);
+        if (!mStream)
+            throw std::runtime_error("failed opening shadow-map diagnostic metadata stream");
+        mStream << "shadow-route-diagnostics-version: 1\nframes:\n";
+        if (!mStream)
+        {
+            mStream.close();
+            std::error_code error;
+            std::filesystem::remove(mPartialPath, error);
+            throw std::runtime_error("failed initializing shadow-map diagnostic metadata stream");
+        }
+    }
+
+    ShadowMapDiagnosticMetadataWriter::~ShadowMapDiagnosticMetadataWriter()
+    {
+        mStream.close();
+        if (!mPublished)
+        {
+            std::error_code error;
+            std::filesystem::remove(mPartialPath, error);
+        }
+    }
+
+    void ShadowMapDiagnosticMetadataWriter::append(
+        std::size_t routeOrdinal, std::uint64_t renderFrame, std::string_view metadata)
+    {
+        if (mPublished)
+            throw std::logic_error("shadow-map diagnostic metadata is already published");
+        mStream << "  - route-ordinal: " << routeOrdinal << "\n    render-frame: " << renderFrame << "\n    capture:\n";
+        std::size_t offset = 0;
+        while (offset < metadata.size())
+        {
+            const std::size_t end = metadata.find('\n', offset);
+            const std::size_t length = end == std::string_view::npos ? metadata.size() - offset : end - offset;
+            mStream << "      " << metadata.substr(offset, length) << '\n';
+            if (end == std::string_view::npos)
+                break;
+            offset = end + 1;
+        }
+        if (!mStream)
+            throw std::runtime_error("failed appending shadow-map diagnostic metadata");
+    }
+
+    void ShadowMapDiagnosticMetadataWriter::finish()
+    {
+        if (mPublished)
+            throw std::logic_error("shadow-map diagnostic metadata is already published");
+        mStream.close();
+        if (!mStream)
+            throw std::runtime_error("failed closing shadow-map diagnostic metadata");
+        std::filesystem::rename(mPartialPath, mPath);
+        mPublished = true;
+    }
 }

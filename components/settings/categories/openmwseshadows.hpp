@@ -17,6 +17,13 @@ namespace Settings
         SettingValue<std::string> mFilteringQuality{ mIndex, "OpenMWSE Shadows", "quality",
             makeEnumSanitizerString({ "legacy", "low", "medium", "high", "ultra" }) };
 
+        /// Extend filtered outdoor shadows beyond the detailed range to the visible horizon.
+        SettingValue<bool> mDistantShadows{ mIndex, "OpenMWSE Shadows", "distant shadows" };
+
+        /// Select how quickly horizon cascades reduce resolution and discard insignificant casters.
+        SettingValue<std::string> mDistantShadowQuality{ mIndex, "OpenMWSE Shadows", "distant shadow quality",
+            makeEnumSanitizerString({ "low", "medium", "high", "ultra" }) };
+
         /// Scale cloud optical depth while preserving the active cloud representation and weather state.
         SettingValue<float> mCloudShadowIntensity{ mIndex, "OpenMWSE Shadows", "cloud shadow intensity",
             makeClampSanitizerFloat(0.f, 1.f) };

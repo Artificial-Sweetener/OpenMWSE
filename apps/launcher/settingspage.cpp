@@ -300,6 +300,7 @@ bool Launcher::SettingsPage::loadSettings()
         loadSettingBool(Settings::shadows().mObjectShadows, *objectShadowsCheckBox);
         loadSettingBool(Settings::shadows().mEnableIndoorShadows, *indoorShadowsCheckBox);
         loadSettingBool(Settings::shadows().mCloudShadows, *cloudShadowsCheckBox);
+        loadSettingBool(Settings::openmwseShadows().mDistantShadows, *distantShadowsCheckBox);
 
         static constexpr std::array<std::string_view, 5> shadowFilteringQualities{ "legacy", "low", "medium", "high",
             "ultra" };
@@ -309,6 +310,13 @@ bool Launcher::SettingsPage::loadSettings()
         shadowFilteringQualityComboBox->setCurrentIndex(quality == shadowFilteringQualities.end()
                 ? 2
                 : static_cast<int>(quality - shadowFilteringQualities.begin()));
+        static constexpr std::array<std::string_view, 4> distantShadowQualities{ "low", "medium", "high", "ultra" };
+        const auto distantShadowQuality = Settings::openmwseShadows().mDistantShadowQuality.get();
+        const auto distantQuality
+            = std::find(distantShadowQualities.begin(), distantShadowQualities.end(), distantShadowQuality);
+        distantShadowQualityComboBox->setCurrentIndex(distantQuality == distantShadowQualities.end()
+                ? 1
+                : static_cast<int>(distantQuality - distantShadowQualities.begin()));
         cloudShadowIntensitySpinBox->setValue(Settings::openmwseShadows().mCloudShadowIntensity * 100.0);
         const auto updateCloudShadowIntensityAvailability = [this]() {
             cloudShadowIntensitySpinBox->setEnabled(
@@ -318,6 +326,16 @@ bool Launcher::SettingsPage::loadSettings()
         connect(shadowFilteringQualityComboBox, &QComboBox::currentIndexChanged, this,
             updateCloudShadowIntensityAvailability);
         updateCloudShadowIntensityAvailability();
+        const auto updateDistantShadowAvailability = [this]() {
+            const bool filteredShadows = shadowFilteringQualityComboBox->currentIndex() != 0;
+            distantShadowsCheckBox->setEnabled(filteredShadows);
+            const bool distantQualityAvailable = filteredShadows && distantShadowsCheckBox->isChecked();
+            distantShadowQualityLabel->setEnabled(distantQualityAvailable);
+            distantShadowQualityComboBox->setEnabled(distantQualityAvailable);
+        };
+        connect(shadowFilteringQualityComboBox, &QComboBox::currentIndexChanged, this, updateDistantShadowAvailability);
+        connect(distantShadowsCheckBox, &QCheckBox::toggled, this, updateDistantShadowAvailability);
+        updateDistantShadowAvailability();
 
         const auto& boundMethod = Settings::shadows().mComputeSceneBounds.get();
         if (boundMethod == "bounds")
@@ -630,6 +648,11 @@ void Launcher::SettingsPage::saveSettings()
         const auto filteringQualityIndex = std::clamp(shadowFilteringQualityComboBox->currentIndex(), 0, 4);
         Settings::openmwseShadows().mFilteringQuality.set(
             std::string(shadowFilteringQualities[static_cast<std::size_t>(filteringQualityIndex)]));
+        saveSettingBool(*distantShadowsCheckBox, Settings::openmwseShadows().mDistantShadows);
+        static constexpr std::array<std::string_view, 4> distantShadowQualities{ "low", "medium", "high", "ultra" };
+        const auto distantQualityIndex = std::clamp(distantShadowQualityComboBox->currentIndex(), 0, 3);
+        Settings::openmwseShadows().mDistantShadowQuality.set(
+            std::string(distantShadowQualities[static_cast<std::size_t>(distantQualityIndex)]));
         Settings::openmwseShadows().mCloudShadowIntensity.set(
             static_cast<float>(cloudShadowIntensitySpinBox->value() / 100.0));
 

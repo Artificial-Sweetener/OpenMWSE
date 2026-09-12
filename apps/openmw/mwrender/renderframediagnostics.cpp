@@ -17,6 +17,10 @@
 
 namespace MWRender
 {
+    RenderFrameDiagnostics::RenderFrameDiagnostics() = default;
+
+    RenderFrameDiagnostics::~RenderFrameDiagnostics() = default;
+
     void RenderFrameDiagnostics::requestCapture(std::filesystem::path outputPath, std::uint32_t frameCount,
         bool nativeResolution, std::uint64_t firstFrameNumber)
     {
@@ -26,7 +30,12 @@ namespace MWRender
         std::lock_guard lock(mMutex);
         if (mOutputPath)
             throw std::logic_error("render frame diagnostic capture is already in progress");
-        mWriter = std::make_unique<RenderDiagnosticBundleWriter>(outputPath);
+        std::filesystem::path metadataPath = outputPath;
+        metadataPath.replace_extension(".shadow.yaml");
+        auto writer = std::make_unique<RenderDiagnosticBundleWriter>(outputPath);
+        auto shadowMetadataWriter = std::make_unique<ShadowMapDiagnosticMetadataWriter>(metadataPath);
+        mWriter = std::move(writer);
+        mShadowMetadataWriter = std::move(shadowMetadataWriter);
         mOutputPath = std::move(outputPath);
         mNativeResolution = nativeResolution;
         mRequestedFrameCount = frameCount;
@@ -70,8 +79,8 @@ namespace MWRender
             std::ostringstream name;
             name << "route-frame-" << std::setw(4) << std::setfill('0') << frameOrdinal << "-osg-" << frameNumber;
             RenderDiagnosticCapture capture(renderInfo);
-            RenderDiagnosticImage image = capture.captureFramebuffer(
-                framebuffer, width, height, name.str(), maximumCaptureDimension);
+            RenderDiagnosticImage image
+                = capture.captureFramebuffer(framebuffer, width, height, name.str(), maximumCaptureDimension);
             ShadowMapDiagnosticCapture shadowMaps = captureShadowMapDiagnostics(capture, renderInfo, 512);
             for (RenderDiagnosticImage& shadowMap : shadowMaps.mImages)
             {
@@ -86,12 +95,15 @@ namespace MWRender
                 return;
             mWriter->append(std::span<const RenderDiagnosticImage>(&image, 1));
             mWriter->append(shadowMaps.mImages);
+            mShadowMetadataWriter->append(frameOrdinal, frameNumber, shadowMaps.mMetadata);
             ++mCapturedFrameCount;
             if (mCapturedFrameCount == mRequestedFrameCount)
             {
+                mShadowMetadataWriter->finish();
                 mWriter->finish(frameNumber);
                 Log(Debug::Info) << "Captured exact render-frame sequence to " << *mOutputPath;
                 mWriter.reset();
+                mShadowMetadataWriter.reset();
                 mOutputPath.reset();
                 mRequestedFrameCount = 0;
                 mCapturedFrameCount = 0;
@@ -102,11 +114,23 @@ namespace MWRender
         {
             Log(Debug::Error) << "Failed to capture exact render-frame sequence: " << exception.what();
             std::lock_guard lock(mMutex);
+            std::filesystem::path metadataPath;
+            if (mOutputPath)
+            {
+                metadataPath = *mOutputPath;
+                metadataPath.replace_extension(".shadow.yaml");
+            }
             mOutputPath.reset();
             mRequestedFrameCount = 0;
             mCapturedFrameCount = 0;
             mLastFrameNumber.reset();
             mWriter.reset();
+            mShadowMetadataWriter.reset();
+            if (!metadataPath.empty())
+            {
+                std::error_code error;
+                std::filesystem::remove(metadataPath, error);
+            }
         }
     }
 }

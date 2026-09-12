@@ -20,6 +20,7 @@ varying float alphaPassthrough;
 
 uniform bool useDiffuseMapForShadowAlpha;
 uniform bool alphaTestShadows;
+uniform bool stabilizeShadowCoverage;
 uniform float alphaRef;
 
 #include "lib/material/alpha.glsl"
@@ -28,7 +29,11 @@ void main()
 {
     gl_FragData[0].rgb = vec3(1.0);
     if (useDiffuseMapForShadowAlpha)
+    {
         gl_FragData[0].a = texture2D(diffuseMap, diffuseMapUV).a * alphaPassthrough;
+        if (stabilizeShadowCoverage)
+            gl_FragData[0].a *= coveragePreservingAlphaScale(diffuseMap, diffuseMapUV);
+    }
     else
         gl_FragData[0].a = alphaPassthrough;
 

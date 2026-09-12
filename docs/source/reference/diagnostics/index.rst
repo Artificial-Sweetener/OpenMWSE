@@ -86,8 +86,9 @@ baseline and candidate repetition.
 
 Add ``--capture-route-frames`` when diagnosing temporal rendering defects. The controller stores the exact final composite for
 every executed route frame together with frame-matched shadow-map depth and projection metadata in bounded, versioned
-``route-frames-*.omwdiag`` bundles inside the artifact directory. The capture uses the isolated graphics context and leaves the
-normal game profile untouched. Preview frames are limited to 1024 pixels on their longest edge.
+``route-frames-*.omwdiag`` bundles and ``route-frames-*.shadow.yaml`` projection sidecars inside the artifact directory. The
+capture uses the isolated graphics context and leaves the normal game profile untouched. Preview frames are limited to 1024
+pixels on their longest edge.
 Use ``--capture-route-native-frames`` for pixel-scale temporal defects. Native captures preserve the rendering resolution
 by streaming each frame directly to a partial bundle and publishing the completed sequence. Each frame is limited to
 64 million RGBA pixels; only the current frame and its shadow attachments are retained in memory.

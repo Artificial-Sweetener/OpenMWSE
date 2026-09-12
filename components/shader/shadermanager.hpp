@@ -90,6 +90,7 @@ namespace Shader
             SLOT_COUNT
         };
 
+        /// Reserve or grow one relocatable contiguous global sampler range without moving other owners.
         int reserveGlobalTextureUnits(Slot slot, int count = 1);
 
         void update(osgViewer::Viewer& viewer);

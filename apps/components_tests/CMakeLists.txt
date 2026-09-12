@@ -56,6 +56,8 @@ file(GLOB UNITTEST_SRC_FILES
     shader/shadermanager.cpp
     shader/shadowcasting.cpp
     shader/atmosphere.cpp
+    sceneutil/shadowcascade.cpp
+    sceneutil/shadowfrustum.cpp
     sceneutil/texturedclouds.cpp
 
     sqlite3/db.cpp

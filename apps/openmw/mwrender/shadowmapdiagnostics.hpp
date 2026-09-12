@@ -3,7 +3,9 @@
 
 #include "renderdiagnosticimage.hpp"
 
+#include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -30,6 +32,29 @@ namespace MWRender
 
     /// Persist shadow-map projection metadata alongside its render diagnostic bundle.
     void writeShadowMapDiagnosticMetadata(const std::filesystem::path& path, std::string_view metadata);
+
+    /// Stream frame-indexed shadow projection metadata and publish it beside a completed route bundle.
+    class ShadowMapDiagnosticMetadataWriter
+    {
+    public:
+        /// Open a private partial sidecar and reject pre-existing diagnostic output.
+        explicit ShadowMapDiagnosticMetadataWriter(const std::filesystem::path& path);
+
+        /// Remove an unpublished partial sidecar after cancellation or failure.
+        ~ShadowMapDiagnosticMetadataWriter();
+
+        /// Append one route frame's render identity and complete shadow-map metadata document.
+        void append(std::size_t routeOrdinal, std::uint64_t renderFrame, std::string_view metadata);
+
+        /// Close and atomically publish the completed metadata sidecar.
+        void finish();
+
+    private:
+        std::filesystem::path mPath;
+        std::filesystem::path mPartialPath;
+        std::ofstream mStream;
+        bool mPublished = false;
+    };
 }
 
 #endif

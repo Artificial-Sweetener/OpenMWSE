@@ -28,6 +28,7 @@ namespace OMW
         bool mCloudSunOcclusion = false;
         bool mShadowsEnabled = false;
         int mShadowMapCount = 0;
+        int mEffectiveShadowMapCount = 0;
         float mMaximumShadowMapDistance = 0.f;
         float mShadowFadeStart = 0.f;
         float mShadowSplitRatio = 0.f;
@@ -45,6 +46,8 @@ namespace OMW
         bool mObjectShadows = false;
         bool mIndoorShadows = false;
         std::string mShadowQuality;
+        bool mDistantShadows = false;
+        std::string mDistantShadowQuality;
     };
 
     /// Snapshot the effective render settings used by the current engine instance.

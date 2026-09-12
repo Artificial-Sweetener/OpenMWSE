@@ -33,6 +33,9 @@
 
 #include <components/shader/shadermanager.hpp>
 
+#include "shadowcascade.hpp"
+#include "shadowfrustum.hpp"
+
 // NOLINTBEGIN(readability-identifier-naming)
 
 namespace SceneUtil {
@@ -90,8 +93,14 @@ namespace SceneUtil {
         /// Publish the reciprocal shadow-map dimensions used by receiver-side filters.
         virtual void setShadowMapTexelSize(const osg::Vec2f& texelSize);
 
+        /// Synchronize receiver sampler uniforms after the global shadow texture range moves or grows.
+        virtual void setShadowTextureUnits(unsigned int baseTextureUnit, unsigned int shadowMapCount);
+
         /// Select stable filtered projections and reserve their sampling footprint at cascade edges.
         virtual void setFilteredProjection(bool enabled, double guardTexels);
+
+        /// Set the authoritative detailed and optional horizon cascade policy for filtered projections.
+        virtual void setCascadePlanSettings(const ShadowCascadePlanSettings& settings);
 
         virtual void enableFrontFaceCulling();
 
@@ -127,35 +136,6 @@ namespace SceneUtil {
             void reset() override;
 
             osg::BoundingBox _bb;
-        };
-
-        struct Frustum
-        {
-            Frustum(osgUtil::CullVisitor* cv, double minZNear, double maxZFar);
-            void setCustomClipSpace(const osg::BoundingBoxd& clipCornersOverride);
-            void init();
-
-            osg::Matrixd projectionMatrix;
-            osg::Matrixd modelViewMatrix;
-
-            bool useCustomClipSpace;
-            osg::BoundingBoxd customClipSpace;
-
-            typedef std::vector<osg::Vec3d> Vertices;
-            Vertices corners;
-
-            typedef std::vector<unsigned int> Indices;
-            typedef std::vector<Indices> Faces;
-            Faces faces;
-
-            typedef std::vector<Indices> Edges;
-            Edges edges;
-
-            osg::Vec3d eye;
-            osg::Vec3d centerNearPlane;
-            osg::Vec3d centerFarPlane;
-            osg::Vec3d center;
-            osg::Vec3d frustumCenterLine;
         };
 
         /** Custom frustum callback allowing the application to request shadow maps covering a
@@ -196,18 +176,26 @@ namespace SceneUtil {
 
         typedef std::list< osg::ref_ptr<LightData> > LightDataList;
 
+        /// Own one realized shadow-map camera and its current cascade sampling policy.
         struct ShadowData : public osg::Referenced
         {
             ShadowData(ViewDependentData* vdd);
 
             virtual void releaseGLObjects(osg::State* = 0) const;
 
+            /// Resize the depth target to the cascade's bounded progressive-resolution tier.
             void updateTextureSize();
 
             ViewDependentData*                  _viewDependentData;
 
             unsigned int                        _textureUnit;
             unsigned int                        _sm_i;
+            ShadowCascade                       _cascade;
+            bool                                _stableCascade = false;
+            double                              _worldUnitsPerTexel = 0.0;
+            float                               _filterRadiusScale = 1.f;
+            float                               _normalOffsetScale = 1.f;
+            osg::Vec3d                          _lightDirection;
             osg::ref_ptr<osg::Texture2D>        _texture;
             osg::ref_ptr<osg::Camera>           _camera;
         };
@@ -263,22 +251,31 @@ namespace SceneUtil {
 
         virtual bool selectActiveLights(osgUtil::CullVisitor* cv, ViewDependentData* vdd) const;
 
-        virtual osg::Polytope computeLightViewFrustumPolytope(Frustum& frustum, LightData& positionedLight);
+        /// Build the original full-view caster volume used by Legacy and non-directional lights.
+        virtual osg::Polytope computeLightViewFrustumPolytope(ShadowFrustum& frustum, LightData& positionedLight);
 
-        virtual bool computeShadowCameraSettings(Frustum& frustum, LightData& positionedLight, osg::Matrixd& projectionMatrix, osg::Matrixd& viewMatrix);
+        /// Fit the shared light camera to the current receiver frustum before per-cascade cropping.
+        virtual bool computeShadowCameraSettings(ShadowFrustum& frustum, LightData& positionedLight, osg::Matrixd& projectionMatrix, osg::Matrixd& viewMatrix);
 
         /// Crop receiver dimensions while retaining the caster-facing depth range for shader depth clamping.
-        virtual bool cropShadowCameraToMainFrustum(Frustum& frustum, osg::Camera* camera, double viewNear, double viewFar, std::vector<osg::Plane>& planeList);
+        virtual bool cropShadowCameraToMainFrustum(ShadowFrustum& frustum, osg::Camera* camera,
+            double viewNear, double viewFar, std::vector<osg::Plane>& planeList,
+            double* worldUnitsPerTexel = nullptr);
 
-        virtual bool adjustPerspectiveShadowMapCameraSettings(osgUtil::RenderStage* renderStage, Frustum& frustum, LightData& positionedLight, osg::Camera* camera, double viewNear, double viewFar);
+        /// Apply the original perspective-shadow adjustment when that projection path is active.
+        virtual bool adjustPerspectiveShadowMapCameraSettings(osgUtil::RenderStage* renderStage, ShadowFrustum& frustum, LightData& positionedLight, osg::Camera* camera, double viewNear, double viewFar);
         
-        virtual void assignShadowStateSettings(osgUtil::CullVisitor& cv, osg::Camera* camera, unsigned int sm_i, Uniforms& uniforms);
+        /// Publish one map's transform, depth interval, filter scale, and receiver-bias state.
+        virtual void assignShadowStateSettings(
+            osgUtil::CullVisitor& cv, ShadowData& shadowData, Uniforms& uniforms);
         
         virtual void assignValidRegionSettings(osgUtil::CullVisitor& cv, osg::Camera* camera, unsigned int sm_i, Uniforms& uniforms);
 
         virtual void cullShadowReceivingScene(osgUtil::CullVisitor* cv) const;
 
-        virtual void cullShadowCastingScene(osgUtil::CullVisitor* cv, osg::Camera* camera) const;
+        /// Traverse the shadow camera using the caster categories selected for this cascade.
+        virtual void cullShadowCastingScene(
+            osgUtil::CullVisitor* cv, osg::Camera* camera, unsigned int casterTraversalMask) const;
 
         virtual osg::StateSet* prepareStateSetForRenderingShadow(ViewDependentData& vdd, unsigned int traversalNumber) const;
 
@@ -322,6 +319,8 @@ namespace SceneUtil {
         osg::Vec2f                              mShadowMapTexelSize{ 1.f, 1.f };
         bool                                    mFilteredProjection = false;
         double                                  mShadowFilterGuardTexels = 0.0;
+        ShadowCascadePlanSettings               mCascadePlanSettings;
+        bool                                    mStabilizeAlphaTestedCasters = false;
 
         unsigned int                            _worldMask = ~0u;
 

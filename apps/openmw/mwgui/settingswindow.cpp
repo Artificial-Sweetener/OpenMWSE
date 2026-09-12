@@ -77,6 +77,7 @@ namespace
     const std::string_view checkButtonType = "CheckButton";
     const std::string_view sliderType = "Slider";
     constexpr std::array<std::string_view, 5> shadowFilteringQualities{ "legacy", "low", "medium", "high", "ultra" };
+    constexpr std::array<std::string_view, 4> distantShadowQualities{ "low", "medium", "high", "ultra" };
 
     std::string_view getSettingType(MyGUI::Widget* widget)
     {
@@ -299,6 +300,8 @@ namespace MWGui
         getWidget(mVolumetricQuality, "VolumetricQuality");
         getWidget(mAtmosphereAppearance, "AtmosphereAppearance");
         getWidget(mShadowFilteringQuality, "ShadowFilteringQuality");
+        getWidget(mDistantShadowsButton, "DistantShadowsButton");
+        getWidget(mDistantShadowQuality, "DistantShadowQuality");
         getWidget(mActorShadowsButton, "ActorShadowsButton");
         getWidget(mPlayerShadowsButton, "PlayerShadowsButton");
         getWidget(mTerrainShadowsButton, "TerrainShadowsButton");
@@ -339,6 +342,8 @@ namespace MWGui
             += MyGUI::newDelegate(this, &SettingsWindow::onVolumetricQualityChanged);
         mShadowFilteringQuality->eventComboChangePosition
             += MyGUI::newDelegate(this, &SettingsWindow::onShadowFilteringQualityChanged);
+        mDistantShadowQuality->eventComboChangePosition
+            += MyGUI::newDelegate(this, &SettingsWindow::onDistantShadowQualityChanged);
         mAtmosphereAppearance->eventComboChangePosition
             += MyGUI::newDelegate(this, &SettingsWindow::onAtmosphereAppearanceChanged);
         mWaterRainRippleDetail->eventComboChangePosition
@@ -587,6 +592,14 @@ namespace MWGui
         if (pos >= sender->getItemCount() || pos >= shadowFilteringQualities.size())
             return;
         Settings::openmwseShadows().mFilteringQuality.set(std::string(shadowFilteringQualities[pos]));
+        apply();
+    }
+
+    void SettingsWindow::onDistantShadowQualityChanged(MyGUI::ComboBox* sender, size_t pos)
+    {
+        if (pos >= sender->getItemCount() || pos >= distantShadowQualities.size())
+            return;
+        Settings::openmwseShadows().mDistantShadowQuality.set(std::string(distantShadowQualities[pos]));
         apply();
     }
 
@@ -985,6 +998,15 @@ namespace MWGui
         mShadowFilteringQuality->setIndexSelected(qualityIt == shadowFilteringQualities.end()
                 ? 2
                 : static_cast<size_t>(qualityIt - shadowFilteringQualities.begin()));
+        const auto distantQuality = Settings::openmwseShadows().mDistantShadowQuality.get();
+        const auto distantQualityIt
+            = std::find(distantShadowQualities.begin(), distantShadowQualities.end(), distantQuality);
+        mDistantShadowQuality->setIndexSelected(distantQualityIt == distantShadowQualities.end()
+                ? 1
+                : static_cast<size_t>(distantQualityIt - distantShadowQualities.begin()));
+        const bool filteredShadows = quality != "legacy";
+        mDistantShadowsButton->setEnabled(filteredShadows);
+        mDistantShadowQuality->setEnabled(filteredShadows && Settings::openmwseShadows().mDistantShadows);
         mCloudShadowIntensity->setEnabled(Settings::shadows().mCloudShadows && quality != "legacy");
     }
 

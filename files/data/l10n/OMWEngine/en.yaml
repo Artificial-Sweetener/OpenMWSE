@@ -282,6 +282,10 @@ CloudShadowIntensityTooltip: "Adjust the strength of diffuse shadows cast by tex
 ShadowFilteringQuality: "Shadow quality"
 ShadowFilteringLegacy: "Legacy (OpenMW)"
 ShadowFilteringQualityTooltip: "Choose shadow smoothing and stability. Legacy reproduces OpenMW's existing geometry and cloud-shadow presentation. Higher settings use more geometry-shadow samples and natural diffuse cloud shadows. Applies immediately."
+DistantShadows: "Distant shadows"
+DistantShadowsTooltip: "Extend outdoor geometry shadows beyond the detailed range to the visible horizon. Available for filtered OpenMWSE shadow qualities. Applies immediately."
+DistantShadowQuality: "Distant shadow quality"
+DistantShadowQualityTooltip: "Control how quickly distant cascades expand, reduce resolution, and discard insignificant casters. Higher levels retain more distant detail at increased cost. Applies immediately."
 ReflectClouds: "Reflect clouds"
 ReflectCloudsTooltip: "Include traditional textured or volumetric clouds in water reflections. Volumetric clouds do not need to be enabled. Requires water shaders."
 

@@ -1,5 +1,6 @@
 #include "diagnosticrenderconfiguration.hpp"
 
+#include <components/sceneutil/shadow.hpp>
 #include <components/settings/values.hpp>
 
 #include <iomanip>
@@ -31,6 +32,7 @@ namespace OMW
             .mCloudSunOcclusion = Settings::shaders().mCloudSunOcclusion,
             .mShadowsEnabled = shadows.mEnableShadows,
             .mShadowMapCount = shadows.mNumberOfShadowMaps,
+            .mEffectiveShadowMapCount = SceneUtil::ShadowManager::instance().getEffectiveShadowMapCount(),
             .mMaximumShadowMapDistance = shadows.mMaximumShadowMapDistance,
             .mShadowFadeStart = shadows.mShadowFadeStart,
             .mShadowSplitRatio = shadows.mSplitPointUniformLogarithmicRatio,
@@ -48,6 +50,8 @@ namespace OMW
             .mObjectShadows = shadows.mObjectShadows,
             .mIndoorShadows = shadows.mEnableIndoorShadows,
             .mShadowQuality = Settings::openmwseShadows().mFilteringQuality,
+            .mDistantShadows = Settings::openmwseShadows().mDistantShadows,
+            .mDistantShadowQuality = Settings::openmwseShadows().mDistantShadowQuality,
         };
     }
 
@@ -73,6 +77,7 @@ namespace OMW
                << "\n  cloud-sun-occlusion: " << boolean(configuration.mCloudSunOcclusion)
                << "\nshadows:\n  enabled: " << boolean(configuration.mShadowsEnabled)
                << "\n  map-count: " << configuration.mShadowMapCount
+               << "\n  effective-map-count: " << configuration.mEffectiveShadowMapCount
                << "\n  maximum-distance: " << configuration.mMaximumShadowMapDistance
                << "\n  fade-start: " << configuration.mShadowFadeStart
                << "\n  split-ratio: " << configuration.mShadowSplitRatio
@@ -90,6 +95,8 @@ namespace OMW
                << "\n  object-casters: " << boolean(configuration.mObjectShadows)
                << "\n  indoor: " << boolean(configuration.mIndoorShadows)
                << "\nopenmwse-shadows:\n  quality: " << std::quoted(configuration.mShadowQuality)
+               << "\n  distant-shadows: " << boolean(configuration.mDistantShadows)
+               << "\n  distant-shadow-quality: " << std::quoted(configuration.mDistantShadowQuality)
                << "\n  cloud-shadow-intensity: " << configuration.mCloudShadowIntensity << '\n';
         return output.str();
     }
