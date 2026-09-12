@@ -322,6 +322,7 @@ namespace LuaUi
         mAnchor = propertyValue("anchor", MyGUI::FloatSize());
         mVisible = propertyValue("visible", true);
         mWidget->setVisible(mVisible);
+        mWidget->setNeedMouseFocus(!propertyValue("ignorePointerEvents", false));
         mWidget->setPointer(propertyValue("pointer", std::string("arrow")));
         mWidget->setAlpha(propertyValue("alpha", 1.f));
         mWidget->setInheritsAlpha(propertyValue("inheritAlpha", true));
@@ -496,6 +497,7 @@ namespace LuaUi
             "relativeSize",
             "anchor",
             "visible",
+            "ignorePointerEvents",
             "pointer",
             "alpha",
             "inheritAlpha",
@@ -562,6 +564,18 @@ namespace LuaUi
     {
         protectedCall([=, this](LuaUtil::LuaView& view) {
             propagateEvent("mouseRelease", [&](auto w) { return w->mouseEvent(view, left, top, button); });
+        });
+    }
+
+    void WidgetExtension::mouseWheel(MyGUI::Widget*, float left, float top, float x, float y)
+    {
+        protectedCall([=, this](LuaUtil::LuaView& view) {
+            propagateEvent("mouseWheel", [&](auto w) {
+                sol::table event = view.newTable();
+                event["position"] = osg::Vec2f(left, top);
+                event["delta"] = osg::Vec2f(x, y);
+                return event;
+            });
         });
     }
 

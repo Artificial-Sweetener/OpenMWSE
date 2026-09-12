@@ -30,21 +30,11 @@ namespace
         return false;
     }
 
-    std::string_view getGMSTString(const MWWorld::Store<ESM::GameSetting>& settings, std::string_view id)
+    template <class T>
+    concept HasRecordFlags = requires
     {
-        const ESM::GameSetting* setting = settings.search(id);
-        if (setting && setting->mValue.getType() == ESM::VT_String)
-            return setting->mValue.getString();
-        return id;
-    }
-
-    float getGMSTFloat(const MWWorld::Store<ESM::GameSetting>& settings, std::string_view id)
-    {
-        const ESM::GameSetting* setting = settings.search(id);
-        if (setting && (setting->mValue.getType() == ESM::VT_Float || setting->mValue.getType() == ESM::VT_Int))
-            return setting->mValue.getFloat();
-        return {};
-    }
+        T::mRecordFlags;
+    };
 }
 
 namespace MWWorld
@@ -341,12 +331,15 @@ namespace MWWorld
     template <class T, class Id>
     void TypedDynamicStore<T, Id>::write(ESM::ESMWriter& writer, Loading::Listener& progress) const
     {
-        for (typename Dynamic::const_iterator iter(mDynamic.begin()); iter != mDynamic.end(); ++iter)
+        for (const auto& [_, record] : mDynamic)
         {
             if constexpr (!ESM::isESM4Rec(T::sRecordId))
             {
-                writer.startRecord(T::sRecordId);
-                iter->second.save(writer);
+                if constexpr (HasRecordFlags<T>)
+                    writer.startRecord(T::sRecordId, record.mRecordFlags);
+                else
+                    writer.startRecord(T::sRecordId);
+                record.save(writer);
                 writer.endRecord(T::sRecordId);
             }
         }
@@ -870,69 +863,6 @@ namespace MWWorld
         return find(cell.mId);
     }
 
-    // Skill
-    //=========================================================================
-
-    void Store<ESM::Skill>::setUp(const MWWorld::Store<ESM::GameSetting>& settings)
-    {
-        constexpr std::string_view skillValues[ESM::Skill::Length][4] = {
-            { "sSkillBlock", "icons\\k\\combat_block.dds", "fWerewolfBlock", {} },
-            { "sSkillArmorer", "icons\\k\\combat_armor.dds", "fWerewolfArmorer", {} },
-            { "sSkillMediumarmor", "icons\\k\\combat_mediumarmor.dds", "fWerewolfMediumarmor", {} },
-            { "sSkillHeavyarmor", "icons\\k\\combat_heavyarmor.dds", "fWerewolfHeavyarmor", {} },
-            { "sSkillBluntweapon", "icons\\k\\combat_blunt.dds", "fWerewolfBluntweapon", {} },
-            { "sSkillLongblade", "icons\\k\\combat_longblade.dds", "fWerewolfLongblade", {} },
-            { "sSkillAxe", "icons\\k\\combat_axe.dds", "fWerewolfAxe", {} },
-            { "sSkillSpear", "icons\\k\\combat_spear.dds", "fWerewolfSpear", {} },
-            { "sSkillAthletics", "icons\\k\\combat_athletics.dds", "fWerewolfAthletics", {} },
-            { "sSkillEnchant", "icons\\k\\magic_enchant.dds", "fWerewolfEnchant", {} },
-            { "sSkillDestruction", "icons\\k\\magic_destruction.dds", "fWerewolfDestruction", "destruction" },
-            { "sSkillAlteration", "icons\\k\\magic_alteration.dds", "fWerewolfAlteration", "alteration" },
-            { "sSkillIllusion", "icons\\k\\magic_illusion.dds", "fWerewolfIllusion", "illusion" },
-            { "sSkillConjuration", "icons\\k\\magic_conjuration.dds", "fWerewolfConjuration", "conjuration" },
-            { "sSkillMysticism", "icons\\k\\magic_mysticism.dds", "fWerewolfMysticism", "mysticism" },
-            { "sSkillRestoration", "icons\\k\\magic_restoration.dds", "fWerewolfRestoration", "restoration" },
-            { "sSkillAlchemy", "icons\\k\\magic_alchemy.dds", "fWerewolfAlchemy", {} },
-            { "sSkillUnarmored", "icons\\k\\magic_unarmored.dds", "fWerewolfUnarmored", {} },
-            { "sSkillSecurity", "icons\\k\\stealth_security.dds", "fWerewolfSecurity", {} },
-            { "sSkillSneak", "icons\\k\\stealth_sneak.dds", "fWerewolfSneak", {} },
-            { "sSkillAcrobatics", "icons\\k\\stealth_acrobatics.dds", "fWerewolfAcrobatics", {} },
-            { "sSkillLightarmor", "icons\\k\\stealth_lightarmor.dds", "fWerewolfLightarmor", {} },
-            { "sSkillShortblade", "icons\\k\\stealth_shortblade.dds", "fWerewolfShortblade", {} },
-            { "sSkillMarksman", "icons\\k\\stealth_marksman.dds", "fWerewolfMarksman", {} },
-            // "Mercantile"! >_<
-            { "sSkillMercantile", "icons\\k\\stealth_mercantile.dds", "fWerewolfMerchantile", {} },
-            { "sSkillSpeechcraft", "icons\\k\\stealth_speechcraft.dds", "fWerewolfSpeechcraft", {} },
-            { "sSkillHandtohand", "icons\\k\\stealth_handtohand.dds", "fWerewolfHandtohand", {} },
-        };
-        for (ESM::Skill* skill : mShared)
-        {
-            int index = ESM::Skill::refIdToIndex(skill->mId);
-            if (index >= 0)
-            {
-                const auto& values = skillValues[index];
-                skill->mName = getGMSTString(settings, values[0]);
-                skill->mIcon = values[1];
-                skill->mWerewolfValue = getGMSTFloat(settings, values[2]);
-                const auto& school = values[3];
-                if (!school.empty())
-                {
-                    if (!skill->mSchool)
-                        skill->mSchool = ESM::MagicSchool{};
-                    const std::string id{ school };
-                    skill->mSchool->mAreaSound = ESM::RefId::stringRefId(id + " area");
-                    skill->mSchool->mBoltSound = ESM::RefId::stringRefId(id + " bolt");
-                    skill->mSchool->mCastSound = ESM::RefId::stringRefId(id + " cast");
-                    skill->mSchool->mFailureSound = ESM::RefId::stringRefId("Spell Failure " + id);
-                    skill->mSchool->mHitSound = ESM::RefId::stringRefId(id + " hit");
-                    const std::string name = "sSchool" + id;
-                    skill->mSchool->mName = getGMSTString(settings, name);
-                    skill->mSchool->mAutoCalcMax = int(getGMSTFloat(settings, "iAutoSpell" + id + "Max"));
-                }
-            }
-        }
-    }
-
     // Game Settings
     //=========================================================================
 
@@ -951,52 +881,49 @@ namespace MWWorld
         return TypedDynamicStore::search(ESM::RefId::stringRefId(id));
     }
 
-    // Attribute
+    // Weapon type
     //=========================================================================
 
-    void Store<ESM::Attribute>::setUp(const MWWorld::Store<ESM::GameSetting>& settings)
+    void Store<ESM::WeaponType>::setUp()
     {
-        insertStatic({ .mId = ESM::Attribute::Strength,
-            .mName = std::string{ getGMSTString(settings, "sAttributeStrength") },
-            .mDescription = std::string{ getGMSTString(settings, "sStrDesc") },
-            .mIcon = "icons\\k\\attribute_strength.dds",
-            .mWerewolfValue = getGMSTFloat(settings, "fWerewolfStrength") });
-        insertStatic({ .mId = ESM::Attribute::Intelligence,
-            .mName = std::string{ getGMSTString(settings, "sAttributeIntelligence") },
-            .mDescription = std::string{ getGMSTString(settings, "sIntDesc") },
-            .mIcon = "icons\\k\\attribute_int.dds",
-            // Oh, Bethesda. It's "Intelligence".
-            .mWerewolfValue = getGMSTFloat(settings, "fWerewolfIntellegence") });
-        insertStatic({ .mId = ESM::Attribute::Willpower,
-            .mName = std::string{ getGMSTString(settings, "sAttributeWillpower") },
-            .mDescription = std::string{ getGMSTString(settings, "sWilDesc") },
-            .mIcon = "icons\\k\\attribute_wilpower.dds",
-            .mWerewolfValue = getGMSTFloat(settings, "fWerewolfWillpower") });
-        insertStatic({ .mId = ESM::Attribute::Agility,
-            .mName = std::string{ getGMSTString(settings, "sAttributeAgility") },
-            .mDescription = std::string{ getGMSTString(settings, "sAgiDesc") },
-            .mIcon = "icons\\k\\attribute_agility.dds",
-            .mWerewolfValue = getGMSTFloat(settings, "fWerewolfAgility") });
-        insertStatic({ .mId = ESM::Attribute::Speed,
-            .mName = std::string{ getGMSTString(settings, "sAttributeSpeed") },
-            .mDescription = std::string{ getGMSTString(settings, "sSpdDesc") },
-            .mIcon = "icons\\k\\attribute_speed.dds",
-            .mWerewolfValue = getGMSTFloat(settings, "fWerewolfSpeed") });
-        insertStatic({ .mId = ESM::Attribute::Endurance,
-            .mName = std::string{ getGMSTString(settings, "sAttributeEndurance") },
-            .mDescription = std::string{ getGMSTString(settings, "sEndDesc") },
-            .mIcon = "icons\\k\\attribute_endurance.dds",
-            .mWerewolfValue = getGMSTFloat(settings, "fWerewolfEndurance") });
-        insertStatic({ .mId = ESM::Attribute::Personality,
-            .mName = std::string{ getGMSTString(settings, "sAttributePersonality") },
-            .mDescription = std::string{ getGMSTString(settings, "sPerDesc") },
-            .mIcon = "icons\\k\\attribute_personality.dds",
-            .mWerewolfValue = getGMSTFloat(settings, "fWerewolfPersonality") });
-        insertStatic({ .mId = ESM::Attribute::Luck,
-            .mName = std::string{ getGMSTString(settings, "sAttributeLuck") },
-            .mDescription = std::string{ getGMSTString(settings, "sLucDesc") },
-            .mIcon = "icons\\k\\attribute_luck.dds",
-            .mWerewolfValue = getGMSTFloat(settings, "fWerewolfLuck") });
+        using Type = ESM::WeaponType;
+        const Type types[] = {
+            { Type::PickProbe, "1h", "pickprobe", "", "", "", ESM::Skill::Security, Type::Melee, {}, 0 },
+            { Type::HandToHand, "hh", "handtohand", "", "", "", ESM::Skill::HandToHand, Type::Melee, {},
+                Type::TwoHanded },
+            { Type::Spell, "spell", "spellcast", "", "", "", ESM::Skill::HandToHand, Type::Melee, {}, Type::TwoHanded },
+            { {}, "", "", "", "", "", ESM::Skill::HandToHand, Type::Melee, {}, 0 },
+            { Type::ShortBladeOneHand, "1s", "shortbladeonehand", "Item Weapon Shortblade", "Weapon Bone",
+                "Bip01 ShortBladeOneHand", ESM::Skill::ShortBlade, Type::Melee, {}, Type::HasHealth },
+            { Type::LongBladeOneHand, "1h", "weapononehand", "Item Weapon Longblade", "Weapon Bone",
+                "Bip01 LongBladeOneHand", ESM::Skill::LongBlade, Type::Melee, {}, Type::HasHealth },
+            { Type::LongBladeTwoHand, "2c", "weapontwohand", "Item Weapon Longblade", "Weapon Bone",
+                "Bip01 LongBladeTwoClose", ESM::Skill::LongBlade, Type::Melee, {}, Type::HasHealth | Type::TwoHanded },
+            { Type::BluntOneHand, "1b", "bluntonehand", "Item Weapon Blunt", "Weapon Bone", "Bip01 BluntOneHand",
+                ESM::Skill::BluntWeapon, Type::Melee, {}, Type::HasHealth },
+            { Type::BluntTwoClose, "2b", "blunttwohand", "Item Weapon Blunt", "Weapon Bone", "Bip01 BluntTwoClose",
+                ESM::Skill::BluntWeapon, Type::Melee, {}, Type::HasHealth | Type::TwoHanded },
+            { Type::BluntTwoWide, "2w", "weapontwowide", "Item Weapon Blunt", "Weapon Bone", "Bip01 BluntTwoWide",
+                ESM::Skill::BluntWeapon, Type::Melee, {}, Type::HasHealth | Type::TwoHanded },
+            { Type::SpearTwoWide, "2w", "weapontwowide", "Item Weapon Spear", "Weapon Bone", "Bip01 SpearTwoWide",
+                ESM::Skill::Spear, Type::Melee, {}, Type::HasHealth | Type::TwoHanded },
+            { Type::AxeOneHand, "1b", "bluntonehand", "Item Weapon Blunt", "Weapon Bone", "Bip01 LongBladeOneHand",
+                ESM::Skill::Axe, Type::Melee, {}, Type::HasHealth },
+            { Type::AxeTwoHand, "2b", "blunttwohand", "Item Weapon Blunt", "Weapon Bone", "Bip01 AxeTwoClose",
+                ESM::Skill::Axe, Type::Melee, {}, Type::HasHealth | Type::TwoHanded },
+            { Type::MarksmanBow, "bow", "bowandarrow", "Item Weapon Bow", "Weapon Bone Left", "Bip01 MarksmanBow",
+                ESM::Skill::Marksman, Type::Ranged, Type::Arrow, Type::HasHealth | Type::TwoHanded },
+            { Type::MarksmanCrossbow, "crossbow", "crossbow", "Item Weapon Crossbow", "Weapon Bone",
+                "Bip01 MarksmanCrossbow", ESM::Skill::Marksman, Type::Ranged, Type::Bolt,
+                Type::HasHealth | Type::TwoHanded },
+            { Type::MarksmanThrown, "1t", "throwweapon", "Item Weapon Blunt", "Weapon Bone", "Bip01 MarksmanThrown",
+                ESM::Skill::Marksman, Type::Thrown, {}, 0 },
+            { Type::Arrow, "", "", "Item Ammo", "Bip01 Arrow", "", ESM::Skill::Marksman, Type::Ammo, {}, 0 },
+            { Type::Bolt, "", "", "Item Ammo", "ArrowBone", "", ESM::Skill::Marksman, Type::Ammo, {}, 0 },
+        };
+
+        for (const Type& type : types)
+            insertStatic(type);
     }
 
     // Dialogue
@@ -1235,6 +1162,7 @@ template class MWWorld::TypedDynamicStore<ESM::Spell>;
 template class MWWorld::TypedDynamicStore<ESM::StartScript>;
 template class MWWorld::TypedDynamicStore<ESM::Static>;
 template class MWWorld::TypedDynamicStore<ESM::Weapon>;
+template class MWWorld::TypedDynamicStore<ESM::WeaponType>;
 
 template class MWWorld::TypedDynamicStore<ESM4::Reference, ESM::FormId>;
 template class MWWorld::TypedDynamicStore<ESM4::ActorCharacter, ESM::FormId>;
