@@ -1,7 +1,6 @@
 #include "settingswindow.hpp"
 
 #include <algorithm>
-#include <array>
 #include <string>
 
 #include <unicode/locid.h>
@@ -12,7 +11,6 @@
 #include <MyGUI_ScrollBar.h>
 #include <MyGUI_ScrollView.h>
 #include <MyGUI_TabControl.h>
-#include <MyGUI_TabItem.h>
 #include <MyGUI_UString.h>
 #include <MyGUI_Window.h>
 
@@ -28,8 +26,6 @@
 #include <components/resource/resourcesystem.hpp>
 #include <components/resource/scenemanager.hpp>
 #include <components/sceneutil/lightmanager.hpp>
-#include <components/sceneutil/shadow.hpp>
-#include <components/settings/shadowresolution.hpp>
 #include <components/settings/values.hpp>
 #include <components/vfs/manager.hpp>
 #include <components/vfs/recursivedirectoryiterator.hpp>
@@ -44,6 +40,7 @@
 #include "../mwlua/luamanagerimp.hpp"
 
 #include "confirmationdialog.hpp"
+#include "graphicssettings.hpp"
 #include "weightedsearch.hpp"
 
 namespace
@@ -76,9 +73,6 @@ namespace
 
     const std::string_view checkButtonType = "CheckButton";
     const std::string_view sliderType = "Slider";
-    constexpr std::array<std::string_view, 5> shadowFilteringQualities{ "legacy", "low", "medium", "high", "ultra" };
-    constexpr std::array<std::string_view, 4> distantShadowQualities{ "low", "medium", "high", "ultra" };
-
     std::string_view getSettingType(MyGUI::Widget* widget)
     {
         return widget->getUserString("SettingType");
@@ -225,8 +219,8 @@ namespace MWGui
 
             configureWidgets(current, init);
         }
-        if (!init && widget == mMainWidget)
-            updateAtmosphereSettings();
+        if (!init && widget == mMainWidget && mGraphicsSettings)
+            mGraphicsSettings->refresh();
     }
 
     void SettingsWindow::onFrame(float duration)
@@ -258,7 +252,7 @@ namespace MWGui
         , mCfgMgr(cfgMgr)
     {
         configureWidgets(mMainWidget, true);
-        mDistanceSettings = std::make_unique<DistanceSettings>(*this, [this] { apply(); });
+        mGraphicsSettings = std::make_unique<GraphicsSettings>(*this, [this] { apply(); });
 
         setTitle("#{OMWEngine:SettingsWindow}");
 
@@ -294,21 +288,6 @@ namespace MWGui
         getWidget(mClassicFalloffWidget, "ClassicFalloffWidget");
         getWidget(mMinimumBrightnessText, "MinimumBrightnessText");
         getWidget(mMinimumBrightnessScroll, "MinimumBrightnessScroll");
-        getWidget(mCloudShadowsButton, "CloudShadowsButton");
-        getWidget(mCloudShadowIntensity, "CloudShadowIntensity");
-        getWidget(mReflectCloudsButton, "ReflectCloudsButton");
-        getWidget(mVolumetricQuality, "VolumetricQuality");
-        getWidget(mAtmosphereAppearance, "AtmosphereAppearance");
-        getWidget(mShadowFilteringQuality, "ShadowFilteringQuality");
-        getWidget(mDistantShadowsButton, "DistantShadowsButton");
-        getWidget(mDistantShadowQuality, "DistantShadowQuality");
-        getWidget(mActorShadowsButton, "ActorShadowsButton");
-        getWidget(mPlayerShadowsButton, "PlayerShadowsButton");
-        getWidget(mTerrainShadowsButton, "TerrainShadowsButton");
-        getWidget(mObjectShadowsButton, "ObjectShadowsButton");
-        getWidget(mShadowMapResolution, "ShadowMapResolution");
-        getWidget(mShadowResolutionDecrease, "ShadowResolutionDecrease");
-        getWidget(mShadowResolutionIncrease, "ShadowResolutionIncrease");
 
 #ifndef WIN32
         // hide gamma controls since it currently does not work under Linux
@@ -338,14 +317,6 @@ namespace MWGui
             += MyGUI::newDelegate(this, &SettingsWindow::onWaterTextureSizeChanged);
         mWaterReflectionDetail->eventComboChangePosition
             += MyGUI::newDelegate(this, &SettingsWindow::onWaterReflectionDetailChanged);
-        mVolumetricQuality->eventComboChangePosition
-            += MyGUI::newDelegate(this, &SettingsWindow::onVolumetricQualityChanged);
-        mShadowFilteringQuality->eventComboChangePosition
-            += MyGUI::newDelegate(this, &SettingsWindow::onShadowFilteringQualityChanged);
-        mDistantShadowQuality->eventComboChangePosition
-            += MyGUI::newDelegate(this, &SettingsWindow::onDistantShadowQualityChanged);
-        mAtmosphereAppearance->eventComboChangePosition
-            += MyGUI::newDelegate(this, &SettingsWindow::onAtmosphereAppearanceChanged);
         mWaterRainRippleDetail->eventComboChangePosition
             += MyGUI::newDelegate(this, &SettingsWindow::onWaterRainRippleDetailChanged);
 
@@ -353,21 +324,6 @@ namespace MWGui
             += MyGUI::newDelegate(this, &SettingsWindow::onLightsResetButtonClicked);
         mMaxLights->eventComboChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onMaxLightsChanged);
 
-        mActorShadowsButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onShadowsButtonClicked);
-        mPlayerShadowsButton->eventMouseButtonClick
-            += MyGUI::newDelegate(this, &SettingsWindow::onShadowsButtonClicked);
-        mTerrainShadowsButton->eventMouseButtonClick
-            += MyGUI::newDelegate(this, &SettingsWindow::onShadowsButtonClicked);
-        mObjectShadowsButton->eventMouseButtonClick
-            += MyGUI::newDelegate(this, &SettingsWindow::onShadowsButtonClicked);
-        mShadowMapResolution->eventEditSelectAccept
-            += MyGUI::newDelegate(this, &SettingsWindow::onShadowMapResolutionChanged);
-        mShadowMapResolution->eventKeyLostFocus
-            += MyGUI::newDelegate(this, &SettingsWindow::onShadowResolutionFocusLost);
-        mShadowResolutionDecrease->eventMouseButtonClick
-            += MyGUI::newDelegate(this, &SettingsWindow::onShadowResolutionStep);
-        mShadowResolutionIncrease->eventMouseButtonClick
-            += MyGUI::newDelegate(this, &SettingsWindow::onShadowResolutionStep);
 
         mWindowModeList->eventComboChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onWindowModeChanged);
         mVSyncModeList->eventComboChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onVSyncModeChanged);
@@ -429,8 +385,6 @@ namespace MWGui
         mWaterRainRippleDetail->setIndexSelected(waterRainRippleDetail);
 
         updateMaxLightsComboBox(mMaxLights);
-
-        refreshShadowResolution();
 
         const Settings::WindowMode windowMode = Settings::video().mWindowMode;
         mWindowBorderButton->setEnabled(
@@ -501,6 +455,8 @@ namespace MWGui
         mControllerButtons.mB = "#{Interface:OK}";
         mControllerButtons.mLStick = "#{Interface:Mouse}";
     }
+
+    SettingsWindow::~SettingsWindow() = default;
 
     void SettingsWindow::onTabChanged(MyGUI::TabControl* /*sender*/, size_t /*index*/)
     {
@@ -576,38 +532,6 @@ namespace MWGui
     void SettingsWindow::onWaterReflectionDetailChanged(MyGUI::ComboBox* /*sender*/, size_t pos)
     {
         Settings::water().mReflectionDetail.set(static_cast<int>(pos));
-        apply();
-    }
-
-    void SettingsWindow::onVolumetricQualityChanged(MyGUI::ComboBox* sender, size_t pos)
-    {
-        if (pos >= sender->getItemCount())
-            return;
-        Settings::shaders().mAtmosphericQuality.set(static_cast<int>(pos));
-        apply();
-    }
-
-    void SettingsWindow::onShadowFilteringQualityChanged(MyGUI::ComboBox* sender, size_t pos)
-    {
-        if (pos >= sender->getItemCount() || pos >= shadowFilteringQualities.size())
-            return;
-        Settings::openmwseShadows().mFilteringQuality.set(std::string(shadowFilteringQualities[pos]));
-        apply();
-    }
-
-    void SettingsWindow::onDistantShadowQualityChanged(MyGUI::ComboBox* sender, size_t pos)
-    {
-        if (pos >= sender->getItemCount() || pos >= distantShadowQualities.size())
-            return;
-        Settings::openmwseShadows().mDistantShadowQuality.set(std::string(distantShadowQualities[pos]));
-        apply();
-    }
-
-    void SettingsWindow::onAtmosphereAppearanceChanged(MyGUI::ComboBox* sender, size_t pos)
-    {
-        if (pos >= sender->getItemCount())
-            return;
-        Settings::shaders().mAtmosphereAppearance.set(static_cast<int>(pos));
         apply();
     }
 
@@ -792,61 +716,6 @@ namespace MWGui
         apply();
     }
 
-    void SettingsWindow::onShadowsButtonClicked(MyGUI::Widget* /*sender*/)
-    {
-        auto& shadowSettings = Settings::shadows();
-        shadowSettings.mEnableShadows.set(shadowSettings.mActorShadows || shadowSettings.mPlayerShadows
-            || shadowSettings.mTerrainShadows || shadowSettings.mObjectShadows);
-        apply();
-    }
-
-    void SettingsWindow::refreshShadowResolution()
-    {
-        const int value = Settings::shadows().mShadowMapResolution;
-        const int maximum = SceneUtil::ShadowManager::getMaximumShadowMapResolution();
-        mShadowMapResolution->setCaption(std::to_string(value));
-        mShadowMapResolution->setTextCursor(0);
-        mShadowResolutionDecrease->setEnabled(maximum > 0 && value > 1);
-        mShadowResolutionIncrease->setEnabled(maximum > 0 && value < maximum);
-    }
-
-    void SettingsWindow::onShadowMapResolutionChanged(MyGUI::EditBox* sender)
-    {
-        auto& setting = Settings::shadows().mShadowMapResolution;
-        const std::string text = sender->getOnlyText();
-        if (text == std::to_string(setting.get()))
-            return;
-        const int maximum = SceneUtil::ShadowManager::getMaximumShadowMapResolution();
-        const auto value = Settings::parseShadowResolution(text, maximum);
-        if (!value)
-        {
-            refreshShadowResolution();
-            auto l10n = MWBase::Environment::get().getL10nManager()->getContext("OMWEngine");
-            MWBase::Environment::get().getWindowManager()->messageBox(
-                l10n->formatMessage("ShadowResolutionInvalid", { "maximum" }, { maximum }));
-            return;
-        }
-        if (*value != setting.get())
-        {
-            setting.set(*value);
-            apply();
-        }
-        refreshShadowResolution();
-    }
-
-    void SettingsWindow::onShadowResolutionFocusLost(MyGUI::Widget* sender, MyGUI::Widget*)
-    {
-        onShadowMapResolutionChanged(sender->castType<MyGUI::EditBox>());
-    }
-
-    void SettingsWindow::onShadowResolutionStep(MyGUI::Widget* sender)
-    {
-        const int value = Settings::stepShadowResolution(Settings::shadows().mShadowMapResolution,
-            sender == mShadowResolutionIncrease, SceneUtil::ShadowManager::getMaximumShadowMapResolution());
-        mShadowMapResolution->setCaption(std::to_string(value));
-        onShadowMapResolutionChanged(mShadowMapResolution);
-    }
-
     void SettingsWindow::onResChange(int /*width*/, int /*height*/)
     {
         center();
@@ -912,7 +781,7 @@ namespace MWGui
         Settings::Manager::resetPendingChanges();
 
         updateLightSettings();
-        updateAtmosphereSettings();
+        mGraphicsSettings->refresh();
     }
 
     void SettingsWindow::onKeyboardSwitchClicked(MyGUI::Widget* /*sender*/)
@@ -978,36 +847,6 @@ namespace MWGui
         }
 
         layoutControlsBox();
-    }
-
-    void SettingsWindow::updateAtmosphereSettings()
-    {
-        const bool clouds = Settings::shaders().mVolumetricClouds;
-        mCloudShadowsButton->setCaptionWithReplacing(
-            Settings::shadows().mCloudShadows ? "#{Interface:On}" : "#{Interface:Off}");
-        mCloudShadowsButton->setEnabled(true);
-        mReflectCloudsButton->setEnabled(Settings::water().mShader);
-        mVolumetricQuality->setIndexSelected(Settings::shaders().mAtmosphericQuality.get());
-        mVolumetricQuality->setEnabled(
-            clouds || Settings::shaders().mAtmosphericScattering || Settings::shaders().mGodrays);
-        mAtmosphereAppearance->setIndexSelected(Settings::shaders().mAtmosphereAppearance.get());
-        mAtmosphereAppearance->setEnabled(Settings::shaders().mAtmosphericScattering);
-
-        const auto quality = Settings::openmwseShadows().mFilteringQuality.get();
-        const auto qualityIt = std::find(shadowFilteringQualities.begin(), shadowFilteringQualities.end(), quality);
-        mShadowFilteringQuality->setIndexSelected(qualityIt == shadowFilteringQualities.end()
-                ? 2
-                : static_cast<size_t>(qualityIt - shadowFilteringQualities.begin()));
-        const auto distantQuality = Settings::openmwseShadows().mDistantShadowQuality.get();
-        const auto distantQualityIt
-            = std::find(distantShadowQualities.begin(), distantShadowQualities.end(), distantQuality);
-        mDistantShadowQuality->setIndexSelected(distantQualityIt == distantShadowQualities.end()
-                ? 1
-                : static_cast<size_t>(distantQualityIt - distantShadowQualities.begin()));
-        const bool filteredShadows = quality != "legacy";
-        mDistantShadowsButton->setEnabled(filteredShadows);
-        mDistantShadowQuality->setEnabled(filteredShadows && Settings::openmwseShadows().mDistantShadows);
-        mCloudShadowIntensity->setEnabled(Settings::shadows().mCloudShadows && quality != "legacy");
     }
 
     void SettingsWindow::updateLightSettings()
@@ -1210,58 +1049,22 @@ namespace MWGui
 
     void SettingsWindow::showVideoPage(std::string_view page)
     {
-        const std::string_view pageWidget = page == "atmosphere" ? "AtmospherePage"
-            : page == "detail"                                   ? "DetailPage"
-            : page == "water"                                    ? "WaterPage"
-            : page == "shadows"                                  ? "ShadowsPage"
-                                                                 : "";
-        if (pageWidget.empty())
-            throw std::invalid_argument("unknown video settings page");
-        MyGUI::TabItem* videoPage;
-        MyGUI::TabItem* selectedPage;
-        MyGUI::TabControl* videoTabs;
-        getWidget(videoPage, "VideoPage");
-        getWidget(videoTabs, "VideoTabs");
-        getWidget(selectedPage, pageWidget);
-        mSettingsTab->setItemSelected(videoPage);
-        videoTabs->setItemSelected(selectedPage);
+        mGraphicsSettings->showPage(page);
     }
 
     void SettingsWindow::setDistanceValues(
         bool useCellEditor, float view, float grass, float shadow, std::optional<int> resolution)
     {
-        mDistanceSettings->setValues(useCellEditor, view, grass, shadow);
-        if (resolution)
-        {
-            const int maximum = SceneUtil::ShadowManager::getMaximumShadowMapResolution();
-            if (!Settings::parseShadowResolution(std::to_string(*resolution), maximum))
-                throw std::invalid_argument("diagnostic shadow resolution exceeds graphics hardware limits");
-            mShadowMapResolution->setCaption(std::to_string(*resolution));
-            mShadowMapResolution->eventEditSelectAccept(mShadowMapResolution);
-            for (auto* arrow : { mShadowResolutionDecrease, mShadowResolutionIncrease })
-            {
-                const int expected
-                    = Settings::stepShadowResolution(*resolution, arrow == mShadowResolutionIncrease, maximum);
-                arrow->eventMouseButtonClick(arrow);
-                if (Settings::shadows().mShadowMapResolution != expected)
-                    throw std::runtime_error("shadow resolution arrow did not apply the expected pixel step");
-                mShadowMapResolution->setCaption(std::to_string(*resolution));
-                mShadowMapResolution->eventEditSelectAccept(mShadowMapResolution);
-            }
-            if (Settings::shadows().mShadowMapResolution != *resolution)
-                throw std::runtime_error("shadow resolution entry did not retain the requested size");
-        }
+        mGraphicsSettings->setDistanceValues(useCellEditor, view, grass, shadow, resolution);
     }
 
     void SettingsWindow::onOpen()
     {
-        mDistanceSettings->refresh();
-        refreshShadowResolution();
-        mDistanceSettings->updateLayout();
+        mGraphicsSettings->refresh();
+        mGraphicsSettings->updateLayout();
         highlightCurrentResolution();
         updateControlsBox();
         updateLightSettings();
-        updateAtmosphereSettings();
         updateWindowModeSettings();
         updateVSyncModeSettings();
         resetScrollbars();
@@ -1279,7 +1082,7 @@ namespace MWGui
 
     void SettingsWindow::onWindowResize(MyGUI::Window* /*sender*/)
     {
-        mDistanceSettings->updateLayout();
+        mGraphicsSettings->updateLayout();
         layoutControlsBox();
     }
 

@@ -6,16 +6,20 @@
 #include <components/files/configurationmanager.hpp>
 #include <components/lua_ui/adapter.hpp>
 
-#include "distancesettings.hpp"
 #include "windowbase.hpp"
 
 namespace MWGui
 {
+    class GraphicsSettings;
+
     class SettingsWindow : public WindowBase
     {
     public:
         /// Bind video and gameplay controls to their persisted settings.
         SettingsWindow(Files::ConfigurationManager& cfgMgr);
+
+        /// Destroy graphics ownership where its complete type is available.
+        ~SettingsWindow() override;
 
         /// Refresh values, dependencies and the space required by localized tabs.
         void onOpen() override;
@@ -34,9 +38,6 @@ namespace MWGui
         void updateControlsBox();
 
         void updateLightSettings();
-        /// Show effective atmosphere control states while retaining preferences for temporarily disabled features.
-        void updateAtmosphereSettings();
-
         void updateVSyncModeSettings();
 
         void updateWindowModeSettings();
@@ -69,22 +70,6 @@ namespace MWGui
         MyGUI::Widget* mMinimumBrightnessText;
         MyGUI::Widget* mMinimumBrightnessScroll;
 
-        MyGUI::Button* mCloudShadowsButton;
-        MyGUI::ScrollBar* mCloudShadowIntensity;
-        MyGUI::Button* mReflectCloudsButton;
-        MyGUI::ComboBox* mVolumetricQuality;
-        MyGUI::ComboBox* mAtmosphereAppearance;
-        MyGUI::ComboBox* mShadowFilteringQuality;
-        MyGUI::Button* mDistantShadowsButton;
-        MyGUI::ComboBox* mDistantShadowQuality;
-        MyGUI::Button* mActorShadowsButton;
-        MyGUI::Button* mPlayerShadowsButton;
-        MyGUI::Button* mTerrainShadowsButton;
-        MyGUI::Button* mObjectShadowsButton;
-        MyGUI::EditBox* mShadowMapResolution;
-        MyGUI::Button* mShadowResolutionDecrease;
-        MyGUI::Button* mShadowResolutionIncrease;
-
         MyGUI::ComboBox* mPrimaryLanguage;
         MyGUI::ComboBox* mSecondaryLanguage;
         MyGUI::Button* mGmstOverridesL10n;
@@ -110,15 +95,6 @@ namespace MWGui
         void onOkButtonClicked(MyGUI::Widget* sender);
         void onTextureFilteringChanged(MyGUI::ComboBox* sender, size_t pos);
         void onAnisotropyChanged(MyGUI::ComboBox* sender, size_t pos);
-        void onShadowsButtonClicked(MyGUI::Widget* sender);
-        /// Apply a supported whole-pixel shadow resolution on Enter.
-        void onShadowMapResolutionChanged(MyGUI::EditBox* sender);
-        /// Commit resolution edits when keyboard focus leaves the field.
-        void onShadowResolutionFocusLost(MyGUI::Widget* sender, MyGUI::Widget* next);
-        /// Adjust both dimensions by 256 pixels within renderer and hardware limits.
-        void onShadowResolutionStep(MyGUI::Widget* sender);
-        /// Synchronize the pixel field and the supported increment boundaries.
-        void refreshShadowResolution();
         void onSliderChangePosition(MyGUI::ScrollBar* scroller, size_t pos);
         void onButtonToggled(MyGUI::Widget* sender);
         void onResolutionSelected(MyGUI::ListBox* sender, size_t index);
@@ -128,14 +104,6 @@ namespace MWGui
 
         void onWaterTextureSizeChanged(MyGUI::ComboBox* sender, size_t pos);
         void onWaterReflectionDetailChanged(MyGUI::ComboBox* sender, size_t pos);
-        /// Apply the selected quality preset immediately through the standard settings notification path.
-        void onVolumetricQualityChanged(MyGUI::ComboBox* sender, size_t pos);
-        /// Apply the selected geometry-shadow filtering policy immediately.
-        void onShadowFilteringQualityChanged(MyGUI::ComboBox* sender, size_t pos);
-        /// Apply the selected horizon-cascade storage and culling policy immediately.
-        void onDistantShadowQualityChanged(MyGUI::ComboBox* sender, size_t pos);
-        /// Apply the selected atmospheric color response immediately.
-        void onAtmosphereAppearanceChanged(MyGUI::ComboBox* sender, size_t pos);
         void onWaterRainRippleDetailChanged(MyGUI::ComboBox* sender, size_t pos);
 
         void onLightsResetButtonClicked(MyGUI::Widget* sender);
@@ -176,7 +144,7 @@ namespace MWGui
         void computeMinimumWindowSize();
 
     private:
-        std::unique_ptr<DistanceSettings> mDistanceSettings;
+        std::unique_ptr<GraphicsSettings> mGraphicsSettings;
         void resetScrollbars();
         Files::ConfigurationManager& mCfgMgr;
     };

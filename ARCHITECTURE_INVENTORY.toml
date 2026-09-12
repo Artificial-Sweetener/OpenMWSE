@@ -12,8 +12,8 @@ assessed_on = 2026-09-12
 id = "OMWSE-INVENTORY-GRAPHICS-SETTINGS-UI"
 area = "graphics-settings-ui"
 owner = "OpenMWSE graphics settings UI"
-fingerprint = "sha256:463e7d8393797833e19810d513b38f25439a5a1951442652bf471e08a5d346fb"
-file_count = 15
+fingerprint = "sha256:389f23e6fa7a84ac9a0804aab454de1e7e70f82a743c19ad1daeeff8f86d0ae1"
+file_count = 17
 assessed_on = 2026-09-12
 
 [[inventories]]

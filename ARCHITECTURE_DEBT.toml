@@ -31,19 +31,3 @@ responsibilities = [
   "live settings and world-state mutation",
 ]
 next_extraction = "Extract command-family handlers behind an engine diagnostic context so queue orchestration no longer owns every command implementation."
-
-[[debts]]
-id = "OMWSE-DEBT-003"
-area = "graphics-settings-ui"
-owner = "OpenMWSE graphics settings UI"
-paths = ["apps/openmw/mwgui/settingswindow.cpp"]
-fingerprint = "sha256:9159b272d466a6aa728f790b698f3f6b5114363162f27c5b6f40ad9fad879296"
-issue = "architecture:omwse-debt-003"
-review_by = 2027-03-12
-responsibilities = [
-  "general settings-window lifecycle",
-  "video and graphics controls",
-  "input rebinding controls",
-  "script-settings page construction",
-]
-next_extraction = "Extract the video and graphics settings controller, including live application and diagnostic access, from the general settings window."

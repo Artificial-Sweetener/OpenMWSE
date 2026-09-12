@@ -66,6 +66,8 @@ source_files = [
   "apps/launcher/settingspage.hpp",
   "apps/openmw/mwgui/distancesettings.cpp",
   "apps/openmw/mwgui/distancesettings.hpp",
+  "apps/openmw/mwgui/graphicssettings.cpp",
+  "apps/openmw/mwgui/graphicssettings.hpp",
   "apps/openmw/mwgui/settingswindow.cpp",
   "apps/openmw/mwgui/settingswindow.hpp",
   "components/settings/atmospheremigration.hpp",

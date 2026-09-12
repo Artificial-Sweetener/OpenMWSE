@@ -57,19 +57,17 @@ fingerprint = "sha256:f4a814d943f9c4218deedfbe4f1df00acb59579926061f2a6985d2d9bc
 max_lines = 716
 
 [[waivers]]
-id = "OMWSE-REMEDIATION-003"
+id = "OMWSE-STRUCTURAL-029"
 area = "graphics-settings-ui"
 owner = "OpenMWSE graphics settings UI"
 rule = "STRUCT003"
 path = "apps/openmw/mwgui/settingswindow.cpp"
-kind = "remediation"
-justification = "This file contains assessed mixed responsibility recorded by OMWSE-DEBT-003; the bounded waiver permits only the current source while the named extraction is completed."
-issue = "architecture:omwse-debt-003"
+kind = "structural"
+justification = "SettingsWindow is the composition root for one modal settings surface: it binds the shared widget tree, coordinates tabs and focus, applies one pending-settings transaction, and owns the input, localization, and script-page presentation tied to that lifetime. Fork-specific live graphics policy, distance editing, shadow validation, and diagnostic exercise now belong to GraphicsSettings."
+issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:9159b272d466a6aa728f790b698f3f6b5114363162f27c5b6f40ad9fad879296"
-max_lines = 1161
-next_limit = 500
-debt = "OMWSE-DEBT-003"
+fingerprint = "sha256:4187fd6d3e0f16ef9e3ab88bf75e294562aa3b89e0d92086b1514d2b55f1ede2"
+max_lines = 976
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-003"
