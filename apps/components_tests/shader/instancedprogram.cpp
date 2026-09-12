@@ -15,6 +15,7 @@
 #include <tuple>
 #include <vector>
 
+#include <osg/GraphicsContext>
 #include <osg/Program>
 #include <osg/Shader>
 
@@ -78,7 +79,8 @@ namespace
 
         // Registers both shaders so twins resolve.
         osg::ref_ptr<osg::Program> buildProgram(std::string_view vertexSuffix, std::string_view fragmentSuffix,
-            const ShaderManager::DefineMap& extra = {}, ProgramCapability capabilities = sMaterialCapabilities)
+            const ShaderManager::DefineMap& extra = {}, ProgramCapability capabilities = sMaterialCapabilities,
+            const ShaderManager::SamplerBindingMap& samplers = {})
         {
             const std::string vertexName = writeTemplate(vertexSuffix, sVertexTemplate);
             const std::string fragmentName = writeTemplate(fragmentSuffix, sFragmentTemplate);
@@ -89,7 +91,7 @@ namespace
             const osg::ref_ptr<osg::Shader> fragment = mManager.getShader(fragmentName, defines);
             if (vertex == nullptr || fragment == nullptr)
                 return nullptr;
-            return mManager.getProgram(vertex, fragment, nullptr, {}, capabilities);
+            return mManager.getProgram(vertex, fragment, nullptr, samplers, capabilities);
         }
     };
 
@@ -198,14 +200,13 @@ namespace
 
     TEST_F(InstancedProgramTest, uber_merges_map_sets)
     {
-        // Same template, different map sets, parallax on both.
         const ShaderManager::DefineMap darkDefines = { { "diffuseMap", "1" }, { "darkMap", "1" }, { "parallax", "1" } };
         const ShaderManager::DefineMap detailDefines
             = { { "diffuseMap", "1" }, { "detailMap", "1" }, { "parallax", "1" } };
-        const osg::ref_ptr<osg::Program> dark
-            = buildProgram("_objects.vert", "_objects.frag", darkDefines, sObjectCapabilities);
-        const osg::ref_ptr<osg::Program> detail
-            = buildProgram("_objects.vert", "_objects.frag", detailDefines, sObjectCapabilities);
+        const osg::ref_ptr<osg::Program> dark = buildProgram("_objects.vert", "_objects.frag", darkDefines,
+            sObjectCapabilities, { { "diffuseMap", 0 }, { "darkMap", 1 }, { "shadowMap0", 7 } });
+        const osg::ref_ptr<osg::Program> detail = buildProgram("_objects.vert", "_objects.frag", detailDefines,
+            sObjectCapabilities, { { "diffuseMap", 0 }, { "detailMap", 1 }, { "shadowMap0", 7 } });
         ASSERT_TRUE(dark);
         ASSERT_TRUE(detail);
         EXPECT_NE(dark.get(), detail.get());
@@ -214,11 +215,73 @@ namespace
         ASSERT_TRUE(uber);
         EXPECT_EQ(uber.get(), mManager.getInstancedProgram(*detail, MaterialMode::Bindless).get());
         EXPECT_THAT(shaderSource(*uber, 0), HasSubstr("#define UBER 1"));
+        EXPECT_FALSE(mManager.getSamplerUnit(*uber, "diffuseMap"));
+        EXPECT_FALSE(mManager.getSamplerUnit(*uber, "darkMap"));
+        EXPECT_FALSE(mManager.getSamplerUnit(*uber, "detailMap"));
+        EXPECT_EQ(mManager.getSamplerUnit(*uber, "shadowMap0"), 7);
 
         const osg::ref_ptr<osg::Program> legacy = mManager.getInstancedProgram(*dark, MaterialMode::Legacy);
         ASSERT_TRUE(legacy);
         EXPECT_NE(legacy.get(), mManager.getInstancedProgram(*detail, MaterialMode::Legacy).get());
         EXPECT_THAT(shaderSource(*legacy, 0), HasSubstr("#define UBER 0"));
+        EXPECT_EQ(mManager.getSamplerUnit(*legacy, "darkMap"), 1);
+    }
+
+    TEST_F(InstancedProgramTest, array_keeps_sampler_bindings)
+    {
+        const osg::ref_ptr<osg::Program> dark
+            = buildProgram("_objects.vert", "_objects.frag", { { "diffuseMap", "1" }, { "darkMap", "1" } },
+                sObjectCapabilities, { { "diffuseMap", 0 }, { "darkMap", 1 } });
+        const osg::ref_ptr<osg::Program> detail
+            = buildProgram("_objects.vert", "_objects.frag", { { "diffuseMap", "1" }, { "detailMap", "1" } },
+                sObjectCapabilities, { { "diffuseMap", 0 }, { "detailMap", 1 } });
+        ASSERT_TRUE(dark);
+        ASSERT_TRUE(detail);
+        const osg::ref_ptr<osg::Program> darkArray = mManager.getInstancedProgram(*dark, MaterialMode::Array);
+        const osg::ref_ptr<osg::Program> detailArray = mManager.getInstancedProgram(*detail, MaterialMode::Array);
+        ASSERT_TRUE(darkArray);
+        ASSERT_TRUE(detailArray);
+        EXPECT_NE(darkArray, detailArray);
+        EXPECT_NE(darkArray->compare(*detailArray), 0);
+        EXPECT_EQ(darkArray->compare(*ShaderManager::cloneProgram(darkArray)), 0);
+        EXPECT_EQ(darkArray->getShader(0), detailArray->getShader(0));
+        EXPECT_EQ(darkArray->getShader(1), detailArray->getShader(1));
+        EXPECT_EQ(mManager.getSamplerUnit(*darkArray, "darkMap"), 1);
+        EXPECT_FALSE(mManager.getSamplerUnit(*darkArray, "detailMap"));
+        EXPECT_EQ(mManager.getSamplerUnit(*detailArray, "detailMap"), 1);
+        EXPECT_FALSE(mManager.getSamplerUnit(*detailArray, "darkMap"));
+        EXPECT_EQ(mManager.getInstancedProgram(*dark, MaterialMode::Array), darkArray);
+        EXPECT_EQ(mManager.getInstancedProgram(*detail, MaterialMode::Array), detailArray);
+    }
+
+    TEST_F(InstancedProgramTest, bindless_keeps_shadow_bindings)
+    {
+        const osg::ref_ptr<osg::Program> first = buildProgram(
+            "_objects.vert", "_objects.frag", {}, sObjectCapabilities, { { "diffuseMap", 0 }, { "shadowMap0", 6 } });
+        const osg::ref_ptr<osg::Program> second = buildProgram(
+            "_objects.vert", "_objects.frag", {}, sObjectCapabilities, { { "diffuseMap", 0 }, { "shadowMap0", 7 } });
+        ASSERT_TRUE(first);
+        ASSERT_TRUE(second);
+        const osg::ref_ptr<osg::Program> firstTwin = mManager.getInstancedProgram(*first, MaterialMode::Bindless);
+        const osg::ref_ptr<osg::Program> secondTwin = mManager.getInstancedProgram(*second, MaterialMode::Bindless);
+        ASSERT_TRUE(firstTwin);
+        ASSERT_TRUE(secondTwin);
+        EXPECT_NE(firstTwin, secondTwin);
+        EXPECT_EQ(mManager.getSamplerUnit(*firstTwin, "shadowMap0"), 6);
+        EXPECT_EQ(mManager.getSamplerUnit(*secondTwin, "shadowMap0"), 7);
+    }
+
+    TEST_F(InstancedProgramTest, cache_keeps_capabilities)
+    {
+        const osg::ref_ptr<osg::Program> classic
+            = buildProgram("_objects.vert", "_objects.frag", {}, ProgramCapability::None);
+        const osg::ref_ptr<osg::Program> instanced = buildProgram("_objects.vert", "_objects.frag");
+        ASSERT_TRUE(classic);
+        ASSERT_TRUE(instanced);
+        EXPECT_NE(classic, instanced);
+        EXPECT_NE(classic->compare(*instanced), 0);
+        EXPECT_FALSE(mManager.getInstancedProgram(*classic, MaterialMode::Array));
+        EXPECT_TRUE(mManager.getInstancedProgram(*instanced, MaterialMode::Array));
     }
 
     TEST_F(InstancedProgramTest, uber_keeps_lighting_split)
@@ -243,7 +306,7 @@ namespace
         EXPECT_THAT(shaderSource(*darkUber, 0), HasSubstr("#define PPL 0"));
     }
 
-    // Compiles the shipped templates when OPENMW_TEST_SHADER_DIR points at files/shaders.
+    // OPENMW_TEST_SHADER_DIR selects shipped templates.
     struct ShaderTemplateTest : Test
     {
         std::filesystem::path mDir;
@@ -266,7 +329,7 @@ namespace
             mManager.setGlobalDefines(globals);
         }
 
-        // Every @token in the tree gets a compilable default.
+        // Unset tokens use zero.
         ShaderManager::DefineMap collectDefaults() const
         {
             ShaderManager::DefineMap defines = getDefaultDefines();
@@ -353,6 +416,85 @@ namespace
         }
     };
 
+    TEST_F(ShaderTemplateTest, classic_alpha_compiles)
+    {
+        const osg::ref_ptr<osg::GraphicsContext::Traits> traits = new osg::GraphicsContext::Traits;
+        traits->readDISPLAY();
+        traits->setUndefinedScreenDetailsToDefaultScreen();
+        traits->width = 8;
+        traits->height = 8;
+        traits->pbuffer = true;
+        traits->doubleBuffer = false;
+        const osg::ref_ptr<osg::GraphicsContext> context = osg::GraphicsContext::createGraphicsContext(traits);
+        if (context == nullptr || !context->realize() || !context->makeCurrent())
+            GTEST_SKIP() << "Offscreen GL context unavailable";
+        osg::State& state = *context->getState();
+        if (!osg::isGLExtensionSupported(state.getContextID(), "GL_EXT_gpu_shader4"))
+            GTEST_SKIP() << "GL_EXT_gpu_shader4 unavailable";
+        for (const char* gpuShader4 : { "0", "1" })
+            for (const char* coverage : { "0", "1" })
+                for (const char* name : { "objects", "terrain", "groundcover", "shadowcasting" })
+                {
+                    SCOPED_TRACE(std::string(name) + " gpuShader4=" + gpuShader4 + " coverage=" + coverage);
+                    const ShaderManager::DefineMap defines = { { "diffuseMap", "1" }, { "diffuseMapUV", "0" },
+                        { "useGPUShader4", gpuShader4 }, { "adjustCoverage", coverage }, { "alphaFunc", "516" } };
+                    const osg::ref_ptr<osg::Program> program = buildProgram(name, defines, sMaterialCapabilities);
+                    ASSERT_TRUE(program);
+                    dump(std::string(name) + "_classic_" + gpuShader4 + coverage, *program);
+                    program->compileGLObjects(state);
+                    const osg::Program::PerContextProgram* pcp = program->getPCP(state);
+                    std::string log;
+                    pcp->getInfoLog(log);
+                    EXPECT_TRUE(pcp->isLinked()) << log;
+                }
+        mManager.releaseGLObjects(&state);
+        context->releaseContext();
+        context->close();
+    }
+
+    TEST_F(ShaderTemplateTest, bindless_variants_compile)
+    {
+        const osg::ref_ptr<osg::GraphicsContext::Traits> traits = new osg::GraphicsContext::Traits;
+        traits->readDISPLAY();
+        traits->setUndefinedScreenDetailsToDefaultScreen();
+        traits->width = 8;
+        traits->height = 8;
+        traits->pbuffer = true;
+        traits->doubleBuffer = false;
+        const osg::ref_ptr<osg::GraphicsContext> context = osg::GraphicsContext::createGraphicsContext(traits);
+        if (context == nullptr || !context->realize() || !context->makeCurrent())
+            GTEST_SKIP() << "Offscreen GL context unavailable";
+        osg::State& state = *context->getState();
+        if (!osg::isGLExtensionSupported(state.getContextID(), "GL_ARB_bindless_texture")
+            || (!osg::isGLExtensionSupported(state.getContextID(), "GL_NV_gpu_shader5")
+                && !osg::isGLExtensionSupported(state.getContextID(), "GL_EXT_nonuniform_qualifier")))
+            GTEST_SKIP() << "Nonuniform bindless requirements unavailable";
+        for (const char* clustered : { "0", "1" })
+        {
+            for (const char* name : { "objects", "terrain", "groundcover", "shadowcasting", "depthclipped",
+                     "gpuscene_prepass", "bs/default", "bs/nolighting" })
+            {
+                const std::string label = std::string(name) + "_" + clustered;
+                SCOPED_TRACE(label);
+                const ShaderManager::DefineMap defines = { { "diffuseMap", "1" }, { "diffuseMapUV", "0" },
+                    { "lightingMethodClustered", clustered }, { "useGPUShader4", "1" }, { "adjustCoverage", "1" } };
+                const osg::ref_ptr<osg::Program> classic = buildProgram(name, defines, sMaterialCapabilities);
+                ASSERT_TRUE(classic);
+                const osg::ref_ptr<osg::Program> program
+                    = mManager.getInstancedProgram(*classic, MaterialMode::Bindless);
+                ASSERT_TRUE(program);
+                program->compileGLObjects(state);
+                const osg::Program::PerContextProgram* pcp = program->getPCP(state);
+                std::string log;
+                pcp->getInfoLog(log);
+                EXPECT_TRUE(pcp->isLinked()) << log;
+            }
+        }
+        mManager.releaseGLObjects(&state);
+        context->releaseContext();
+        context->close();
+    }
+
     TEST_F(ShaderTemplateTest, twins_link_bodies_and_keep_120_objects)
     {
         const char* maps[] = { "diffuseMap", "darkMap", "detailMap", "decalMap", "emissiveMap", "normalMap", "envMap",
@@ -409,6 +551,16 @@ namespace
                 const bool bindlessBody = mode == MaterialMode::Bindless && name != "gpuscene_prepass";
                 EXPECT_EQ(bindlessBody, programSource(*twin).find(sBindlessRequire) != std::string::npos)
                     << label << ' ' << modeName;
+                EXPECT_EQ(bindlessBody,
+                    programSource(*twin).find("#extension GL_NV_gpu_shader5 : require") != std::string::npos)
+                    << label << ' ' << modeName;
+                if (bindlessBody)
+                {
+                    EXPECT_THAT(programSource(*twin), HasSubstr("#extension GL_EXT_nonuniform_qualifier : require"));
+                    EXPECT_THAT(programSource(*twin), HasSubstr("nonuniformEXT(sampler2D(handle))"));
+                    EXPECT_THAT(programSource(*twin), HasSubstr("texture(GPU_SAMPLER(mapHandle(map)), uv)"));
+                    EXPECT_THAT(programSource(*twin), HasSubstr("textureSize(GPU_SAMPLER(mapHandle(map)), 0)"));
+                }
             }
         }
     }

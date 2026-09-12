@@ -42,6 +42,17 @@ namespace
         }
     };
 
+    TEST_F(ShaderManagerTest, accepts_single_shader)
+    {
+        const osg::ref_ptr<osg::Shader> shader
+            = new osg::Shader(osg::Shader::COMPUTE, "#version 430\nvoid main() {}\n");
+        const osg::ref_ptr<osg::Program> program = mManager.getProgram(nullptr, shader);
+        ASSERT_TRUE(program);
+        ASSERT_EQ(program->getNumShaders(), 1u);
+        EXPECT_EQ(program->getShader(0), shader);
+        EXPECT_EQ(mManager.getProgram(nullptr, shader), program);
+    }
+
     TEST_F(ShaderManagerTest, get_shader_with_empty_content_should_succeed)
     {
         const std::string content;
