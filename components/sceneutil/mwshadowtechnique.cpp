@@ -793,17 +793,20 @@ void SceneUtil::MWShadowTechnique::setupCastingShader(Shader::ShaderManager & sh
 {
     // This can't be part of the constructor as OSG mandates that there be a trivial constructor available
 
+    osg::ref_ptr<osg::Shader> castingVertexShader
+        = shaderManager.getShader("shadowcasting.vert", { { "gpuInstanced", "0" }, { "opaqueShadowCaster", "0" } });
     std::string useGPUShader4 = SceneUtil::getGLExtensions().isGpuShader4Supported ? "1" : "0";
     for (int alphaFunc = GL_NEVER; alphaFunc <= GL_ALWAYS; ++alphaFunc)
     {
         auto& program = _castingPrograms[alphaFunc - GL_NEVER];
-        program = shaderManager.getProgram(shaderManager.getShader("shadowcasting.vert", { { "opaqueShadowCaster", "0" } }),
+        program = shaderManager.getProgram(castingVertexShader,
             shaderManager.getShader("shadowcasting.frag",
                 { { "alphaFunc", std::to_string(alphaFunc) }, { "alphaToCoverage", "0" }, { "adjustCoverage", "1" },
                     { "useGPUShader4", useGPUShader4 }, { "opaqueShadowCaster", "0" } }));
     }
     _opaqueCastingProgram = shaderManager.getProgram(
-        shaderManager.getShader("shadowcasting.vert", { { "opaqueShadowCaster", "1" } }),
+        shaderManager.getShader(
+            "shadowcasting.vert", { { "gpuInstanced", "0" }, { "opaqueShadowCaster", "1" } }),
         shaderManager.getShader("shadowcasting.frag",
             { { "alphaFunc", std::to_string(GL_ALWAYS) }, { "alphaToCoverage", "0" }, { "adjustCoverage", "1" },
                 { "useGPUShader4", useGPUShader4 }, { "opaqueShadowCaster", "1" } }));

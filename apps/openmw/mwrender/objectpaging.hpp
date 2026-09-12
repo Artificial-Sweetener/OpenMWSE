@@ -5,7 +5,10 @@
 #include <components/resource/resourcemanager.hpp>
 #include <components/terrain/quadtreeworld.hpp>
 
+#include <memory>
 #include <mutex>
+
+#include <osg/observer_ptr>
 
 namespace Resource
 {
@@ -14,14 +17,22 @@ namespace Resource
 
 namespace MWRender
 {
+    class GpuScene;
+    struct GpuTemplate;
 
     typedef std::tuple<osg::Vec2f, float, bool> ChunkId; // Center, Size, ActiveGrid
 
     class ObjectPaging : public Resource::GenericResourceManager<ChunkId>, public Terrain::QuadTreeWorld::ChunkManager
     {
     public:
-        ObjectPaging(Resource::SceneManager* sceneManager, ESM::RefId worldspace);
+        /// Create the object-paging manager with an optional GPU scene for compatible distant geometry.
+        ObjectPaging(Resource::SceneManager* sceneManager, ESM::RefId worldspace, GpuScene* gpuScene);
         ~ObjectPaging() = default;
+
+        /// Expire CPU chunks and source-node GPU templates at their shared cache cadence.
+        void updateCache(double referenceTime) override;
+        /// Clear both CPU chunks and cached GPU extraction templates.
+        void clearCache() override;
 
         osg::ref_ptr<osg::Node> getChunk(float size, const osg::Vec2f& center, unsigned char lod, unsigned int lodFlags,
             bool activeGrid, const osg::Vec3f& viewPoint, bool compile) override;
@@ -48,7 +59,15 @@ namespace MWRender
         void getPagedRefnums(const osg::Vec4i& activeGrid, std::vector<ESM::RefNum>& out);
 
     private:
+        /// Return or build the GPU extraction template for a source node and traversal mask.
+        const GpuTemplate* getGpuTemplate(const osg::Node& node, osg::Node::NodeMask mask);
+
         Resource::SceneManager* mSceneManager;
+        GpuScene* mGpuScene;
+        std::mutex mGpuTemplateMutex;
+        std::map<const osg::Node*, std::pair<osg::observer_ptr<const osg::Node>, std::shared_ptr<GpuTemplate>>>
+            mGpuTemplates;
+        double mNextTemplateSweep = 0;
         bool mActiveGrid;
         bool mDebugBatches;
         float mMergeFactor;

@@ -101,8 +101,8 @@ kind = "structural"
 justification = "Object paging is one chunk-production pipeline that gathers eligible records, builds and optimizes render nodes, and caches the resulting chunks with their statistics. Each stage shares paging keys, compile policy, and cache lifetime; extraction would create pass-through interfaces rather than an independent owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:389d2462630228f0d71f4195aa9d2ec0fce75c3a96d2a183146dfdc518697236"
-max_lines = 981
+fingerprint = "sha256:2fb4d5193930c106926b378adef8ac8cbaa8d6fb3b4e34ccde4dedb74bc84432"
+max_lines = 1207
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-026"
@@ -127,8 +127,8 @@ kind = "structural"
 justification = "RenderingManager is the renderer composition root and scene-facing facade: subsystem construction, ordered frame advancement, scene mutation, settings propagation, and renderer queries all coordinate the same owned object graph. Atmosphere diagnostic policy and applied capture state now belong to a separate controller."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:d19c29f3af2aeaeb176b35a56db6b9ac7f6d7f69456dd9daa9eefc4630abe8c2"
-max_lines = 1590
+fingerprint = "sha256:89b6bbace350c94e7fbb64570f8a0f118b5e776f5c3ee3e07063b0c95d9a86ea"
+max_lines = 1634
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-008"
@@ -296,8 +296,8 @@ kind = "structural"
 justification = "MWShadowTechnique owns one view-dependent shadow-map algorithm from cascade slicing and caster-volume construction through shadow-camera culling and receiver-state publication. Those phases share light-space bounds, traversal-local resources, and cascade indices; the optional debug HUD and reusable diagnostic instrumentation live in separate owners."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:12eaa01b46574c03d375b637883208a1b24cd587f65228521479ffc8c0489f30"
-max_lines = 2575
+fingerprint = "sha256:6adf849268cff98ac50b7783c2cd75a4efac86d9e75e6c50cf4f6abcef74de9d"
+max_lines = 2578
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-020"
@@ -376,3 +376,16 @@ issue = "architecture:structural-review"
 review_by = 2027-03-12
 fingerprint = "sha256:5c8750489d35e038883a31a65f4fef63ec0897dc0339d3f7ad9e101a7c011b0b"
 max_lines = 533
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-030"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "apps/openmw/mwrender/gpuscene.cpp"
+kind = "structural"
+justification = "GpuScene owns one GPU-driven distant-scene lifecycle: compatible geometry normalization, shared buffer residency, view culling, indirect-command construction, and material-bucket submission use the same identifiers and render-thread resources. The stages form one backend contract while their internal data flow is still being established."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:98d5ab89ddc8acb1f68e1de5d03caa438b4bf1131b85adadeb607c373bafa89d"
+max_lines = 968

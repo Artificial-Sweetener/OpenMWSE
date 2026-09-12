@@ -109,6 +109,7 @@ namespace MWRender
     class ActorsPaths;
     class RecastMesh;
     class ObjectPaging;
+    class GpuScene;
     class Groundcover;
     class PostProcessor;
 
@@ -333,6 +334,12 @@ namespace MWRender
 
         void updateRecastMesh();
 
+        /// Create and attach the optional GPU scene when supported by the active graphics context.
+        bool createGpuScene();
+
+        /// Rebuild paged object and terrain caches after switching GPU-driven paging at runtime.
+        void rebuildPagedCaches();
+
         const bool mSkyBlending;
 
         osg::ref_ptr<osgUtil::IntersectionVisitor> getIntersectionVisitor(osgUtil::Intersector* intersector,
@@ -344,6 +351,7 @@ namespace MWRender
         osg::ref_ptr<osg::Group> mRootNode;
         osg::ref_ptr<SceneUtil::LightManager> mSceneRoot;
         Resource::ResourceSystem* mResourceSystem;
+        std::unique_ptr<GpuScene> mGpuScene;
 
         osg::ref_ptr<SceneUtil::WorkQueue> mWorkQueue;
 

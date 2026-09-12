@@ -191,6 +191,17 @@ Terrain Settings
    without impacting the performance as dramatically as the minimum size setting.
 
 .. omw-setting::
+   :title: object paging gpu driven
+   :type: boolean
+   :range: true, false
+   :default: false
+
+   Renders distant paged objects as instances kept in GPU buffers.
+   Visibility is decided by a compute shader and the objects are drawn with one indirect draw per material,
+   which removes most of the per-object CPU work from the distant scene.
+   Requires OpenGL 4.3; the regular object paging path is used otherwise.
+   Objects the GPU path cannot represent (blended geometry, animated nodes) keep using the regular path.
+.. omw-setting::
    :title: object paging min size cost multiplier
    :type: float32
    :range: >0

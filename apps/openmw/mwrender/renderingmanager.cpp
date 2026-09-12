@@ -74,6 +74,7 @@
 #include "camera.hpp"
 #include "effectmanager.hpp"
 #include "fogmanager.hpp"
+#include "gpuscene.hpp"
 #include "groundcover.hpp"
 #include "navmesh.hpp"
 #include "npcanimation.hpp"
@@ -269,6 +270,7 @@ namespace MWRender
         globalDefines["exponentialFog"] = exponentialFog ? "1" : "0";
         globalDefines["skyBlending"] = mSkyBlending ? "1" : "0";
         globalDefines["particlePointLighting"] = Settings::shaders().mParticlePointLighting ? "1" : "0";
+        globalDefines["gpuInstanced"] = "0";
 
         for (auto itr = lightDefines.begin(); itr != lightDefines.end(); itr++)
             globalDefines[itr->first] = itr->second;
@@ -284,6 +286,9 @@ namespace MWRender
 
         // Only set up the shadow casting shaders once our global defines have been set
         mShadowManager->setupShaders(mResourceSystem->getSceneManager()->getShaderManager());
+
+        if (Settings::terrain().mObjectPaging && Settings::terrain().mObjectPagingGpuDriven)
+            createGpuScene();
 
         mNavMesh = std::make_unique<NavMesh>(mRootNode, mWorkQueue, Settings::navigator().mEnableNavMeshRender,
             Settings::navigator().mNavMeshRenderMode);
@@ -742,7 +747,51 @@ namespace MWRender
         {
             return mRecastMesh->toggle();
         }
+        else if (mode == Render_GpuDrivenPaging)
+        {
+            if (mGpuScene == nullptr)
+            {
+                // Worldspace managers rewire on recreation.
+                if (!Settings::terrain().mObjectPaging || !createGpuScene())
+                    return false;
+                rebuildPagedCaches();
+                return true;
+            }
+            const bool enable = !mGpuScene->isEnabled();
+            mGpuScene->setEnabled(enable);
+            rebuildPagedCaches();
+            return enable;
+        }
         return false;
+    }
+
+    bool RenderingManager::createGpuScene()
+    {
+        if (mGpuScene != nullptr)
+            return true;
+        mGpuScene = std::make_unique<GpuScene>(mResourceSystem->getSceneManager()->getShaderManager());
+        if (!mGpuScene->isSupported())
+        {
+            mGpuScene.reset();
+            return false;
+        }
+        mGpuScene->setEnabled(true);
+        mGpuScene->getNode()->setNodeMask(Mask_Static);
+        mSceneRoot->addChild(mGpuScene->getNode());
+        return true;
+    }
+
+    void RenderingManager::rebuildPagedCaches()
+    {
+        // The rebuild leaves unpaged frames visible.
+        MWBase::Environment::get().getWindowManager()->fadeScreenOut(0.f);
+        for (auto& [_, chunkMgr] : mWorldspaceChunks)
+        {
+            if (chunkMgr.mObjectPaging != nullptr)
+                chunkMgr.mObjectPaging->clearCache();
+            chunkMgr.mTerrain->rebuildViews();
+        }
+        MWBase::Environment::get().getWindowManager()->fadeScreenIn(1.f);
     }
 
     void RenderingManager::configureFog(const MWWorld::Cell& cell)
@@ -1458,7 +1507,7 @@ namespace MWRender
             if (Settings::terrain().mObjectPaging)
             {
                 newChunkMgr.mObjectPaging
-                    = std::make_unique<ObjectPaging>(mResourceSystem->getSceneManager(), worldspace);
+                    = std::make_unique<ObjectPaging>(mResourceSystem->getSceneManager(), worldspace, mGpuScene.get());
                 quadTreeWorld->addChunkManager(newChunkMgr.mObjectPaging.get());
                 mResourceSystem->addResourceManager(newChunkMgr.mObjectPaging.get());
             }
