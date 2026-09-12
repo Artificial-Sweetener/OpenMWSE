@@ -1,0 +1,127 @@
+schema_version = 2
+
+[structure]
+soft_lines = 350
+hard_lines = 500
+source_extensions = [
+  ".cc",
+  ".comp",
+  ".cpp",
+  ".cxx",
+  ".frag",
+  ".glsl",
+  ".h",
+  ".hpp",
+  ".in",
+  ".inl",
+  ".py",
+  ".vert",
+]
+excluded_paths = []
+
+[[areas]]
+id = "renderer"
+owner = "OpenMWSE rendering"
+status = "active"
+# OpenMWSE owns renderer architecture, including upstream-derived implementations retained by the fork.
+source_roots = [
+  "apps/openmw/mwrender",
+  "components/fx",
+  "components/myguiplatform",
+  "components/nifosg",
+  "components/sceneutil",
+  "components/shader",
+  "components/stereo",
+  "components/terrain",
+  "files/shaders",
+]
+source_files = [
+  "components/resource/animation.cpp",
+  "components/resource/animation.hpp",
+  "components/resource/animblendrulesmanager.cpp",
+  "components/resource/animblendrulesmanager.hpp",
+  "components/resource/bgsmfilemanager.cpp",
+  "components/resource/bgsmfilemanager.hpp",
+  "components/resource/errormarker.cpp",
+  "components/resource/errormarker.hpp",
+  "components/resource/imagemanager.cpp",
+  "components/resource/imagemanager.hpp",
+  "components/resource/keyframemanager.cpp",
+  "components/resource/keyframemanager.hpp",
+  "components/resource/scenemanager.cpp",
+  "components/resource/scenemanager.hpp",
+  "components/resource/stats.cpp",
+  "components/resource/stats.hpp",
+  "components/std140/ubo.hpp",
+]
+
+[[areas]]
+id = "graphics-settings-ui"
+owner = "OpenMWSE graphics settings UI"
+status = "active"
+# This file-level boundary owns graphics policy and presentation without claiming unrelated game UI.
+source_roots = []
+source_files = [
+  "apps/launcher/settingspage.cpp",
+  "apps/launcher/settingspage.hpp",
+  "apps/openmw/mwgui/distancesettings.cpp",
+  "apps/openmw/mwgui/distancesettings.hpp",
+  "apps/openmw/mwgui/settingswindow.cpp",
+  "apps/openmw/mwgui/settingswindow.hpp",
+  "components/settings/atmospheremigration.hpp",
+  "components/settings/categories/openmwseshadows.hpp",
+  "components/settings/categories/shaders.hpp",
+  "components/settings/categories/shadows.hpp",
+  "components/settings/categories/water.hpp",
+  "components/settings/distance.hpp",
+  "components/settings/settings.cpp",
+  "components/settings/shadowresolution.hpp",
+  "components/settings/values.hpp",
+]
+
+[[areas]]
+id = "diagnostics"
+owner = "OpenMWSE diagnostic bridge"
+status = "active"
+# Diagnostic host seams in upstream-owned engine types remain outside this owned implementation area.
+source_roots = [
+  "apps/openmw-diagnosticctl",
+  "components/diagnostics",
+]
+source_files = [
+  "apps/openmw/diagnosticcollection.cpp",
+  "apps/openmw/diagnosticcollection.hpp",
+  "apps/openmw/diagnosticcommands.cpp",
+  "apps/openmw/diagnosticgameplayroute.cpp",
+  "apps/openmw/diagnosticgameplayroute.hpp",
+  "apps/openmw/diagnosticperformance.cpp",
+  "apps/openmw/diagnosticperformance.hpp",
+  "apps/openmw/diagnosticrenderconfiguration.cpp",
+  "apps/openmw/diagnosticrenderconfiguration.hpp",
+  "apps/openmw/diagnosticrenderingtiming.cpp",
+  "apps/openmw/diagnosticrenderingtiming.hpp",
+  "apps/openmw/diagnosticstartup.cpp.in",
+  "apps/openmw/diagnosticstartup.hpp",
+  "apps/openmw/diagnosticworkcounter.cpp",
+  "apps/openmw/diagnosticworkcounter.hpp",
+  "apps/openmw/mwinput/diagnosticinputmanager.cpp",
+  "apps/openmw/mwinput/diagnosticinputmanager.hpp",
+  "components/sdlutil/diagnosticpresentationtiming.cpp",
+  "components/sdlutil/diagnosticpresentationtiming.hpp",
+  "scripts/atmosphere_diagnostics.py",
+  "scripts/compare_diagnostic_graphics.py",
+  "scripts/generate_atmosphere_cloud_noise.py",
+]
+
+[[areas]]
+id = "mwse-compatibility"
+owner = "OpenMWSE MWSE compatibility"
+status = "reserved"
+# The checker rejects source at this boundary until a later integration explicitly activates it.
+source_roots = ["apps/openmw/mwse"]
+source_files = []
+
+[registries]
+inventory = "ARCHITECTURE_INVENTORY.toml"
+debt = "ARCHITECTURE_DEBT.toml"
+waivers = "ARCHITECTURE_WAIVERS.toml"

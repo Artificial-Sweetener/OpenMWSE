@@ -1,0 +1,431 @@
+schema_version = 1
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-001"
+area = "graphics-settings-ui"
+owner = "OpenMWSE graphics settings UI"
+rule = "STRUCT003"
+path = "apps/launcher/settingspage.cpp"
+kind = "structural"
+justification = "The launcher settings page is one Qt form controller with a single load, validation, enablement, and save lifecycle. Its category-specific controls all bind the same form state and persistence boundary; splitting by category would duplicate widget coordination and make atomic apply behavior harder to verify."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:204d90cf0665edb8489795f1acfac772e10c2acb823d12ce95ed1877281e04ec"
+max_lines = 675
+
+[[waivers]]
+id = "OMWSE-REMEDIATION-001"
+area = "diagnostics"
+owner = "OpenMWSE diagnostic bridge"
+rule = "STRUCT003"
+path = "apps/openmw-diagnosticctl/main.cpp"
+kind = "remediation"
+justification = "This file contains assessed mixed responsibility recorded by OMWSE-DEBT-001; the bounded waiver permits only the current source while the named extraction is completed."
+issue = "architecture:omwse-debt-001"
+review_by = 2027-03-12
+fingerprint = "sha256:b912e57c37eef6237cc99ae0b1613af400d973854cfcac5c73dcbd05d64a9811"
+max_lines = 1330
+next_limit = 500
+debt = "OMWSE-DEBT-001"
+
+[[waivers]]
+id = "OMWSE-REMEDIATION-002"
+area = "diagnostics"
+owner = "OpenMWSE diagnostic bridge"
+rule = "STRUCT003"
+path = "apps/openmw/diagnosticcommands.cpp"
+kind = "remediation"
+justification = "This file contains assessed mixed responsibility recorded by OMWSE-DEBT-002; the bounded waiver permits only the current source while the named extraction is completed."
+issue = "architecture:omwse-debt-002"
+review_by = 2027-03-12
+fingerprint = "sha256:d268c2607fce4d8b45a1af80c6e827a6b2944411ef25982635b4ad9754ac74d2"
+max_lines = 778
+next_limit = 500
+debt = "OMWSE-DEBT-002"
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-002"
+area = "diagnostics"
+owner = "OpenMWSE diagnostic bridge"
+rule = "STRUCT003"
+path = "apps/openmw/diagnosticperformance.cpp"
+kind = "structural"
+justification = "This translation unit owns one diagnostic performance report pipeline from sampled viewer statistics through attribution, distribution calculation, and stable serialization. The internal metric records are private stages of that pipeline, share one frame-time model, and have no independent runtime lifecycle."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:f4a814d943f9c4218deedfbe4f1df00acb59579926061f2a6985d2d9bcb744ba"
+max_lines = 716
+
+[[waivers]]
+id = "OMWSE-REMEDIATION-003"
+area = "graphics-settings-ui"
+owner = "OpenMWSE graphics settings UI"
+rule = "STRUCT003"
+path = "apps/openmw/mwgui/settingswindow.cpp"
+kind = "remediation"
+justification = "This file contains assessed mixed responsibility recorded by OMWSE-DEBT-003; the bounded waiver permits only the current source while the named extraction is completed."
+issue = "architecture:omwse-debt-003"
+review_by = 2027-03-12
+fingerprint = "sha256:9159b272d466a6aa728f790b698f3f6b5114363162f27c5b6f40ad9fad879296"
+max_lines = 1161
+next_limit = 500
+debt = "OMWSE-DEBT-003"
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-003"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "apps/openmw/mwrender/animation.cpp"
+kind = "structural"
+justification = "The animation implementation owns one model animation state machine: controller attachment, source selection, blending, playback advancement, and text-key delivery all operate on the same animation graph and timing state. Separating those mechanics would expose private invariants without establishing another authoritative owner."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:0ff8cd96cf18b9141fecd3efd8e399257b80f78743f9e6bc55dbea863b2ba559"
+max_lines = 1749
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-004"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "apps/openmw/mwrender/globalmap.cpp"
+kind = "structural"
+justification = "Global map rendering, exploration overlay updates, and image persistence are the single durable global-map representation lifecycle. Rendering produces the exact texture that is serialized and restored, so moving persistence alone would add a cross-owner pixel-format contract without reducing responsibility or change coupling."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:e6220b95cb9f464d67138cf42845f7cc474e5dd912f35124eb47f8969e070856"
+max_lines = 513
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-005"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "apps/openmw/mwrender/localmap.cpp"
+kind = "structural"
+justification = "Local map capture, coordinate tracking, and fog-of-war restoration together define the persisted local-map tile lifecycle. They share tile addressing, texture formats, cell bounds, and update cadence; separating storage mechanics would split one representation invariant across owners."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:281a8f7273d5ed662397208cf7579494c976f795e1158e006cc5f65908a00574"
+max_lines = 614
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-006"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "apps/openmw/mwrender/npcanimation.cpp"
+kind = "structural"
+justification = "NPCAnimation is the authoritative visual assembly and animation state for one actor. Body-part selection, equipment visibility, first-person presentation, speech, and blink state all mutate the same scene graph and must be synchronized during rebuilds, so they remain one cohesive owner."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:79524d14f9af3e5e25d26e4561c07d61bcda13a5ceeab7e0fddbb0d66a689f2d"
+max_lines = 1068
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-007"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "apps/openmw/mwrender/objectpaging.cpp"
+kind = "structural"
+justification = "Object paging is one chunk-production pipeline that gathers eligible records, builds and optimizes render nodes, and caches the resulting chunks with their statistics. Each stage shares paging keys, compile policy, and cache lifetime; extraction would create pass-through interfaces rather than an independent owner."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:389d2462630228f0d71f4195aa9d2ec0fce75c3a96d2a183146dfdc518697236"
+max_lines = 981
+
+[[waivers]]
+id = "OMWSE-REMEDIATION-004"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "apps/openmw/mwrender/postprocessor.cpp"
+kind = "remediation"
+justification = "This file contains assessed mixed responsibility recorded by OMWSE-DEBT-004; the bounded waiver permits only the current source while the named extraction is completed."
+issue = "architecture:omwse-debt-004"
+review_by = 2027-03-12
+fingerprint = "sha256:f476942c6209c5418b041cf3a2a8ea4e79462d2d763e5b791b1c10e6a79301a0"
+max_lines = 888
+next_limit = 500
+debt = "OMWSE-DEBT-004"
+
+[[waivers]]
+id = "OMWSE-REMEDIATION-005"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "apps/openmw/mwrender/renderingmanager.cpp"
+kind = "remediation"
+justification = "This file contains assessed mixed responsibility recorded by OMWSE-DEBT-005; the bounded waiver permits only the current source while the named extraction is completed."
+issue = "architecture:omwse-debt-005"
+review_by = 2027-03-12
+fingerprint = "sha256:1f039066224d49e7b7c4929a451a24b210bd47a921eeef39674d996a8e080102"
+max_lines = 1621
+next_limit = 500
+debt = "OMWSE-DEBT-005"
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-008"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "apps/openmw/mwrender/sky.cpp"
+kind = "structural"
+justification = "SkyManager owns the complete runtime sky scene and weather-driven lifecycle. Celestial state, precipitation, occlusion, and water-facing sky state all update the same graph in ordered frame phases; keeping them together preserves that lifecycle and avoids hidden ordering across subsystem boundaries."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:f905852987d061fa0cf78a31884b987ea1c3ca2d07f32345f9ba63bb197d922c"
+max_lines = 814
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-009"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "apps/openmw/mwrender/skyutil.cpp"
+kind = "structural"
+justification = "Sky utilities implement the private scene objects and callbacks used exclusively by SkyManager, including celestial drawables, cloud state, precipitation emitters, and camera-relative transforms. They share sky masks, coordinate conventions, and update contracts and intentionally have no public lifecycle of their own."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:2bdf2044f54706b49a92e03a99a2296cfd0f7629d96d305fd323cf6911d4211f"
+max_lines = 934
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-010"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "apps/openmw/mwrender/water.cpp"
+kind = "structural"
+justification = "Water owns one surface-rendering lifecycle comprising geometry, reflection resources, material state, ripple emission, and cell transitions. These behaviors share the same water plane, cameras, masks, and settings invalidation, so splitting them would distribute one render invariant across coupled owners."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:2cbfbc12e9e9b677c456fe8fba51125166fee9a3ef4c00b65f74e0728935437c"
+max_lines = 620
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-011"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "components/fx/technique.cpp"
+kind = "structural"
+justification = "An Fx technique is one compiled effect-language artifact. Parsing, typed value conversion, shader graph construction, compilation, runtime bindings, and reload metadata are consecutive stages with one error context and cache identity; separate owners would duplicate the language and compilation contract."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:91c997ecbfd8689f02d2d70a10349e902a44d3a17008f9b5400250c2b9a1c313"
+max_lines = 1035
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-012"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "components/nifosg/controller.cpp"
+kind = "structural"
+justification = "This file is the format adapter for NIF controller variants. The implementations share key interpolation, record dispatch, OSG update-callback conventions, and loader-facing construction; grouping the closed family preserves format locality and avoids a file-per-variant layout with no new ownership boundary."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:51db9a97793b1305e9e97c4008edadebb08289d42d46a451eee80086a632a4ec"
+max_lines = 651
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-013"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "components/nifosg/nifloader.cpp"
+kind = "structural"
+justification = "NIF loading is one graph-conversion transaction from a related record tree to an OSG scene graph. Node dispatch, render-state materialization, controller attachment, and particle handling depend on shared record context and caches, so the large visitor remains the authoritative conversion owner."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:bf68b812f82269e33a7400533e92b19a9cf18cef33a8459c41a884df9faaffd0"
+max_lines = 2580
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-014"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "components/nifosg/particle.cpp"
+kind = "structural"
+justification = "The NIF particle adapter owns the closed set of emission, shooter, affector, and collision operators needed to reproduce one source particle system in OSG. The operators share scene lookup, transform rules, and particle-state contracts and are constructed through the same loader boundary."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:f67f6f9bed4ff18633cea9d18a0f95bf62678c4d8e147923e47ee11d25dc9340"
+max_lines = 608
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-015"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "components/resource/errormarker.cpp"
+kind = "structural"
+justification = "This file contains one generated serialized OSG error-marker asset and the minimal accessor that exposes it. The byte representation is intentionally atomic and regenerated as a unit; splitting it would fragment a single resource without improving readability, ownership, or testability."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:1762b8eba81d32080c0fffbfeb355a8bf626ef4b650ab174395a7ddbaaecfe37"
+max_lines = 1392
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-016"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "components/resource/scenemanager.cpp"
+kind = "structural"
+justification = "SceneManager is the authoritative cached scene-resource lifecycle from load through clone, optimization, shader preparation, markers, and cache reporting. Those operations share cache keys, object sharing policy, and compile context; extraction would expose private cache invariants without a stable independent owner."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:17fe1082905f6a9f60f4e4092873ca57d995a3742e5adc20ae8408348782f48d"
+max_lines = 1039
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-017"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "components/resource/stats.cpp"
+kind = "structural"
+justification = "Resource statistics collection, event control, and HUD presentation form one optional debugging surface backed by the same cache counters and enablement lifecycle. The presentation is not a reusable product UI, and separating it would add an interface used only to relay this exact statistics model."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:53ccfc4094bdd2217c8e844d4633569483fbd64cc44bd9f95f91ee415a098659"
+max_lines = 516
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-018"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "components/sceneutil/diagnosticgputiming.cpp"
+kind = "structural"
+justification = "GPU timing owns one graphics-context query lifecycle and its publication into OSG frame statistics. Camera and render-bin instruments share query pools, frame identity, pass naming, and delayed availability rules; keeping them together preserves the single timing protocol and synchronization boundary."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:0c46753874e2dc52be439439e354bc91675aca7968de9a20ec811e2f9caa0945"
+max_lines = 602
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-019"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "components/sceneutil/lightmanager.cpp"
+kind = "structural"
+justification = "LightManager owns the per-view light-selection and GPU-data lifecycle, from cull collection through object uniforms and clustered buffers to sunlight settings. These stages share frame-local indices and buffer layout, so separation would leak representation details across tightly ordered rendering phases."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:f4d346f510c1aa922b8ced758cbe74c34be965afa4ef85eca6ba867d2731e459"
+max_lines = 596
+
+[[waivers]]
+id = "OMWSE-REMEDIATION-006"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "components/sceneutil/mwshadowtechnique.cpp"
+kind = "remediation"
+justification = "This file contains assessed mixed responsibility recorded by OMWSE-DEBT-006; the bounded waiver permits only the current source while the named extraction is completed."
+issue = "architecture:omwse-debt-006"
+review_by = 2027-03-12
+fingerprint = "sha256:befddf2eb05726214aad6b8cbb57ad44ab7696b1ddba209742db018238060af4"
+max_lines = 2759
+next_limit = 500
+debt = "OMWSE-DEBT-006"
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-020"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "components/sceneutil/optimizer.cpp"
+kind = "structural"
+justification = "The optimizer is a closed suite of OSG graph-rewrite passes coordinated by one option mask and shared traversal conventions. Individual visitors are implementation strategies rather than independently owned services; colocating them mirrors their ordered pipeline and keeps graph invariants reviewable together."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:f5345eb1cad72c0135cc2994ceb5e38b8271bc7dac815b8dd8251c2ab0a49ae1"
+max_lines = 1641
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-021"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "components/shader/shadermanager.cpp"
+kind = "structural"
+justification = "ShaderManager owns one cached shader-program lifecycle from template preprocessing and define resolution through sampler allocation, compilation, linking, and reload invalidation. Each stage contributes to the same cache key and diagnostic context, so it remains a cohesive compilation owner."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:0b1f3ce815a4b652426924242ae1b1ca070046869e62a351b5bf37dc6695ab8c"
+max_lines = 777
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-022"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "components/shader/shadervisitor.cpp"
+kind = "structural"
+justification = "ShaderVisitor performs one scene traversal that infers shader requirements and applies the resulting program and material state, while retaining enough state to restore removals. Analysis and mutation share node-local facts and traversal order; splitting them would require a duplicate intermediate scene model."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:e8ff8419d8ccaf75550b0d7b4ce7e9ee374b5a783d71a8e73d6afebbfc73ad29"
+max_lines = 712
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-023"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "components/stereo/multiview.cpp"
+kind = "structural"
+justification = "The multiview implementation owns one OpenGL framebuffer and texture-layer strategy for stereo rendering. View callbacks, allocation, MSAA resolve, and layer presentation share exact attachment formats and extension constraints, and must evolve together as one backend implementation."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:2f734adee811f363aa37ddb35486831a88cdde09067ae0b124bcad2ef3b357f0"
+max_lines = 733
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-024"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "components/terrain/quadtreeworld.cpp"
+kind = "structural"
+justification = "QuadtreeWorld owns the terrain quadtree view and chunk lifecycle, including cell adapters, preload behavior, debug borders, and statistics tied to those chunks. The operations share grid coordinates, view membership, and chunk-manager state and do not establish independent policy owners."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:ca374fc86c7f08b0a2a1b28e2c6efd55eb9e84200eb4a5bcbb8157f70115843a"
+max_lines = 547
+
+[[waivers]]
+id = "OMWSE-REMEDIATION-007"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "files/shaders/lib/atmosphere/clouds.glsl"
+kind = "remediation"
+justification = "This file contains assessed mixed responsibility recorded by OMWSE-DEBT-007; the bounded waiver permits only the current source while the named extraction is completed."
+issue = "architecture:omwse-debt-007"
+review_by = 2027-03-12
+fingerprint = "sha256:f58038bbc9af175eacf3be32d04f22eb3a75ce13f51514a133c620f22eaff978"
+max_lines = 840
+next_limit = 500
+debt = "OMWSE-DEBT-007"
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-025"
+area = "diagnostics"
+owner = "OpenMWSE diagnostic bridge"
+rule = "STRUCT003"
+path = "scripts/generate_atmosphere_cloud_noise.py"
+kind = "structural"
+justification = "The cloud-noise generator is one deterministic asset-production command: mathematical kernels, tiling validation, channel packing, DDS encoding, provenance, and self-checks all define the same output contract. Keeping the pipeline together makes reproducibility and format invariants auditable end to end."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:5c8750489d35e038883a31a65f4fef63ec0897dc0339d3f7ad9e101a7c011b0b"
+max_lines = 533

@@ -192,5 +192,12 @@ source_files = []
             diagnostics = validate_repository(root, today=date(2026, 9, 4))
             self.assertTrue(any(item.rule == "INVENTORY004" for item in diagnostics))
 
+    def test_current_repository_has_no_governance_errors(self) -> None:
+        """Keep checked-in owned architecture exact and enforceable."""
+
+        repository_root = SCRIPTS_ROOT.parent
+        errors = [item for item in validate_repository(repository_root) if item.severity == "error"]
+        self.assertEqual(errors, [])
+
 if __name__ == "__main__":
     unittest.main()

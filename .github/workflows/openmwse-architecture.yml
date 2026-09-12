@@ -1,0 +1,15 @@
+name: OpenMWSE architecture governance
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Test architecture governance
+        run: python3 -m unittest discover -s scripts/tests -p test_architecture_governance.py -v
+      - name: Check owned architecture
+        run: python3 scripts/check_architecture.py

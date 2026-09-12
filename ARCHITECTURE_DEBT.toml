@@ -1,0 +1,113 @@
+schema_version = 1
+
+[[debts]]
+id = "OMWSE-DEBT-001"
+area = "diagnostics"
+owner = "OpenMWSE diagnostic bridge"
+paths = ["apps/openmw-diagnosticctl/main.cpp"]
+fingerprint = "sha256:b912e57c37eef6237cc99ae0b1613af400d973854cfcac5c73dcbd05d64a9811"
+issue = "architecture:omwse-debt-001"
+review_by = 2027-03-12
+responsibilities = [
+  "process isolation and temporary profile ownership",
+  "command-line parsing and validation",
+  "run, replay, inspection, and capsule-edit workflows",
+  "evidence serialization and child-process supervision",
+]
+next_extraction = "Extract operation parsing and execution into focused diagnosticctl command owners, leaving main responsible only for top-level dispatch and exit reporting."
+
+[[debts]]
+id = "OMWSE-DEBT-002"
+area = "diagnostics"
+owner = "OpenMWSE diagnostic bridge"
+paths = ["apps/openmw/diagnosticcommands.cpp"]
+fingerprint = "sha256:d268c2607fce4d8b45a1af80c6e827a6b2944411ef25982635b4ad9754ac74d2"
+issue = "architecture:omwse-debt-002"
+review_by = 2027-03-12
+responsibilities = [
+  "capsule snapshot construction",
+  "diagnostic queue dispatch",
+  "graphics and gameplay command execution",
+  "live settings and world-state mutation",
+]
+next_extraction = "Extract command-family handlers behind an engine diagnostic context so queue orchestration no longer owns every command implementation."
+
+[[debts]]
+id = "OMWSE-DEBT-003"
+area = "graphics-settings-ui"
+owner = "OpenMWSE graphics settings UI"
+paths = ["apps/openmw/mwgui/settingswindow.cpp"]
+fingerprint = "sha256:9159b272d466a6aa728f790b698f3f6b5114363162f27c5b6f40ad9fad879296"
+issue = "architecture:omwse-debt-003"
+review_by = 2027-03-12
+responsibilities = [
+  "general settings-window lifecycle",
+  "video and graphics controls",
+  "input rebinding controls",
+  "script-settings page construction",
+]
+next_extraction = "Extract the video and graphics settings controller, including live application and diagnostic access, from the general settings window."
+
+[[debts]]
+id = "OMWSE-DEBT-004"
+area = "renderer"
+owner = "OpenMWSE rendering"
+paths = ["apps/openmw/mwrender/postprocessor.cpp"]
+fingerprint = "sha256:f476942c6209c5418b041cf3a2a8ea4e79462d2d763e5b791b1c10e6a79301a0"
+issue = "architecture:omwse-debt-004"
+review_by = 2027-03-12
+responsibilities = [
+  "post-process frame-resource lifecycle",
+  "effect-chain and attachment orchestration",
+  "atmosphere and exact-frame diagnostic capture",
+  "shader live reload",
+]
+next_extraction = "Extract diagnostic capture state and comparison sequencing from the production post-processing pipeline."
+
+[[debts]]
+id = "OMWSE-DEBT-005"
+area = "renderer"
+owner = "OpenMWSE rendering"
+paths = ["apps/openmw/mwrender/renderingmanager.cpp"]
+fingerprint = "sha256:1f039066224d49e7b7c4929a451a24b210bd47a921eeef39674d996a8e080102"
+issue = "architecture:omwse-debt-005"
+review_by = 2027-03-12
+responsibilities = [
+  "renderer subsystem composition",
+  "scene and terrain mutation",
+  "settings application",
+  "atmosphere diagnostic control and capture routing",
+]
+next_extraction = "Extract atmosphere diagnostic control and capture routing behind a focused renderer diagnostics owner."
+
+[[debts]]
+id = "OMWSE-DEBT-006"
+area = "renderer"
+owner = "OpenMWSE rendering"
+paths = ["components/sceneutil/mwshadowtechnique.cpp"]
+fingerprint = "sha256:befddf2eb05726214aad6b8cbb57ad44ab7696b1ddba209742db018238060af4"
+issue = "architecture:omwse-debt-006"
+review_by = 2027-03-12
+responsibilities = [
+  "shadow frustum and light-space computation",
+  "shadow camera and resource lifecycle",
+  "cull traversal and render-leaf filtering",
+  "debug visualization and diagnostic instrumentation",
+]
+next_extraction = "Extract debug visualization and diagnostic instrumentation from the runtime shadow-map technique."
+
+[[debts]]
+id = "OMWSE-DEBT-007"
+area = "renderer"
+owner = "OpenMWSE rendering"
+paths = ["files/shaders/lib/atmosphere/clouds.glsl"]
+fingerprint = "sha256:f58038bbc9af175eacf3be32d04f22eb3a75ce13f51514a133c620f22eaff978"
+issue = "architecture:omwse-debt-007"
+review_by = 2027-03-12
+responsibilities = [
+  "cloud geometry and terrain coupling",
+  "density and procedural noise shaping",
+  "optical transport and phase evaluation",
+  "raymarch integration and presentation",
+]
+next_extraction = "Split cloud field geometry, density, optical transport, and raymarch integration into authoritative shared shader includes."
