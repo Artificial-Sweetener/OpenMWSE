@@ -131,8 +131,7 @@ namespace
                         && (Settings::optimizations().useGpuSceneLighting() || Settings::shaders().mClusteredLighting));
                     lm->setClassicFalloff(
                         Settings::optimizations().useGpuSceneLighting() && Settings::shaders().mClassicFalloff);
-                    lm->enableIndexedLightLists(
-                        Settings::optimizations().isActive(Settings::optimizations().mIndexedLightLists));
+                    lm->enableIndexedLightLists(Settings::optimizations().useIndexedLightLists());
                 }
 
                 lm->processChangedSettings(Settings::shaders().mLightRadiusMultiplier,
@@ -252,7 +251,7 @@ namespace MWRender
             SceneUtil::LightSettings{
                 .mClusteredLighting = optimizedLighting || Settings::shaders().mClusteredLighting,
                 .mClassicFalloff = optimizedLighting && Settings::shaders().mClassicFalloff,
-                .mIndexedLightLists = Settings::optimizations().isActive(Settings::optimizations().mIndexedLightLists),
+                .mIndexedLightLists = Settings::optimizations().useIndexedLightLists(),
                 .mMaxLights = Settings::shaders().mMaxLights,
                 .mMaximumLightDistance = Settings::shaders().mMaximumLightDistance,
                 .mLightFadeStart = Settings::shaders().mLightFadeStart,
@@ -270,6 +269,8 @@ namespace MWRender
                          << (Settings::shaders().mClassicFalloff ? "-classic" : "");
 
         sceneRoot->setLightingMask(Mask_Lighting);
+        if (sceneRoot->getClusteredLighting())
+            sceneRoot->setDistantLightRange(mViewDistance);
         mSceneRoot = sceneRoot;
         sceneRoot->setNodeMask(Mask_Scene);
         sceneRoot->setName("Scene Root");
@@ -741,14 +742,17 @@ namespace MWRender
 
     void RenderingManager::prepareGpuScene(Loading::Listener& listener)
     {
-        if (mGpuScene == nullptr)
+        if (mGpuScene == nullptr || !mGpuScene->isEnabled())
             return;
         if (osg::ref_ptr<osg::GraphicsOperation> probe = mGpuScene->createProbeOperation())
         {
             mViewer->getCamera()->getGraphicsContext()->add(probe);
             const auto probeDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
             while (probe->getKeep() && std::chrono::steady_clock::now() < probeDeadline)
+            {
+                listener.increaseProgress(0);
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
         }
         mGpuScene->capture(*mSceneRoot);
         const unsigned int total = mGpuScene->getPendingWork();
@@ -756,15 +760,15 @@ namespace MWRender
             return;
         listener.setLabel("#{OMWEngine:UploadingGpuScene}");
         listener.setProgressRange(total);
-        osg::ref_ptr<osg::GraphicsOperation> operation = mGpuScene->createCompileOperation(total);
+        osg::ref_ptr<osg::GraphicsOperation> operation = mGpuScene->createCompileOperation();
         mViewer->getCamera()->getGraphicsContext()->add(operation);
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
         while (operation->getKeep() && std::chrono::steady_clock::now() < deadline)
         {
-            listener.setProgress(std::min(mGpuScene->getCompletedWork(), total));
             listener.increaseProgress(0);
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
+        listener.setProgress(total);
     }
 
     bool RenderingManager::toggleRenderMode(RenderMode mode)
@@ -832,8 +836,15 @@ namespace MWRender
         }
         if (mGpuScene != nullptr)
             return true;
-        mGpuScene = std::make_unique<GpuScene>(mResourceSystem->getSceneManager()->getShaderManager(),
-            Settings::optimizations().useGpuSkinning(), Settings::optimizations().useGpuTextureArrays());
+        GpuScene::Options options;
+        options.mGpuSkinning = Settings::optimizations().useGpuSkinning();
+        options.mPackedTextures = Settings::optimizations().useGpuTextureArrays();
+        options.mStorageBudget = Settings::optimizations().useGpuStorageBudget();
+        options.mLowEndIndirectBatching = Settings::optimizations().useLowEndIndirectBatching();
+        options.mLightOcclusion = Settings::optimizations().useGpuLightOcclusion();
+        options.mDistantPaging = Settings::optimizations().useGpuDistantPaging();
+        mGpuScene = std::make_unique<GpuScene>(
+            mResourceSystem->getSceneManager()->getShaderManager(), *mViewer->getViewerStats(), options);
         if (!mGpuScene->isSupported())
         {
             mGpuScene.reset();
@@ -842,6 +853,7 @@ namespace MWRender
         mGpuScene->setEnabled(true);
         mGpuScene->setOcclusionEnabled(mGpuOcclusion && Settings::optimizations().useGpuOcclusionCulling());
         mGpuScene->setLightManager(mSceneRoot.get());
+        mSceneRoot->setDistantLightsEnabled(Settings::optimizations().useGpuDistantPaging());
         if (const auto* material = dynamic_cast<const SceneUtil::Material*>(
                 mSceneRoot->getOrCreateStateSet()->getAttribute(osg::StateAttribute::MATERIAL)))
             mGpuScene->setDefaultMaterial(material);
@@ -878,9 +890,8 @@ namespace MWRender
         }
         else
         {
-            mGpuScene->setEnabled(false);
-            wireGpuScene(nullptr);
-            mGpuScene.reset();
+            mSceneRoot->setDistantLightsEnabled(false);
+            destroyGpuScene();
         }
         if (applied)
             rebuildPagedCaches();
@@ -891,6 +902,11 @@ namespace MWRender
     void RenderingManager::wireGpuScene(GpuScene* scene)
     {
         GpuScene* const actorScene = Settings::optimizations().useGpuActors() ? scene : nullptr;
+        SceneUtil::LightManager* const distantLights = Settings::optimizations().useGpuDistantPaging()
+                && mSceneRoot->getClusteredLighting() && scene != nullptr && scene->isEnabled()
+            ? mSceneRoot.get()
+            : nullptr;
+        mSceneRoot->setDistantLightsEnabled(distantLights != nullptr);
         mObjects->setGpuScene(actorScene);
         mWater->setGpuScene(scene);
         mSky->setGpuScene(scene);
@@ -901,10 +917,32 @@ namespace MWRender
         {
             chunkMgr.mTerrain->setGpuChunkFactory(scene, Mask_GpuProxy);
             if (chunkMgr.mObjectPaging != nullptr)
-                chunkMgr.mObjectPaging->setGpuScene(scene);
+                chunkMgr.mObjectPaging->setGpuScene(scene, distantLights);
             if (chunkMgr.mGroundcover != nullptr)
                 chunkMgr.mGroundcover->setGpuScene(scene);
         }
+    }
+
+    void RenderingManager::destroyGpuScene()
+    {
+        if (mGpuScene == nullptr)
+            return;
+
+        mGpuScene->setEnabled(false);
+        wireGpuScene(nullptr);
+
+        osg::GraphicsContext* const context = mViewer->getCamera()->getGraphicsContext();
+        if (context == nullptr || !context->valid() || !context->makeCurrent())
+        {
+            Log(Debug::Error) << "Failed to acquire the graphics context while disabling GPU-driven paging; "
+                                 "GPU resources will be released during context shutdown.";
+        }
+        else
+        {
+            mGpuScene->releaseGLObjects(context->getState());
+            context->releaseContext();
+        }
+        mGpuScene.reset();
     }
 
     bool RenderingManager::reconfigureGpuScene()
@@ -913,9 +951,7 @@ namespace MWRender
             return true;
 
         mViewer->stopThreading();
-        mGpuScene->setEnabled(false);
-        wireGpuScene(nullptr);
-        mGpuScene.reset();
+        destroyGpuScene();
         const bool created = createGpuScene();
         if (created)
             wireGpuScene(mGpuScene.get());
@@ -932,6 +968,8 @@ namespace MWRender
         {
             if (chunkMgr.mObjectPaging != nullptr)
                 chunkMgr.mObjectPaging->clearCache();
+            if (chunkMgr.mGroundcover != nullptr)
+                chunkMgr.mGroundcover->clearCache();
             chunkMgr.mTerrain->clearAssociatedCaches();
             chunkMgr.mTerrain->rebuildViews();
         }
@@ -1003,6 +1041,13 @@ namespace MWRender
         updateRaycasts();
         reportStats();
         mObjects->flushGpuRefresh();
+        if (mGpuScene != nullptr && mGpuScene->takeDemotion())
+        {
+            mSceneRoot->setDistantLightsEnabled(false);
+            rebuildPagedCaches();
+        }
+        if (mGpuScene != nullptr)
+            mGpuScene->setNightDayMode(MWBase::Environment::get().getWorld()->getNightDayMode());
 
         mPostProcessor->diagnostics().advanceAtmosphereComparison();
 
@@ -1167,7 +1212,7 @@ namespace MWRender
             setupPlayer(ptr);
             mPlayerAnimation->updatePtr(ptr);
         }
-        mCamera->attachTo(ptr);
+        mCamera->attachTo(ptr, Settings::optimizations().useGpuDrivenPaging());
     }
 
     void RenderingManager::removePlayer(const MWWorld::Ptr& player)
@@ -1466,7 +1511,7 @@ namespace MWRender
         mIntersectionVisitor->setTraversalNumber(mViewer->getFrameStamp()->getFrameNumber());
         mIntersectionVisitor->setFrameStamp(mViewer->getFrameStamp());
         mIntersectionVisitor->setIntersector(intersector);
-        // Terrain picks LOD from the eye point.
+        // Restore the baseline visitor state after a live transition from GPU paging.
         mIntersectionVisitor->setReferenceEyePoint(osg::Vec3f());
         mIntersectionVisitor->setReferenceEyePointCoordinateFrame(osgUtil::Intersector::VIEW);
 
@@ -1500,8 +1545,12 @@ namespace MWRender
 
         osg::ref_ptr<osgUtil::IntersectionVisitor> visitor
             = getIntersectionVisitor(intersector, ignorePlayer, ignoreActors, ignoreTerrain, ignoreList, skipGpuRigs);
-        visitor->setReferenceEyePoint(origin);
-        visitor->setReferenceEyePointCoordinateFrame(osgUtil::Intersector::MODEL);
+        if (Settings::optimizations().useGpuDrivenPaging())
+        {
+            // GPU-paged terrain picks the scripted ray's LOD from its world-space origin.
+            visitor->setReferenceEyePoint(origin);
+            visitor->setReferenceEyePointCoordinateFrame(osgUtil::Intersector::MODEL);
+        }
         mRootNode->accept(*visitor);
 
         return getIntersectionResult(intersector, mIntersectionVisitor, ignoreList);
@@ -1640,7 +1689,7 @@ namespace MWRender
         mPlayerAnimation->setGpuScene(Settings::optimizations().useGpuActors() ? mGpuScene.get() : nullptr);
 
         mCamera->setAnimation(mPlayerAnimation.get());
-        mCamera->attachTo(player);
+        mCamera->attachTo(player, Settings::optimizations().useGpuDrivenPaging());
     }
 
     void RenderingManager::rebuildPtr(const MWWorld::Ptr& ptr)
@@ -1655,7 +1704,7 @@ namespace MWRender
             anim->rebuild();
             if (mCamera->getTrackingPtr() == ptr)
             {
-                mCamera->attachTo(ptr);
+                mCamera->attachTo(ptr, Settings::optimizations().useGpuDrivenPaging());
                 mCamera->setAnimation(anim);
             }
         }
@@ -1796,8 +1845,12 @@ namespace MWRender
             quadTreeWorld->setGpuChunkFactory(mGpuScene.get(), Mask_GpuProxy);
             if (Settings::terrain().mObjectPaging)
             {
-                newChunkMgr.mObjectPaging
-                    = std::make_unique<ObjectPaging>(mResourceSystem->getSceneManager(), worldspace, mGpuScene.get());
+                SceneUtil::LightManager* const distantLights = Settings::optimizations().useGpuDistantPaging()
+                        && mSceneRoot->getClusteredLighting() && mGpuScene != nullptr && mGpuScene->isEnabled()
+                    ? mSceneRoot.get()
+                    : nullptr;
+                newChunkMgr.mObjectPaging = std::make_unique<ObjectPaging>(
+                    mResourceSystem->getSceneManager(), worldspace, mGpuScene.get(), distantLights);
                 quadTreeWorld->addChunkManager(newChunkMgr.mObjectPaging.get());
                 mResourceSystem->addResourceManager(newChunkMgr.mObjectPaging.get());
             }
@@ -1847,7 +1900,14 @@ namespace MWRender
             setGpuDrivenPagingEnabled(enabled);
         }
         const bool gpuScenePolicyChanged = changed.contains({ "Optimizations", "gpu skinning" })
-            || changed.contains({ "Optimizations", "gpu texture arrays" });
+            || changed.contains({ "Optimizations", "gpu texture arrays" })
+            || changed.contains({ "Optimizations", "gpu storage budget" })
+            || changed.contains({ "Optimizations", "low end indirect batching" })
+            || changed.contains({ "Optimizations", "gpu light occlusion" })
+            || changed.contains({ "Optimizations", "gpu distant paging" })
+            || changed.contains({ "Optimizations", "gpu scene lighting" })
+            || changed.contains({ "Optimizations", "gpu occlusion culling" })
+            || changed.contains({ "Terrain", "object paging gpu texture budget" });
         if (!gpuPagingChanged && gpuScenePolicyChanged && Settings::optimizations().useGpuDrivenPaging())
             reconfigureGpuScene();
         if (prerequisiteChanged || changed.contains({ "Optimizations", "gpu actors" }))
@@ -1877,6 +1937,12 @@ namespace MWRender
             LightManagerUpdateVisitor visitor;
             visitor.setDoThreadUnsafeOps(true);
             mViewer->getSceneData()->accept(visitor);
+            wireGpuScene(mGpuScene != nullptr && mGpuScene->isEnabled() ? mGpuScene.get() : nullptr);
+            const bool distantPagingBackendChanged = changed.contains({ "Shaders", "clustered lighting" })
+                && !gpuPagingChanged && !gpuScenePolicyChanged && Settings::optimizations().useGpuDistantPaging()
+                && mGpuScene != nullptr && mGpuScene->isEnabled();
+            if (distantPagingBackendChanged)
+                rebuildPagedCaches();
 
             auto defines = mResourceSystem->getSceneManager()->getShaderManager().getGlobalDefines();
             for (const auto& [name, value] : getLightRoot()->getLightDefines())
@@ -2085,6 +2151,8 @@ namespace MWRender
     void RenderingManager::setViewDistance(float distance, bool delay)
     {
         mViewDistance = distance;
+        if (mSceneRoot->getClusteredLighting())
+            mSceneRoot->setDistantLightRange(distance);
 
         if (delay)
         {

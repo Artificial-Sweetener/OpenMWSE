@@ -43,6 +43,8 @@ file(GLOB UNITTEST_SRC_FILES
     mwrender/testanimation.cpp
     mwrender/testgpuscenearrays.cpp
     mwrender/testgpuscenekeys.cpp
+    mwrender/testgpunightday.cpp
+    mwrender/testluminance.cpp
     mwrender/testgpuresidency.cpp
 
     mwinput/testdiagnosticinputmanager.cpp

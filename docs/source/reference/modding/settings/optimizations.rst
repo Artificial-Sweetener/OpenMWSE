@@ -23,7 +23,8 @@ retaining the subordinate selections for later use. Unsupported graphics capabil
 
    Keep eligible paged objects, loaded-cell statics, and terrain chunks in GPU-managed buffers.
    Requires ``object paging`` and OpenGL 4.3 compute, storage-buffer, and indirect-drawing capabilities.
-   Content that cannot be represented uses baseline rendering.
+   Content that cannot be represented uses baseline rendering. OpenMWSE validation observed a substantial regression in one
+   dense scene when packed textures were disabled, so measure this path with ``gpu texture arrays`` both off and on.
 
 .. omw-setting::
    :title: gpu skinning
@@ -62,7 +63,7 @@ retaining the subordinate selections for later use. Unsupported graphics capabil
    :default: false
    :location: :bdg-info:`In Game > Settings > Options > Video > Optimizations`
 
-   Pack compatible GPU-scene textures into arrays or bindless storage.
+   Pack compatible GPU-scene textures into arrays or bindless storage. Requires ``gpu driven paging``.
    The selected mode depends on GPU and driver capabilities and consumes managed graphics memory.
 
 .. omw-setting::
@@ -84,3 +85,56 @@ retaining the subordinate selections for later use. Unsupported graphics capabil
 
    Evaluate compatible GPU-scene receivers through clustered lighting.
    Requires ``gpu driven paging`` and clustered-light graphics capabilities.
+
+.. omw-setting::
+   :title: gpu storage budget
+   :type: boolean
+   :range: true, false
+   :default: false
+   :location: :bdg-info:`In Game > Settings > Options > Video > Optimizations`
+
+   Bound GPU-scene texture and mesh storage using ``object paging gpu texture budget`` from the ``[Terrain]`` category.
+   Requires ``gpu driven paging``.
+   Automatic budgets use a driver free-memory report only as an initial limit; the report is not usage telemetry.
+
+.. omw-setting::
+   :title: low end indirect batching
+   :type: boolean
+   :range: true, false
+   :default: false
+   :location: :bdg-info:`In Game > Settings > Options > Video > Optimizations`
+
+   Reduce GPU-scene shadow and indirect-command work through active command ranges and terrain-shadow batching.
+   Requires ``gpu driven paging``.
+   Clockwork targets lower-throughput GPUs; the extra range bookkeeping may not benefit faster GPUs or every scene.
+
+.. omw-setting::
+   :title: gpu light occlusion
+   :type: boolean
+   :range: true, false
+   :default: false
+   :location: :bdg-info:`In Game > Settings > Options > Video > Optimizations`
+
+   Cull hidden classic-light receiver work with the GPU-scene depth pyramid.
+   Requires ``gpu scene lighting`` and ``gpu occlusion culling``. Compute overhead may outweigh savings in sparse scenes.
+
+.. omw-setting::
+   :title: gpu distant paging
+   :type: boolean
+   :range: true, false
+   :default: false
+   :location: :bdg-info:`In Game > Settings > Options > Video > Optimizations`
+
+   Page eligible distant day/night geometry and exterior lights through the GPU scene.
+   This can increase resident geometry and light memory. OpenMWSE validation observed a substantial regression in one dense
+   scene when packed textures were disabled. Unsupported or animated content remains on the baseline path.
+
+.. omw-setting::
+   :title: skip dormant ripples
+   :type: boolean
+   :range: true, false
+   :default: false
+   :location: :bdg-info:`In Game > Settings > Options > Video > Optimizations`
+
+   Skip water-ripple simulation passes until an emitter activates them while preserving active decay and queued emitters.
+   Clockwork observed a small gain on H700 hardware; desktop gains may be negligible.

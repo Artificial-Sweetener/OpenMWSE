@@ -437,12 +437,69 @@ namespace
             }
         }
 
+        /// Return shader text with branches disabled by literal preprocessor conditions removed.
+        static std::string activeVersion120Source(const std::string& source)
+        {
+            struct Branch
+            {
+                bool mParentActive;
+                bool mActive;
+                int mLiteralCondition;
+            };
+
+            std::vector<Branch> branches;
+            std::istringstream input(source);
+            std::ostringstream output;
+            std::string line;
+            while (std::getline(input, line))
+            {
+                const std::size_t first = line.find_first_not_of(" \t");
+                const std::string_view directive
+                    = first == std::string::npos ? std::string_view() : std::string_view(line).substr(first);
+                const bool parentActive = branches.empty() || branches.back().mActive;
+                if (directive.starts_with("#if "))
+                {
+                    const std::string_view expression = directive.substr(4);
+                    const int literal = expression == "0" ? 0 : expression == "1" ? 1 : -1;
+                    branches.push_back({ parentActive, parentActive && literal != 0, literal });
+                    continue;
+                }
+                if (directive.starts_with("#ifdef ") || directive.starts_with("#ifndef "))
+                {
+                    branches.push_back({ parentActive, parentActive, -1 });
+                    continue;
+                }
+                if (directive.starts_with("#elif ") && !branches.empty())
+                {
+                    Branch& branch = branches.back();
+                    branch.mActive = branch.mParentActive && branch.mLiteralCondition != 1;
+                    branch.mLiteralCondition = -1;
+                    continue;
+                }
+                if (directive == "#else" && !branches.empty())
+                {
+                    Branch& branch = branches.back();
+                    branch.mActive = branch.mParentActive && branch.mLiteralCondition != 1;
+                    continue;
+                }
+                if (directive == "#endif" && !branches.empty())
+                {
+                    branches.pop_back();
+                    continue;
+                }
+                if (branches.empty() || branches.back().mActive)
+                    output << line << '\n';
+            }
+            return output.str();
+        }
+
+        /// Require the active classic shader body to remain valid GLSL 1.20 source.
         static void expectVersion120(const std::string& source, const std::string& label)
         {
             EXPECT_THAT(source, StartsWith(sVersion120)) << label;
             const std::regex forbidden(
                 "\\b(uint|uvec[234]|flat|sampler2DArray)\\b|layout\\s*\\(\\s*std430|sampler2D\\s*\\(");
-            EXPECT_FALSE(std::regex_search(source, forbidden)) << label;
+            EXPECT_FALSE(std::regex_search(activeVersion120Source(source), forbidden)) << label;
         }
 
         osg::ref_ptr<osg::Program> buildProgram(

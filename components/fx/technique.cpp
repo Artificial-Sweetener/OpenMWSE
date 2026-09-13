@@ -17,6 +17,7 @@
 #include <components/files/conversion.hpp>
 #include <components/misc/strings/algorithm.hpp>
 #include <components/resource/imagemanager.hpp>
+#include <components/sceneutil/util.hpp>
 #include <components/stereo/multiview.hpp>
 #include <components/vfs/manager.hpp>
 
@@ -407,6 +408,7 @@ namespace Fx
             error(std::format("redeclaration of render target '{}'", mBlockName));
 
         Fx::Types::RenderTarget rt;
+        rt.mTarget->setSubloadCallback(new SceneUtil::RenderTextureStorage);
         rt.mTarget->setTextureSize(mWidth, mHeight);
         rt.mTarget->setSourceFormat(GL_RGB);
         rt.mTarget->setInternalFormat(GL_RGB);

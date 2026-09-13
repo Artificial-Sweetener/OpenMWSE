@@ -20,9 +20,9 @@ namespace MWWorld
     /// Positions closer than this share one preload.
     constexpr float terrainPreloadMergeDistance = 128.f;
 
-    /// @return Primary and detached camera positions.
+    /// @return The baseline primary position and, when requested, a bounded detached-camera position.
     std::vector<PositionCellGrid> terrainPreloadPositions(const osg::Vec3f& primary, const osg::Vec3f& playerPos,
-        const osg::Vec3f& cameraPos, bool cameraDetached, const osg::Vec4i& grid, ESM::RefId worldspace);
+        const osg::Vec3f& cameraPos, bool includeDetachedCamera, const osg::Vec4i& grid, ESM::RefId worldspace);
 }
 
 #endif

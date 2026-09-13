@@ -4,6 +4,7 @@
 #include <chrono>
 #include <functional>
 #include <future>
+#include <limits>
 #include <system_error>
 
 #include <osgDB/ReaderWriter>
@@ -531,7 +532,8 @@ void OMW::Engine::createGraphicsContext()
     const bool windowBorder = Settings::video().mWindowBorder;
     const SDLUtil::VSyncMode vsync = Settings::video().mVsyncMode;
     unsigned antialiasing = static_cast<unsigned>(Settings::video().mAntialiasing);
-    const bool debugOpenGL = Debug::shouldDebugOpenGL() || Settings::optimizations().useGpuDrivenPaging();
+    const bool debugOpenGL
+        = Debug::shouldDebugOpenGL() || mDiagnosticChild || Settings::optimizations().useGpuDrivenPaging();
 
     osg::ref_ptr<osg::GraphicsContext> graphicsContext;
     if (mDiagnosticChild && !mDiagnosticHeaded)
@@ -1027,6 +1029,7 @@ void OMW::Engine::go()
     if (!path.empty())
     {
         stats.open(path, std::ios_base::out);
+        stats.precision(std::numeric_limits<double>::max_digits10);
         if (stats.is_open())
             Log(Debug::Info) << "OSG stats will be written to: " << path;
         else

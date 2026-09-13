@@ -417,6 +417,7 @@ namespace MWRender
         mCanvases[frameId]->setCalculateAvgLum(mHDR);
 
         mCanvases[frameId]->setTextureScene(getTexture(Tex_Scene, frameId));
+        mCanvases[frameId]->setTextureOpaqueColor(getTexture(Tex_OpaqueColor, frameId));
         mCanvases[frameId]->setTextureDepth(getTexture(Tex_OpaqueDepth, frameId));
         mCanvases[frameId]->setTextureDistortion(getTexture(Tex_Distortion, frameId));
 

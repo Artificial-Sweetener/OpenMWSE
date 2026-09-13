@@ -4,11 +4,13 @@
 #include "gameplayrouteexecution.hpp"
 #include "isolatedsettings.hpp"
 #include "isolatedworkspace.hpp"
+#include "settingssequences.hpp"
 
 #include <components/diagnostics/atmospheresettings.hpp>
 #include <components/diagnostics/capsule.hpp>
 #include <components/diagnostics/distancesettings.hpp>
 #include <components/diagnostics/gameplayroute.hpp>
+#include <components/diagnostics/optimizationsettings.hpp>
 #include <components/misc/strings/algorithm.hpp>
 
 #include <yaml-cpp/yaml.h>
@@ -141,6 +143,8 @@ namespace DiagnosticCtl
             throw std::invalid_argument("live atmosphere settings require a capsule containing a gameplay route");
         if (findOption(arguments, "--distance-settings-sequence") && gameplayRoute.empty())
             throw std::invalid_argument("live distance settings require a capsule containing a gameplay route");
+        if (findOption(arguments, "--optimization-settings-sequence") && gameplayRoute.empty())
+            throw std::invalid_argument("live optimization settings require a capsule containing a gameplay route");
 
         ChildProcess child(executable, childArguments);
         Diagnostics::Command hello{ 1, Diagnostics::CommandType::Hello, std::move(replayManifest) };
@@ -316,36 +320,32 @@ namespace DiagnosticCtl
                 if (payloadText(capabilities.mPayload).find("graphics@3") == std::string::npos)
                     throw std::runtime_error("native route capture requires graphics@3");
             }
-            std::vector<Diagnostics::AtmosphereSettings> settingsSequence;
-            if (const auto sequencePath = findOption(arguments, "--atmosphere-settings-sequence"))
-            {
-                const YAML::Node sequence = YAML::LoadFile(*sequencePath);
-                const std::size_t segmentCount
-                    = (routePlan.mFrameCount + routePlan.mSegmentFrameCount - 1) / routePlan.mSegmentFrameCount;
-                if (!sequence.IsSequence() || sequence.size() != segmentCount || sequence.size() > 64)
-                    throw std::invalid_argument(
-                        "atmosphere settings sequence requires one entry per route segment, at most 64");
-                for (const auto& entry : sequence)
-                    settingsSequence.push_back(Diagnostics::deserializeAtmosphereSettings(YAML::Dump(entry)));
-                std::filesystem::copy_file(*sequencePath, artifacts / "atmosphere-settings-sequence.yaml");
-            }
+            const SettingsSequenceContext sequenceContext{ routePlan.mFrameCount, routePlan.mSegmentFrameCount,
+                artifacts };
+            const auto settingsSequence = loadAtmosphereSettingsSequence(arguments, sequenceContext);
             std::size_t completedFrames = 0;
             unsigned segmentIndex = 0;
-            std::vector<Diagnostics::DistanceSettings> distanceSequence;
-            if (const auto sequencePath = findOption(arguments, "--distance-settings-sequence"))
-            {
-                const YAML::Node sequence = YAML::LoadFile(*sequencePath);
-                const std::size_t segmentCount
-                    = (routePlan.mFrameCount + routePlan.mSegmentFrameCount - 1) / routePlan.mSegmentFrameCount;
-                if (!sequence.IsSequence() || sequence.size() != segmentCount || sequence.size() > 64)
-                    throw std::invalid_argument(
-                        "distance settings sequence must contain one entry per route segment, at most 64");
-                for (const auto& entry : sequence)
-                    distanceSequence.push_back(Diagnostics::deserializeDistanceSettings(YAML::Dump(entry)));
-                std::filesystem::copy_file(*sequencePath, artifacts / "distance-settings-sequence.yaml");
-            }
+            const auto optimizationSequence = loadOptimizationSettingsSequence(arguments, sequenceContext);
+            const auto distanceSequence = loadDistanceSettingsSequence(arguments, sequenceContext);
             while (completedFrames < routePlan.mFrameCount)
             {
+                if (!optimizationSequence.empty())
+                {
+                    const auto& requested = optimizationSequence.at(segmentIndex);
+                    const auto applied = Diagnostics::transact(endpoint,
+                        { requestId++, Diagnostics::CommandType::SetOptimizationSettings,
+                            textPayload(Diagnostics::serializeOptimizationSettings(requested)) });
+                    requireSuccessfulResponse(applied);
+                    const auto observed = Diagnostics::deserializeOptimizationSettings(payloadText(applied.mPayload));
+                    if (observed != requested)
+                        throw std::runtime_error("live optimization settings did not match the requested selections");
+                    std::ofstream evidence(
+                        artifacts / ("optimization-settings-" + std::to_string(segmentIndex) + ".yaml"));
+                    evidence << Diagnostics::serializeOptimizationSettings(observed);
+                    if (!evidence)
+                        throw std::runtime_error("failed writing live optimization settings evidence");
+                    std::cout << "live-optimization-settings-parity: " << segmentIndex << " true\n";
+                }
                 if (!distanceSequence.empty())
                 {
                     const auto& requested = distanceSequence.at(segmentIndex);

@@ -12,6 +12,7 @@
 #include <components/sceneutil/depth.hpp>
 #include <components/sceneutil/diagnosticgputiming.hpp>
 #include <components/sceneutil/glextensions.hpp>
+#include <components/settings/values.hpp>
 #include <components/shader/shadermanager.hpp>
 
 #include "../mwworld/ptr.hpp"
@@ -173,6 +174,7 @@ namespace MWRender
         const osg::Vec2f offset = mCurrentPlayerPos - mLastPlayerPos;
         mLastPlayerPos = mCurrentPlayerPos;
 
+        state.mHasPositions = mPositionCount != 0;
         state.mStateset->getUniform("positionCount")->set(static_cast<int>(mPositionCount));
         state.mStateset->getUniform("offset")->set(offset);
 
@@ -212,14 +214,34 @@ namespace MWRender
         osg::State& state = *renderInfo.getState();
         const std::size_t currentFrame = state.getFrameStamp()->getFrameNumber() % 2;
         const State& frameState = mState[currentFrame];
+        const unsigned int contextID = state.getContextID();
+        Activity& activity = mActivity[contextID];
+        const bool skipDormant = Settings::optimizations().useSkipDormantRipples();
+        if (!skipDormant)
+            activity = Activity::Active;
+        else
+        {
+            if (activity == Activity::Empty || !mTextures[0]->getTextureObject(contextID))
+            {
+                mFBOs[0]->apply(state, osg::FrameBufferObject::DRAW_FRAMEBUFFER);
+                glClearColor(0.f, 0.f, 0.f, 0.f);
+                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+                state.haveAppliedAttribute(osg::StateAttribute::COLORMASK);
+                state.applyMode(GL_SCISSOR_TEST, false);
+                glClear(GL_COLOR_BUFFER_BIT);
+                activity = Activity::Idle;
+            }
+            if (frameState.mHasPositions)
+                activity = Activity::Active;
+            if (activity == Activity::Idle)
+                return;
+        }
         if (frameState.mPaused)
         {
             return;
         }
 
         osg::GLExtensions& ext = *state.get<osg::GLExtensions>();
-        const unsigned contextID = state.getContextID();
-
         const auto bindImage = [&](osg::Texture2D* texture, GLuint index, GLenum access) {
             osg::Texture::TextureObject* to = texture->getTextureObject(contextID);
             if (!to || texture->isDirty(contextID))
@@ -301,6 +323,10 @@ namespace MWRender
 
     void RipplesSurface::releaseGLObjects(osg::State* state) const
     {
+        if (state != nullptr)
+            mActivity[state->getContextID()] = Activity::Empty;
+        else
+            mActivity.setAllElementsTo(Activity::Empty);
         for (const auto& tex : mTextures)
             tex->releaseGLObjects(state);
         for (const auto& fbo : mFBOs)

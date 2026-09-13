@@ -40,7 +40,13 @@ TEST(GroundcoverDistanceTest, UpdatesExistingLodAndFadeUniformWithoutReplacingGe
     reduced->setName("reduced");
     lod->addChild(detailed);
     lod->addChild(reduced);
-    osg::Uniform* fade = distance->getFadeUniform();
+    osg::ref_ptr<osg::StateSet> legacyState = new osg::StateSet;
+    osg::ref_ptr<osg::StateSet> gpuState = new osg::StateSet;
+    distance->attachFadeUniform(*legacyState);
+    distance->attachFadeUniform(*gpuState);
+    osg::Uniform* fade = legacyState->getUniform("groundcoverFade");
+    ASSERT_NE(fade, nullptr);
+    EXPECT_EQ(gpuState->getUniform("groundcoverFade"), fade);
 
     LodVisitor visitor;
     lod->traverse(visitor);
@@ -50,7 +56,6 @@ TEST(GroundcoverDistanceTest, UpdatesExistingLodAndFadeUniformWithoutReplacingGe
     EXPECT_EQ(visitor.mVisited, "reduced");
     EXPECT_EQ(lod->getChild(0), detailed);
     EXPECT_EQ(lod->getChild(1), reduced);
-    EXPECT_EQ(distance->getFadeUniform(), fade);
     osg::Vec2f interval;
     ASSERT_TRUE(fade->get(interval));
     EXPECT_EQ(interval, osg::Vec2f(45, 50));

@@ -90,11 +90,7 @@ namespace Terrain
             return;
         }
 
-        if (mCompositeMap && mCompositeMapRenderer)
-        {
-            mCompositeMapRenderer->setImmediate(mCompositeMap);
-            mCompositeMapRenderer = nullptr;
-        }
+        requireCompositeMap();
 
         bool pushedLight = mLightListCallback && mLightListCallback->pushLightState(this, cv);
 
@@ -113,6 +109,12 @@ namespace Terrain
             cv->popStateSet();
         if (pushedLight)
             cv->popStateSet();
+    }
+
+    void TerrainDrawable::requireCompositeMap()
+    {
+        if (mCompositeMap && mCompositeMapRenderer && !mCompositeMapRequested.exchange(true, std::memory_order_relaxed))
+            mCompositeMapRenderer->setImmediate(mCompositeMap);
     }
 
     void TerrainDrawable::createClusterCullingCallback()

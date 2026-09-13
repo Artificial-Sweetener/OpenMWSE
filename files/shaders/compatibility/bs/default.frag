@@ -58,7 +58,7 @@ void main()
         return;
 #endif
 
-        gl_FragData[0].a *= mapCoverageScale(@diffuseMapIndex, diffuseMapUV);
+        gl_FragData[0].a *= coveragePreservingAlphaScale(@diffuseMapIndex, diffuseMapUV);
     }
     else
         gl_FragData[0] = vec4(1.0);

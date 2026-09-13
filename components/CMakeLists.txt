@@ -132,7 +132,7 @@ add_component_dir (vfs
 
 add_component_dir (resource
     scenemanager keyframemanager imagemanager animblendrulesmanager bulletshapemanager bulletshape niffilemanager objectcache multiobjectcache resourcesystem
-    resourcemanager stats animation foreachbulletobject errormarker selectionmarker cachestats bgsmfilemanager
+    resourcemanager stats gpustatsoverlay animation foreachbulletobject errormarker selectionmarker cachestats bgsmfilemanager
     )
 
 add_component_dir (shader
@@ -327,7 +327,7 @@ add_component_dir (files
     )
 
 add_component_dir (diagnostics
-    protocol commandqueue capsule gameplayroute localtransport session fixedstepscheduler atmospherescenario atmospheresettings distancesettings
+    protocol commandqueue capsule gameplayroute localtransport session fixedstepscheduler atmospherescenario atmospheresettings distancesettings optimizationsettings
     )
 
 if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")

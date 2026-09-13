@@ -144,7 +144,15 @@ void main()
         if ((flags & 2u) != 0u)
         {
             float d = distance(views[v].viewPoint.xyz, inst.lod.xyz) * views[v].viewPoint.w;
-            if (d < inst.lod.w || d >= uintBitsToFloat(inst.meta.w))
+            float lodMin = inst.lod.w;
+            float lodMax = uintBitsToFloat(inst.meta.w);
+            if ((flags & 128u) != 0u)
+            {
+                bool reducedGroundcover = lodMin > 0.0;
+                lodMin = reducedGroundcover ? views[v].params.y : 0.0;
+                lodMax = reducedGroundcover ? views[v].params.z : views[v].params.y;
+            }
+            if (d < lodMin || d >= lodMax)
                 continue;
         }
 

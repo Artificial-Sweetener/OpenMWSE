@@ -63,8 +63,6 @@ varying vec4 position;
 varying vec3 passViewPos;
 varying float linearDepth;
 
-uniform float osg_SimulationTime;
-
 uniform float near;
 uniform float far;
 

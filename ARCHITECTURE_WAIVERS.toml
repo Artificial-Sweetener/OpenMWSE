@@ -36,8 +36,8 @@ kind = "structural"
 justification = "SettingsWindow is the composition root for one modal settings surface: it binds the shared widget tree, coordinates tabs and focus, applies one pending-settings transaction, and owns the input, localization, and script-page presentation tied to that lifetime. Fork-specific live graphics policy, distance editing, shadow validation, and diagnostic exercise now belong to GraphicsSettings."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:4187fd6d3e0f16ef9e3ab88bf75e294562aa3b89e0d92086b1514d2b55f1ede2"
-max_lines = 976
+fingerprint = "sha256:bcebd24c1fea907b55786c973ecb485232b982f07073785feebfa6fe3ddbf0e6"
+max_lines = 985
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-003"
@@ -46,11 +46,11 @@ owner = "OpenMWSE rendering"
 rule = "STRUCT003"
 path = "apps/openmw/mwrender/animation.cpp"
 kind = "structural"
-justification = "The animation implementation owns one model animation state machine: controller attachment, source selection, blending, playback advancement, and text-key delivery all operate on the same animation graph and timing state. Separating those mechanics would expose private invariants without establishing another authoritative owner."
+justification = "The animation implementation owns one model animation state machine: controller attachment, source selection, blending, playback advancement, text-key delivery, and GPU-instance attachment all operate on the same animation graph and timing state. Separating those mechanics would expose private invariants without establishing another authoritative owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:5b9cdd82ecb624a79dcbd8dc29c374ff869c8062031d905b9e4830c92be791a9"
-max_lines = 2057
+fingerprint = "sha256:3b3cff5533e052fd8eb41b3f564e80c8a729ac1598f210694ecad4348f7bbd3b"
+max_lines = 2071
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-004"
@@ -98,11 +98,11 @@ owner = "OpenMWSE rendering"
 rule = "STRUCT003"
 path = "apps/openmw/mwrender/objectpaging.cpp"
 kind = "structural"
-justification = "Object paging is one chunk-production pipeline that gathers eligible records, builds and optimizes render nodes, and caches the resulting chunks with their statistics. Each stage shares paging keys, compile policy, and cache lifetime; extraction would create pass-through interfaces rather than an independent owner."
+justification = "Object paging is one chunk-production pipeline that gathers eligible records, builds CPU nodes or GPU chunks and paged-light proxies, and caches the resulting chunks with their statistics. Each stage shares paging keys, compile policy, fallback state, and cache lifetime; extraction would create pass-through interfaces rather than an independent owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:26b41ff9dfda0878c713f2b289be67b9a429f1e9dfc0a7fed396894fca36cea8"
-max_lines = 1108
+fingerprint = "sha256:449d66cc15d70caa225dcb986f6332650d280e5a6da83ccec970cfbddf917d58"
+max_lines = 1206
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-026"
@@ -114,8 +114,8 @@ kind = "structural"
 justification = "PostProcessor now owns only the production post-process graph lifecycle: frame-local resources, attachment topology, effect-chain compilation, cull dispatch, and shader reload all share the same render targets and invalidation contract. Capture state and diagnostic comparison sequencing have an independent owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:5c056240a3f30ffc598bf11645ab6521adba890595d9182f1e240a6a8e432c3c"
-max_lines = 812
+fingerprint = "sha256:b0ac86254f513f35f941b0b0f083f6761105fa2000fb68be707f96985903e336"
+max_lines = 813
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-027"
@@ -127,8 +127,8 @@ kind = "structural"
 justification = "RenderingManager is the renderer composition root and scene-facing facade: subsystem construction, ordered frame advancement, scene mutation, settings propagation, and renderer queries all coordinate the same owned object graph. Atmosphere diagnostic policy and applied capture state now belong to a separate controller."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:5e6f1f8390669a9255fbf233df91efac07881ff47b7807bf85edd473194eae1e"
-max_lines = 1850
+fingerprint = "sha256:527cd0f0b04a096307e91a8bce394d96bd65fa740e785865d93087e3b6ea6aff"
+max_lines = 2028
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-008"
@@ -179,8 +179,8 @@ kind = "structural"
 justification = "An Fx technique is one compiled effect-language artifact. Parsing, typed value conversion, shader graph construction, compilation, runtime bindings, and reload metadata are consecutive stages with one error context and cache identity; separate owners would duplicate the language and compilation contract."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:91c997ecbfd8689f02d2d70a10349e902a44d3a17008f9b5400250c2b9a1c313"
-max_lines = 1035
+fingerprint = "sha256:827ac3a19c8899240e97b1ce5d6dbe524e78cb22a5752cb9922437ccf5ee3d01"
+max_lines = 1037
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-012"
@@ -254,11 +254,11 @@ owner = "OpenMWSE rendering"
 rule = "STRUCT003"
 path = "components/resource/stats.cpp"
 kind = "structural"
-justification = "Resource statistics collection, event control, and HUD presentation form one optional debugging surface backed by the same cache counters and enablement lifecycle. The presentation is not a reusable product UI, and separating it would add an interface used only to relay this exact statistics model."
+justification = "Resource statistics collection, event control, and the core HUD lifecycle form one optional debugging surface backed by the same cache counters and enablement state. GPU-scene overlay composition has a separate owner; the remaining presentation is the direct view of this exact resource-statistics model."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:53ccfc4094bdd2217c8e844d4633569483fbd64cc44bd9f95f91ee415a098659"
-max_lines = 516
+fingerprint = "sha256:7117d0e27269ab51cf48bf1ab4b50b4f5aa66854bae21d9f9ddd9dba6b5f8ef1"
+max_lines = 502
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-018"
@@ -280,11 +280,11 @@ owner = "OpenMWSE rendering"
 rule = "STRUCT003"
 path = "components/sceneutil/lightmanager.cpp"
 kind = "structural"
-justification = "LightManager owns the per-view light-selection and GPU-data lifecycle, from cull collection through object uniforms and clustered buffers to sunlight settings. These stages share frame-local indices and buffer layout, so separation would leak representation details across tightly ordered rendering phases."
+justification = "LightManager owns the per-view light-selection and GPU-data lifecycle, from cull collection through indexed receiver lists, clustered buffers, distant paged-light state, object uniforms, and sunlight settings. These stages share frame-local indices, receiver identities, and buffer layouts, so separation would leak representation details across tightly ordered rendering phases."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:400f21ab489729ce40112e7ca0798f4942c28d05e34ecd7e60312a599b9b050d"
-max_lines = 597
+fingerprint = "sha256:6b6c004239f68395d7ac791b08b6731a0f5b896a693f2c4f4a1df6f53d5d2964"
+max_lines = 1123
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-028"
@@ -296,8 +296,8 @@ kind = "structural"
 justification = "MWShadowTechnique owns one view-dependent shadow-map algorithm from cascade slicing and caster-volume construction through shadow-camera culling and receiver-state publication. Those phases share light-space bounds, traversal-local resources, and cascade indices; the optional debug HUD and reusable diagnostic instrumentation live in separate owners."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:be38ef7758672cbfef12b45e4e045b6ef333073fd8253c8ce899dd0d96dc3f9a"
-max_lines = 2582
+fingerprint = "sha256:62eff8aa838c8fcaaf63ab4f492cbec2312a0996e850fe30cbc8bb4e44979fb0"
+max_lines = 2585
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-020"
@@ -322,8 +322,8 @@ kind = "structural"
 justification = "ShaderManager owns one cached shader-program lifecycle from template preprocessing and define resolution through material-mode program derivation, sampler allocation, compilation, linking, and reload invalidation. Each stage contributes to the same cache key and diagnostic context, so it remains a cohesive compilation owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:4175e4cf3920075eee02cd52382be101d8232ca3ed5c041ed10adc348482e147"
-max_lines = 968
+fingerprint = "sha256:7b1a00b9dba6b95246209b660c118165d0252fb45ece931a347e9f4728d4c753"
+max_lines = 966
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-022"
@@ -361,8 +361,8 @@ kind = "structural"
 justification = "QuadtreeWorld owns the terrain quadtree view and chunk lifecycle, including cell adapters, preload behavior, debug borders, and statistics tied to those chunks. The operations share grid coordinates, view membership, and chunk-manager state and do not establish independent policy owners."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:78ecc7360cc1b9337dfb49dbd5162fbffa8c5e414697fb15cc18095340ce6d89"
-max_lines = 555
+fingerprint = "sha256:9e13d7db12ae8b08569cab4e7dc89266b78cae8c473db7be4be2538ca02d24dd"
+max_lines = 556
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-025"
@@ -378,19 +378,6 @@ fingerprint = "sha256:5c8750489d35e038883a31a65f4fef63ec0897dc0339d3f7ad9e101a7c
 max_lines = 533
 
 [[waivers]]
-id = "OMWSE-STRUCTURAL-030"
-area = "renderer"
-owner = "OpenMWSE rendering"
-rule = "STRUCT003"
-path = "apps/openmw/mwrender/gpuscene.cpp"
-kind = "structural"
-justification = "GpuScene owns one GPU-driven distant-scene lifecycle: compatible geometry normalization, shared buffer residency, view culling, indirect-command construction, and material-bucket submission use the same identifiers and render-thread resources. The stages form one backend contract while their internal data flow is still being established."
-issue = "architecture:structural-review"
-review_by = 2027-03-12
-fingerprint = "sha256:7eb1524327309b02b51e6ddfddbfcdcd366c963e624ec8468b8a4e2fe4f89d70"
-max_lines = 6269
-
-[[waivers]]
 id = "OMWSE-STRUCTURAL-031"
 area = "renderer"
 owner = "OpenMWSE rendering"
@@ -400,8 +387,8 @@ kind = "structural"
 justification = "ActorAnimation owns one actor's visual assembly lifecycle, including body-part construction, animation-source attachment, equipment-dependent rebuilds, and publication of the matching GPU proxy. These operations share the same actor scene graph and rebuild transaction."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:49742b2b3f0639c8e63208b6596d5a0367afec6f4ff55c4c241a6d79438a29d4"
-max_lines = 511
+fingerprint = "sha256:4bde901bdbfd799ed8ae6968078e67251f3b7485d158cfe24aab7e91dcdc9d29"
+max_lines = 516
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-032"
@@ -413,5 +400,5 @@ kind = "structural"
 justification = "The GPU scene header defines the single identifier, residency, material, instance, view, and asynchronous-ray contract shared by its implementation and contributor adapters. Keeping these interdependent records together makes binary layouts and lifetime relationships reviewable at one backend boundary."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:333303d5fd96398c33cfef02ec25c835deb43e5d4e310a3181fb8c0d60e65ff8"
-max_lines = 707
+fingerprint = "sha256:e760bc2df5df813240612d8a0d6c9dce6e447a3ab5512e09a39f53e7608055e8"
+max_lines = 818

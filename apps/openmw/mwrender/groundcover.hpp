@@ -43,8 +43,8 @@ namespace MWRender
             bool activeGrid, const osg::Vec3f& viewPoint, bool compile) override;
 
         void clearCache() override;
-        /// Replace the optional GPU scene used for newly built chunks.
-        void setGpuScene(GpuScene* gpuScene) { mGpuScene = gpuScene; }
+        /// Replace the optional GPU scene and synchronize its live groundcover distance policy.
+        void setGpuScene(GpuScene* gpuScene);
 
         unsigned int getNodeMask() override;
 

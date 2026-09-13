@@ -17,6 +17,17 @@ namespace osgViewer
 
 namespace SceneUtil
 {
+    /// Allocates mutable render-target storage without reusing immutable texture objects.
+    class RenderTextureStorage : public osg::Texture2D::SubloadCallback
+    {
+    public:
+        /// Allocates every configured mip level for the current render-target dimensions.
+        void load(const osg::Texture2D& texture, osg::State& state) const override;
+
+        /// Retains existing render-target storage when OSG requests an ordinary subload.
+        void subload(const osg::Texture2D&, osg::State&) const override {}
+    };
+
     class GlowUpdater : public SceneUtil::StateSetUpdater
     {
     public:

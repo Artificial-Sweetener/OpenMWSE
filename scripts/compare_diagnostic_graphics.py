@@ -1,4 +1,4 @@
-"""Compare production graphics evidence from two OpenMWSE diagnostic runs."""
+"""Compare matching production-stage directories or route-frame bundles from two diagnostic runs."""
 
 from __future__ import annotations
 
@@ -15,10 +15,13 @@ from PIL import Image
 MAGIC = b"OMWATMD1"
 VERSION = 1
 STAGE_PATTERN = re.compile(r"atmosphere-(.+)-frame-\d+-\d+\.omwdiag")
+ROUTE_COLOR_PATTERN = re.compile(r"route-frame-(\d+)-osg-\d+")
+ROUTE_SHADOW_PATTERN = re.compile(r"route-shadow-frame-(\d+)-shadow-map-depth-cascade-(\d+)-\d+")
 ATTACHMENT_RULES = {
     "atmosphere-cloud-models-v2": {"mean": 0.000001, "p999": 0.000001, "localize": 0.000001},
     "atmosphere-cloud-terrain-v1": {"mean": 0.0, "p999": 0.0, "localize": 0.0},
     "scene-color-before-post-processing": {"mean": 0.002, "p999": 0.01, "localize": 0.0001},
+    "scene-opaque-color": {"mean": 0.002, "p999": 0.01, "localize": 0.0001},
     "scene-opaque-depth": {"mean": 0.00001, "p999": 0.0001, "localize": 0.000001},
     "previous-scene-opaque-depth": {"mean": 0.00001, "p999": 0.0001, "localize": 0.000001},
     "atmosphere-volume-checkerboard-raw": {
@@ -47,6 +50,15 @@ ATTACHMENT_RULES = {
     "previous-atmosphere-volume-resolved": {"mean": 0.002, "p999": 0.01, "localize": 0.0001},
     "previous-atmosphere-volume-metadata": {"mean": 0.0001, "p999": 0.001, "localize": 0.00001},
     "final-composite": {"mean": 0.001, "p999": 0.01, "localize": 0.0001},
+}
+ROUTE_ATTACHMENT_RULES = {
+    "final-color": {"mean": 0.001, "p999": 0.01, "localize": 0.0001},
+    "shadow-depth": {
+        "mean": 0.00001,
+        "p999": 0.0001,
+        "localize": 0.000001,
+        "informational": True,
+    },
 }
 
 
@@ -90,8 +102,11 @@ def read_images(path: Path) -> dict[str, numpy.ndarray]:
     return images
 
 
-def index_stages(directory: Path) -> dict[str, Path]:
-    """Index exactly one bundle for every production diagnostic stage."""
+def index_stages(evidence: Path) -> dict[str, Path]:
+    """Index a route bundle or exactly one bundle for every production diagnostic stage."""
+    if evidence.is_file():
+        return {"route": evidence}
+    directory = evidence
     result: dict[str, Path] = {}
     for path in directory.glob("atmosphere-*-frame-*.omwdiag"):
         match = STAGE_PATTERN.fullmatch(path.name)
@@ -104,6 +119,33 @@ def index_stages(directory: Path) -> dict[str, Path]:
     if not result:
         raise ValueError(f"no production diagnostic bundles in {directory}")
     return result
+
+
+def normalize_route_images(images: dict[str, numpy.ndarray], path: Path) -> dict[str, numpy.ndarray]:
+    """Remove run-specific engine frame numbers while retaining route-frame and cascade identities."""
+    result: dict[str, numpy.ndarray] = {}
+    for label, pixels in images.items():
+        if match := ROUTE_COLOR_PATTERN.fullmatch(label):
+            normalized = f"frame-{match.group(1)}-final-color"
+        elif match := ROUTE_SHADOW_PATTERN.fullmatch(label):
+            normalized = f"frame-{match.group(1)}-shadow-depth-cascade-{match.group(2)}"
+        else:
+            raise ValueError(f"unsupported route attachment {label} in {path}")
+        if normalized in result:
+            raise ValueError(f"duplicate route attachment {normalized} in {path}")
+        result[normalized] = pixels
+    return result
+
+
+def comparison_rule(name: str) -> dict:
+    """Return the explicit numerical rule for one production or route attachment."""
+    if name in ATTACHMENT_RULES:
+        return ATTACHMENT_RULES[name]
+    if name.endswith("-final-color"):
+        return ROUTE_ATTACHMENT_RULES["final-color"]
+    if "-shadow-depth-cascade-" in name:
+        return ROUTE_ATTACHMENT_RULES["shadow-depth"]
+    raise ValueError(f"attachment {name} has no explicit comparison rule")
 
 
 def difference_region(pixel_difference: numpy.ndarray, threshold: float) -> dict | None:
@@ -137,7 +179,7 @@ def write_heatmap(path: Path, pixel_difference: numpy.ndarray) -> None:
 
 
 def compare_directories(reference: Path, replay: Path, heatmap_directory: Path | None = None) -> dict:
-    """Return enforcing numerical parity evidence for matching production stages."""
+    """Return enforcing numerical parity evidence for matching production stages or route frames."""
     reference_stages = index_stages(reference)
     replay_stages = index_stages(replay)
     if reference_stages.keys() != replay_stages.keys():
@@ -148,11 +190,15 @@ def compare_directories(reference: Path, replay: Path, heatmap_directory: Path |
         "replay": str(replay),
         "passed": True,
         "attachment_rules": ATTACHMENT_RULES,
+        "route_attachment_rules": ROUTE_ATTACHMENT_RULES,
         "stages": {},
     }
     for stage in sorted(reference_stages):
         reference_images = read_images(reference_stages[stage])
         replay_images = read_images(replay_stages[stage])
+        if stage == "route":
+            reference_images = normalize_route_images(reference_images, reference_stages[stage])
+            replay_images = normalize_route_images(replay_images, replay_stages[stage])
         if reference_images.keys() != replay_images.keys():
             raise ValueError(f"attachment sets differ for stage {stage}")
         stage_report: dict = {}
@@ -166,8 +212,6 @@ def compare_directories(reference: Path, replay: Path, heatmap_directory: Path |
             and reference_layout[0, 0, 0] == replay_layout[0, 0, 0]
         )
         for name in sorted(reference_images):
-            if name not in ATTACHMENT_RULES:
-                raise ValueError(f"attachment {name} has no explicit comparison rule")
             reference_pixels = reference_images[name]
             replay_pixels = replay_images[name]
             if reference_pixels.shape != replay_pixels.shape:
@@ -175,7 +219,7 @@ def compare_directories(reference: Path, replay: Path, heatmap_directory: Path |
             finite = numpy.isfinite(reference_pixels) & numpy.isfinite(replay_pixels)
             if not finite.all():
                 raise ValueError(f"non-finite pixels found in {stage}/{name}")
-            rule = ATTACHMENT_RULES[name]
+            rule = comparison_rule(name)
             if rule.get("layout"):
                 if reference_pixels.shape != (1, 1, 4):
                     raise ValueError(f"invalid checkerboard layout dimensions in {stage}/{name}")
@@ -209,10 +253,15 @@ def compare_directories(reference: Path, replay: Path, heatmap_directory: Path |
                 "maximum_relative": float(relative_difference.max()),
                 "localized_difference": difference_region(pixel_difference, rule["localize"]),
             }
-            attachment_passed = (
+            informational = bool(rule.get("informational"))
+            attachment_passed = informational or (
                 stage_report[name]["mean_absolute"] <= rule["mean"]
                 and stage_report[name]["p999_absolute"] <= rule["p999"]
             )
+            stage_report[name]["enforced"] = not informational
+            if informational:
+                stage_report[name]["comparison"] = "finite-structure-and-observational-difference"
+                stage_report[name]["reason"] = "cascade transforms can differ between rendering implementations"
             stage_report[name]["passed"] = attachment_passed
             if heatmap_directory and (stage == "normal" or not attachment_passed):
                 heatmap_path = heatmap_directory / stage / f"{name}.png"
@@ -225,7 +274,7 @@ def compare_directories(reference: Path, replay: Path, heatmap_directory: Path |
 
 
 def parse_arguments() -> argparse.Namespace:
-    """Parse the two production capture directories and optional output path."""
+    """Parse two matching evidence paths and optional report outputs."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("reference", type=Path)
     parser.add_argument("replay", type=Path)

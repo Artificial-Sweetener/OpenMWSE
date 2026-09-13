@@ -1,10 +1,14 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <osg/ContextData>
+#include <osg/FrameBufferObject>
+
 #include <components/files/configurationmanager.hpp>
 #include <components/fx/technique.hpp>
 #include <components/resource/imagemanager.hpp>
 #include <components/settings/settings.hpp>
+#include <components/testing/graphics.hpp>
 #include <components/testing/util.hpp>
 
 #include <osg/Program>
@@ -285,6 +289,58 @@ namespace
 
         EXPECT_EQ(mTechnique->getPasses().size(), 2);
         EXPECT_EQ(mTechnique->getPasses()[0]->getTarget(), "rendertarget");
+    }
+
+    TEST_F(TechniqueTest, recyclesRenderTargets)
+    {
+        const auto context = TestingOpenMW::createGraphicsContext();
+        if (!context)
+            GTEST_SKIP() << "Offscreen GL context unavailable";
+        auto& state = *context->getState();
+        auto* ext = state.get<osg::GLExtensions>();
+        auto* pool = osg::get<osg::TextureObjectManager>(state.getContextID());
+        pool->setMaxTexturePoolSize(64u * 1024u * 1024u);
+        compile("rendertarget_properties");
+        ASSERT_EQ(mTechnique->getRenderTargetsMap().size(), 1u);
+        auto& texture = mTechnique->getRenderTargetsMap().begin()->second.mTarget;
+        for (const int side : { 32, 64, 32, 32 })
+        {
+            SCOPED_TRACE(side);
+            const int levels = osg::Image::computeNumberOfMipmapLevels(side, side);
+            texture->setTextureSize(side, side);
+            texture->setNumMipmapLevels(levels);
+            texture->dirtyTextureObject();
+            osg::ref_ptr<osg::Texture::TextureObject> object
+                = pool->generateTextureObject(texture, GL_TEXTURE_2D, levels, GL_R16F, side, side, 1, 0);
+            object->bind();
+            if (!object->isAllocated())
+            {
+                ext->glTexStorage2D(GL_TEXTURE_2D, levels, GL_R16F, side, side);
+                object->setAllocated();
+            }
+            const osg::Texture::TextureProfile profile = object->_profile;
+            object->release();
+            object = nullptr;
+            pool->handlePendingOrphandedTextureObjects();
+            ASSERT_GT(pool->getTextureObjectSet(profile)->getNumOrphans(), 0u);
+            ASSERT_EQ(glGetError(), GL_NO_ERROR);
+            const osg::ref_ptr<osg::FrameBufferObject> fbo = new osg::FrameBufferObject;
+            fbo->setAttachment(osg::Camera::COLOR_BUFFER0, osg::FrameBufferAttachment(texture));
+            fbo->apply(state);
+            ASSERT_EQ(glGetError(), GL_NO_ERROR);
+            ASSERT_EQ(ext->glCheckFramebufferStatus(GL_FRAMEBUFFER_EXT), GL_FRAMEBUFFER_COMPLETE_EXT);
+            glClearColor(0.25f, 0, 0, 1);
+            glClear(GL_COLOR_BUFFER_BIT);
+            state.applyTextureAttribute(0, texture);
+            ext->glGenerateMipmap(GL_TEXTURE_2D);
+            float value = 0;
+            glGetTexImage(GL_TEXTURE_2D, levels - 1, GL_RED, GL_FLOAT, &value);
+            EXPECT_FLOAT_EQ(value, 0.25f);
+            EXPECT_EQ(glGetError(), GL_NO_ERROR);
+        }
+        texture->releaseGLObjects(&state);
+        context->releaseContext();
+        context->close();
     }
 
     /// Preserve imported shader defines when a technique creates independent stages for a render pass.

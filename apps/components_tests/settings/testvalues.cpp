@@ -8,6 +8,7 @@
 #include <boost/program_options/options_description.hpp>
 #include <boost/program_options/variables_map.hpp>
 
+#include <array>
 #include <fstream>
 
 #include <gmock/gmock.h>
@@ -221,51 +222,99 @@ namespace Settings
         {
             Index index;
             Values values(index);
-            EXPECT_FALSE(values.mOptimizations.mEnabled);
-            EXPECT_FALSE(values.mOptimizations.isActive(values.mOptimizations.mGpuSkinning));
+            const std::array options{ &values.mOptimizations.mGpuDrivenPaging, &values.mOptimizations.mGpuSkinning,
+                &values.mOptimizations.mGpuOcclusionCulling, &values.mOptimizations.mGpuActors,
+                &values.mOptimizations.mGpuTextureArrays, &values.mOptimizations.mIndexedLightLists,
+                &values.mOptimizations.mGpuSceneLighting, &values.mOptimizations.mGpuStorageBudget,
+                &values.mOptimizations.mLowEndIndirectBatching, &values.mOptimizations.mGpuLightOcclusion,
+                &values.mOptimizations.mGpuDistantPaging, &values.mOptimizations.mSkipDormantRipples };
 
-            values.mOptimizations.mGpuSkinning.set(true);
-            EXPECT_TRUE(values.mOptimizations.mGpuSkinning);
-            EXPECT_FALSE(values.mOptimizations.isActive(values.mOptimizations.mGpuSkinning));
+            EXPECT_FALSE(values.mOptimizations.mEnabled);
+            for (SettingValue<bool>* option : options)
+            {
+                EXPECT_FALSE(*option);
+                option->set(true);
+                EXPECT_TRUE(*option);
+                EXPECT_FALSE(values.mOptimizations.isActive(*option));
+            }
 
             values.mOptimizations.mEnabled.set(true);
-            EXPECT_TRUE(values.mOptimizations.isActive(values.mOptimizations.mGpuSkinning));
+            for (const SettingValue<bool>* option : options)
+                EXPECT_TRUE(values.mOptimizations.isActive(*option));
 
             values.mOptimizations.mEnabled.set(false);
-            EXPECT_TRUE(values.mOptimizations.mGpuSkinning);
-            EXPECT_FALSE(values.mOptimizations.isActive(values.mOptimizations.mGpuSkinning));
+            for (const SettingValue<bool>* option : options)
+            {
+                EXPECT_TRUE(*option);
+                EXPECT_FALSE(values.mOptimizations.isActive(*option));
+            }
 
-            values.mOptimizations.mGpuDrivenPaging.set(true);
-            EXPECT_FALSE(values.mOptimizations.isActive(values.mOptimizations.mGpuDrivenPaging));
-            EXPECT_FALSE(values.mOptimizations.useGpuDrivenPaging());
             values.mOptimizations.mEnabled.set(true);
-            EXPECT_TRUE(values.mOptimizations.isActive(values.mOptimizations.mGpuDrivenPaging));
             EXPECT_TRUE(values.mOptimizations.useGpuDrivenPaging());
-            EXPECT_FALSE(values.mOptimizations.useGpuActors());
-            values.mOptimizations.mGpuSkinning.set(false);
-            values.mOptimizations.mGpuActors.set(true);
             EXPECT_TRUE(values.mOptimizations.useGpuActors());
-            EXPECT_FALSE(values.mOptimizations.useGpuSkinning());
-            values.mOptimizations.mGpuSkinning.set(true);
             EXPECT_TRUE(values.mOptimizations.useGpuSkinning());
+            EXPECT_TRUE(values.mOptimizations.useGpuTextureArrays());
+            EXPECT_TRUE(values.mOptimizations.useGpuOcclusionCulling());
+            EXPECT_TRUE(values.mOptimizations.useIndexedLightLists());
+            EXPECT_TRUE(values.mOptimizations.useGpuSceneLighting());
+            EXPECT_TRUE(values.mOptimizations.useGpuStorageBudget());
+            EXPECT_TRUE(values.mOptimizations.useLowEndIndirectBatching());
+            EXPECT_TRUE(values.mOptimizations.useGpuLightOcclusion());
+            EXPECT_TRUE(values.mOptimizations.useGpuDistantPaging());
+            EXPECT_TRUE(values.mOptimizations.useSkipDormantRipples());
+
+            values.mOptimizations.mGpuActors.set(false);
+            EXPECT_FALSE(values.mOptimizations.useGpuActors());
+            EXPECT_FALSE(values.mOptimizations.useGpuSkinning());
+            values.mOptimizations.mGpuActors.set(true);
+            values.mOptimizations.mGpuOcclusionCulling.set(false);
+            EXPECT_FALSE(values.mOptimizations.useGpuOcclusionCulling());
+            EXPECT_FALSE(values.mOptimizations.useGpuLightOcclusion());
+            values.mOptimizations.mGpuOcclusionCulling.set(true);
+            values.mOptimizations.mGpuDrivenPaging.set(false);
+            EXPECT_FALSE(values.mOptimizations.useGpuDrivenPaging());
+            EXPECT_FALSE(values.mOptimizations.useGpuActors());
+            EXPECT_FALSE(values.mOptimizations.useGpuSceneLighting());
+            EXPECT_TRUE(values.mOptimizations.useIndexedLightLists());
+            EXPECT_TRUE(values.mOptimizations.useSkipDormantRipples());
+
+            values.mOptimizations.mEnabled.set(false);
+            for (const SettingValue<bool>* option : options)
+                EXPECT_FALSE(values.mOptimizations.isActive(*option));
         }
 
         /// Save and reload the prerequisite independently from retained subordinate selections.
         TEST_F(SettingsStartupTest, preservesDormantOptimizationSelectionsAcrossSaveAndReload)
         {
             std::ofstream(mDirectory / "settings.cfg")
-                << "[Optimizations]\nenabled = false\ngpu skinning = true\ngpu actors = true\n";
+                << "[Optimizations]\nenabled = false\ngpu driven paging = true\ngpu skinning = true\n"
+                   "gpu occlusion culling = true\ngpu actors = true\ngpu texture arrays = true\n"
+                   "indexed light lists = true\ngpu scene lighting = true\ngpu storage budget = true\n"
+                   "low end indirect batching = true\ngpu light occlusion = true\ngpu distant paging = true\n"
+                   "skip dormant ripples = true\n";
+            const auto selections = [] {
+                auto& settings = optimizations();
+                return std::array{ &settings.mGpuDrivenPaging, &settings.mGpuSkinning, &settings.mGpuOcclusionCulling,
+                    &settings.mGpuActors, &settings.mGpuTextureArrays, &settings.mIndexedLightLists,
+                    &settings.mGpuSceneLighting, &settings.mGpuStorageBudget, &settings.mLowEndIndirectBatching,
+                    &settings.mGpuLightOcclusion, &settings.mGpuDistantPaging, &settings.mSkipDormantRipples };
+            };
             ASSERT_NO_FATAL_FAILURE(load());
             EXPECT_FALSE(optimizations().mEnabled);
-            EXPECT_TRUE(optimizations().mGpuSkinning);
-            EXPECT_TRUE(optimizations().mGpuActors);
-            EXPECT_FALSE(optimizations().isActive(optimizations().mGpuSkinning));
+            for (const SettingValue<bool>* selection : selections())
+            {
+                EXPECT_TRUE(*selection);
+                EXPECT_FALSE(optimizations().isActive(*selection));
+            }
 
             Manager::saveUser(mDirectory / "settings.cfg");
             ASSERT_NO_FATAL_FAILURE(load());
             EXPECT_FALSE(optimizations().mEnabled);
-            EXPECT_TRUE(optimizations().mGpuSkinning);
-            EXPECT_TRUE(optimizations().mGpuActors);
+            for (const SettingValue<bool>* selection : selections())
+            {
+                EXPECT_TRUE(*selection);
+                EXPECT_FALSE(optimizations().isActive(*selection));
+            }
         }
 
         TEST_F(SettingsValuesTest, migrateBundledAtmosphereWithoutOverwritingExplicitChoices)

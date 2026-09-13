@@ -68,6 +68,9 @@ namespace MWRender
 
         void setTextureScene(osg::ref_ptr<osg::Texture> tex) { mTextureScene = tex; }
 
+        /// Select the resolved opaque color attachment exposed to production diagnostics.
+        void setTextureOpaqueColor(osg::ref_ptr<osg::Texture> tex) { mTextureOpaqueColor = tex; }
+
         void setTextureDepth(osg::ref_ptr<osg::Texture> tex) { mTextureDepth = tex; }
 
         void setTextureNormals(osg::ref_ptr<osg::Texture> tex) { mTextureNormals = tex; }
@@ -93,6 +96,7 @@ namespace MWRender
         osg::ref_ptr<osg::StateSet> mMultiviewResolveStateSet;
 
         osg::ref_ptr<osg::Texture> mTextureScene;
+        osg::ref_ptr<osg::Texture> mTextureOpaqueColor;
         osg::ref_ptr<osg::Texture> mTextureDepth;
         osg::ref_ptr<osg::Texture> mTextureNormals;
         osg::ref_ptr<osg::Texture> mTextureDistortion;

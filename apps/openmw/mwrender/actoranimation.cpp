@@ -65,7 +65,7 @@ namespace MWRender
 
     ActorAnimation::~ActorAnimation()
     {
-        detachGpuRigs();
+        detachGpuInstances();
         removeFromSceneImpl();
     }
 
@@ -600,15 +600,21 @@ namespace MWRender
 
     void ActorAnimation::removeFromScene()
     {
-        detachGpuRigs();
+        detachGpuInstances();
         removeFromSceneImpl();
         Animation::removeFromScene();
     }
 
     void ActorAnimation::refreshGpuInstances()
     {
+        if (mCaptureScene == nullptr)
+        {
+            Animation::refreshGpuInstances();
+            return;
+        }
+
         auto* actor = dynamic_cast<SceneUtil::PositionAttitudeTransform*>(mInsert.get());
-        if (mCaptureScene == nullptr || actor == nullptr)
+        if (actor == nullptr)
         {
             Animation::refreshGpuInstances();
             return;
@@ -625,14 +631,14 @@ namespace MWRender
         pruneBareBones();
     }
 
-    void ActorAnimation::detachGpuRigs()
+    void ActorAnimation::detachGpuInstances()
     {
-        if (mCaptureScene == nullptr)
-            return;
-        auto* actor = dynamic_cast<SceneUtil::PositionAttitudeTransform*>(mInsert.get());
-        if (actor == nullptr)
-            return;
-        mCaptureScene->removeActor(*actor);
+        if (mCaptureScene != nullptr)
+        {
+            auto* actor = dynamic_cast<SceneUtil::PositionAttitudeTransform*>(mInsert.get());
+            if (actor != nullptr)
+                mCaptureScene->removeActor(*actor);
+        }
         pruneBareBones();
     }
 

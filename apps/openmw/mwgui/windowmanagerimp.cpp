@@ -2403,8 +2403,6 @@ namespace MWGui
 
     void WindowManager::showVideoSettings(std::string_view page)
     {
-        if (page != "atmosphere" && page != "water" && page != "shadows" && page != "detail")
-            throw std::invalid_argument("unknown video settings page");
         if (!mSettingsWindow->isVisible())
             toggleSettingsWindow();
         mSettingsWindow->showVideoPage(page);

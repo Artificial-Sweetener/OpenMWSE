@@ -324,6 +324,9 @@ namespace SceneUtil
 
         std::uint32_t currentReceiver() const { return mCurrentReceiver; }
 
+        /// Return the current frame's classic receiver storage for GPU-scene light culling.
+        osg::ref_ptr<osg::ShaderStorageBufferBinding> receiverBuffer(osgUtil::CullVisitor& cv) const;
+
         void setReceiver(std::uint32_t receiver) { mCurrentReceiver = receiver; }
 
         int getMaxLights() const;

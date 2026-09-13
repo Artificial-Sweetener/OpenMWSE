@@ -447,6 +447,7 @@ namespace Terrain
                 callback->setLowZ(-std::numeric_limits<float>::max());
                 return;
             }
+            cv->getCurrentCullingSet().resetCullingMask();
             cv->pushCurrentMask();
             static bool debug = getenv("OPENMW_WATER_CULLING_DEBUG") != nullptr;
             for (unsigned int i = 0; i < vd->getNumEntries(); ++i)

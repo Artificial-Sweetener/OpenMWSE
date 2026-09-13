@@ -119,28 +119,28 @@ namespace
     TEST(GpuSceneKeysTest, RejectsMissingImage)
     {
         const osg::ref_ptr<osg::Texture2D> texture = new osg::Texture2D;
-        EXPECT_STREQ(rejectionOf(*texture), "dynamic");
+        EXPECT_STREQ(rejectionOf(*texture), "no image data");
     }
 
     TEST(GpuSceneKeysTest, RejectsDynamicImage)
     {
         const osg::ref_ptr<osg::Texture2D> texture = makeStatic();
         texture->getImage()->setDataVariance(osg::Object::DYNAMIC);
-        EXPECT_STREQ(rejectionOf(*texture), "dynamic");
+        EXPECT_STREQ(rejectionOf(*texture), "dynamic image");
     }
 
     TEST(GpuSceneKeysTest, RejectsDynamicTexture)
     {
         const osg::ref_ptr<osg::Texture2D> texture = makeStatic();
         texture->setDataVariance(osg::Object::DYNAMIC);
-        EXPECT_STREQ(rejectionOf(*texture), "dynamic");
+        EXPECT_STREQ(rejectionOf(*texture), "dynamic texture");
     }
 
     TEST(GpuSceneKeysTest, RejectsTextureBorder)
     {
         const osg::ref_ptr<osg::Texture2D> texture = makeStatic();
         texture->setBorderWidth(1);
-        EXPECT_STREQ(rejectionOf(*texture), "dynamic");
+        EXPECT_STREQ(rejectionOf(*texture), "texture border");
     }
 
     TEST(GpuSceneKeysTest, RejectsImageStream)
@@ -148,7 +148,7 @@ namespace
         const osg::ref_ptr<osg::Image> stream = makeImage(new osg::ImageStream, 4, 4, GL_RGBA, GL_RGBA, 64);
         ASSERT_TRUE(stream->valid());
         const osg::ref_ptr<osg::Texture2D> texture = makeTexture(stream);
-        EXPECT_STREQ(rejectionOf(*texture), "dynamic");
+        EXPECT_STREQ(rejectionOf(*texture), "image stream");
         // The same pixels pass outside a stream.
         StorageKey key;
         EXPECT_TRUE(storage(*makeStatic(), key));
@@ -158,7 +158,7 @@ namespace
     {
         const osg::ref_ptr<osg::Texture2D> texture = makeStatic();
         texture->setSubloadCallback(new NullSubload);
-        EXPECT_STREQ(rejectionOf(*texture), "dynamic");
+        EXPECT_STREQ(rejectionOf(*texture), "subload callback");
     }
 
     TEST(GpuSceneKeysTest, AcceptsCompleteMipChain)

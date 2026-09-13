@@ -315,8 +315,6 @@ namespace Terrain
             const osg::Vec3f offset(chunkCenter.x() * cellWorldSize, chunkCenter.y() * cellWorldSize, 0.f);
             if (osg::ref_ptr<osg::Node> gpu = mGpuChunkFactory->createTerrainChunk(*geometry, offset, chunkSize <= 1.f))
             {
-                if (CompositeMap* compositeMap = geometry->getCompositeMap())
-                    mCompositeMapRenderer->setImmediate(compositeMap);
                 geometry->setNodeMask(mGpuProxyMask);
                 osg::ref_ptr<osg::Group> group = new osg::Group;
                 group->addChild(geometry);

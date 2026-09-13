@@ -38,8 +38,8 @@ namespace MWRender
         Camera(osg::Camera* camera);
         ~Camera();
 
-        /// Attach camera to object
-        void attachTo(const MWWorld::Ptr& ptr);
+        /// Attach to an object and optionally make its current position immediately observable.
+        void attachTo(const MWWorld::Ptr& ptr, bool initializePosition);
         MWWorld::Ptr getTrackingPtr() const { return mTrackingPtr; }
 
         void setFocalPointTransitionSpeed(float v) { mFocalPointTransitionSpeedCoef = v; }

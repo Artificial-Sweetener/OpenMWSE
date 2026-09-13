@@ -130,11 +130,11 @@ namespace MWRender
     }
 
     void AtmosphereDiagnostics::captureFrame(osg::RenderInfo& renderInfo, osg::Texture* sceneColor,
-        osg::Texture* sceneDepth, osg::Texture* sceneNormals, osg::Texture* previousSceneDepth,
-        osg::Texture2D* rawVolume, osg::Texture2D* rawVolumeMetadata, osg::Texture2D* reprojectedMetadata,
-        osg::Texture2D* resolvedVolume, osg::Texture2D* volumeMetadata, osg::Texture2D* shafts,
-        osg::Texture2D* previousResolvedVolume, osg::Texture2D* previousVolumeMetadata, unsigned int finalFramebuffer,
-        int finalWidth, int finalHeight)
+        osg::Texture* opaqueColor, osg::Texture* sceneDepth, osg::Texture* sceneNormals,
+        osg::Texture* previousSceneDepth, osg::Texture2D* rawVolume, osg::Texture2D* rawVolumeMetadata,
+        osg::Texture2D* reprojectedMetadata, osg::Texture2D* resolvedVolume, osg::Texture2D* volumeMetadata,
+        osg::Texture2D* shafts, osg::Texture2D* previousResolvedVolume, osg::Texture2D* previousVolumeMetadata,
+        unsigned int finalFramebuffer, int finalWidth, int finalHeight)
     {
         std::filesystem::path outputDirectory;
         CaptureStage captureStage;
@@ -195,6 +195,7 @@ namespace MWRender
             };
 
             appendColor(sceneColor, "scene-color-before-post-processing");
+            appendColor(opaqueColor, "scene-opaque-color");
             appendDepth(sceneDepth, "scene-opaque-depth");
             appendColor(sceneNormals, "scene-normals");
             appendDepth(previousSceneDepth, "previous-scene-opaque-depth");

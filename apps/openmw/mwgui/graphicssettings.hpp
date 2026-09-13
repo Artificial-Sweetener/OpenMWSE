@@ -79,7 +79,7 @@ namespace MWGui
         MyGUI::Button* mShadowResolutionDecrease;
         MyGUI::Button* mShadowResolutionIncrease;
         MyGUI::Button* mOptimizationsEnabled;
-        std::array<MyGUI::Button*, 7> mOptimizationButtons;
+        std::array<MyGUI::Button*, 12> mOptimizationButtons;
     };
 }
 

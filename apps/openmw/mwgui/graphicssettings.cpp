@@ -46,7 +46,12 @@ MWGui::GraphicsSettings::GraphicsSettings(Layout& layout, std::function<void()> 
         layout.getWidget("GpuActorsButton")->castType<MyGUI::Button>(),
         layout.getWidget("GpuTextureArraysButton")->castType<MyGUI::Button>(),
         layout.getWidget("IndexedLightListsButton")->castType<MyGUI::Button>(),
-        layout.getWidget("GpuSceneLightingButton")->castType<MyGUI::Button>() }
+        layout.getWidget("GpuSceneLightingButton")->castType<MyGUI::Button>(),
+        layout.getWidget("GpuStorageBudgetButton")->castType<MyGUI::Button>(),
+        layout.getWidget("LowEndIndirectBatchingButton")->castType<MyGUI::Button>(),
+        layout.getWidget("GpuLightOcclusionButton")->castType<MyGUI::Button>(),
+        layout.getWidget("GpuDistantPagingButton")->castType<MyGUI::Button>(),
+        layout.getWidget("SkipDormantRipplesButton")->castType<MyGUI::Button>() }
 {
     mVolumetricQuality->eventComboChangePosition
         += MyGUI::newDelegate(this, &GraphicsSettings::onVolumetricQualityChanged);

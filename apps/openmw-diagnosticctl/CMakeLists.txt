@@ -6,6 +6,7 @@ openmw_add_executable(openmw-diagnosticctl
     isolatedrun.cpp isolatedrun.hpp
     isolatedworkspace.cpp isolatedworkspace.hpp
     replaystate.cpp replaystate.hpp
+    settingssequences.cpp settingssequences.hpp
 )
 
 target_link_libraries(openmw-diagnosticctl components)

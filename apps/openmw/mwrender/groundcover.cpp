@@ -12,6 +12,7 @@
 #include <osg/BlendFunc>
 #include <osg/ComputeBoundsVisitor>
 #include <osg/Geometry>
+#include <osg/LOD>
 #include <osg/Program>
 #include <osg/VertexAttribDivisor>
 
@@ -203,6 +204,8 @@ namespace MWRender
             : osg::ref_ptr<osg::Program>(new osg::Program);
         mProgramTemplate->addBindAttribLocation("aOffset", 6);
         mProgramTemplate->addBindAttribLocation("aRotation", 7);
+        if (mGpuScene != nullptr)
+            mGpuScene->setGroundcoverDistances(mDistance->getFarLodDistance(), mDistance->get());
     }
 
     Groundcover::~Groundcover() = default;
@@ -210,6 +213,15 @@ namespace MWRender
     void Groundcover::updateDistance(float distance)
     {
         mDistance->set(distance);
+        if (mGpuScene != nullptr)
+            mGpuScene->setGroundcoverDistances(mDistance->getFarLodDistance(), mDistance->get());
+    }
+
+    void Groundcover::setGpuScene(GpuScene* gpuScene)
+    {
+        mGpuScene = gpuScene;
+        if (mGpuScene != nullptr)
+            mGpuScene->setGroundcoverDistances(mDistance->getFarLodDistance(), mDistance->get());
     }
 
     void Groundcover::collectInstances(InstanceMap& instances, float size, const osg::Vec2f& center)
@@ -296,11 +308,22 @@ namespace MWRender
         osg::ref_ptr<osg::Node> node
             = static_cast<osg::Node*>(temp.clone(osg::CopyOp::DEEP_COPY_NODES | osg::CopyOp::DEEP_COPY_DRAWABLES
                 | osg::CopyOp::DEEP_COPY_USERDATA | osg::CopyOp::DEEP_COPY_ARRAYS | osg::CopyOp::DEEP_COPY_PRIMITIVES));
+        constexpr float farTriangleRatio = 0.25f;
+        osg::ref_ptr<osg::Node> farNode = makeGroundcoverFarLod(*node, farTriangleRatio);
+        osg::ref_ptr<osg::LOD> lod = new osg::LOD;
+        const float lodDistance = mDistance->getFarLodDistance();
+        lod->addChild(node, 0.f, lodDistance);
+        lod->addChild(farNode, lodDistance, std::numeric_limits<float>::max());
         model.mRoot = new osg::Group;
         model.mRoot->setStateSet(mStateset);
-        model.mRoot->addChild(node);
+        model.mRoot->addChild(lod);
         mSceneManager->recreateShaders(model.mRoot, "groundcover", mProgramTemplate);
         mSceneManager->shareState(model.mRoot);
+        // GPU buckets are extracted before the chunk enters the terrain graph, so capture the live fade uniform here.
+        osg::ref_ptr<osg::StateSet> distanceState = new osg::StateSet(*model.mRoot->getOrCreateStateSet());
+        mDistance->attachFadeUniform(*distanceState);
+        distanceState->setDataVariance(osg::Object::STATIC);
+        model.mRoot->setStateSet(distanceState);
         model.mTemplate = mGpuScene->extract(*model.mRoot, ~0u, false);
         mGpuTemplates.emplace(&temp, model);
         return model;
@@ -311,34 +334,23 @@ namespace MWRender
         osg::ref_ptr<osg::Group> group = new osg::Group;
         osg::Vec3f worldCenter = osg::Vec3f(center.x(), center.y(), 0) * ESM::Land::REAL_SIZE;
         std::vector<GpuScene::Instance> gpuInstances;
-        std::vector<std::pair<osg::ref_ptr<osg::Group>, const std::vector<GroundcoverEntry>*>> gpuRoots;
+        struct GpuSource
+        {
+            osg::ref_ptr<osg::Group> mRoot;
+            osg::ref_ptr<const osg::Node> mModel;
+            const std::vector<GroundcoverEntry>* mEntries = nullptr;
+        };
+        std::vector<GpuSource> gpuRoots;
         const auto appendModel
             = [&](const GpuTemplate& gpuTemplate, const std::vector<GroundcoverEntry>& modelEntries) {
                   for (const GroundcoverEntry& entry : modelEntries)
                   {
                       const osg::Matrixf matrix(computeGpuInstanceMatrix(entry));
-                      mGpuScene->appendInstances(gpuTemplate, matrix, entry.mScale,
-                          { 0.f, std::numeric_limits<float>::max() }, false, gpuInstances);
+                      mGpuScene->appendGroundcoverInstances(gpuTemplate, matrix, entry.mScale, gpuInstances);
                   }
               };
-        for (const auto& [model, entries] : instances)
-        {
-            const osg::Node* temp = mSceneManager->getTemplate(model);
-            // Keep link to original mesh to keep it in cache
-            group->getOrCreateUserDataContainer()->addUserObject(new Resource::TemplateRef(temp));
-
-            if (mGpuScene != nullptr && mGpuScene->isEnabled())
-            {
-                const GpuModel gpuModel = lookupGpuModel(*temp);
-                if (gpuModel.mTemplate != nullptr && !gpuModel.mTemplate->mLegacy)
-                {
-                    appendModel(*gpuModel.mTemplate, entries);
-                    gpuRoots.emplace_back(gpuModel.mRoot, &entries);
-                    continue;
-                }
-            }
-
-            osg::ref_ptr<osg::Node> node = static_cast<osg::Node*>(temp->clone(osg::CopyOp::DEEP_COPY_NODES
+        const auto addInstancedCopy = [&](const osg::Node& source, const std::vector<GroundcoverEntry>& entries) {
+            osg::ref_ptr<osg::Node> node = static_cast<osg::Node*>(source.clone(osg::CopyOp::DEEP_COPY_NODES
                 | osg::CopyOp::DEEP_COPY_DRAWABLES | osg::CopyOp::DEEP_COPY_USERDATA | osg::CopyOp::DEEP_COPY_ARRAYS
                 | osg::CopyOp::DEEP_COPY_PRIMITIVES));
 
@@ -367,8 +379,27 @@ namespace MWRender
             lod->addChild(node);
             lod->addChild(farNode);
             group->addChild(lod);
+        };
+        for (const auto& [model, entries] : instances)
+        {
+            const osg::Node* temp = mSceneManager->getTemplate(model);
+            // Keep link to original mesh to keep it in cache
+            group->getOrCreateUserDataContainer()->addUserObject(new Resource::TemplateRef(temp));
+
+            if (mGpuScene != nullptr && mGpuScene->isEnabled())
+            {
+                const GpuModel gpuModel = lookupGpuModel(*temp);
+                if (gpuModel.mTemplate != nullptr && !gpuModel.mTemplate->mLegacy)
+                {
+                    appendModel(*gpuModel.mTemplate, entries);
+                    gpuRoots.push_back(GpuSource{ gpuModel.mRoot, temp, &entries });
+                    continue;
+                }
+            }
+            addInstancedCopy(*temp, entries);
         }
 
+        osg::BoundingSphere gpuBound;
         if (!gpuInstances.empty())
         {
             const auto buildChunk = [&] {
@@ -376,23 +407,38 @@ namespace MWRender
                 for (const GpuScene::Instance& instance : gpuInstances)
                     localBound.expandBy(
                         osg::BoundingSphere(instance.mBounds.center() - worldCenter, instance.mBounds.radius()));
-                return mGpuScene->createChunk(
-                    std::move(gpuInstances), localBound, Settings::groundcover().mPointLighting);
+                osg::ref_ptr<osg::Node> chunk = mGpuScene->createChunk(std::move(gpuInstances), localBound,
+                    Settings::groundcover().mPointLighting, GpuScene::ChunkKind::Groundcover);
+                if (chunk != nullptr)
+                    gpuBound = localBound;
+                return chunk;
             };
             osg::ref_ptr<osg::Node> gpuChunk = buildChunk();
             if (gpuChunk == nullptr)
             {
-                // A material retired during the build.
+                // A material or mesh retired during the build.
                 gpuInstances.clear();
-                for (const auto& [root, modelEntries] : gpuRoots)
+                std::vector<GpuSource> live;
+                for (const GpuSource& source : gpuRoots)
                 {
-                    const std::unique_ptr<const GpuTemplate> fresh = mGpuScene->extract(*root, ~0u, false);
+                    const std::unique_ptr<const GpuTemplate> fresh = mGpuScene->extract(*source.mRoot, ~0u, false);
                     if (fresh != nullptr && !fresh->mLegacy)
-                        appendModel(*fresh, *modelEntries);
+                    {
+                        appendModel(*fresh, *source.mEntries);
+                        live.push_back(source);
+                    }
+                    else
+                        addInstancedCopy(*source.mModel, *source.mEntries);
                 }
-                gpuChunk = buildChunk();
-                if (gpuChunk == nullptr)
-                    Log(Debug::Warning) << "Groundcover chunk rebuild failed; plants hidden.";
+                gpuRoots = std::move(live);
+                if (!gpuInstances.empty())
+                    gpuChunk = buildChunk();
+                if (gpuChunk == nullptr && !gpuRoots.empty())
+                {
+                    Log(Debug::Warning) << "Groundcover GPU chunk failed; drawing plants directly.";
+                    for (const GpuSource& source : gpuRoots)
+                        addInstancedCopy(*source.mModel, *source.mEntries);
+                }
             }
             if (gpuChunk != nullptr)
                 group->addChild(gpuChunk);
@@ -401,6 +447,8 @@ namespace MWRender
         osg::ComputeBoundsVisitor cbv;
         group->accept(cbv);
         osg::BoundingBox box = cbv.getBoundingBox();
+        if (gpuBound.valid())
+            box.expandBy(gpuBound);
         group->addCullCallback(new ViewDistanceCallback(mDistance, box));
 
         group->setStateSet(mStateset);
@@ -411,7 +459,7 @@ namespace MWRender
         mSceneManager->shareState(group);
         // Keep the editable uniform out of the shared-state cache's value-based ordering.
         osg::ref_ptr<osg::StateSet> distanceState = new osg::StateSet(*group->getStateSet());
-        distanceState->addUniform(mDistance->getFadeUniform());
+        mDistance->attachFadeUniform(*distanceState);
         distanceState->setDataVariance(osg::Object::STATIC);
         group->setStateSet(distanceState);
         group->getBound();

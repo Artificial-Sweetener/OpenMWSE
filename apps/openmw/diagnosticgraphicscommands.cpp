@@ -5,12 +5,18 @@
 #include <components/diagnostics/atmospherescenario.hpp>
 #include <components/diagnostics/atmospheresettings.hpp>
 #include <components/diagnostics/distancesettings.hpp>
+#include <components/diagnostics/optimizationsettings.hpp>
 #include <components/diagnostics/session.hpp>
 #include <components/settings/values.hpp>
 
+#include <osg/Camera>
+#include <osg/Image>
+#include <osg/RenderInfo>
+#include <osgViewer/Viewer>
 #include <osgViewer/ViewerEventHandlers>
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -24,6 +30,56 @@
 #include "mwworld/timestamp.hpp"
 #include "mwworld/weather.hpp"
 #include "mwworld/worldimp.hpp"
+
+namespace
+{
+    /// Captures completed UI frames from either a windowed back buffer or a single-buffered diagnostic pbuffer.
+    class DiagnosticScreenCapture final : public osg::Camera::DrawCallback
+    {
+    public:
+        /// Create a capture that overwrites the same per-context image for the requested number of frames.
+        DiagnosticScreenCapture(std::string prefix, int frames)
+            : mOperation(new osgViewer::ScreenCaptureHandler::WriteToFile(
+                std::move(prefix), "png", osgViewer::ScreenCaptureHandler::WriteToFile::OVERWRITE))
+            , mFrames(frames)
+        {
+        }
+
+        /// Read the framebuffer appropriate to the current context and remove the callback after the final frame.
+        void operator()(osg::RenderInfo& renderInfo) const override
+        {
+            osg::State* state = renderInfo.getState();
+            osg::GraphicsContext* context = state != nullptr ? state->getGraphicsContext() : nullptr;
+            const osg::GraphicsContext::Traits* traits = context != nullptr ? context->getTraits() : nullptr;
+            if (state == nullptr || traits == nullptr)
+                throw std::runtime_error("diagnostic screenshot requires a valid graphics context");
+
+            glReadBuffer(traits->doubleBuffer ? GL_BACK : GL_FRONT);
+            osg::ref_ptr<osg::Image> image = new osg::Image;
+            image->readPixels(
+                0, 0, traits->width, traits->height, traits->alpha > 0 ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE);
+            (*mOperation)(*image, state->getContextID());
+
+            if (--mFrames == 0)
+                renderInfo.getCurrentCamera()->setFinalDrawCallback(nullptr);
+        }
+
+    private:
+        osg::ref_ptr<osgViewer::ScreenCaptureHandler::CaptureOperation> mOperation;
+        mutable int mFrames;
+    };
+
+    /// Attach a capture callback to the last active camera so the resulting image includes post-render UI.
+    void captureVideoSettings(osgViewer::ViewerBase& viewer, std::string prefix)
+    {
+        osgViewer::ViewerBase::Cameras cameras;
+        viewer.getCameras(cameras, true);
+        const auto camera = std::max_element(cameras.begin(), cameras.end(), osg::CameraRenderOrderSortOp{});
+        if (camera == cameras.end())
+            throw std::runtime_error("diagnostic screenshot requires an active camera");
+        (*camera)->setFinalDrawCallback(new DiagnosticScreenCapture(std::move(prefix), 3));
+    }
+}
 
 void OMW::Engine::processDiagnosticGraphicsCommand(
     const Diagnostics::Command& command, Diagnostics::Response& response, std::ostringstream& output)
@@ -39,11 +95,7 @@ void OMW::Engine::processDiagnosticGraphicsCommand(
                 mWindowManager->showVideoSettings(diagnosticText(command.mPayload));
                 mWindowManager->setHudVisibility(false);
                 const auto prefix = (mDiagnosticArtifactRoot / "video-settings").string();
-                mScreenCaptureHandler->setCaptureOperation(new osgViewer::ScreenCaptureHandler::WriteToFile(
-                    prefix, "png", osgViewer::ScreenCaptureHandler::WriteToFile::OVERWRITE));
-                // Retain the last framebuffer after MyGUI and asynchronous pixel readback have advanced.
-                mScreenCaptureHandler->setFramesToCapture(3);
-                mScreenCaptureHandler->startCapture();
+                captureVideoSettings(*mViewer, prefix);
             }
             break;
 
@@ -62,6 +114,39 @@ void OMW::Engine::processDiagnosticGraphicsCommand(
                     Settings::shadows().mMaximumShadowMapDistance, settings.mUseCellEditor,
                     settings.mShadowResolution ? std::optional<int>(Settings::shadows().mShadowMapResolution)
                                                : std::nullopt }));
+            break;
+        }
+
+        case Diagnostics::CommandType::SetOptimizationSettings:
+        {
+            if (!mDiagnosticChild)
+            {
+                response.mError = Diagnostics::ErrorCode::PermissionDenied;
+                break;
+            }
+            const auto requested = Diagnostics::deserializeOptimizationSettings(diagnosticText(command.mPayload));
+            auto& settings = Settings::optimizations();
+            settings.mEnabled.set(requested.mEnabled);
+            settings.mGpuDrivenPaging.set(requested.mGpuDrivenPaging);
+            settings.mGpuSkinning.set(requested.mGpuSkinning);
+            settings.mGpuOcclusionCulling.set(requested.mGpuOcclusionCulling);
+            settings.mGpuActors.set(requested.mGpuActors);
+            settings.mGpuTextureArrays.set(requested.mGpuTextureArrays);
+            settings.mIndexedLightLists.set(requested.mIndexedLightLists);
+            settings.mGpuSceneLighting.set(requested.mGpuSceneLighting);
+            settings.mGpuStorageBudget.set(requested.mGpuStorageBudget);
+            settings.mLowEndIndirectBatching.set(requested.mLowEndIndirectBatching);
+            settings.mGpuLightOcclusion.set(requested.mGpuLightOcclusion);
+            settings.mGpuDistantPaging.set(requested.mGpuDistantPaging);
+            settings.mSkipDormantRipples.set(requested.mSkipDormantRipples);
+            const auto changed = Settings::Manager::getPendingChanges();
+            mWorld->processChangedSettings(changed);
+            Settings::Manager::resetPendingChanges();
+            response.mPayload = diagnosticBytes(Diagnostics::serializeOptimizationSettings(
+                { settings.mEnabled, settings.mGpuDrivenPaging, settings.mGpuSkinning, settings.mGpuOcclusionCulling,
+                    settings.mGpuActors, settings.mGpuTextureArrays, settings.mIndexedLightLists,
+                    settings.mGpuSceneLighting, settings.mGpuStorageBudget, settings.mLowEndIndirectBatching,
+                    settings.mGpuLightOcclusion, settings.mGpuDistantPaging, settings.mSkipDormantRipples }));
             break;
         }
 

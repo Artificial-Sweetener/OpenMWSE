@@ -10,6 +10,11 @@
 #include <osg/PrimitiveSet>
 #include <osgUtil/UpdateVisitor>
 
+#include <array>
+#include <cstddef>
+#include <string_view>
+#include <vector>
+
 namespace
 {
     class AnimationFixture : public MWRender::Animation
@@ -45,6 +50,32 @@ namespace
         }
 
         unsigned int mCount = 0;
+    };
+
+    class GpuSceneLifecycleFixture : public MWRender::Animation
+    {
+    public:
+        GpuSceneLifecycleFixture()
+            : Animation(MWWorld::Ptr(), new osg::Group, nullptr)
+        {
+        }
+
+        const std::vector<std::string_view>& events() const { return mEvents; }
+
+    protected:
+        void detachGpuInstances() override
+        {
+            mEvents.push_back(mCaptureScene == nullptr ? "detach:null" : "detach:scene");
+        }
+
+    public:
+        void refreshGpuInstances() override
+        {
+            mEvents.push_back(mCaptureScene == nullptr ? "refresh:null" : "refresh:scene");
+        }
+
+    private:
+        std::vector<std::string_view> mEvents;
     };
 
     TEST(AnimationTest, PrunesGpuRigBranches)
@@ -106,5 +137,23 @@ namespace
         update.setTraversalMask(~MWRender::Mask_GpuProxy);
         root->accept(update);
         EXPECT_EQ(callback->mCount, 1u);
+    }
+
+    TEST(AnimationTest, DetachesOldGpuSceneBeforeAttachingNewScene)
+    {
+        alignas(std::max_align_t) std::array<std::byte, 1> firstSceneStorage;
+        alignas(std::max_align_t) std::array<std::byte, 1> secondSceneStorage;
+        auto* firstScene = reinterpret_cast<MWRender::GpuScene*>(firstSceneStorage.data());
+        auto* secondScene = reinterpret_cast<MWRender::GpuScene*>(secondSceneStorage.data());
+
+        GpuSceneLifecycleFixture animation;
+        animation.setGpuScene(firstScene);
+        animation.setGpuScene(firstScene);
+        animation.setGpuScene(secondScene);
+        animation.setGpuScene(nullptr);
+
+        const std::vector<std::string_view> expected{ "refresh:scene", "refresh:scene", "detach:scene", "refresh:scene",
+            "detach:scene", "refresh:null" };
+        EXPECT_EQ(animation.events(), expected);
     }
 }

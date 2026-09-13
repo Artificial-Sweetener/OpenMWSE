@@ -72,6 +72,7 @@ source_files = [
   "apps/openmw/mwgui/settingswindow.hpp",
   "components/settings/atmospheremigration.hpp",
   "components/settings/categories/openmwseshadows.hpp",
+  "components/settings/categories/optimizations.hpp",
   "components/settings/categories/shaders.hpp",
   "components/settings/categories/shadows.hpp",
   "components/settings/categories/water.hpp",

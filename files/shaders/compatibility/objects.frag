@@ -133,7 +133,7 @@ vec2 screenCoords = gl_FragCoord.xy / screenRes;
 #if @diffuseParallax
         gl_FragData[0].a = 1.0;
 #else
-        gl_FragData[0].a *= mapCoverageScale(@diffuseMapIndex, diffuseMapUV + offset);
+        gl_FragData[0].a *= coveragePreservingAlphaScale(@diffuseMapIndex, diffuseMapUV + offset);
 #endif
     }
     else
@@ -149,7 +149,7 @@ vec2 screenCoords = gl_FragCoord.xy / screenRes;
     if (hasMap(@darkMapIndex))
     {
         gl_FragData[0] *= sampleDarkMap(darkMapUV);
-        gl_FragData[0].a *= mapCoverageScale(@darkMapIndex, darkMapUV);
+        gl_FragData[0].a *= coveragePreservingAlphaScale(@darkMapIndex, darkMapUV);
     }
 #endif
 

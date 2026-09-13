@@ -7,10 +7,10 @@
 namespace MWWorld
 {
     std::vector<PositionCellGrid> terrainPreloadPositions(const osg::Vec3f& primary, const osg::Vec3f& playerPos,
-        const osg::Vec3f& cameraPos, bool cameraDetached, const osg::Vec4i& grid, ESM::RefId worldspace)
+        const osg::Vec3f& cameraPos, bool includeDetachedCamera, const osg::Vec4i& grid, ESM::RefId worldspace)
     {
         std::vector<PositionCellGrid> positions{ PositionCellGrid{ primary, grid } };
-        if (!cameraDetached)
+        if (!includeDetachedCamera)
             return positions;
         // Camera distance bounds terrain LOD preloads.
         const float distance = (cameraPos - playerPos).length();

@@ -219,6 +219,7 @@ namespace OMW
         void prepareEngine();
 
         /// Create either the interactive window context or the isolated offscreen diagnostic context.
+        /// Creates the configured window or isolated diagnostic context and attaches required graphics diagnostics.
         void createGraphicsContext();
         void setWindowIcon();
 

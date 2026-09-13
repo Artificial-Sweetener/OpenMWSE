@@ -43,6 +43,7 @@ namespace MWRender
         bool useShieldAnimations() const override;
         bool updateCarriedLeftVisible(ESM::RefId weaptype) const override;
 
+        /// Rebuilds this actor's GPU representation or restores its CPU graph.
         void refreshGpuInstances() override;
         void removeFromScene() override;
 
@@ -68,7 +69,8 @@ namespace MWRender
         void addHiddenItemLight(const MWWorld::ConstPtr& item, const ESM::Light* esmLight);
         void removeHiddenItemLight(const MWWorld::ConstPtr& item);
         void resetControllers(osg::Node* node);
-        void detachGpuRigs();
+        /// Removes actor batches while their owning GPU scene remains valid.
+        void detachGpuInstances() override;
         void removeFromSceneImpl();
 
         typedef std::map<MWWorld::ConstPtr, osg::ref_ptr<SceneUtil::LightSource>> ItemLightMap;

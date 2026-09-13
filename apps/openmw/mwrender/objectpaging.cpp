@@ -1,8 +1,11 @@
 #include "objectpaging.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <limits>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <osg/LOD>
@@ -21,6 +24,7 @@
 #include <components/esm3/loadcell.hpp>
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/loaddoor.hpp>
+#include <components/esm3/loadligh.hpp>
 #include <components/esm3/loadstat.hpp>
 #include <components/esm3/readerscache.hpp>
 #include <components/esm4/loadacti.hpp>
@@ -51,16 +55,19 @@
 #include "apps/openmw/mwworld/esmstore.hpp"
 
 #include "gpuscene.hpp"
+#include "pagedlight.hpp"
 #include "vismask.hpp"
 
 namespace MWRender
 {
     namespace
     {
-        bool typeFilter(int type, bool far)
+        bool typeFilter(int type, bool far, bool lights)
         {
             switch (type)
             {
+                case ESM::REC_LIGH:
+                    return lights;
                 case ESM::REC_STAT:
                 case ESM::REC_ACTI:
                 case ESM::REC_DOOR:
@@ -99,6 +106,8 @@ namespace MWRender
                     return store.get<ESM::Door>().searchStatic(id)->mModel.getNormalized();
                 case ESM::REC_CONT:
                     return store.get<ESM::Container>().searchStatic(id)->mModel.getNormalized();
+                case ESM::REC_LIGH:
+                    return store.get<ESM::Light>().searchStatic(id)->mModel.getNormalized();
                 case ESM::REC_STAT4:
                     return getEsm4Model(store.get<ESM4::Static>().searchStatic(id));
                 case ESM::REC_DOOR4:
@@ -129,8 +138,20 @@ namespace MWRender
             return static_cast<osg::Node*>(obj.get());
 
         const unsigned char lod = static_cast<unsigned char>(lodFlags >> (4 * 4));
-        osg::ref_ptr<osg::Node> node = createChunk(size, center, activeGrid, viewPoint, compile, lod);
-        mCache->addEntryToObjectCache(id, node.get());
+        bool gpuFailed = false;
+        std::vector<ESM::RefNum> pagedRefs;
+        osg::ref_ptr<osg::Node> node = createChunk(
+            size, center, activeGrid, viewPoint, compile, lod, &gpuFailed, activeGrid ? &pagedRefs : nullptr);
+        if (!gpuFailed)
+            mCache->addEntryToObjectCache(id, node.get());
+        if (activeGrid)
+        {
+            std::lock_guard<std::mutex> lock(mIncompleteMutex);
+            if (!gpuFailed)
+                mIncompleteRefnums.erase(id);
+            else if (!pagedRefs.empty())
+                mIncompleteRefnums[id] = std::move(pagedRefs);
+        }
         return node;
     }
 
@@ -465,11 +486,13 @@ namespace MWRender
         };
     }
 
-    ObjectPaging::ObjectPaging(Resource::SceneManager* sceneManager, ESM::RefId worldspace, GpuScene* gpuScene)
+    ObjectPaging::ObjectPaging(Resource::SceneManager* sceneManager, ESM::RefId worldspace, GpuScene* gpuScene,
+        SceneUtil::LightManager* distantLights)
         : GenericResourceManager<ChunkId>(nullptr, Settings::cells().mCacheExpiryDelay)
         , Terrain::QuadTreeWorld::ChunkManager(worldspace)
         , mSceneManager(sceneManager)
         , mGpuScene(gpuScene)
+        , mDistantLights(distantLights)
         , mActiveGrid(Settings::terrain().mObjectPagingActiveGrid)
         , mDebugBatches(Settings::terrain().mDebugChunks)
         , mMergeFactor(Settings::terrain().mObjectPagingMergeFactor)
@@ -485,6 +508,8 @@ namespace MWRender
         GenericResourceManager<ChunkId>::clearCache();
         std::lock_guard<std::mutex> lock(mGpuTemplateMutex);
         mGpuTemplates.clear();
+        std::lock_guard<std::mutex> lockIncomplete(mIncompleteMutex);
+        mIncompleteRefnums.clear();
     }
 
     void ObjectPaging::updateCache(double referenceTime)
@@ -493,8 +518,7 @@ namespace MWRender
         if (referenceTime < mNextTemplateSweep)
             return;
         mNextTemplateSweep = referenceTime + mExpiryDelay;
-        std::lock_guard<std::mutex> lock(mGpuTemplateMutex);
-        std::erase_if(mGpuTemplates, [](const auto& item) { return !item.second.first.valid(); });
+        sweepGpuTemplates();
     }
 
     std::shared_ptr<const GpuTemplate> ObjectPaging::getGpuTemplate(
@@ -516,6 +540,25 @@ namespace MWRender
         std::shared_ptr<const GpuTemplate> result = mGpuScene->extract(node, mask, !activeGrid);
         mGpuTemplates.emplace(key, std::make_pair(osg::observer_ptr<const osg::Node>(&node), result));
         return result;
+    }
+
+    void ObjectPaging::dropGpuTemplate(const osg::Node& node, bool activeGrid)
+    {
+        std::lock_guard<std::mutex> lock(mGpuTemplateMutex);
+        mGpuTemplates.erase(std::make_pair(&node, activeGrid));
+    }
+
+    void ObjectPaging::sweepGpuTemplates()
+    {
+        std::lock_guard<std::mutex> lock(mGpuTemplateMutex);
+        for (auto it = mGpuTemplates.begin(); it != mGpuTemplates.end();)
+        {
+            osg::ref_ptr<const osg::Node> alive;
+            if (it->second.first.lock(alive))
+                ++it;
+            else
+                it = mGpuTemplates.erase(it);
+        }
     }
 
     namespace
@@ -546,7 +589,7 @@ namespace MWRender
             osg::BoundingSphere bound;
             for (const GpuScene::Instance& instance : instances)
                 bound.expandBy(osg::BoundingSphere(instance.mBounds.center() - worldCenter, instance.mBounds.radius()));
-            return scene.createChunk(std::move(instances), bound, lit);
+            return scene.createChunk(std::move(instances), bound, lit, GpuScene::ChunkKind::Object);
         }
 
         PagedCellRef makePagedCellRef(const ESM::CellRef& value)
@@ -572,7 +615,7 @@ namespace MWRender
         }
 
         std::map<ESM::RefNum, PagedCellRef> collectESM3References(
-            float size, const osg::Vec2i& startCell, const MWWorld::ESMStore& store)
+            float size, const osg::Vec2i& startCell, const MWWorld::ESMStore& store, bool lights)
         {
             std::map<ESM::RefNum, PagedCellRef> refs;
             ESM::ReadersCache readers;
@@ -605,7 +648,7 @@ namespace MWRender
                                     continue;
 
                                 int type = store.findStatic(ref.mRefID);
-                                if (!typeFilter(type, size >= 2))
+                                if (!typeFilter(type, size >= 2, lights))
                                     continue;
                                 if (deleted)
                                 {
@@ -632,7 +675,7 @@ namespace MWRender
                             continue;
                         }
                         int type = store.findStatic(ref.mRefID);
-                        if (!typeFilter(type, size >= 2))
+                        if (!typeFilter(type, size >= 2, lights))
                             continue;
                         PagedCellRef pagedRef = makePagedCellRef(ref);
                         pagedRef.mType = type;
@@ -661,7 +704,7 @@ namespace MWRender
                         if (ref4->mFlags & ESM4::Rec_Disabled)
                             continue;
                         int type = store.findStatic(ref4->mBaseObj);
-                        if (!typeFilter(type, size >= 2))
+                        if (!typeFilter(type, size >= 2, false))
                             continue;
                         if (!ref4->mEsp.parent.isZeroOrUnset())
                         {
@@ -686,18 +729,21 @@ namespace MWRender
     }
 
     osg::ref_ptr<osg::Node> ObjectPaging::createChunk(float size, const osg::Vec2f& center, bool activeGrid,
-        const osg::Vec3f& viewPoint, bool compile, unsigned char lod)
+        const osg::Vec3f& viewPoint, bool compile, unsigned char lod, bool* gpuFailed,
+        std::vector<ESM::RefNum>* pagedRefs)
     {
         const osg::Vec2i startCell(static_cast<int>(std::floor(center.x() - size / 2.f)),
             static_cast<int>(std::floor(center.y() - size / 2.f)));
         const MWBase::World& world = *MWBase::Environment::get().getWorld();
         const MWWorld::ESMStore& store = world.getStore();
 
+        const bool gpuDriven = mGpuScene != nullptr && mGpuScene->isEnabled();
+        const bool lit = activeGrid || (gpuDriven && mDistantLights != nullptr);
         std::map<ESM::RefNum, PagedCellRef> refs;
 
         if (mWorldspace == ESM::Cell::sDefaultWorldspaceId)
         {
-            refs = collectESM3References(size, startCell, store);
+            refs = collectESM3References(size, startCell, store, gpuDriven && mDistantLights != nullptr && !activeGrid);
         }
         else
         {
@@ -748,6 +794,11 @@ namespace MWRender
         const LODRange lodDistances = activeGrid ? LODRange{ 0.f, std::numeric_limits<float>::max() }
                                                  : LODRange{ smallestDistanceToChunk, higherDistanceToChunk };
 
+        const osg::Vec3f worldCenter
+            = osg::Vec3f(center.x(), center.y(), 0) * static_cast<float>(getCellSize(mWorldspace));
+        osg::ref_ptr<osg::Group> group = new osg::Group;
+        osg::ref_ptr<DistantLightBatch> distantLights = new DistantLightBatch(mDistantLights, mGpuScene);
+        distantLights->setNodeMask(Mask_Lighting);
         AnalyzeVisitor analyzeVisitor(copyMask);
         const float minSize = mMinSizeMergeFactor ? mMinSize * mMinSizeMergeFactor : mMinSize;
         for (const auto& [refNum, ref] : refs)
@@ -763,18 +814,33 @@ namespace MWRender
             }
 
             const float dSqr = (viewPoint - ref.mPosition).length2();
+            const int type = store.findStatic(ref.mRefId);
+            const bool stableLight = gpuDriven && type == ESM::REC_LIGH;
+            const float cullD2 = stableLight ? smallestDistanceToChunk * smallestDistanceToChunk : dSqr;
+            if (type == ESM::REC_LIGH)
+            {
+                const ESM::Light& light = *store.get<ESM::Light>().searchStatic(ref.mRefId);
+                if (!(light.mData.mFlags & ESM::Light::OffDefault))
+                {
+                    const VFS::Path::Normalized lightMesh = getModel(type, ref.mRefId, store);
+                    const osg::ref_ptr<const osg::Node> lightModel = lightMesh.empty()
+                        ? nullptr
+                        : mSceneManager->getTemplate(Misc::ResourceHelpers::correctMeshPath(lightMesh), false);
+                    distantLights->addLight(
+                        light, ref.mRefNum, ref.mPosition, ref.mRotation, ref.mScale, worldCenter, lightModel);
+                }
+            }
             if (!activeGrid)
             {
                 std::lock_guard<std::mutex> lock(mSizeCacheMutex);
                 SizeCache::iterator found = mSizeCache.find(refNum);
-                if (found != mSizeCache.end() && found->second < dSqr * minSize * minSize)
+                if (found != mSizeCache.end() && found->second < cullD2 * minSize * minSize)
                     continue;
             }
 
             if (Misc::ResourceHelpers::isHiddenMarker(ref.mRefId))
                 continue;
 
-            const int type = store.findStatic(ref.mRefId);
             VFS::Path::Normalized model = getModel(type, ref.mRefId, store);
             if (model.empty())
                 continue;
@@ -830,7 +896,7 @@ namespace MWRender
             }
 
             const float radius2 = cnode->getBound().radius2() * ref.mScale * ref.mScale;
-            if (radius2 < dSqr * minSize * minSize && !activeGrid)
+            if (radius2 < cullD2 * minSize * minSize && !activeGrid)
             {
                 std::lock_guard<std::mutex> lock(mSizeCacheMutex);
                 mSizeCache[refNum] = radius2;
@@ -852,16 +918,16 @@ namespace MWRender
             emplaced.first->second.mInstances.push_back(&ref);
         }
 
-        const osg::Vec3f worldCenter
-            = osg::Vec3f(center.x(), center.y(), 0) * static_cast<float>(getCellSize(mWorldspace));
-        osg::ref_ptr<osg::Group> group = new osg::Group;
+        if (!distantLights->empty())
+            group->addChild(distantLights);
+
         osg::ref_ptr<osg::Group> mergeGroup = new osg::Group;
         osg::ref_ptr<Resource::TemplateMultiRef> templateRefs = new Resource::TemplateMultiRef;
         osgUtil::StateToCompile stateToCompile(0, nullptr);
         CopyOp copyop(activeGrid, copyMask);
-        const bool gpuDriven = mGpuScene != nullptr && mGpuScene->isEnabled();
         std::vector<GpuScene::Instance> gpuInstances;
         std::vector<GpuChunkRef> gpuRefs;
+        std::vector<osg::ref_ptr<osg::Node>> gpuProxies;
         for (const auto& pair : nodes)
         {
             const osg::Node* cnode = pair.first;
@@ -883,16 +949,16 @@ namespace MWRender
             for (const PagedCellRef* refPtr : pair.second.mInstances)
             {
                 const PagedCellRef& ref = *refPtr;
+                const bool stableLight = gpuDriven && ref.mType == ESM::REC_LIGH;
+                const float cullD2 = stableLight ? smallestDistanceToChunk * smallestDistanceToChunk
+                                                 : (viewPoint - ref.mPosition).length2();
 
                 if (!activeGrid && minSizeMerged != minSize
-                    && cnode->getBound().radius2() * ref.mScale * ref.mScale
-                        < (viewPoint - ref.mPosition).length2() * minSizeMerged * minSizeMerged)
+                    && cnode->getBound().radius2() * ref.mScale * ref.mScale < cullD2 * minSizeMerged * minSizeMerged)
                     continue;
 
                 const osg::Vec3f nodePos = ref.mPosition - worldCenter;
-                const osg::Quat nodeAttitude = osg::Quat(ref.mRotation.z(), osg::Vec3f(0, 0, -1))
-                    * osg::Quat(ref.mRotation.y(), osg::Vec3f(0, -1, 0))
-                    * osg::Quat(ref.mRotation.x(), osg::Vec3f(-1, 0, 0));
+                const osg::Quat nodeAttitude = pagedObjectAttitude(ref.mRotation);
                 const osg::Vec3f nodeScale(ref.mScale, ref.mScale, ref.mScale);
 
                 const bool refGpu = gpuTemplate != nullptr
@@ -906,8 +972,10 @@ namespace MWRender
                     refMatrix.preMultRotate(nodeAttitude);
                     refMatrix.preMultScale(nodeScale);
                     const LODRange refDistances = lodDistances / ref.mScale;
-                    mGpuScene->appendInstances(*gpuTemplate, refMatrix, ref.mScale, refDistances, !merge, gpuInstances);
-                    gpuRefs.push_back(GpuChunkRef{ cnode, refMatrix, ref.mScale, refDistances, !merge });
+                    const bool smallFeatureCulling = !merge || stableLight;
+                    mGpuScene->appendInstances(
+                        *gpuTemplate, refMatrix, ref.mScale, refDistances, smallFeatureCulling, gpuInstances);
+                    gpuRefs.push_back(GpuChunkRef{ cnode, refMatrix, ref.mScale, refDistances, smallFeatureCulling });
                     ++numinstances;
                     if (activeGrid)
                     {
@@ -925,6 +993,7 @@ namespace MWRender
                         proxy->getOrCreateUserDataContainer()->addUserObject(marker);
                         proxy->setNodeMask(Mask_GpuProxy);
                         group->addChild(proxy);
+                        gpuProxies.push_back(proxy);
                     }
                     if (!gpuTemplate->mLegacy)
                         continue;
@@ -1002,29 +1071,46 @@ namespace MWRender
 
         const osg::Vec3f relativeViewPoint = viewPoint - worldCenter;
 
+        bool incomplete = false;
         if (!gpuInstances.empty())
         {
-            osg::ref_ptr<osg::Node> gpuChunk
-                = makeGpuChunk(*mGpuScene, std::move(gpuInstances), worldCenter, activeGrid);
+            const std::size_t wanted = gpuInstances.size();
+            osg::ref_ptr<osg::Node> gpuChunk = makeGpuChunk(*mGpuScene, std::move(gpuInstances), worldCenter, lit);
             if (gpuChunk == nullptr)
             {
-                // A material retired between lookup and build.
+                // A material or mesh retired between lookup and build.
                 gpuInstances.clear();
+                std::unordered_set<const osg::Node*> extracted;
                 for (const GpuChunkRef& gpuRef : gpuRefs)
                 {
+                    if (extracted.insert(gpuRef.mNode).second)
+                        dropGpuTemplate(*gpuRef.mNode, activeGrid);
                     const std::shared_ptr<const GpuTemplate> fresh
                         = getGpuTemplate(*gpuRef.mNode, copyMask, activeGrid);
                     if (fresh != nullptr)
                         mGpuScene->appendInstances(*fresh, gpuRef.mMatrix, gpuRef.mScale, gpuRef.mDistances,
                             gpuRef.mSmallFeatureCulling, gpuInstances);
                 }
-                gpuChunk = makeGpuChunk(*mGpuScene, std::move(gpuInstances), worldCenter, activeGrid);
+                if (gpuInstances.size() < wanted)
+                {
+                    Log(Debug::Warning) << "Rebuilt GPU chunk dropped geometry.";
+                    incomplete = true;
+                }
+                if (!gpuInstances.empty())
+                    gpuChunk = makeGpuChunk(*mGpuScene, std::move(gpuInstances), worldCenter, lit);
                 if (gpuChunk == nullptr)
-                    Log(Debug::Warning) << "GPU chunk rebuild failed; objects hidden.";
+                {
+                    Log(Debug::Warning) << "GPU chunk build failed.";
+                    for (const osg::ref_ptr<osg::Node>& proxy : gpuProxies)
+                        proxy->setNodeMask(Mask_Static);
+                    incomplete = !activeGrid;
+                }
             }
             if (gpuChunk != nullptr)
                 group->addChild(gpuChunk);
         }
+        if (gpuFailed != nullptr)
+            *gpuFailed = incomplete;
 
         if (mergeGroup->getNumChildren())
         {
@@ -1071,8 +1157,11 @@ namespace MWRender
             refnumSet->mRefnums.erase(
                 std::unique(refnumSet->mRefnums.begin(), refnumSet->mRefnums.end()), refnumSet->mRefnums.end());
             udc->addUserObject(refnumSet);
-            group->addCullCallback(new SceneUtil::LightListCallback);
+            if (pagedRefs != nullptr)
+                *pagedRefs = refnumSet->mRefnums;
         }
+        if (lit)
+            group->addCullCallback(new SceneUtil::LightListCallback);
         udc->addUserObject(templateRefs);
         if (mGpuScene != nullptr)
             mGpuScene->capture(*group);
@@ -1131,7 +1220,7 @@ namespace MWRender
     bool ObjectPaging::enableObject(
         int type, ESM::RefNum refnum, const osg::Vec3f& pos, const osg::Vec2i& cell, bool enabled)
     {
-        if (!typeFilter(type, false))
+        if (!typeFilter(type, false, false))
             return false;
 
         {
@@ -1155,7 +1244,7 @@ namespace MWRender
 
     bool ObjectPaging::blacklistObject(int type, ESM::RefNum refnum, const osg::Vec3f& pos, const osg::Vec2i& cell)
     {
-        if (!typeFilter(type, false))
+        if (!typeFilter(type, false, false))
             return false;
 
         {
@@ -1196,6 +1285,7 @@ namespace MWRender
                 mRefTracker = mRefTrackerNew;
         }
         mCache->clear();
+        sweepGpuTemplates();
         return true;
     }
 
@@ -1236,6 +1326,16 @@ namespace MWRender
         GetRefnumsFunctor grf(out);
         grf.mActiveGrid = activeGrid;
         mCache->call(grf);
+        {
+            std::lock_guard<std::mutex> lock(mIncompleteMutex);
+            for (const auto& [chunkId, refnums] : mIncompleteRefnums)
+            {
+                const osg::Vec2f& center = std::get<0>(chunkId);
+                if (center.x() > activeGrid.x() || center.y() > activeGrid.y() || center.x() < activeGrid.z()
+                    || center.y() < activeGrid.w())
+                    out.insert(out.end(), refnums.begin(), refnums.end());
+            }
+        }
         std::sort(out.begin(), out.end());
         out.erase(std::unique(out.begin(), out.end()), out.end());
     }

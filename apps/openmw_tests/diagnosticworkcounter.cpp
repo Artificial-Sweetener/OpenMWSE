@@ -44,14 +44,11 @@ TEST(DiagnosticWorkCounterTest, CollectsRenderWorkOnlyWhenRequested)
     ASSERT_TRUE(stats->getAttribute(frameNumber, std::string(MWRender::colorCopyCounter), value));
     EXPECT_DOUBLE_EQ(value, 2.0);
 
-    ASSERT_TRUE(stats->getAttribute(
-        frameNumber, std::string(MWRender::transparentClassifiedLeafCounter), value));
+    ASSERT_TRUE(stats->getAttribute(frameNumber, std::string(MWRender::transparentClassifiedLeafCounter), value));
     EXPECT_DOUBLE_EQ(value, 0.0);
 
-    MWRender::addDiagnosticRenderWorkCounter(
-        *stats, frameNumber, MWRender::groundcoverInstanceTestCounter, 12.0);
-    ASSERT_TRUE(stats->getAttribute(
-        frameNumber, std::string(MWRender::groundcoverInstanceTestCounter), value));
+    MWRender::addDiagnosticRenderWorkCounter(*stats, frameNumber, MWRender::groundcoverInstanceTestCounter, 12.0);
+    ASSERT_TRUE(stats->getAttribute(frameNumber, std::string(MWRender::groundcoverInstanceTestCounter), value));
     EXPECT_DOUBLE_EQ(value, 12.0);
 
     ASSERT_TRUE(
@@ -74,4 +71,13 @@ TEST(DiagnosticWorkCounterTest, ResetsDeformationWorkOnlyWhenRequested)
     EXPECT_DOUBLE_EQ(value, 0.0);
     ASSERT_TRUE(stats->getAttribute(frameNumber, std::string(SceneUtil::deformationCpuMillisecondCounter), value));
     EXPECT_DOUBLE_EQ(value, 0.0);
+
+    const std::span counters = OMW::diagnosticWorkCounters();
+    const auto gpuRigs = std::ranges::find(counters, "deformation.gpu-rigs", &OMW::DiagnosticWorkCounter::mName);
+    ASSERT_NE(gpuRigs, counters.end());
+    EXPECT_EQ(gpuRigs->mStatistic, SceneUtil::gpuDeformationRigCounter);
+    const auto gpuFallback
+        = std::ranges::find(counters, "fallback.gpu-deformation", &OMW::DiagnosticWorkCounter::mName);
+    ASSERT_NE(gpuFallback, counters.end());
+    EXPECT_EQ(gpuFallback->mStatistic, SceneUtil::gpuDeformationFallbackCounter);
 }

@@ -22,7 +22,7 @@ namespace MWWorld
             EXPECT_EQ(positions[0].mCellBounds, grid);
         }
 
-        TEST(TerrainPreloadTest, IgnoresAttachedCamera)
+        TEST(TerrainPreloadTest, KeepsBaselineWhenDetachedCameraPreloadIsDisabled)
         {
             const osg::Vec3f camera = player + osg::Vec3f(0.f, 0.f, terrainPreloadMergeDistance * 4.f);
             const std::vector<PositionCellGrid> positions

@@ -60,6 +60,17 @@ namespace SceneUtil
         };
     }
 
+    void RenderTextureStorage::load(const osg::Texture2D& texture, osg::State& state) const
+    {
+        state.unbindPixelBufferObject();
+        constexpr GLenum textureMaxLevel = 0x813D;
+        glTexParameteri(GL_TEXTURE_2D, textureMaxLevel, std::max(1u, texture.getNumMipmapLevels()) - 1);
+        for (unsigned int level = 0; level < std::max(1u, texture.getNumMipmapLevels()); ++level)
+            glTexImage2D(GL_TEXTURE_2D, level, texture.getInternalFormat(),
+                std::max(1, texture.getTextureWidth() >> level), std::max(1, texture.getTextureHeight() >> level),
+                texture.getBorderWidth(), texture.getSourceFormat(), texture.getSourceType(), nullptr);
+    }
+
     GlowUpdater::GlowUpdater(int texUnit, const osg::Vec4f& color,
         const std::vector<osg::ref_ptr<osg::Texture2D>>& textures, osg::Node* node, float duration,
         Resource::ResourceSystem* resourcesystem)

@@ -1,6 +1,7 @@
 #include "luminancecalculator.hpp"
 
 #include <components/misc/mathutil.hpp>
+#include <components/sceneutil/util.hpp>
 #include <components/settings/values.hpp>
 #include <components/shader/shadermanager.hpp>
 
@@ -21,11 +22,14 @@ namespace MWRender
         mResolveProgram = shaderManager.getProgram(vertex, std::move(resolveFragment));
         mLuminanceProgram = shaderManager.getProgram(std::move(vertex), std::move(luminanceFragment));
 
+        const osg::ref_ptr<SceneUtil::RenderTextureStorage> storage = new SceneUtil::RenderTextureStorage;
         for (auto& buffer : mBuffers)
         {
             buffer.mipmappedSceneLuminanceTex = new osg::Texture2D;
+            buffer.mipmappedSceneLuminanceTex->setSubloadCallback(storage);
             buffer.mipmappedSceneLuminanceTex->setInternalFormat(GL_R16F);
             buffer.mipmappedSceneLuminanceTex->setSourceFormat(GL_RED);
+            buffer.mipmappedSceneLuminanceTex->setSourceType(GL_FLOAT);
             buffer.mipmappedSceneLuminanceTex->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
             buffer.mipmappedSceneLuminanceTex->setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
             buffer.mipmappedSceneLuminanceTex->setFilter(
@@ -34,8 +38,10 @@ namespace MWRender
             buffer.mipmappedSceneLuminanceTex->setTextureSize(mWidth, mHeight);
 
             buffer.luminanceTex = new osg::Texture2D;
+            buffer.luminanceTex->setSubloadCallback(storage);
             buffer.luminanceTex->setInternalFormat(GL_R16F);
             buffer.luminanceTex->setSourceFormat(GL_RED);
+            buffer.luminanceTex->setSourceType(GL_FLOAT);
             buffer.luminanceTex->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
             buffer.luminanceTex->setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
             buffer.luminanceTex->setFilter(osg::Texture2D::MIN_FILTER, osg::Texture2D::NEAREST);

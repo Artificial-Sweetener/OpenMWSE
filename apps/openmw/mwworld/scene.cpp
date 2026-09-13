@@ -1158,7 +1158,7 @@ namespace MWWorld
         {
             const MWRender::Camera& camera = *mRendering.getCamera();
             exteriorPositions = terrainPreloadPositions(predictedPos, playerPos, camera.getPosition(),
-                camera.getMode() == MWRender::Camera::Mode::Static,
+                Settings::optimizations().useGpuDrivenPaging() && camera.getMode() == MWRender::Camera::Mode::Static,
                 gridCenterToBounds(getNewGridCenter(predictedPos, nullptr)), mCurrentCell->getCell()->getWorldSpace());
         }
 

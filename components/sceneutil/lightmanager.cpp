@@ -434,6 +434,10 @@ namespace SceneUtil
                 }
             }
 
+            if (osg::Stats* stats = cv->getCurrentCamera()->getStats(); stats && stats->collectStats("scene"))
+                stats->setAttribute(
+                    static_cast<unsigned int>(frame), "Scene point lights", static_cast<double>(lights.size()));
+
             // SSBO bindings require nonzero storage.
             if (lights.empty())
                 lights.emplace_back();
@@ -548,6 +552,11 @@ namespace SceneUtil
             for (const auto* source : *ignored)
                 ids.push_back(static_cast<std::uint32_t>(source->getId()));
         return index;
+    }
+
+    osg::ref_ptr<osg::ShaderStorageBufferBinding> LightManager::receiverBuffer(osgUtil::CullVisitor& cv) const
+    {
+        return mCullCallback->mCache.at(cv.getCurrentCamera()).mReceiverSSBB[cv.getTraversalNumber() % 2];
     }
 
     int LightManager::getMaxLights() const

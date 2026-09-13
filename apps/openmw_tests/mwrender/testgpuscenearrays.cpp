@@ -1,12 +1,19 @@
-#include <apps/openmw/mwrender/gpuscene.hpp>
+#include <apps/openmw/mwrender/gpusceneinternal.hpp>
+
+#include <SDL_opengl_glext.h>
 
 #include <components/debug/gldebug.hpp>
 #include <components/nifosg/controller.hpp>
+#include <components/sceneutil/deformationstats.hpp>
 #include <components/sceneutil/glextensions.hpp>
 #include <components/sceneutil/material.hpp>
+#include <components/sceneutil/positionattitudetransform.hpp>
+#include <components/sceneutil/riggeometry.hpp>
 #include <components/sceneutil/shadow.hpp>
 #include <components/settings/values.hpp>
 #include <components/shader/shadermanager.hpp>
+#include <components/terrain/compositemaprenderer.hpp>
+#include <components/terrain/terraindrawable.hpp>
 
 #include <gtest/gtest.h>
 
@@ -18,6 +25,7 @@
 #include <osg/GraphicsContext>
 #include <osg/GraphicsThread>
 #include <osg/Image>
+#include <osg/LOD>
 #include <osg/Matrix>
 #include <osg/PrimitiveSet>
 #include <osg/Program>
@@ -31,6 +39,7 @@
 #include <osg/Viewport>
 #include <osgUtil/CullVisitor>
 #include <osgUtil/RenderStage>
+#include <osgUtil/StateGraph>
 #include <osgUtil/UpdateVisitor>
 
 #include <algorithm>
@@ -41,6 +50,7 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -209,9 +219,12 @@ namespace
         stamp->setFrameNumber(frame);
         const osg::ref_ptr<osgUtil::RenderStage> stage = new osgUtil::RenderStage;
         stage->setCamera(&camera);
+        const osg::ref_ptr<osgUtil::StateGraph> graph = new osgUtil::StateGraph;
         const osg::ref_ptr<osgUtil::CullVisitor> cull = new osgUtil::CullVisitor;
         cull->setFrameStamp(stamp);
+        cull->setTraversalNumber(frame);
         cull->setRenderStage(stage);
+        cull->setStateGraph(graph);
         cull->setComputeNearFarMode(osg::CullSettings::DO_NOT_COMPUTE_NEAR_FAR);
         cull->pushViewport(new osg::Viewport(0, 0, sSide, sSide));
         cull->pushProjectionMatrix(new osg::RefMatrix);
@@ -322,13 +335,22 @@ namespace
 
         void TearDown() override
         {
+            // Programs are fixture-owned, so discard cached state attributes before their references become stale.
+            if (sContext != nullptr && sContext->getState() != nullptr)
+                sContext->getState()->dirtyAllAttributes();
             forceMode(nullptr);
             Settings::terrain().mObjectPagingGpuTextureBudget.set(mBudget);
         }
 
-        std::unique_ptr<GpuScene> makeScene()
+        std::unique_ptr<GpuScene> makeScene(bool packedTextures = true, bool storageBudget = true)
         {
-            auto scene = std::make_unique<GpuScene>(mShaderManager, true, true);
+            GpuScene::Options options;
+            options.mGpuSkinning = true;
+            options.mPackedTextures = packedTextures;
+            options.mStorageBudget = storageBudget;
+            options.mLowEndIndirectBatching = true;
+            options.mLightOcclusion = true;
+            auto scene = std::make_unique<GpuScene>(mShaderManager, *mStats, options);
             scene->setDefaultMaterial(new SceneUtil::Material);
             return scene;
         }
@@ -351,11 +373,37 @@ namespace
         static osg::ref_ptr<osg::GraphicsContext> sContext;
 
         Shader::ShaderManager mShaderManager;
+        osg::ref_ptr<osg::Stats> mStats = new osg::Stats("gpu-scene-test");
         osg::ref_ptr<osg::Program> mProgram;
         int mBudget = -1;
     };
 
     osg::ref_ptr<osg::GraphicsContext> GpuSceneArrayTest::sContext;
+
+    TEST_F(GpuSceneArrayTest, KeepsGpuPagingWhenPackedTexturesAreDisabled)
+    {
+        const std::unique_ptr<GpuScene> scene = makeScene(false);
+        ASSERT_TRUE(scene->isSupported());
+
+        const osg::ref_ptr<osg::Texture2D> texture = makeTexture(makeImage(sSide, 1));
+        const osg::ref_ptr<osg::StateSet> state = makeState(*texture);
+        const GpuScene::Surface surface = surfaceOf(*scene, *state);
+
+        EXPECT_NE(surface.mBucket, GpuScene::sInvalid);
+        EXPECT_NE(surface.mMaterial, GpuScene::sInvalid);
+        EXPECT_EQ(statValue(*scene, "GPU array pools"), 0.0);
+        EXPECT_EQ(statValue(*scene, "GPU legacy materials"), 1.0);
+    }
+
+    TEST_F(GpuSceneArrayTest, LeavesGpuStorageUnboundedWhenBudgetingIsDisabled)
+    {
+        Settings::terrain().mObjectPagingGpuTextureBudget.set(1);
+        const std::unique_ptr<GpuScene> scene = makeScene(true, false);
+
+        ASSERT_TRUE(scene->isSupported());
+        EXPECT_EQ(statValue(*scene, "GPU texture budget"), 0.0);
+        EXPECT_EQ(statValue(*scene, "GPU mesh budget"), 0.0);
+    }
 
     TEST_F(GpuSceneArrayTest, FallsBackWithoutBindlessRequirements)
     {
@@ -747,8 +795,8 @@ namespace
         scene->appendInstances(
             *tmpl, osg::Matrixf::identity(), 1.f, { 0.f, std::numeric_limits<float>::max() }, false, instances);
         ASSERT_FALSE(instances.empty());
-        osg::ref_ptr<osg::Node> chunk
-            = scene->createChunk(std::move(instances), osg::BoundingSphere(osg::Vec3f(), 1.f), false);
+        osg::ref_ptr<osg::Node> chunk = scene->createChunk(
+            std::move(instances), osg::BoundingSphere(osg::Vec3f(), 1.f), false, GpuScene::ChunkKind::Object);
         ASSERT_TRUE(chunk);
 
         // Chunk users outlast the grace period.
@@ -830,7 +878,8 @@ namespace
         ASSERT_FALSE(scene->isTemplateLive(*tmpl));
 
         // Paging re-extracts the template after this.
-        EXPECT_FALSE(scene->createChunk(std::move(instances), osg::BoundingSphere(osg::Vec3f(), 1.f), false));
+        EXPECT_FALSE(scene->createChunk(
+            std::move(instances), osg::BoundingSphere(osg::Vec3f(), 1.f), false, GpuScene::ChunkKind::Object));
     }
 
     TEST_F(GpuSceneArrayTest, IsolatesLiveMaterial)
@@ -962,6 +1011,33 @@ namespace
         scene->releaseGLObjects(&glState);
     }
 
+    TEST_F(GpuSceneArrayTest, ReleasesBindlessTexturesForBaselineReuse)
+    {
+        forceMode("bindless");
+        const std::unique_ptr<GpuScene> scene = makeScene();
+        ASSERT_TRUE(scene->isSupported());
+
+        const osg::ref_ptr<osg::Texture2D> texture = makeTexture(makeImage(sSide, 107));
+        const osg::ref_ptr<osg::StateSet> state = makeState(*texture);
+        ASSERT_NE(surfaceOf(*scene, *state).mMaterial, GpuScene::sInvalid);
+        if (statValue(*scene, "GPU array pools") != 0.0 || statValue(*scene, "GPU legacy materials") != 0.0)
+            GTEST_SKIP() << "bindless textures unavailable";
+
+        osg::State& glState = *sContext->getState();
+        scene->compile(glState);
+        ASSERT_EQ(statValue(*scene, "GPU texture handles"), 1.0);
+        ASSERT_EQ(glGetError(), GL_NO_ERROR);
+
+        scene->releaseGLObjects(&glState);
+        texture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::NEAREST);
+        texture->apply(glState);
+        EXPECT_NE(texture->getTextureObject(glState.getContextID()), nullptr);
+        EXPECT_EQ(glState.getCurrentVertexArrayObject(), 0u);
+        EXPECT_EQ(glState.getCurrentVertexBufferObject(), nullptr);
+        EXPECT_EQ(glState.getCurrentElementBufferObject(), nullptr);
+        EXPECT_EQ(glGetError(), GL_NO_ERROR);
+    }
+
     TEST_F(GpuSceneArrayTest, DemotesOverBudget)
     {
         forceMode("legacy");
@@ -1048,11 +1124,163 @@ namespace
         scene->appendInstances(
             *tmpl, osg::Matrixf::identity(), 1.f, { 0.f, std::numeric_limits<float>::max() }, false, instances);
         ASSERT_FALSE(instances.empty());
-        const osg::ref_ptr<osg::Node> chunk
-            = scene->createChunk(std::move(instances), osg::BoundingSphere(osg::Vec3f(), 1.f), false);
+        const osg::ref_ptr<osg::Node> chunk = scene->createChunk(
+            std::move(instances), osg::BoundingSphere(osg::Vec3f(), 1.f), false, GpuScene::ChunkKind::Object);
         ASSERT_TRUE(chunk);
 
         EXPECT_EQ(statValue(*scene, "GPU receiver slots"), 0.0);
+    }
+
+    TEST_F(GpuSceneArrayTest, ReportsChunkOwnershipAndReleasedPopulations)
+    {
+        forceMode("legacy");
+        const std::unique_ptr<GpuScene> scene = makeScene();
+        ASSERT_TRUE(scene->isSupported());
+
+        const osg::ref_ptr<osg::Texture2D> texture = makeTexture(makeImage(sSide, 41));
+        const osg::ref_ptr<osg::Geometry> geometry = makeTriangle();
+        geometry->setStateSet(makeState(*texture));
+        const std::unique_ptr<const MWRender::GpuTemplate> tmpl = scene->extract(*geometry, ~0u, false);
+        ASSERT_TRUE(tmpl);
+
+        std::vector<GpuScene::Instance> groundcover;
+        scene->appendInstances(*tmpl, osg::Matrixf::identity(), 1.f, { 0.f, 100.f }, false, groundcover);
+        scene->appendInstances(*tmpl, osg::Matrixf::translate(2.f, 0.f, 0.f), 1.f, { 0.f, 100.f }, false, groundcover);
+        ASSERT_EQ(groundcover.size(), 2u);
+        osg::ref_ptr<osg::Node> groundcoverChunk = scene->createChunk(
+            std::move(groundcover), osg::BoundingSphere(osg::Vec3f(), 2.f), false, GpuScene::ChunkKind::Groundcover);
+        ASSERT_TRUE(groundcoverChunk);
+
+        std::vector<GpuScene::Instance> terrain;
+        scene->appendInstances(*tmpl, osg::Matrixf::identity(), 1.f, { 0.f, 100.f }, false, terrain);
+        ASSERT_EQ(terrain.size(), 1u);
+        const osg::ref_ptr<osg::Node> terrainChunk = scene->createChunk(
+            std::move(terrain), osg::BoundingSphere(osg::Vec3f(), 1.f), false, GpuScene::ChunkKind::Terrain);
+        ASSERT_TRUE(terrainChunk);
+
+        EXPECT_EQ(statValue(*scene, "GPU groundcover chunks"), 1.0);
+        EXPECT_EQ(statValue(*scene, "GPU groundcover instances"), 2.0);
+        EXPECT_EQ(statValue(*scene, "GPU terrain chunks"), 1.0);
+        EXPECT_EQ(statValue(*scene, "GPU terrain instances"), 1.0);
+        EXPECT_EQ(statValue(*scene, "GPU object chunks"), 0.0);
+
+        groundcoverChunk = nullptr;
+        EXPECT_EQ(statValue(*scene, "GPU groundcover chunks"), 0.0);
+        EXPECT_EQ(statValue(*scene, "GPU groundcover instances"), 0.0);
+    }
+
+    TEST_F(GpuSceneArrayTest, ReportsMixedGpuAndCpuActorDeformation)
+    {
+        forceMode("legacy");
+        const std::unique_ptr<GpuScene> scene = makeScene();
+        ASSERT_TRUE(scene->isSupported());
+
+        const osg::ref_ptr<osg::Texture2D> texture = makeTexture(makeImage(sSide, 43));
+        const auto makeRig = [&]() {
+            osg::ref_ptr<SceneUtil::RigGeometry> rig = new SceneUtil::RigGeometry;
+            rig->setSourceGeometry(makeTriangle());
+            std::vector<SceneUtil::RigGeometry::BoneInfo> bones(1);
+            bones.front().mName = "root";
+            rig->setBoneInfo(std::move(bones));
+            const SceneUtil::RigGeometry::BoneWeights weights{ { 0, 1.f } };
+            rig->setInfluences(std::vector<SceneUtil::RigGeometry::BoneWeights>(3, weights));
+            rig->setStateSet(makeState(*texture));
+            return rig;
+        };
+
+        osg::ref_ptr<SceneUtil::PositionAttitudeTransform> actor = new SceneUtil::PositionAttitudeTransform;
+        const osg::ref_ptr<SceneUtil::RigGeometry> gpuRig = makeRig();
+        const osg::ref_ptr<SceneUtil::RigGeometry> orderedRig = makeRig();
+        orderedRig->getOrCreateStateSet()->setMode(GL_BLEND, osg::StateAttribute::ON);
+        actor->addChild(gpuRig);
+        actor->addChild(orderedRig);
+
+        scene->captureActor(*actor, *actor);
+
+        EXPECT_EQ(statValue(*scene, SceneUtil::gpuDeformationRigCounter.data()), 1.0);
+        EXPECT_EQ(statValue(*scene, SceneUtil::gpuDeformationFallbackCounter.data()), 1.0);
+        EXPECT_EQ(gpuRig->getNodeMask(), MWRender::Mask_GpuProxy);
+        EXPECT_EQ(orderedRig->getNodeMask(), ~0u);
+
+        scene->removeActor(*actor);
+        EXPECT_EQ(statValue(*scene, SceneUtil::gpuDeformationRigCounter.data()), 0.0);
+        EXPECT_EQ(statValue(*scene, SceneUtil::gpuDeformationFallbackCounter.data()), 0.0);
+        EXPECT_EQ(gpuRig->getNodeMask(), ~0u);
+    }
+
+    TEST_F(GpuSceneArrayTest, MarksDetailedAndReducedGroundcoverForLiveLodSelection)
+    {
+        forceMode("legacy");
+        const std::unique_ptr<GpuScene> scene = makeScene();
+        ASSERT_TRUE(scene->isSupported());
+
+        const osg::ref_ptr<osg::Texture2D> texture = makeTexture(makeImage(sSide, 42));
+        const osg::ref_ptr<osg::Geometry> detailed = makeTriangle();
+        detailed->setStateSet(makeState(*texture));
+        const osg::ref_ptr<osg::Geometry> reduced = makeTriangle();
+        reduced->setStateSet(makeState(*texture));
+        osg::ref_ptr<osg::LOD> lod = new osg::LOD;
+        lod->addChild(detailed, 0.f, 50.f);
+        lod->addChild(reduced, 50.f, std::numeric_limits<float>::max());
+
+        const std::unique_ptr<const MWRender::GpuTemplate> tmpl = scene->extract(*lod, ~0u, false);
+        ASSERT_TRUE(tmpl);
+        std::vector<GpuScene::Instance> instances;
+        scene->appendGroundcoverInstances(*tmpl, osg::Matrixf::identity(), 1.f, instances);
+
+        ASSERT_EQ(instances.size(), 2u);
+        EXPECT_TRUE(instances[0].mLod);
+        EXPECT_TRUE(instances[0].mGroundcoverLod);
+        EXPECT_FLOAT_EQ(instances[0].mLodMin, 0.f);
+        EXPECT_FLOAT_EQ(instances[0].mLodMax, 50.f);
+        EXPECT_TRUE(instances[1].mLod);
+        EXPECT_TRUE(instances[1].mGroundcoverLod);
+        EXPECT_FLOAT_EQ(instances[1].mLodMin, 50.f);
+        EXPECT_EQ(instances[1].mLodMax, std::numeric_limits<float>::max());
+        const osg::ref_ptr<osg::Node> chunk = scene->createChunk(
+            std::move(instances), osg::BoundingSphere(osg::Vec3f(), 1.f), false, GpuScene::ChunkKind::Groundcover);
+        ASSERT_TRUE(chunk);
+        EXPECT_EQ(statValue(*scene, "GPU groundcover detailed instances"), 1.0);
+        EXPECT_EQ(statValue(*scene, "GPU groundcover reduced instances"), 1.0);
+        EXPECT_EQ(statValue(*scene, "GPU groundcover detailed triangles"), 1.0);
+        EXPECT_EQ(statValue(*scene, "GPU groundcover reduced triangles"), 1.0);
+        EXPECT_NO_THROW(scene->setGroundcoverDistances(75.f, 100.f));
+        EXPECT_THROW(scene->setGroundcoverDistances(101.f, 100.f), std::invalid_argument);
+    }
+
+    TEST_F(GpuSceneArrayTest, DefersGpuTerrainCompositeMapsUntilVisible)
+    {
+        forceMode("legacy");
+        const std::unique_ptr<GpuScene> scene = makeScene();
+        ASSERT_TRUE(scene->isSupported());
+
+        const osg::ref_ptr<osg::Texture2D> texture = makeTexture(makeImage(sSide, 43));
+        const osg::ref_ptr<osg::Geometry> triangle = makeTriangle();
+        osg::ref_ptr<Terrain::TerrainDrawable> terrain = new Terrain::TerrainDrawable;
+        terrain->setVertexArray(triangle->getVertexArray());
+        for (unsigned int index = 0; index < triangle->getNumPrimitiveSets(); ++index)
+            terrain->addPrimitiveSet(triangle->getPrimitiveSet(index));
+        terrain->setPasses({ makeState(*texture) });
+
+        const osg::ref_ptr<Terrain::CompositeMapRenderer> renderer = new Terrain::CompositeMapRenderer;
+        const osg::ref_ptr<Terrain::CompositeMap> map = new Terrain::CompositeMap;
+        map->mTexture = texture;
+        renderer->addCompositeMap(map, false);
+        terrain->setCompositeMap(map);
+        terrain->setCompositeMapRenderer(renderer);
+
+        const osg::ref_ptr<osg::Node> chunk = scene->createTerrainChunk(*terrain, osg::Vec3f(), false);
+        ASSERT_TRUE(chunk);
+        ASSERT_EQ(renderer->getCompileSetSize(), 1u);
+
+        osg::ref_ptr<osg::Camera> shadow = new osg::Camera;
+        shadow->setName("ShadowCamera");
+        cullNode(*chunk, *shadow, 1);
+        EXPECT_EQ(renderer->getCompileSetSize(), 1u);
+
+        const osg::ref_ptr<osg::Camera> sceneCamera = new osg::Camera;
+        cullNode(*chunk, *sceneCamera, 2);
+        EXPECT_EQ(renderer->getCompileSetSize(), 0u);
     }
 
     TEST_F(GpuSceneArrayTest, ReceiversShareChunkInstances)
@@ -1073,8 +1301,8 @@ namespace
             { 0.f, std::numeric_limits<float>::max() }, false, first);
         const std::size_t firstCount = first.size();
         ASSERT_GE(firstCount, 2u);
-        const osg::ref_ptr<osg::Node> lit
-            = scene->createChunk(std::move(first), osg::BoundingSphere(osg::Vec3f(), 1.f), true);
+        const osg::ref_ptr<osg::Node> lit = scene->createChunk(
+            std::move(first), osg::BoundingSphere(osg::Vec3f(), 1.f), true, GpuScene::ChunkKind::Object);
         ASSERT_TRUE(lit);
 
         // The sentinel burns one slot.
@@ -1083,8 +1311,8 @@ namespace
         std::vector<GpuScene::Instance> second;
         scene->appendInstances(*tmpl, osg::Matrixf::translate(8.f, 0.f, 0.f), 1.f,
             { 0.f, std::numeric_limits<float>::max() }, false, second);
-        const osg::ref_ptr<osg::Node> more
-            = scene->createChunk(std::move(second), osg::BoundingSphere(osg::Vec3f(), 1.f), true);
+        const osg::ref_ptr<osg::Node> more = scene->createChunk(
+            std::move(second), osg::BoundingSphere(osg::Vec3f(), 1.f), true, GpuScene::ChunkKind::Object);
         ASSERT_TRUE(more);
 
         EXPECT_EQ(statValue(*scene, "GPU receiver slots"), 3.0);
@@ -1106,8 +1334,8 @@ namespace
             *tmpl, osg::Matrixf::identity(), 1.f, { 0.f, std::numeric_limits<float>::max() }, false, instances);
         const std::size_t count = instances.size();
         ASSERT_GE(count, 1u);
-        osg::ref_ptr<osg::Node> lit
-            = scene->createChunk(std::move(instances), osg::BoundingSphere(osg::Vec3f(), 1.f), true);
+        osg::ref_ptr<osg::Node> lit = scene->createChunk(
+            std::move(instances), osg::BoundingSphere(osg::Vec3f(), 1.f), true, GpuScene::ChunkKind::Object);
         ASSERT_TRUE(lit);
         const double grown = statValue(*scene, "GPU receiver slots");
         EXPECT_EQ(grown, 2.0);
@@ -1118,11 +1346,168 @@ namespace
         scene->appendInstances(
             *tmpl, osg::Matrixf::identity(), 1.f, { 0.f, std::numeric_limits<float>::max() }, false, replacement);
         ASSERT_EQ(replacement.size(), count);
-        const osg::ref_ptr<osg::Node> reused
-            = scene->createChunk(std::move(replacement), osg::BoundingSphere(osg::Vec3f(), 1.f), true);
+        const osg::ref_ptr<osg::Node> reused = scene->createChunk(
+            std::move(replacement), osg::BoundingSphere(osg::Vec3f(), 1.f), true, GpuScene::ChunkKind::Object);
         ASSERT_TRUE(reused);
 
         // The freed range serves the new chunk.
         EXPECT_EQ(statValue(*scene, "GPU receiver slots"), grown);
+    }
+
+    TEST_F(GpuSceneArrayTest, DemotesFailedArrayProbe)
+    {
+        forceMode("array");
+        const std::unique_ptr<GpuScene> scene = makeScene();
+        ASSERT_TRUE(scene->isSupported());
+        const osg::ref_ptr<osg::StateSet> state = makeState(*makeTexture(makeImage(sSide, 23)));
+        ASSERT_NE(surfaceOf(*scene, *state).mBucket, GpuScene::sInvalid);
+        osg::GLExtensions& extensions = SceneUtil::getGLExtensions();
+        const auto storage = extensions.glTexStorage3D;
+        extensions.glTexStorage3D = nullptr;
+        scene->compile(*sContext->getState());
+        extensions.glTexStorage3D = storage;
+        EXPECT_FALSE(scene->isSupported());
+        EXPECT_FALSE(scene->isEnabled());
+        EXPECT_TRUE(scene->takeDemotion());
+        EXPECT_FALSE(scene->takeDemotion());
+        EXPECT_EQ(surfaceOf(*scene, *state).mBucket, GpuScene::sInvalid);
+        scene->releaseGLObjects(sContext->getState());
+    }
+
+    TEST_F(GpuSceneArrayTest, CompilesSamplerParameters)
+    {
+        osg::State& state = *sContext->getState();
+        const osg::GLExtensions& extensions = *state.get<osg::GLExtensions>();
+        const osg::ref_ptr<MWRender::GpuSampler> sampler = new MWRender::GpuSampler;
+        sampler->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_BORDER);
+        sampler->setWrap(osg::Texture::WRAP_T, osg::Texture::MIRROR);
+        sampler->setWrap(osg::Texture::WRAP_R, osg::Texture::CLAMP_TO_EDGE);
+        sampler->setFilter(osg::Texture::MIN_FILTER, osg::Texture::NEAREST_MIPMAP_NEAREST);
+        sampler->setFilter(osg::Texture::MAG_FILTER, osg::Texture::NEAREST);
+        sampler->setLODBias(0.5f);
+        sampler->compileGLObjects(state);
+        const GLuint object = sampler->object(state.getContextID());
+        EXPECT_NE(object, 0u);
+        for (const auto& [name, expected] : { std::pair<GLenum, GLint>{ GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER },
+                 { GL_TEXTURE_WRAP_T, GL_MIRRORED_REPEAT }, { GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE },
+                 { GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST }, { GL_TEXTURE_MAG_FILTER, GL_NEAREST },
+                 { GL_TEXTURE_COMPARE_MODE, GL_NONE } })
+        {
+            GLint value = 0;
+            extensions.glGetSamplerParameteriv(object, name, &value);
+            EXPECT_EQ(value, expected) << name;
+        }
+        GLfloat bias = 0.f;
+        extensions.glGetSamplerParameterfv(object, GL_TEXTURE_LOD_BIAS, &bias);
+        EXPECT_FLOAT_EQ(bias, 0.5f);
+        EXPECT_EQ(glGetError(), GL_NO_ERROR);
+
+        sampler->setWrap(osg::Texture::WRAP_R, osg::Texture::REPEAT);
+        sampler->compileGLObjects(state);
+        EXPECT_EQ(sampler->object(state.getContextID()), object);
+        GLint wrap = 0;
+        extensions.glGetSamplerParameteriv(object, GL_TEXTURE_WRAP_R, &wrap);
+        EXPECT_EQ(wrap, GL_REPEAT);
+        sampler->releaseGLObjects(&state);
+    }
+
+    TEST_F(GpuSceneArrayTest, DrainsPendingUploads)
+    {
+        forceMode("array");
+        const std::unique_ptr<GpuScene> scene = makeScene();
+        ASSERT_TRUE(scene->isSupported());
+        std::vector<osg::ref_ptr<osg::StateSet>> states;
+        for (unsigned int i = 0; i < 257; ++i)
+        {
+            states.push_back(makeState(*makeTexture(makeImage(2, static_cast<unsigned char>(i)))));
+            ASSERT_NE(surfaceOf(*scene, *states.back()).mBucket, GpuScene::sInvalid);
+        }
+        ASSERT_GT(scene->getPendingWork(), 200u);
+        scene->compile(*sContext->getState());
+        EXPECT_EQ(scene->getPendingWork(), 0u);
+        EXPECT_EQ(glGetError(), GL_NO_ERROR);
+        scene->releaseGLObjects(sContext->getState());
+    }
+
+    TEST_F(GpuSceneArrayTest, BakesFrozenCallbackNodes)
+    {
+        forceMode("array");
+        const std::unique_ptr<GpuScene> scene = makeScene();
+        ASSERT_TRUE(scene->isSupported());
+
+        const osg::ref_ptr<osg::Texture2D> texture = makeTexture(makeImage(sSide, 47));
+        const osg::ref_ptr<osg::Geometry> geometry = makeTriangle();
+        geometry->setStateSet(makeState(*texture));
+        const osg::ref_ptr<osg::Group> updated = new osg::Group;
+        updated->addUpdateCallback(new NoopNodeCallback);
+        updated->addChild(geometry);
+        const osg::ref_ptr<osg::Group> root = new osg::Group;
+        root->addChild(updated);
+
+        EXPECT_FALSE(scene->extract(*root, ~0u, false));
+        const std::unique_ptr<const MWRender::GpuTemplate> frozen = scene->extract(*root, ~0u, true);
+        ASSERT_TRUE(frozen);
+        EXPECT_FALSE(frozen->mLegacy);
+        EXPECT_EQ(frozen->mGeometries.size(), 1u);
+    }
+
+    TEST_F(GpuSceneArrayTest, FreesCapturedMesh)
+    {
+        forceMode("array");
+        const std::unique_ptr<GpuScene> scene = makeScene();
+        ASSERT_TRUE(scene->isSupported());
+
+        const osg::ref_ptr<osg::Texture2D> texture = makeTexture(makeImage(sSide, 131));
+        osg::ref_ptr<osg::Group> root = new osg::Group;
+        root->setStateSet(makeState(*texture));
+        osg::ref_ptr<osg::Geometry> geometry = makeTriangle();
+        root->addChild(geometry);
+        scene->capture(*root);
+
+        const osg::ref_ptr<osg::Camera> camera = new osg::Camera;
+        cullNode(*scene->getNode(), *camera, 1);
+        cullNode(*root, *camera, 1);
+        ASSERT_GT(statValue(*scene, "GPU mesh bytes"), 0.0);
+
+        geometry = nullptr;
+        root = nullptr;
+        runFrame(*scene, 2);
+        EXPECT_EQ(statValue(*scene, "GPU mesh bytes"), 0.0);
+    }
+
+    TEST_F(GpuSceneArrayTest, KeepsOrderedClassic)
+    {
+        forceMode("array");
+        const std::unique_ptr<GpuScene> scene = makeScene();
+        ASSERT_TRUE(scene->isSupported());
+
+        const osg::ref_ptr<osg::Texture2D> texture = makeTexture(makeImage(sSide, 137));
+        const osg::ref_ptr<osg::Group> root = new osg::Group;
+        root->setStateSet(makeState(*texture));
+        root->getStateSet()->setRenderingHint(osg::StateSet::TRANSPARENT_BIN);
+        root->addChild(makeTriangle());
+        scene->capture(*root);
+
+        const osg::ref_ptr<osg::Camera> camera = new osg::Camera;
+        cullNode(*scene->getNode(), *camera, 1);
+        cullNode(*root, *camera, 1);
+        EXPECT_EQ(statValue(*scene, "GPU mesh bytes"), 0.0);
+
+        root->getStateSet()->setRenderBinToInherit();
+        root->getStateSet()->setMode(GL_BLEND, osg::StateAttribute::ON);
+        cullNode(*scene->getNode(), *camera, 2);
+        cullNode(*root, *camera, 2);
+        EXPECT_EQ(statValue(*scene, "GPU mesh bytes"), 0.0);
+
+        root->getStateSet()->setMode(GL_BLEND, osg::StateAttribute::OFF);
+        root->getStateSet()->setRenderBinDetails(0, "SORT_BACK_TO_FRONT");
+        cullNode(*scene->getNode(), *camera, 3);
+        cullNode(*root, *camera, 3);
+        EXPECT_EQ(statValue(*scene, "GPU mesh bytes"), 0.0);
+
+        root->getStateSet()->setRenderBinToInherit();
+        cullNode(*scene->getNode(), *camera, 4);
+        cullNode(*root, *camera, 4);
+        EXPECT_GT(statValue(*scene, "GPU mesh bytes"), 0.0);
     }
 }

@@ -359,6 +359,9 @@ namespace MWRender
         /// Hand the selected GPU scene to every renderer that can contribute compatible geometry.
         void wireGpuScene(GpuScene* scene);
 
+        /// Release context-owned GPU resources before destroying the optional GPU scene.
+        void destroyGpuScene();
+
         /// Recreate the GPU scene after an immutable skinning or material policy changes.
         bool reconfigureGpuScene();
 

@@ -1511,8 +1511,15 @@ namespace MWRender
 
     void Animation::setGpuScene(GpuScene* scene)
     {
+        if (mCaptureScene != nullptr && mCaptureScene != scene)
+            detachGpuInstances();
         mCaptureScene = scene;
         refreshGpuInstances();
+    }
+
+    void Animation::detachGpuInstances()
+    {
+        pruneBareBones();
     }
 
     void Animation::refreshGpuInstances()
@@ -1797,6 +1804,8 @@ namespace MWRender
 
         mExtraLightSource = SceneUtil::addLight(parent, esmLight, Mask_Lighting, exterior);
         mExtraLightSource->setActorFade(mActorFade);
+        if (exterior && mPtr.getType() == ESM::REC_LIGH)
+            mExtraLightSource->setPagedId(SceneUtil::pagedLightId(mPtr.getCellRef().getRefNum()));
     }
 
     void Animation::addEffect(std::string_view model, std::string_view effectId, bool loop, std::string_view bonename,
@@ -2358,7 +2367,7 @@ namespace MWRender
             osg::LOD::MinMaxPair(0.f, std::numeric_limits<float>::max()), true, instances);
         osg::BoundingSphere bound = mObjectRoot->getBound();
         bound.set(bound.center() * base, bound.radius() * scale.x());
-        mGpuChunk = mCaptureScene->createChunk(std::move(instances), bound, true);
+        mGpuChunk = mCaptureScene->createChunk(std::move(instances), bound, true, GpuScene::ChunkKind::Actor);
         if (mGpuChunk == nullptr)
             return;
         mGpuHidden = std::move(hidden);
@@ -2407,13 +2416,20 @@ namespace MWRender
     {
         if (mGpuChunk == nullptr)
             return;
-        mCaptureScene->removeResident(*mGpuChunk);
+        if (mCaptureScene != nullptr)
+            mCaptureScene->removeResident(*mGpuChunk);
         mGpuChunk = nullptr;
         mGpuHidden = nullptr;
         for (const auto& [node, mask] : mHiddenNodes)
             node->setNodeMask(mask);
         mHiddenNodes.clear();
         unparkInsert();
+    }
+
+    void ObjectAnimation::detachGpuInstances()
+    {
+        dropGpuInstances();
+        Animation::detachGpuInstances();
     }
 
     osg::Vec3f ObjectAnimation::runAnimation(float duration)

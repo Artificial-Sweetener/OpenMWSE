@@ -1121,10 +1121,10 @@
                     <Widget type="TabItem" name="OptimizationsPage">
                         <Property key="Caption" value=" #{OMWEngine:Optimizations} "/>
                         <Widget type="ScrollView" skin="MW_ScrollView" position_real="0 0 1 1" align="Stretch">
-                            <Property key="CanvasSize" value="352 312"/>
+                            <Property key="CanvasSize" value="352 450"/>
                             <Property key="CanvasAlign" value="Left Top"/>
                             <Property key="VisibleHScroll" value="false"/>
-                            <Widget type="VBox" position="0 0 352 300" align="Left Top">
+                            <Widget type="VBox" position="0 0 352 450" align="Left Top">
                                 <Widget type="HBox" align="Stretch">
                                     <UserString key="HStretch" value="true"/>
                                     <UserString key="VStretch" value="false"/>
@@ -1249,6 +1249,81 @@
                                         <UserString key="ToolTipType" value="Layout"/>
                                         <UserString key="ToolTipLayout" value="TextToolTip"/>
                                         <UserString key="Caption_Text" value="#{OMWEngine:GpuSceneLightingTooltip}"/>
+                                    </Widget>
+                                </Widget>
+                                <Widget type="HBox" align="Stretch">
+                                    <UserString key="HStretch" value="true"/>
+                                    <UserString key="VStretch" value="false"/>
+                                    <Widget type="AutoSizedButton" skin="MW_Button" name="GpuStorageBudgetButton">
+                                        <UserString key="SettingCategory" value="Optimizations"/>
+                                        <UserString key="SettingName" value="gpu storage budget"/>
+                                        <UserString key="SettingType" value="CheckButton"/>
+                                    </Widget>
+                                    <Widget type="AutoSizedTextBox" skin="SandText">
+                                        <Property key="Caption" value="#{OMWEngine:GpuStorageBudget}"/>
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:GpuStorageBudgetTooltip}"/>
+                                    </Widget>
+                                </Widget>
+                                <Widget type="HBox" align="Stretch">
+                                    <UserString key="HStretch" value="true"/>
+                                    <UserString key="VStretch" value="false"/>
+                                    <Widget type="AutoSizedButton" skin="MW_Button" name="LowEndIndirectBatchingButton">
+                                        <UserString key="SettingCategory" value="Optimizations"/>
+                                        <UserString key="SettingName" value="low end indirect batching"/>
+                                        <UserString key="SettingType" value="CheckButton"/>
+                                    </Widget>
+                                    <Widget type="AutoSizedTextBox" skin="SandText">
+                                        <Property key="Caption" value="#{OMWEngine:LowEndIndirectBatching}"/>
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:LowEndIndirectBatchingTooltip}"/>
+                                    </Widget>
+                                </Widget>
+                                <Widget type="HBox" align="Stretch">
+                                    <UserString key="HStretch" value="true"/>
+                                    <UserString key="VStretch" value="false"/>
+                                    <Widget type="AutoSizedButton" skin="MW_Button" name="GpuLightOcclusionButton">
+                                        <UserString key="SettingCategory" value="Optimizations"/>
+                                        <UserString key="SettingName" value="gpu light occlusion"/>
+                                        <UserString key="SettingType" value="CheckButton"/>
+                                    </Widget>
+                                    <Widget type="AutoSizedTextBox" skin="SandText">
+                                        <Property key="Caption" value="#{OMWEngine:GpuLightOcclusion}"/>
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:GpuLightOcclusionTooltip}"/>
+                                    </Widget>
+                                </Widget>
+                                <Widget type="HBox" align="Stretch">
+                                    <UserString key="HStretch" value="true"/>
+                                    <UserString key="VStretch" value="false"/>
+                                    <Widget type="AutoSizedButton" skin="MW_Button" name="GpuDistantPagingButton">
+                                        <UserString key="SettingCategory" value="Optimizations"/>
+                                        <UserString key="SettingName" value="gpu distant paging"/>
+                                        <UserString key="SettingType" value="CheckButton"/>
+                                    </Widget>
+                                    <Widget type="AutoSizedTextBox" skin="SandText">
+                                        <Property key="Caption" value="#{OMWEngine:GpuDistantPaging}"/>
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:GpuDistantPagingTooltip}"/>
+                                    </Widget>
+                                </Widget>
+                                <Widget type="HBox" align="Stretch">
+                                    <UserString key="HStretch" value="true"/>
+                                    <UserString key="VStretch" value="false"/>
+                                    <Widget type="AutoSizedButton" skin="MW_Button" name="SkipDormantRipplesButton">
+                                        <UserString key="SettingCategory" value="Optimizations"/>
+                                        <UserString key="SettingName" value="skip dormant ripples"/>
+                                        <UserString key="SettingType" value="CheckButton"/>
+                                    </Widget>
+                                    <Widget type="AutoSizedTextBox" skin="SandText">
+                                        <Property key="Caption" value="#{OMWEngine:SkipDormantRipples}"/>
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:SkipDormantRipplesTooltip}"/>
                                     </Widget>
                                 </Widget>
                             </Widget>

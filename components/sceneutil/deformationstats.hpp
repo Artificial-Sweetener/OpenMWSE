@@ -18,6 +18,10 @@ namespace SceneUtil
     inline constexpr std::string_view morphVertexCounter = "Diagnostic Morph Vertices";
     inline constexpr std::string_view deformationUploadByteCounter = "Diagnostic Upload Bytes";
     inline constexpr std::string_view deformationCpuMillisecondCounter = "Diagnostic Deformation CPU Milliseconds";
+    /// Names the per-frame population of actor rigs owned by GPU deformation.
+    inline constexpr std::string_view gpuDeformationRigCounter = "Diagnostic GPU Deformation Rigs";
+    /// Names the per-frame population of captured actor rigs retained on CPU deformation.
+    inline constexpr std::string_view gpuDeformationFallbackCounter = "Diagnostic GPU Deformation Fallbacks";
 
     /// Identifies the CPU deformation implementation that produced diagnostic work.
     enum class DeformationPath

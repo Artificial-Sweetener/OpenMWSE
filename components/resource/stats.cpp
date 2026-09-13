@@ -1,5 +1,7 @@
 #include "stats.hpp"
 
+#include "gpustatsoverlay.hpp"
+
 #include <algorithm>
 #include <iomanip>
 #include <span>
@@ -245,27 +247,6 @@ namespace Resource
 
             return nullptr;
         }
-
-        class SetFontVisitor : public osg::NodeVisitor
-        {
-        public:
-            SetFontVisitor(osgText::Font* font)
-                : osg::NodeVisitor(TRAVERSE_ALL_CHILDREN)
-                , mFont(font)
-            {
-            }
-
-            void apply(osg::Drawable& node) override
-            {
-                if (osgText::Text* text = dynamic_cast<osgText::Text*>(&node))
-                {
-                    text->setFont(mFont);
-                }
-            }
-
-        private:
-            osgText::Font* mFont;
-        };
     }
 
     Profiler::Profiler(bool offlineCollect, const VFS::Manager& vfs)
@@ -279,13 +260,13 @@ namespace Resource
         setupStatCollection();
     }
 
-    void Profiler::setUpFonts()
+    void Profiler::setUpFonts(osgViewer::ViewerBase& viewer)
     {
-        if (mTextFont != nullptr)
-        {
-            SetFontVisitor visitor(mTextFont);
-            _switch->accept(visitor);
-        }
+        osgViewer::ViewerBase::Cameras cameras;
+        collectWhichCamerasToRenderStatsFor(&viewer, cameras);
+        configureGpuStatsOverlay(*_switch, _cameraSceneChildNum, *_statsGeode, *_camera, cameras,
+            viewer.getViewerStats(), mTextFont, _blockMultiplier, _numBlocks, _statsWidth - _startBlocks - 10,
+            characterSize);
 
         mInitFonts = true;
     }
@@ -295,15 +276,15 @@ namespace Resource
         osgViewer::ViewerBase* viewer = nullptr;
 
         bool handled = StatsHandler::handle(ea, aa);
-        if (_initialized && !mInitFonts)
-            setUpFonts();
-
         auto* view = dynamic_cast<osgViewer::View*>(&aa);
         if (view)
             viewer = view->getViewerBase();
 
         if (viewer != nullptr)
         {
+            if (_initialized && !mInitFonts)
+                setUpFonts(*viewer);
+            viewer->getViewerStats()->collectStats("gpu_scene", _statsType >= StatsHandler::CAMERA_SCENE_STATS);
             // Add/remove openmw stats to the osd as necessary
             viewer->getViewerStats()->collectStats("engine", _statsType >= StatsHandler::StatsType::VIEWER_STATS);
 
@@ -611,6 +592,8 @@ namespace Resource
             if (collectStatCameraObjects)
                 camera->getStats()->collectStats("scene", true);
         }
+        if (collectStatCameraObjects)
+            viewer.getViewerStats()->collectStats("gpu_scene", true);
         if (collectStatEvent)
             viewer.getViewerStats()->collectStats("event", true);
         if (collectStatFrameRate)

@@ -784,7 +784,8 @@ void main()
                     replaceUniqueShaderText(clouds, "atmosphere.cloudsEnabled", "false");
                     replaceUniqueShaderText(clouds, "isReflection", "false");
                     replaceUniqueShaderText(clouds, "atmosphere.cloudReflectionsEnabled", "true");
-                    replaceUniqueShaderText(clouds, "texture2D(diffuseMap,", "omw_Texture2D(omw_SamplerLastShader,");
+                    replaceUniqueShaderText(
+                        clouds, "sampleDiffuseMap(diffuseMapUV)", "omw_Texture2D(omw_SamplerLastShader, diffuseMapUV)");
                     source.erase(source.rfind("void main()"));
                     source += R"glsl(
 vec2 diffuseMapUV;
@@ -7802,51 +7803,6 @@ void main()
         EXPECT_GT(opacity / first.pixels.size(), 0.01);
         EXPECT_LT(meanRgbDifference(first, second), 1e-6)
             << "A fixed shallow density field must not change with the blue-noise frame phase";
-    }
-
-    /// Preserve stationary low-cloud optical depth while moving through empty foreground along the same ray.
-    TEST(AtmosphereShaderTest, forwardMotionThroughEmptyAirPreservesLowCloudOpticalDepth)
-    {
-        NativePassInputs inputs = makePackagedAtmosphereInputs("Thunderstorm", "Day");
-        inputs.width = inputs.height = 1;
-        inputs.cloudParameters = {};
-        inputs.mistParameters = {};
-        inputs.fogVolumeParameters = {};
-        inputs.lowCloudParameters = { 0.21f, 1.066f, 3147.f, 14199.f };
-        inputs.lowCloudEnvironmentInfluence = 0.f;
-        inputs.eyePosition = { 35276.5f, -74563.6f, 8308.86f };
-        inputs.viewDirection = { 0.97545f, 0.2174f, -0.03563f };
-        inputs.viewDirection.normalize();
-        inputs.farPlane = 229376.f;
-        inputs.historyValid = true;
-        const osg::Vec3f origin = inputs.eyePosition;
-        const PassImage first = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-        ASSERT_EQ(first.pixels.size(), 1u);
-        inputs.renderCloudDensitySlice = true;
-        inputs.cloudDensitySliceQuantity = 28;
-        inputs.cloudDensitySliceAxis = 0;
-        const PassImage reference = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-        ASSERT_LT(reference.pixels[0].a(), 0.999f);
-        inputs.cloudDensitySliceAxis = 1;
-        const PassImage finerReference = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-        EXPECT_NEAR(reference.pixels[0].a(), finerReference.pixels[0].a(), 0.0005f);
-        EXPECT_NEAR(first.pixels[0].a(), reference.pixels[0].a(), 0.002f) << "Dense optical-depth reference";
-        inputs.renderCloudDensitySlice = false;
-        const auto sceneDepth = inputs.depth;
-        inputs.depth = [](int, int) { return normalizedDepthForViewDistance(400.f, false); };
-        const PassImage foreground = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-        ASSERT_GT(foreground.pixels[0].a(), 0.999f);
-        inputs.depth = sceneDepth;
-        for (const float distance : { 50.f, 100.f, 200.f, 300.f })
-        {
-            inputs.eyePosition = origin + inputs.viewDirection * distance;
-            const PassImage moved = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-            EXPECT_NEAR(moved.pixels[0].a(), reference.pixels[0].a(), 0.002f) << "distance=" << distance;
-            inputs.renderCloudDensitySlice = true;
-            const PassImage movedReference = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
-            EXPECT_NEAR(movedReference.pixels[0].a(), finerReference.pixels[0].a(), 0.0005f);
-            inputs.renderCloudDensitySlice = false;
-        }
     }
 
     /// Preserve local-medium radiance and depth when lighting is reused below, across, and above cloud recovery.

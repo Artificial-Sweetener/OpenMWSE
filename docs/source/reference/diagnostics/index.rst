@@ -261,7 +261,9 @@ The versioned providers expose these evidence domains:
   Pending or unsupported results are not zero-duration samples; their durations remain unavailable.
   Groundcover attribution includes submitted model batches and drawables plus a diagnostic-only conservative per-instance
   frustum and distance test of instances accepted by cluster visibility. The additional instance test runs only during bounded
-  scene-statistics collection and measures potential GPU rejection without changing submitted work.
+  scene-statistics collection and measures potential GPU rejection without changing submitted work. GPU-scene captures report
+  resident detailed and reduced groundcover instance and triangle populations separately, proving that both live-distance LOD
+  representations are available without treating residency as visibility.
   Each shadow map reports its own CPU time, GPU time, post-sort render leaves, state graphs, directional-light vertical
   magnitude, and scene-linear luminance so aggregate shadow cost can be traced to a specific map, its submitted work, and the
   low-sun light state. Terrain-composite detail reports the scheduler budget, queue
@@ -278,6 +280,10 @@ The versioned providers expose these evidence domains:
   are recorded as unavailable rather than inferred. Resolve byte counts describe the logical destination attachment volume
   written by the copies; they are not an estimate of hardware bus traffic. The endpoint remains passive between requests;
   expensive scene, timing-query, and work-counter collection is enabled only for a bounded performance capture and then restored.
+  ``deformation.gpu-rigs`` counts captured actor rigs successfully owned by GPU deformation, while
+  ``fallback.gpu-deformation`` counts captured rigs that remain on CPU deformation after GPU eligibility and capability checks.
+  Both counters are zero when the GPU scene exists but GPU skinning is inactive, and unavailable when no GPU scene publishes
+  them; baseline CPU work remains represented by the ordinary deformation counters.
 
 A ``.omwdiag`` capsule contains a manifest, effective settings, full loadable world snapshot, stable world state, provider
 versions, frame identity, and performance evidence. A scenario capsule also contains its versioned deterministic atmosphere
@@ -361,7 +367,7 @@ appearance to OpenMWSE, godrays and cloud sun occlusion to enabled, and sun glar
 The controller verifies requested-versus-observed preferences and retains the sequence with replay evidence.
 ``--capture-route-native-frames`` captures the actual rendered transition frames.
 
-``run`` and ``replay`` accept ``--video-settings-page atmosphere|water|shadows|detail`` to display the real video settings page
+``run`` and ``replay`` accept ``--video-settings-page atmosphere|water|shadows|detail|optimizations`` to display the real video settings page
 inside the isolated child for graphical review. Both preference mutation and menu navigation are rejected by interactive
 sessions; the user's normal profile is not changed.
 
@@ -378,3 +384,16 @@ Version 1 retains the current shadow resolution. The sequence contains one entry
 Both numeric fields are checked after entry, and the
 controller verifies the resulting canonical settings and records ``distance-settings-<segment>.yaml``.
 This operation is restricted to isolated diagnostic children. The source profile remains unchanged.
+
+Live optimization controls
+--------------------------
+
+``replay --optimization-settings-sequence sequence.yaml`` applies the prerequisite and all twelve subordinate
+optimization selections before each gameplay-route segment. Each entry uses ``settings-version: 1`` and contains
+boolean ``enabled``, ``gpu-driven-paging``, ``gpu-skinning``, ``gpu-occlusion-culling``, ``gpu-actors``,
+``gpu-texture-arrays``, ``indexed-light-lists``, ``gpu-scene-lighting``, ``gpu-storage-budget``,
+``low-end-indirect-batching``, ``gpu-light-occlusion``, ``gpu-distant-paging``, and ``skip-dormant-ripples`` fields.
+The controller applies each entry through the renderer's ordinary settings-change lifecycle, verifies the complete
+observed selection, and records ``optimization-settings-<segment>.yaml``. A sequence that changes only ``enabled``
+verifies baseline and selected optimized rendering in the same process while retaining every subordinate preference.
+The sequence contains one entry per segment, at most 64, and is restricted to isolated diagnostic children.

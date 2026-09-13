@@ -33,7 +33,8 @@ namespace Resource
         bool handle(const osgGA::GUIEventAdapter& ea, osgGA::GUIActionAdapter& aa) override;
 
     private:
-        void setUpFonts();
+        /// Configure fonts and extend OSG's camera overlay with GPU-scene statistics.
+        void setUpFonts(osgViewer::ViewerBase& viewer);
 
         bool mInitFonts = false;
         bool mOfflineCollect;

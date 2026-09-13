@@ -77,6 +77,7 @@ file(GLOB UNITTEST_SRC_FILES
     diagnostics/atmospherescenario.cpp
     diagnostics/atmospheresettings.cpp
     diagnostics/distancesettings.cpp
+    diagnostics/optimizationsettings.cpp
     diagnostics/commandqueue.cpp
     diagnostics/capsule.cpp
     diagnostics/gameplayroute.cpp
@@ -100,8 +101,11 @@ file(GLOB UNITTEST_SRC_FILES
 
     esmterrain/testgridsampling.cpp
 
+    terrain/compositemapvisibility.cpp
+
     resource/testobjectcache.cpp
     resource/testresourcesystem.cpp
+    resource/gpustatsoverlay.cpp
 
     vfs/testpathutil.cpp
 

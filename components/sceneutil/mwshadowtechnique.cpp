@@ -1683,7 +1683,11 @@ void MWShadowTechnique::createShaders()
         _fallbackBaseTexture->setFilter(osg::Texture2D::MIN_FILTER,osg::Texture2D::NEAREST);
         _fallbackBaseTexture->setFilter(osg::Texture2D::MAG_FILTER,osg::Texture2D::NEAREST);
 
-        _fallbackShadowMapTexture = new osg::Texture2D(image.get());
+        osg::ref_ptr<osg::Image> shadowImage = new osg::Image;
+        shadowImage->allocateImage(1, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT);
+        *reinterpret_cast<float*>(shadowImage->data()) = 1.f;
+
+        _fallbackShadowMapTexture = new osg::Texture2D(shadowImage.get());
         _fallbackShadowMapTexture->setWrap(osg::Texture2D::WRAP_S,osg::Texture2D::REPEAT);
         _fallbackShadowMapTexture->setWrap(osg::Texture2D::WRAP_T,osg::Texture2D::REPEAT);
         _fallbackShadowMapTexture->setFilter(osg::Texture2D::MIN_FILTER,osg::Texture2D::NEAREST);

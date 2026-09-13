@@ -3,6 +3,7 @@
 
 #include "groundcoverlod.hpp"
 
+#include <osg/StateSet>
 #include <osg/Uniform>
 
 namespace MWRender
@@ -32,8 +33,8 @@ namespace MWRender
         float get() const { return mDistance; }
         /// Return the current distance at which reduced geometry may be selected.
         float getFarLodDistance() const { return mFarLodDistance; }
-        /// Return the shared fade uniform for the chunk's material state.
-        osg::Uniform* getFadeUniform() const { return mFade; }
+        /// Attach the shared live fade interval to a legacy or GPU material state.
+        void attachFadeUniform(osg::StateSet& stateSet) const { stateSet.addUniform(mFade); }
 
     private:
         float mDistance = 0;

@@ -327,6 +327,9 @@ namespace MWRender
 
         void animationEnded(AnimState& state) const;
 
+        /// Detaches GPU-owned representations while the current scene remains available.
+        virtual void detachGpuInstances();
+
     public:
         Animation(
             const MWWorld::Ptr& ptr, osg::ref_ptr<osg::Group> parentNode, Resource::ResourceSystem* resourceSystem);
@@ -450,6 +453,7 @@ namespace MWRender
 
         virtual osg::Vec3f runAnimation(float duration);
 
+        /// Moves this animation between CPU rendering and the supplied GPU scene.
         void setGpuScene(GpuScene* scene);
 
         void setLoopingEnabled(std::string_view groupname, bool enabled);
@@ -498,6 +502,7 @@ namespace MWRender
         virtual float getBodyPitchRadians() const { return mBodyPitchRadians; }
 
         virtual void setAccurateAiming(bool enabled) {}
+        /// Rebuilds this animation's representation for the current GPU scene.
         virtual void refreshGpuInstances();
         virtual void flushGpuRefresh() {}
         /// Keeps drawable-free bone subtrees out of cull.
@@ -543,6 +548,8 @@ namespace MWRender
     private:
         void buildGpuInstances();
         void dropGpuInstances();
+        /// Releases resident static-object state before changing GPU scenes.
+        void detachGpuInstances() override;
         void parkInsert();
         void unparkInsert();
 

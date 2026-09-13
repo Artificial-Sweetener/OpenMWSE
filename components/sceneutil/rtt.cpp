@@ -134,6 +134,9 @@ namespace SceneUtil
     osg::Texture2D* RTTNode::createTexture(GLint internalFormat)
     {
         osg::Texture2D* texture = new osg::Texture2D;
+        texture->setSubloadCallback(new RenderTextureStorage);
+        if (mGenerateMipmaps && !SceneUtil::isDepthFormat(internalFormat))
+            texture->setNumMipmapLevels(osg::Image::computeNumberOfMipmapLevels(mTextureWidth, mTextureHeight));
         texture->setTextureSize(mTextureWidth, mTextureHeight);
         texture->setInternalFormat(internalFormat);
         GLenum sourceFormat = 0;

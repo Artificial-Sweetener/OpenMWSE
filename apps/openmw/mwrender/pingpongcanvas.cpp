@@ -269,8 +269,6 @@ namespace MWRender
             attachment.mTarget->setTextureSize(w, h);
             if (attachment.mMipMap)
                 attachment.mTarget->setNumMipmapLevels(osg::Image::computeNumberOfMipmapLevels(w, h));
-            attachment.mTarget->dirtyTextureObject();
-
             osg::ref_ptr<osg::FrameBufferObject> fbo = new osg::FrameBufferObject;
 
             fbo->setAttachment(
@@ -443,8 +441,9 @@ namespace MWRender
 
         if (mAtmosphereDiagnostics && mAtmosphereDiagnostics->captureRequested())
         {
-            mAtmosphereDiagnostics->captureFrame(renderInfo, mTextureScene.get(), mTextureDepth.get(),
-                mTextureNormals.get(), mPreviousCanvas ? mPreviousCanvas->mTextureDepth.get() : nullptr,
+            mAtmosphereDiagnostics->captureFrame(renderInfo, mTextureScene.get(), mTextureOpaqueColor.get(),
+                mTextureDepth.get(), mTextureNormals.get(),
+                mPreviousCanvas ? mPreviousCanvas->mTextureDepth.get() : nullptr,
                 findRenderTarget("AtmosphereVolumeRaw"), findRenderTarget("AtmosphereVolumeMetadataRaw"),
                 findRenderTarget("AtmosphereVolumeMetadataReprojected"), findRenderTarget("AtmosphereVolumeHistory"),
                 findRenderTarget("AtmosphereVolumeMetadataHistory"), findRenderTarget("AtmosphereShafts"),

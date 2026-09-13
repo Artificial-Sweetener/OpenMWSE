@@ -938,44 +938,20 @@ elseif(NOT APPLE)
     endif ()
 
     if(WIN32)
-        INSTALL(DIRECTORY "${INSTALL_SOURCE}/" DESTINATION "." FILES_MATCHING PATTERN "*.dll"
-                                                                              PATTERN ".cmake" EXCLUDE
-                                                                              PATTERN ".qt" EXCLUDE
-                                                                              PATTERN "_CPack_Packages" EXCLUDE
-                                                                              PATTERN "_deps" EXCLUDE
-                                                                              PATTERN "apps" EXCLUDE
-                                                                              PATTERN "bin" EXCLUDE
-                                                                              PATTERN "CMakeFiles" EXCLUDE
-                                                                              PATTERN "components" EXCLUDE
-                                                                              PATTERN "deps" EXCLUDE
-                                                                              PATTERN "docs" EXCLUDE
-                                                                              PATTERN "extern" EXCLUDE
-                                                                              PATTERN "files" EXCLUDE
-                                                                              PATTERN "lib" EXCLUDE
-                                                                              PATTERN "SymStore" EXCLUDE
-                                                                              PATTERN "symstore-venv" EXCLUDE
-                                                                              PATTERN "Testing" EXCLUDE
-                                                                              PATTERN "tests_output" EXCLUDE
-                                                                              PATTERN "try-compile")
-        INSTALL(DIRECTORY "${INSTALL_SOURCE}/" DESTINATION "." CONFIGURATIONS Debug;RelWithDebInfo FILES_MATCHING PATTERN "*.pdb"
-                                                                                                                  PATTERN ".cmake" EXCLUDE
-                                                                                                                  PATTERN ".qt" EXCLUDE
-                                                                                                                  PATTERN "_CPack_Packages" EXCLUDE
-                                                                                                                  PATTERN "_deps" EXCLUDE
-                                                                                                                  PATTERN "apps" EXCLUDE
-                                                                                                                  PATTERN "bin" EXCLUDE
-                                                                                                                  PATTERN "CMakeFiles" EXCLUDE
-                                                                                                                  PATTERN "components" EXCLUDE
-                                                                                                                  PATTERN "deps" EXCLUDE
-                                                                                                                  PATTERN "docs" EXCLUDE
-                                                                                                                  PATTERN "extern" EXCLUDE
-                                                                                                                  PATTERN "files" EXCLUDE
-                                                                                                                  PATTERN "lib" EXCLUDE
-                                                                                                                  PATTERN "SymStore" EXCLUDE
-                                                                                                                  PATTERN "symstore-venv" EXCLUDE
-                                                                                                                  PATTERN "Testing" EXCLUDE
-                                                                                                                  PATTERN "tests_output" EXCLUDE
-                                                                                                                  PATTERN "try-compile")
+        # Enumerate root artifacts at install time so transient build directories never enter packages.
+        INSTALL(CODE "
+            file(GLOB _openmw_runtime_dlls LIST_DIRECTORIES false \"${INSTALL_SOURCE}/*.dll\")
+            if(_openmw_runtime_dlls)
+                file(INSTALL DESTINATION \"\${CMAKE_INSTALL_PREFIX}/.\" TYPE FILE FILES \${_openmw_runtime_dlls})
+            endif()
+            if(CMAKE_INSTALL_CONFIG_NAME MATCHES \"^(Debug|RelWithDebInfo)$\")
+                file(GLOB _openmw_runtime_pdbs LIST_DIRECTORIES false \"${INSTALL_SOURCE}/*.pdb\")
+                list(FILTER _openmw_runtime_pdbs EXCLUDE REGEX \"/(components-tests|openmw-cs-tests|openmw-tests)[.]pdb$\")
+                if(_openmw_runtime_pdbs)
+                    file(INSTALL DESTINATION \"\${CMAKE_INSTALL_PREFIX}/.\" TYPE FILE FILES \${_openmw_runtime_pdbs})
+                endif()
+            endif()
+        ")
         INSTALL(FILES "${INSTALL_SOURCE}/openmw.cfg.install" DESTINATION "." RENAME "openmw.cfg")
         INSTALL(FILES "${OpenMW_SOURCE_DIR}/CHANGELOG.md" DESTINATION "." RENAME "CHANGELOG.txt")
         INSTALL(FILES "${OpenMW_SOURCE_DIR}/README.md" DESTINATION "." RENAME "README.txt")

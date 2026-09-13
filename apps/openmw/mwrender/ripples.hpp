@@ -54,7 +54,16 @@ namespace MWRender
         struct State
         {
             bool mPaused = true;
+            bool mHasPositions = false;
             osg::ref_ptr<osg::StateSet> mStateset;
+        };
+
+        /// Track whether a graphics context contains ripple data that still needs decay passes.
+        enum class Activity
+        {
+            Empty,
+            Idle,
+            Active
         };
 
         void setupFragmentPipeline();
@@ -75,6 +84,7 @@ namespace MWRender
 
         std::array<osg::ref_ptr<osg::Texture2D>, 2> mTextures;
         std::array<osg::ref_ptr<osg::FrameBufferObject>, 2> mFBOs;
+        mutable osg::buffered_object<Activity> mActivity;
 
         osg::ref_ptr<osg::Program> mProgramBlobber;
         osg::ref_ptr<osg::Program> mProgramSimulation;

@@ -337,10 +337,10 @@ namespace MWRender
         mPosition = pos;
     }
 
-    void Camera::attachTo(const MWWorld::Ptr& ptr)
+    void Camera::attachTo(const MWWorld::Ptr& ptr, bool initializePosition)
     {
         mTrackingPtr = ptr;
-        if (mMode == Mode::Static)
+        if (!initializePosition || mMode == Mode::Static)
             return;
         // Scripts read position before the first update.
         mTrackedPosition = ptr.getRefData().getPosition().asVec3();

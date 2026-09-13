@@ -34,6 +34,21 @@ namespace Settings
         /// Evaluate compatible scene lighting through the GPU-scene receiver path.
         SettingValue<bool> mGpuSceneLighting{ mIndex, "Optimizations", "gpu scene lighting" };
 
+        /// Bound GPU-scene texture and mesh storage using the configured texture budget.
+        SettingValue<bool> mGpuStorageBudget{ mIndex, "Optimizations", "gpu storage budget" };
+
+        /// Reduce GPU-scene command and shadow work for lower-throughput hardware.
+        SettingValue<bool> mLowEndIndirectBatching{ mIndex, "Optimizations", "low end indirect batching" };
+
+        /// Cull hidden classic-light receiver work with the GPU-scene depth pyramid.
+        SettingValue<bool> mGpuLightOcclusion{ mIndex, "Optimizations", "gpu light occlusion" };
+
+        /// Page eligible distant day/night geometry and exterior lights through the GPU scene.
+        SettingValue<bool> mGpuDistantPaging{ mIndex, "Optimizations", "gpu distant paging" };
+
+        /// Skip water-ripple simulation passes until a ripple emitter activates them.
+        SettingValue<bool> mSkipDormantRipples{ mIndex, "Optimizations", "skip dormant ripples" };
+
         /// Return whether the prerequisite and a subordinate option are both selected.
         bool isActive(const SettingValue<bool>& option) const { return mEnabled && option; }
 
@@ -52,8 +67,29 @@ namespace Settings
         /// Return whether GPU-scene depth-pyramid rejection is active.
         bool useGpuOcclusionCulling() const { return useGpuDrivenPaging() && mGpuOcclusionCulling; }
 
+        /// Return whether indexed light-list reuse is active.
+        bool useIndexedLightLists() const { return isActive(mIndexedLightLists); }
+
         /// Return whether GPU-scene receivers use the optimized lighting path.
         bool useGpuSceneLighting() const { return useGpuDrivenPaging() && mGpuSceneLighting; }
+
+        /// Return whether GPU-scene storage is governed by its configured memory budget.
+        bool useGpuStorageBudget() const { return useGpuDrivenPaging() && mGpuStorageBudget; }
+
+        /// Return whether the low-end indirect batching policy is active.
+        bool useLowEndIndirectBatching() const { return useGpuDrivenPaging() && mLowEndIndirectBatching; }
+
+        /// Return whether depth-pyramid rejection applies to classic-light receivers.
+        bool useGpuLightOcclusion() const
+        {
+            return useGpuSceneLighting() && useGpuOcclusionCulling() && mGpuLightOcclusion;
+        }
+
+        /// Return whether distant geometry and light paging is active within the GPU scene.
+        bool useGpuDistantPaging() const { return useGpuDrivenPaging() && mGpuDistantPaging; }
+
+        /// Return whether dormant water-ripple passes may be skipped.
+        bool useSkipDormantRipples() const { return isActive(mSkipDormantRipples); }
     };
 }
 

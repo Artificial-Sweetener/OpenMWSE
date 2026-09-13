@@ -15,6 +15,11 @@ namespace Resource
     class SceneManager;
 }
 
+namespace SceneUtil
+{
+    class LightManager;
+}
+
 namespace MWRender
 {
     class GpuScene;
@@ -25,20 +30,28 @@ namespace MWRender
     class ObjectPaging : public Resource::GenericResourceManager<ChunkId>, public Terrain::QuadTreeWorld::ChunkManager
     {
     public:
-        /// Create the object-paging manager with an optional GPU scene for compatible distant geometry.
-        ObjectPaging(Resource::SceneManager* sceneManager, ESM::RefId worldspace, GpuScene* gpuScene);
+        /// Create object paging with optional GPU geometry and distant-light targets.
+        ObjectPaging(Resource::SceneManager* sceneManager, ESM::RefId worldspace, GpuScene* gpuScene,
+            SceneUtil::LightManager* distantLights);
         ~ObjectPaging() = default;
 
         /// Expire CPU chunks and source-node GPU templates at their shared cache cadence.
         void updateCache(double referenceTime) override;
         /// Clear both CPU chunks and cached GPU extraction templates.
         void clearCache() override;
-        void setGpuScene(GpuScene* gpuScene) { mGpuScene = gpuScene; }
+        /// Replace the GPU geometry and distant-light targets used by subsequently built chunks.
+        void setGpuScene(GpuScene* gpuScene, SceneUtil::LightManager* distantLights)
+        {
+            mGpuScene = gpuScene;
+            mDistantLights = distantLights;
+        }
         osg::ref_ptr<osg::Node> getChunk(float size, const osg::Vec2f& center, unsigned char lod, unsigned int lodFlags,
             bool activeGrid, const osg::Vec3f& viewPoint, bool compile) override;
 
+        /// Create a chunk and report any GPU geometry that requires an uncached retry.
         osg::ref_ptr<osg::Node> createChunk(float size, const osg::Vec2f& center, bool activeGrid,
-            const osg::Vec3f& viewPoint, bool compile, unsigned char lod);
+            const osg::Vec3f& viewPoint, bool compile, unsigned char lod, bool* gpuFailed = nullptr,
+            std::vector<ESM::RefNum>* pagedRefs = nullptr);
 
         unsigned int getNodeMask() override;
 
@@ -63,8 +76,15 @@ namespace MWRender
         std::shared_ptr<const GpuTemplate> getGpuTemplate(
             const osg::Node& node, osg::Node::NodeMask mask, bool activeGrid);
 
+        /// Force the next lookup for a source model to extract a fresh GPU template.
+        void dropGpuTemplate(const osg::Node& node, bool activeGrid);
+
+        /// Remove cached GPU templates whose source model has expired.
+        void sweepGpuTemplates();
+
         Resource::SceneManager* mSceneManager;
         GpuScene* mGpuScene;
+        SceneUtil::LightManager* mDistantLights;
         std::mutex mGpuTemplateMutex;
         std::map<std::pair<const osg::Node*, bool>,
             std::pair<osg::observer_ptr<const osg::Node>, std::shared_ptr<const GpuTemplate>>>
@@ -90,6 +110,9 @@ namespace MWRender
         RefTracker mRefTracker;
         RefTracker mRefTrackerNew;
         bool mRefTrackerLocked;
+
+        std::mutex mIncompleteMutex;
+        std::map<ChunkId, std::vector<ESM::RefNum>> mIncompleteRefnums;
 
         const RefTracker& getRefTracker() const { return mRefTracker; }
         RefTracker& getWritableRefTracker() { return mRefTrackerLocked ? mRefTrackerNew : mRefTracker; }

@@ -133,6 +133,56 @@ namespace MWRender
         return result;
     }
 
+    /// Keys a GL-resident texture without an image.
+    inline bool storageFromTexture(const osg::Texture2D& texture, StorageKey& key)
+    {
+        const int width = texture.getTextureWidth();
+        const int height = texture.getTextureHeight();
+        if (width <= 0 || height <= 0)
+            return false;
+        GLint internal = texture.getInternalFormat();
+        GLenum format = 0;
+        switch (internal)
+        {
+            case 0x1907: // rgb
+                internal = 0x8051;
+                [[fallthrough]];
+            case 0x8051: // rgb8
+                format = 0x1907;
+                break;
+            case 0x1908: // rgba
+                internal = 0x8058;
+                [[fallthrough]];
+            case 0x8058: // rgba8
+                format = 0x1908;
+                break;
+            case 0x8C40: // srgb
+                internal = 0x8C41;
+                [[fallthrough]];
+            case 0x8C41: // srgb8
+                format = 0x1907;
+                break;
+            default:
+                return false;
+        }
+        key.mWidth = width;
+        key.mHeight = height;
+        key.mInternal = internal;
+        key.mImageInternal = internal;
+        key.mFormat = format;
+        key.mType = 0x1401; // unsigned byte
+        key.mPacking = 1;
+        key.mLevels = 1;
+        key.mGenerated = false;
+        key.mResize = false;
+        const osg::Vec4i swizzle = texture.getSwizzle();
+        for (int i = 0; i < 4; ++i)
+            key.mSwizzle[i] = swizzle[i];
+        // Conservative accounting for budget headroom.
+        key.mBytes = static_cast<std::size_t>(width) * height * 4;
+        return true;
+    }
+
     inline bool storage(const osg::Texture2D& texture, StorageKey& key, const char** reason = nullptr)
     {
         const auto reject = [&](const char* why) {
@@ -141,11 +191,20 @@ namespace MWRender
             return false;
         };
         const osg::Image* image = texture.getImage();
-        if (image == nullptr || !image->valid() || image->r() != 1 || image->getDataVariance() == osg::Object::DYNAMIC
-            || dynamic_cast<const osg::ImageStream*>(image) != nullptr || texture.getSubloadCallback() != nullptr
-            || texture.getDataVariance() == osg::Object::DYNAMIC || texture.getBorderWidth() != 0 || image->s() <= 0
-            || image->t() <= 0)
-            return reject("dynamic");
+        if (image == nullptr || !image->valid() || image->s() <= 0 || image->t() <= 0)
+            return reject("no image data");
+        if (image->r() != 1)
+            return reject("3d image");
+        if (dynamic_cast<const osg::ImageStream*>(image) != nullptr)
+            return reject("image stream");
+        if (image->getDataVariance() == osg::Object::DYNAMIC)
+            return reject("dynamic image");
+        if (texture.getSubloadCallback() != nullptr)
+            return reject("subload callback");
+        if (texture.getDataVariance() == osg::Object::DYNAMIC)
+            return reject("dynamic texture");
+        if (texture.getBorderWidth() != 0)
+            return reject("texture border");
         key.mWidth = image->s();
         key.mHeight = image->t();
         key.mImageInternal = image->getInternalTextureFormat();
