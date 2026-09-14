@@ -139,7 +139,7 @@ namespace MWRender
 
         const unsigned char lod = static_cast<unsigned char>(lodFlags >> (4 * 4));
         bool gpuFailed = false;
-        std::vector<ESM::RefNum> pagedRefs;
+        std::vector<PagedRefKey> pagedRefs;
         osg::ref_ptr<osg::Node> node = createChunk(
             size, center, activeGrid, viewPoint, compile, lod, &gpuFailed, activeGrid ? &pagedRefs : nullptr);
         if (!gpuFailed)
@@ -302,7 +302,7 @@ namespace MWRender
             void handleCallbacks(const osg::Node* node, osg::Node* cloned) const
             {
                 for (const osg::Callback* callback = node->getCullCallback(); callback != nullptr;
-                    callback = callback->getNestedCallback())
+                     callback = callback->getNestedCallback())
                 {
                     if (node->getCullCallback()->getNestedCallback())
                     {
@@ -345,16 +345,18 @@ namespace MWRender
             osg::Callback* operator()(const osg::Callback* callback) const override { return nullptr; }
         };
 
-        class RefnumSet : public osg::Object
+        /// Stores the cell-qualified references represented by one active-grid paging chunk.
+        class PagedRefSet : public osg::Object
         {
         public:
-            RefnumSet() {}
-            RefnumSet(const RefnumSet& copy, const osg::CopyOp&)
-                : mRefnums(copy.mRefnums)
+            PagedRefSet() {}
+            /// Copy the represented reference identities into a cloned paging chunk.
+            PagedRefSet(const PagedRefSet& copy, const osg::CopyOp&)
+                : mRefs(copy.mRefs)
             {
             }
-            META_Object(MWRender, RefnumSet)
-            std::vector<ESM::RefNum> mRefnums;
+            META_Object(MWRender, PagedRefSet)
+            std::vector<PagedRefKey> mRefs;
         };
 
         class AnalyzeVisitor : public osg::NodeVisitor
@@ -469,16 +471,17 @@ namespace MWRender
         class AddRefnumMarkerVisitor : public osg::NodeVisitor
         {
         public:
-            AddRefnumMarkerVisitor(ESM::RefNum refnum)
+            /// Configure the visitor to mark geometry with one cell-qualified reference identity.
+            AddRefnumMarkerVisitor(PagedRefKey ref)
                 : osg::NodeVisitor(TRAVERSE_ALL_CHILDREN)
-                , mRefnum(refnum)
+                , mRef(std::move(ref))
             {
             }
-            ESM::RefNum mRefnum;
+            PagedRefKey mRef;
             void apply(osg::Geometry& node) override
             {
                 osg::ref_ptr<RefnumMarker> marker(new RefnumMarker);
-                marker->mRefnum = mRefnum;
+                marker->mRef = mRef;
                 if (osg::Array* array = node.getVertexArray())
                     marker->mNumVertices = array->getNumElements();
                 node.getOrCreateUserDataContainer()->addUserObject(marker);
@@ -566,7 +569,7 @@ namespace MWRender
         struct PagedCellRef
         {
             ESM::RefId mRefId;
-            ESM::RefNum mRefNum;
+            PagedRefKey mKey;
             osg::Vec3f mPosition;
             osg::Vec3f mRotation;
             float mScale;
@@ -592,37 +595,41 @@ namespace MWRender
             return scene.createChunk(std::move(instances), bound, lit, GpuScene::ChunkKind::Object);
         }
 
-        PagedCellRef makePagedCellRef(const ESM::CellRef& value)
+        /// Convert an ESM3 reference while preserving the exterior cell that scopes its renderer identity.
+        PagedCellRef makePagedCellRef(const ESM::CellRef& value, const ESM::ExteriorCellLocation& cell)
         {
             return PagedCellRef{
                 .mRefId = value.mRefID,
-                .mRefNum = value.mRefNum,
+                .mKey = PagedRefKey{ value.mRefNum, cell },
                 .mPosition = value.mPos.asVec3(),
                 .mRotation = value.mPos.asRotationVec3(),
                 .mScale = value.mScale,
             };
         }
 
-        PagedCellRef makePagedCellRef(const ESM4::Reference& value)
+        /// Convert an ESM4 reference while preserving the exterior cell and worldspace that scope its identity.
+        PagedCellRef makePagedCellRef(const ESM4::Reference& value, const ESM::ExteriorCellLocation& cell)
         {
             return PagedCellRef{
                 .mRefId = value.mBaseObj,
-                .mRefNum = value.mId,
+                .mKey = PagedRefKey{ value.mId, cell },
                 .mPosition = value.mPos.asVec3(),
                 .mRotation = value.mPos.asRotationVec3(),
                 .mScale = value.mScale,
             };
         }
 
-        std::map<ESM::RefNum, PagedCellRef> collectESM3References(
+        /// Collect ESM3 paging references without collapsing reference numbers reused by different cells.
+        std::map<PagedRefKey, PagedCellRef> collectESM3References(
             float size, const osg::Vec2i& startCell, const MWWorld::ESMStore& store, bool lights)
         {
-            std::map<ESM::RefNum, PagedCellRef> refs;
+            std::map<PagedRefKey, PagedCellRef> refs;
             ESM::ReadersCache readers;
             for (int cellX = startCell.x(); cellX < startCell.x() + size; ++cellX)
             {
                 for (int cellY = startCell.y(); cellY < startCell.y() + size; ++cellY)
                 {
+                    const ESM::ExteriorCellLocation cellLocation(cellX, cellY, ESM::Cell::sDefaultWorldspaceId);
                     const ESM::Cell* cell = store.get<ESM::Cell>().searchStatic(cellX, cellY);
                     if (!cell)
                         continue;
@@ -652,12 +659,12 @@ namespace MWRender
                                     continue;
                                 if (deleted)
                                 {
-                                    refs.erase(ref.mRefNum);
+                                    refs.erase(PagedRefKey{ ref.mRefNum, cellLocation });
                                     continue;
                                 }
-                                PagedCellRef pagedRef = makePagedCellRef(ref);
+                                PagedCellRef pagedRef = makePagedCellRef(ref, cellLocation);
                                 pagedRef.mType = type;
-                                refs.insert_or_assign(ref.mRefNum, pagedRef);
+                                refs.insert_or_assign(pagedRef.mKey, std::move(pagedRef));
                             }
                         }
                         catch (const std::exception& e)
@@ -671,32 +678,33 @@ namespace MWRender
                     {
                         if (deleted)
                         {
-                            refs.erase(ref.mRefNum);
+                            refs.erase(PagedRefKey{ ref.mRefNum, cellLocation });
                             continue;
                         }
                         int type = store.findStatic(ref.mRefID);
                         if (!typeFilter(type, size >= 2, lights))
                             continue;
-                        PagedCellRef pagedRef = makePagedCellRef(ref);
+                        PagedCellRef pagedRef = makePagedCellRef(ref, cellLocation);
                         pagedRef.mType = type;
-                        refs.insert_or_assign(ref.mRefNum, pagedRef);
+                        refs.insert_or_assign(pagedRef.mKey, std::move(pagedRef));
                     }
                 }
             }
             return refs;
         }
 
-        std::map<ESM::RefNum, PagedCellRef> collectESM4References(
+        /// Collect ESM4 paging references without collapsing identities across cells or worldspaces.
+        std::map<PagedRefKey, PagedCellRef> collectESM4References(
             float size, const osg::Vec2i& startCell, ESM::RefId worldspace)
         {
-            std::map<ESM::RefNum, PagedCellRef> refs;
+            std::map<PagedRefKey, PagedCellRef> refs;
             const auto& store = MWBase::Environment::get().getWorld()->getStore();
             for (int cellX = startCell.x(); cellX < startCell.x() + size; ++cellX)
             {
                 for (int cellY = startCell.y(); cellY < startCell.y() + size; ++cellY)
                 {
-                    const ESM4::Cell* cell
-                        = store.get<ESM4::Cell>().searchExterior(ESM::ExteriorCellLocation(cellX, cellY, worldspace));
+                    const ESM::ExteriorCellLocation cellLocation(cellX, cellY, worldspace);
+                    const ESM4::Cell* cell = store.get<ESM4::Cell>().searchExterior(cellLocation);
                     if (!cell)
                         continue;
                     for (const ESM4::Reference* ref4 : store.get<ESM4::Reference>().getByCell(cell->mId))
@@ -718,9 +726,9 @@ namespace MWRender
                                     continue;
                             }
                         }
-                        PagedCellRef pagedRef = makePagedCellRef(*ref4);
+                        PagedCellRef pagedRef = makePagedCellRef(*ref4, cellLocation);
                         pagedRef.mType = type;
-                        refs.insert_or_assign(ref4->mId, pagedRef);
+                        refs.insert_or_assign(pagedRef.mKey, std::move(pagedRef));
                     }
                 }
             }
@@ -730,7 +738,7 @@ namespace MWRender
 
     osg::ref_ptr<osg::Node> ObjectPaging::createChunk(float size, const osg::Vec2f& center, bool activeGrid,
         const osg::Vec3f& viewPoint, bool compile, unsigned char lod, bool* gpuFailed,
-        std::vector<ESM::RefNum>* pagedRefs)
+        std::vector<PagedRefKey>* pagedRefs)
     {
         const osg::Vec2i startCell(static_cast<int>(std::floor(center.x() - size / 2.f)),
             static_cast<int>(std::floor(center.y() - size / 2.f)));
@@ -739,7 +747,7 @@ namespace MWRender
 
         const bool gpuDriven = mGpuScene != nullptr && mGpuScene->isEnabled();
         const bool lit = activeGrid || (gpuDriven && mDistantLights != nullptr);
-        std::map<ESM::RefNum, PagedCellRef> refs;
+        std::map<PagedRefKey, PagedCellRef> refs;
 
         if (mWorldspace == ESM::Cell::sDefaultWorldspaceId)
         {
@@ -753,10 +761,10 @@ namespace MWRender
         if (activeGrid && !refs.empty())
         {
             std::lock_guard<std::mutex> lock(mRefTrackerMutex);
-            const std::set<ESM::RefNum>& blacklist = getRefTracker().mBlacklist;
+            const std::set<PagedRefKey>& blacklist = getRefTracker().mBlacklist;
             if (blacklist.size() < refs.size())
             {
-                for (ESM::RefNum ref : blacklist)
+                for (const PagedRefKey& ref : blacklist)
                     refs.erase(ref);
             }
             else
@@ -779,7 +787,8 @@ namespace MWRender
         };
         typedef std::map<osg::ref_ptr<const osg::Node>, InstanceList> NodeMap;
         NodeMap nodes;
-        const osg::ref_ptr<RefnumSet> refnumSet = activeGrid ? new RefnumSet : nullptr;
+        std::map<VFS::Path::Normalized, osg::observer_ptr<const osg::Node>> resolvedTemplates;
+        const osg::ref_ptr<PagedRefSet> pagedRefSet = activeGrid ? new PagedRefSet : nullptr;
 
         // Mask_UpdateVisitor is used in such cases in NIF loader:
         // 1. For collision nodes, which is not supposed to be rendered.
@@ -801,7 +810,7 @@ namespace MWRender
         distantLights->setNodeMask(Mask_Lighting);
         AnalyzeVisitor analyzeVisitor(copyMask);
         const float minSize = mMinSizeMergeFactor ? mMinSize * mMinSizeMergeFactor : mMinSize;
-        for (const auto& [refNum, ref] : refs)
+        for (const auto& [refKey, ref] : refs)
         {
             if (size < 1.f)
             {
@@ -827,13 +836,13 @@ namespace MWRender
                         ? nullptr
                         : mSceneManager->getTemplate(Misc::ResourceHelpers::correctMeshPath(lightMesh), false);
                     distantLights->addLight(
-                        light, ref.mRefNum, ref.mPosition, ref.mRotation, ref.mScale, worldCenter, lightModel);
+                        light, refKey.mRefNum, ref.mPosition, ref.mRotation, ref.mScale, worldCenter, lightModel);
                 }
             }
             if (!activeGrid)
             {
                 std::lock_guard<std::mutex> lock(mSizeCacheMutex);
-                SizeCache::iterator found = mSizeCache.find(refNum);
+                SizeCache::iterator found = mSizeCache.find(refKey);
                 if (found != mSizeCache.end() && found->second < cullD2 * minSize * minSize)
                     continue;
             }
@@ -870,12 +879,21 @@ namespace MWRender
                 else
                     model = mLODNameCache
                                 .emplace_hint(found, std::move(key),
-                                    Misc::ResourceHelpers::getLODMeshName(world.getESMVersions()[refNum.mContentFile],
-                                        model, *mSceneManager->getVFS(), lod))
+                                    Misc::ResourceHelpers::getLODMeshName(
+                                        world.getESMVersions()[refKey.mRefNum.mContentFile], model,
+                                        *mSceneManager->getVFS(), lod))
                                 ->second;
             }
 
-            osg::ref_ptr<const osg::Node> cnode = mSceneManager->getTemplate(model, false);
+            osg::ref_ptr<const osg::Node> cnode;
+            const auto resolved = resolvedTemplates.find(model);
+            if (resolved != resolvedTemplates.end() && resolved->second.valid())
+                cnode = resolved->second.get();
+            else
+            {
+                cnode = mSceneManager->getTemplate(model, false);
+                resolvedTemplates.insert_or_assign(std::move(model), cnode.get());
+            }
 
             if (activeGrid)
             {
@@ -886,12 +904,12 @@ namespace MWRender
                         && dynamic_cast<const osgAnimation::BasicAnimationManager*>(cnode->getUpdateCallback())))
                     continue;
                 else
-                    refnumSet->mRefnums.push_back(refNum);
+                    pagedRefSet->mRefs.push_back(refKey);
             }
 
             {
                 std::lock_guard<std::mutex> lock(mRefTrackerMutex);
-                if (getRefTracker().mDisabled.count(refNum))
+                if (getRefTracker().mDisabled.count(refKey))
                     continue;
             }
 
@@ -899,7 +917,7 @@ namespace MWRender
             if (radius2 < cullD2 * minSize * minSize && !activeGrid)
             {
                 std::lock_guard<std::mutex> lock(mSizeCacheMutex);
-                mSizeCache[refNum] = radius2;
+                mSizeCache[refKey] = radius2;
                 continue;
             }
 
@@ -989,7 +1007,7 @@ namespace MWRender
                         copyop.mDistances = lodDistances / ref.mScale;
                         copyop.copy(cnode, proxy);
                         osg::ref_ptr<RefnumMarker> marker = new RefnumMarker;
-                        marker->mRefnum = ref.mRefNum;
+                        marker->mRef = ref.mKey;
                         proxy->getOrCreateUserDataContainer()->addUserObject(marker);
                         proxy->setNodeMask(Mask_GpuProxy);
                         group->addChild(proxy);
@@ -1035,13 +1053,13 @@ namespace MWRender
                 {
                     if (merge)
                     {
-                        AddRefnumMarkerVisitor visitor(ref.mRefNum);
+                        AddRefnumMarkerVisitor visitor(ref.mKey);
                         trans->accept(visitor);
                     }
                     else
                     {
                         osg::ref_ptr<RefnumMarker> marker = new RefnumMarker;
-                        marker->mRefnum = ref.mRefNum;
+                        marker->mRef = ref.mKey;
                         trans->getOrCreateUserDataContainer()->addUserObject(marker);
                     }
                 }
@@ -1153,12 +1171,12 @@ namespace MWRender
         osg::UserDataContainer* udc = group->getOrCreateUserDataContainer();
         if (activeGrid)
         {
-            std::sort(refnumSet->mRefnums.begin(), refnumSet->mRefnums.end());
-            refnumSet->mRefnums.erase(
-                std::unique(refnumSet->mRefnums.begin(), refnumSet->mRefnums.end()), refnumSet->mRefnums.end());
-            udc->addUserObject(refnumSet);
+            std::sort(pagedRefSet->mRefs.begin(), pagedRefSet->mRefs.end());
+            pagedRefSet->mRefs.erase(
+                std::unique(pagedRefSet->mRefs.begin(), pagedRefSet->mRefs.end()), pagedRefSet->mRefs.end());
+            udc->addUserObject(pagedRefSet);
             if (pagedRefs != nullptr)
-                *pagedRefs = refnumSet->mRefnums;
+                *pagedRefs = pagedRefSet->mRefs;
         }
         if (lit)
             group->addCullCallback(new SceneUtil::LightListCallback);
@@ -1223,11 +1241,13 @@ namespace MWRender
         if (!typeFilter(type, false, false))
             return false;
 
+        const PagedRefKey ref{ refnum, ESM::ExteriorCellLocation(cell.x(), cell.y(), mWorldspace) };
+
         {
             std::lock_guard<std::mutex> lock(mRefTrackerMutex);
-            if (enabled && !getWritableRefTracker().mDisabled.erase(refnum))
+            if (enabled && !getWritableRefTracker().mDisabled.erase(ref))
                 return false;
-            if (!enabled && !getWritableRefTracker().mDisabled.insert(refnum).second)
+            if (!enabled && !getWritableRefTracker().mDisabled.insert(ref).second)
                 return false;
             if (mRefTrackerLocked)
                 return false;
@@ -1247,9 +1267,11 @@ namespace MWRender
         if (!typeFilter(type, false, false))
             return false;
 
+        const PagedRefKey ref{ refnum, ESM::ExteriorCellLocation(cell.x(), cell.y(), mWorldspace) };
+
         {
             std::lock_guard<std::mutex> lock(mRefTrackerMutex);
-            if (!getWritableRefTracker().mBlacklist.insert(refnum).second)
+            if (!getWritableRefTracker().mBlacklist.insert(ref).second)
                 return false;
             if (mRefTrackerLocked)
                 return false;
@@ -1293,7 +1315,8 @@ namespace MWRender
     {
         struct GetRefnumsFunctor
         {
-            GetRefnumsFunctor(std::vector<ESM::RefNum>& output)
+            /// Append reference identities found while visiting cached active-grid chunks.
+            GetRefnumsFunctor(std::vector<PagedRefKey>& output)
                 : mOutput(output)
             {
             }
@@ -1310,18 +1333,18 @@ namespace MWRender
                 osg::UserDataContainer* udc = obj->getUserDataContainer();
                 if (udc && udc->getNumUserObjects())
                 {
-                    RefnumSet* refnums = dynamic_cast<RefnumSet*>(udc->getUserObject(0));
-                    if (!refnums)
+                    PagedRefSet* refs = dynamic_cast<PagedRefSet*>(udc->getUserObject(0));
+                    if (!refs)
                         return;
-                    mOutput.insert(mOutput.end(), refnums->mRefnums.begin(), refnums->mRefnums.end());
+                    mOutput.insert(mOutput.end(), refs->mRefs.begin(), refs->mRefs.end());
                 }
             }
             osg::Vec4i mActiveGrid;
-            std::vector<ESM::RefNum>& mOutput;
+            std::vector<PagedRefKey>& mOutput;
         };
     }
 
-    void ObjectPaging::getPagedRefnums(const osg::Vec4i& activeGrid, std::vector<ESM::RefNum>& out)
+    void ObjectPaging::getPagedRefnums(const osg::Vec4i& activeGrid, std::vector<PagedRefKey>& out)
     {
         GetRefnumsFunctor grf(out);
         grf.mActiveGrid = activeGrid;

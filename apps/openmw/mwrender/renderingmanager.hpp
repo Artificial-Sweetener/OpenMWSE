@@ -116,6 +116,7 @@ namespace MWRender
     class ActorsPaths;
     class RecastMesh;
     class ObjectPaging;
+    struct PagedRefKey;
     class GpuScene;
     class Groundcover;
     class PostProcessor;
@@ -316,7 +317,8 @@ namespace MWRender
         bool pagingEnableObject(int type, const MWWorld::ConstPtr& ptr, bool enabled);
         void pagingBlacklistObject(int type, const MWWorld::ConstPtr& ptr);
         bool pagingUnlockCache();
-        void getPagedRefnums(const osg::Vec4i& activeGrid, std::vector<ESM::RefNum>& out);
+        /// Append the cell-qualified references represented by active-grid paging chunks.
+        void getPagedRefnums(const osg::Vec4i& activeGrid, std::vector<PagedRefKey>& out);
 
         void updateProjectionMatrix();
 

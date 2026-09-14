@@ -16,6 +16,8 @@
 #include <components/esm/exteriorcelllocation.hpp>
 #include <components/misc/constants.hpp>
 
+#include "../mwrender/pagedref.hpp"
+
 namespace osg
 {
     class Vec3f;
@@ -108,7 +110,7 @@ namespace MWWorld
 
         osg::Vec3f mLastPlayerPos;
 
-        std::vector<ESM::RefNum> mPagedRefs;
+        std::vector<MWRender::PagedRefKey> mPagedRefs;
 
         std::vector<osg::ref_ptr<SceneUtil::WorkItem>> mWorkItems;
 

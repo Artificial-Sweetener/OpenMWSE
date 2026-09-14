@@ -1352,13 +1352,18 @@ namespace MWRender
                         && intersectionIndex < vertexCounter + refnumMarkers[i]->mNumVertices))
                 {
                     auto it = std::find_if(
-                        ignoreList.begin(), ignoreList.end(), [target = refnumMarkers[i]->mRefnum](const auto& ptr) {
-                            return target == ptr.getCellRef().getRefNum();
+                        ignoreList.begin(), ignoreList.end(), [target = refnumMarkers[i]->mRef](const auto& ptr) {
+                            return ptr.isInCell() && ptr.getCell()->isExterior()
+                                && target
+                                == PagedRefKey{
+                                       ptr.getCellRef().getRefNum(),
+                                       ptr.getCell()->getCell()->getExteriorCellLocation(),
+                                   };
                         });
 
                     if (it == ignoreList.end())
                     {
-                        result.mHitRefnum = refnumMarkers[i]->mRefnum;
+                        result.mHitRefnum = refnumMarkers[i]->mRef.mRefNum;
                     }
 
                     break;
@@ -2373,7 +2378,7 @@ namespace MWRender
         }
         return false;
     }
-    void RenderingManager::getPagedRefnums(const osg::Vec4i& activeGrid, std::vector<ESM::RefNum>& out)
+    void RenderingManager::getPagedRefnums(const osg::Vec4i& activeGrid, std::vector<PagedRefKey>& out)
     {
         if (mObjectPaging)
             mObjectPaging->getPagedRefnums(activeGrid, out);

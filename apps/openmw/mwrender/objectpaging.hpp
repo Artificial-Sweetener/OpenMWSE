@@ -10,6 +10,8 @@
 
 #include <osg/observer_ptr>
 
+#include "pagedref.hpp"
+
 namespace Resource
 {
     class SceneManager;
@@ -51,7 +53,7 @@ namespace MWRender
         /// Create a chunk and report any GPU geometry that requires an uncached retry.
         osg::ref_ptr<osg::Node> createChunk(float size, const osg::Vec2f& center, bool activeGrid,
             const osg::Vec3f& viewPoint, bool compile, unsigned char lod, bool* gpuFailed = nullptr,
-            std::vector<ESM::RefNum>* pagedRefs = nullptr);
+            std::vector<PagedRefKey>* pagedRefs = nullptr);
 
         unsigned int getNodeMask() override;
 
@@ -69,7 +71,8 @@ namespace MWRender
 
         void reportStats(unsigned int frameNumber, osg::Stats* stats) const override;
 
-        void getPagedRefnums(const osg::Vec4i& activeGrid, std::vector<ESM::RefNum>& out);
+        /// Append the cell-qualified references represented by active-grid paging chunks.
+        void getPagedRefnums(const osg::Vec4i& activeGrid, std::vector<PagedRefKey>& out);
 
     private:
         /// Return a shared GPU extraction template so callers retain replaced material-array state while building.
@@ -100,8 +103,8 @@ namespace MWRender
         std::mutex mRefTrackerMutex;
         struct RefTracker
         {
-            std::set<ESM::RefNum> mDisabled;
-            std::set<ESM::RefNum> mBlacklist;
+            std::set<PagedRefKey> mDisabled;
+            std::set<PagedRefKey> mBlacklist;
             bool operator==(const RefTracker& other) const
             {
                 return mDisabled == other.mDisabled && mBlacklist == other.mBlacklist;
@@ -112,13 +115,13 @@ namespace MWRender
         bool mRefTrackerLocked;
 
         std::mutex mIncompleteMutex;
-        std::map<ChunkId, std::vector<ESM::RefNum>> mIncompleteRefnums;
+        std::map<ChunkId, std::vector<PagedRefKey>> mIncompleteRefnums;
 
         const RefTracker& getRefTracker() const { return mRefTracker; }
         RefTracker& getWritableRefTracker() { return mRefTrackerLocked ? mRefTrackerNew : mRefTracker; }
 
         std::mutex mSizeCacheMutex;
-        typedef std::map<ESM::RefNum, float> SizeCache;
+        typedef std::map<PagedRefKey, float> SizeCache;
         SizeCache mSizeCache;
 
         std::mutex mLODNameCacheMutex;
@@ -127,6 +130,7 @@ namespace MWRender
         LODNameCache mLODNameCache;
     };
 
+    /// Associates paged geometry with its cell-qualified source reference for renderer queries.
     class RefnumMarker : public osg::Object
     {
     public:
@@ -134,14 +138,15 @@ namespace MWRender
             : mNumVertices(0)
         {
         }
+        /// Copy the source identity and geometry span into a cloned marker.
         RefnumMarker(const RefnumMarker& copy, osg::CopyOp co)
-            : mRefnum(copy.mRefnum)
+            : mRef(copy.mRef)
             , mNumVertices(copy.mNumVertices)
         {
         }
         META_Object(MWRender, RefnumMarker)
 
-        ESM::RefNum mRefnum;
+        PagedRefKey mRef;
         unsigned int mNumVertices;
     };
 }

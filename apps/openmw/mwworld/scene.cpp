@@ -108,8 +108,10 @@ namespace
     // TODO: find a more clever way to make paging exclusion more reliable?
     static osg::ref_ptr<SceneUtil::PositionAttitudeTransform> pagedNode = new SceneUtil::PositionAttitudeTransform;
 
-    void addObject(const MWWorld::Ptr& ptr, const MWWorld::World& world, const std::vector<ESM::RefNum>& pagedRefs,
-        MWPhysics::PhysicsSystem& physics, MWRender::RenderingManager& rendering)
+    /// Add one live object unless its exact exterior-cell reference is already represented by paging.
+    void addObject(const MWWorld::Ptr& ptr, const MWWorld::World& world,
+        const std::vector<MWRender::PagedRefKey>& pagedRefs, MWPhysics::PhysicsSystem& physics,
+        MWRender::RenderingManager& rendering)
     {
         if (ptr.getRefData().getBaseNode() || physics.getActor(ptr))
         {
@@ -121,7 +123,13 @@ namespace
         const auto rotation = makeDirectNodeRotation(ptr);
 
         ESM::RefNum refnum = ptr.getCellRef().getRefNum();
-        if (!refnum.hasContentFile() || !std::binary_search(pagedRefs.begin(), pagedRefs.end(), refnum))
+        const bool paged = refnum.hasContentFile() && ptr.getCell()->isExterior()
+            && std::binary_search(pagedRefs.begin(), pagedRefs.end(),
+                MWRender::PagedRefKey{
+                    refnum,
+                    ptr.getCell()->getCell()->getExteriorCellLocation(),
+                });
+        if (!paged)
             ptr.getClass().insertObjectRendering(ptr, model, rendering);
         else
             ptr.getRefData().setBaseNode(pagedNode);
@@ -279,10 +287,11 @@ namespace
         return false;
     }
 
-    bool removeFromSorted(ESM::RefNum refNum, std::vector<ESM::RefNum>& pagedRefs)
+    /// Remove one exact cell-qualified identity from a sorted paging handoff list.
+    bool removeFromSorted(const MWRender::PagedRefKey& ref, std::vector<MWRender::PagedRefKey>& pagedRefs)
     {
-        const auto it = std::lower_bound(pagedRefs.begin(), pagedRefs.end(), refNum);
-        if (it == pagedRefs.end() || *it != refNum)
+        const auto it = std::lower_bound(pagedRefs.begin(), pagedRefs.end(), ref);
+        if (it == pagedRefs.end() || *it != ref)
             return false;
         pagedRefs.erase(it);
         return true;
@@ -322,7 +331,9 @@ namespace MWWorld
     void Scene::removeFromPagedRefs(const Ptr& ptr)
     {
         ESM::RefNum refnum = ptr.getCellRef().getRefNum();
-        if (refnum.hasContentFile() && removeFromSorted(refnum, mPagedRefs))
+        if (refnum.hasContentFile() && ptr.getCell()->isExterior()
+            && removeFromSorted(
+                MWRender::PagedRefKey{ refnum, ptr.getCell()->getCell()->getExteriorCellLocation() }, mPagedRefs))
         {
             if (!ptr.getRefData().getBaseNode())
                 return;

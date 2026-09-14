@@ -101,8 +101,8 @@ kind = "structural"
 justification = "Object paging is one chunk-production pipeline that gathers eligible records, builds CPU nodes or GPU chunks and paged-light proxies, and caches the resulting chunks with their statistics. Each stage shares paging keys, compile policy, fallback state, and cache lifetime; extraction would create pass-through interfaces rather than an independent owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:449d66cc15d70caa225dcb986f6332650d280e5a6da83ccec970cfbddf917d58"
-max_lines = 1206
+fingerprint = "sha256:55810c33b6e51f58b0cbe4e84260e1ab4c10d94c28a4e3ecd6aea1af3ea4f74e"
+max_lines = 1219
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-026"
@@ -127,8 +127,8 @@ kind = "structural"
 justification = "RenderingManager is the renderer composition root and scene-facing facade: subsystem construction, ordered frame advancement, scene mutation, settings propagation, and renderer queries all coordinate the same owned object graph. Atmosphere diagnostic policy and applied capture state now belong to a separate controller."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:527cd0f0b04a096307e91a8bce394d96bd65fa740e785865d93087e3b6ea6aff"
-max_lines = 2028
+fingerprint = "sha256:a321c1cd9a4c6ea2dd359c89502825a6c6d64de731b70d6c3ed5ceeaa2884d51"
+max_lines = 2033
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-008"
