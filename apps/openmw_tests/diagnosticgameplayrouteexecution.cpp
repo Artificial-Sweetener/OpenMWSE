@@ -41,3 +41,27 @@ TEST(DiagnosticGameplayRouteExecutionTest, RequiresExactRouteProgressRatherThanR
     EXPECT_THROW(DiagnosticCtl::validateGameplayRouteProgress(100, 40, 59), std::runtime_error);
     EXPECT_THROW(DiagnosticCtl::validateGameplayRouteProgress(39, 40, 0), std::runtime_error);
 }
+
+TEST(DiagnosticGameplayRouteExecutionTest, ExtractsClearanceWithoutParsingRawPerformanceStatistics)
+{
+    const std::string response
+        = "request-frame: 4\nroute-clearance:\n  provider: bullet-standing-actor@1\n"
+          "  frames: []\nprovider: performance@16\nraw-statistics:\nStats Viewer FrameNumber 4\n";
+    EXPECT_EQ(DiagnosticCtl::extractGameplayRouteClearanceReport(response),
+        "route-clearance:\n  provider: bullet-standing-actor@1\n  frames: []");
+    EXPECT_THROW(DiagnosticCtl::extractGameplayRouteClearanceReport("provider: performance@16\n"), std::runtime_error);
+    EXPECT_THROW(
+        DiagnosticCtl::extractGameplayRouteClearanceReport("route-clearance:\n  frames: []\n"), std::runtime_error);
+}
+
+/// Extract traversal evidence independently when clearance evidence precedes it in the same response.
+TEST(DiagnosticGameplayRouteExecutionTest, ExtractsTraversalWithoutParsingOtherRouteEvidence)
+{
+    const std::string response
+        = "route-clearance:\n  frames: []\nroute-traversal:\n  provider: bullet-player-movement@1\n"
+          "  frames: []\nprovider: performance@6\n";
+    EXPECT_EQ(DiagnosticCtl::extractGameplayRouteTraversalReport(response),
+        "route-traversal:\n  provider: bullet-player-movement@1\n  frames: []");
+    EXPECT_THROW(
+        DiagnosticCtl::extractGameplayRouteTraversalReport("route-traversal:\n  frames: []\n"), std::runtime_error);
+}

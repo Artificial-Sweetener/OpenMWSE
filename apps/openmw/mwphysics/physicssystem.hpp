@@ -16,6 +16,7 @@
 #include <osg/Timer>
 #include <osg/ref_ptr>
 
+#include <components/detournavigator/collisionshapetype.hpp>
 #include <components/vfs/pathutil.hpp>
 
 #include "../mwworld/ptr.hpp"
@@ -65,6 +66,24 @@ namespace MWPhysics
         MWWorld::Ptr mObject;
         osg::Vec3f mPoint;
         osg::Vec3f mNormal;
+    };
+
+    /// Describes one world or door collision penetrating a lifted standing-actor probe.
+    struct StandingActorClearanceContact
+    {
+        MWWorld::Ptr mObject;
+        osg::Vec3f mPoint;
+        osg::Vec3f mNormal;
+        float mPenetrationDepth = 0.f;
+    };
+
+    /// Reports the exact actor shape and blocking contacts observed at its current reference pose.
+    struct StandingActorClearance
+    {
+        DetourNavigator::CollisionShapeType mShapeType = DetourNavigator::CollisionShapeType::Cylinder;
+        osg::Vec3f mHalfExtents;
+        float mLift = 0.f;
+        std::vector<StandingActorClearanceContact> mContacts;
     };
 
     struct LOSRequest
@@ -207,6 +226,10 @@ namespace MWPhysics
             int collisionMask) const; ///< get handles this object collides with
         std::vector<ContactPoint> getCollisionsPoints(
             const MWWorld::ConstPtr& ptr, int collisionGroup, int collisionMask) const;
+
+        /// Probe a standing actor above its current reference pose using its exact Bullet shape.
+        StandingActorClearance probeStandingActorClearance(const MWWorld::ConstPtr& actor, float lift) const;
+
         osg::Vec3f traceDown(const MWWorld::Ptr& ptr, const osg::Vec3f& position, float maxHeight);
 
         /// @param ignore Optional, a list of Ptr to ignore in the list of results. targets are actors to filter for,

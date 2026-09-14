@@ -39,6 +39,12 @@ Run a windowless production capture from an existing save::
       --save <profile>\userdata\saves\<character>\<save>.omwsave --artifacts <capture-directory> \
       --frames 120 --performance-samples 64
 
+Large development profiles can extend the three-minute child-readiness budget with ``--startup-timeout <seconds>``. The
+bounded value accepts 1 through 3,600 seconds and changes only how long the controller waits for the isolated world to load.
+Use ``--new-game`` instead of ``--save`` to start the current content stack through its normal new-game sequence inside the
+temporary profile. This avoids coupling content-load validation to an older save while retaining the same isolation and cleanup
+guarantees.
+
 Replay that capture after rebuilding::
 
   openmw-diagnosticctl replay --openmw <build>\openmw.exe --config <profile>\openmw.cfg \
@@ -83,6 +89,21 @@ The controller measures every route
 frame in bounded segments, writes ``performance-segment-*.txt``, captures full graphics evidence at each segment boundary, and
 then closes and cleans the isolated child. Use the same capsule, build configuration, driver state, and replay command for every
 baseline and candidate repetition.
+
+Add ``--audit-route-clearance`` to test every consumed route state with the installed player's exact Bullet collision shape.
+The probe is raised four world units so a supporting floor is not classified as an obstruction, and tests loaded world and door
+collision while excluding LAND support and transient actors. The controller writes ``route-clearance.yaml`` with the route
+frame, cell, actor shape and half-extents, and exact placed-reference contacts. This proves standing clearance at the authored
+route samples; it does not replace continuous movement simulation between samples.
+
+Add ``--audit-route-traversal`` to drive the installed player from each consumed route state toward the next through OpenMW's
+ordinary movement queue and Bullet solver. The isolated controller disables asynchronous physics publication only in its copied
+writable configuration, keeping target and achieved positions on the same fixed frame without changing the source profile. It
+writes ``route-traversal.yaml`` with full-precision target and actual cells and positions, their errors, initialization state,
+and whether each target was reached within the diagnostic timing tolerance. Exact target timing is raw evidence rather than a
+route-completion verdict: downstream validation can measure monotonic progress, a bounded local course corridor, and final
+endpoint arrival from the recorded positions. Pair traversal with ``--audit-route-clearance`` when certifying both locomotion
+and standing collision along a route.
 
 Add ``--capture-route-frames`` when diagnosing temporal rendering defects. The controller stores the exact final composite for
 every executed route frame together with frame-matched shadow-map depth and projection metadata in bounded, versioned

@@ -71,6 +71,8 @@
 #include "diagnosticcollection.hpp"
 #include "diagnosticgameplayroute.hpp"
 
+#include "mwphysics/physicssystem.hpp"
+
 #include "mwgui/windowmanagerimp.hpp"
 
 #include "mwlua/luamanagerimp.hpp"
@@ -107,6 +109,21 @@
 
 namespace
 {
+    /// Return the stable diagnostic spelling for the exact Bullet actor shape in use.
+    std::string_view diagnosticActorShapeName(DetourNavigator::CollisionShapeType shape)
+    {
+        switch (shape)
+        {
+            case DetourNavigator::CollisionShapeType::Aabb:
+                return "axis-aligned-box";
+            case DetourNavigator::CollisionShapeType::RotatingBox:
+                return "rotating-box";
+            case DetourNavigator::CollisionShapeType::Cylinder:
+                return "cylinder";
+        }
+        throw std::logic_error("unsupported actor collision shape");
+    }
+
     void checkSDLError(int ret)
     {
         if (ret != 0)
@@ -316,7 +333,9 @@ bool OMW::Engine::frame(unsigned frameNumber, float frametime)
 
             if (mStateManager->getState() != MWBase::StateManager::State_NoGame)
             {
-                mWorld->updatePhysics(frametime, paused, frameStart, frameNumber, *stats);
+                prepareDiagnosticGameplayRouteMovement(frametime);
+                const bool traverseRoute = mDiagnosticGameplayRoute && mDiagnosticGameplayRoute->capturingTraversal();
+                mWorld->updatePhysics(frametime, paused && !traverseRoute, frameStart, frameNumber, *stats);
             }
         }
 
@@ -1274,13 +1293,67 @@ void OMW::Engine::applyDiagnosticGameplayRoute()
     const Diagnostics::GameplayRouteFrame& frame = mDiagnosticGameplayRoute->replayFrame();
     MWWorld::Ptr player = mWorld->getPlayerPtr();
     MWWorld::CellStore& cell = mWorld->getWorldModel().getCell(ESM::RefId::deserializeText(frame.mCell));
-    const osg::Vec3f position(frame.mPosition[0], frame.mPosition[1], frame.mPosition[2]);
+    const osg::Vec3f targetPosition(frame.mPosition[0], frame.mPosition[1], frame.mPosition[2]);
     const osg::Vec3f rotation(frame.mRotation[0], frame.mRotation[1], frame.mRotation[2]);
-    if (player.getCell() == &cell)
-        player = mWorld->moveObject(player, position, true, true);
-    else
-        player = mWorld->moveObject(player, &cell, position, true, true);
+    const bool initializedTraversal
+        = mDiagnosticGameplayRoute->capturingTraversal() && mDiagnosticGameplayRoute->replayFrameIndex() == 0;
+    if (!mDiagnosticGameplayRoute->capturingTraversal())
+    {
+        if (player.getCell() == &cell)
+            player = mWorld->moveObject(player, targetPosition, true, true);
+        else
+            player = mWorld->moveObject(player, &cell, targetPosition, true, true);
+    }
     mWorld->rotateObject(player, rotation, MWBase::RotationFlag_none);
+    const ESM::Position& actualTransform = player.getRefData().getPosition();
+    const osg::Vec3f actualPosition = actualTransform.asVec3();
+    const std::string actualCell = player.getCell()->getCell()->getId().serializeText();
+    if (mDiagnosticGameplayRoute->capturingClearance())
+    {
+        constexpr float supportingSurfaceClearance = 4.f;
+        const MWPhysics::StandingActorClearance clearance
+            = mWorld->getPhysicsSystem().probeStandingActorClearance(player, supportingSurfaceClearance);
+        DiagnosticRouteClearanceFrame observed{
+            .mRouteFrame = mDiagnosticGameplayRoute->replayFrameIndex(),
+            .mCell = actualCell,
+            .mPosition = actualPosition,
+            .mShape = std::string(diagnosticActorShapeName(clearance.mShapeType)),
+            .mHalfExtents = clearance.mHalfExtents,
+            .mLift = clearance.mLift,
+            .mContacts = {},
+        };
+        observed.mContacts.reserve(clearance.mContacts.size());
+        for (const MWPhysics::StandingActorClearanceContact& contact : clearance.mContacts)
+        {
+            observed.mContacts.push_back({
+                .mObjectId = contact.mObject.getCellRef().getRefId().serializeText(),
+                .mReference = contact.mObject.getCellRef().getRefNum().toString(),
+                .mPoint = contact.mPoint,
+                .mNormal = contact.mNormal,
+                .mPenetrationDepth = contact.mPenetrationDepth,
+            });
+        }
+        mDiagnosticGameplayRoute->recordClearance(std::move(observed));
+    }
+    if (mDiagnosticGameplayRoute->capturingTraversal())
+    {
+        const osg::Vec2f horizontalDelta(
+            actualPosition.x() - targetPosition.x(), actualPosition.y() - targetPosition.y());
+        const float horizontalError = horizontalDelta.length();
+        const float verticalError = std::abs(actualPosition.z() - targetPosition.z());
+        mDiagnosticGameplayRoute->recordTraversal({
+            .mRouteFrame = mDiagnosticGameplayRoute->replayFrameIndex(),
+            .mTargetCell = frame.mCell,
+            .mTargetPosition = targetPosition,
+            .mActualCell = actualCell,
+            .mActualPosition = actualPosition,
+            .mHorizontalError = horizontalError,
+            .mVerticalError = verticalError,
+            .mInitialized = initializedTraversal,
+            .mTargetReached = actualCell == frame.mCell && horizontalError <= diagnosticRouteHorizontalTolerance
+                && verticalError <= diagnosticRouteVerticalTolerance,
+        });
+    }
     if (mWorld->isFirstPerson() != frame.mFirstPerson)
         mWorld->togglePOV(true);
     MWRender::Camera* camera = mWorld->getCamera();
@@ -1288,6 +1361,33 @@ void OMW::Engine::applyDiagnosticGameplayRoute()
     camera->setYaw(frame.mCameraAngles[1], true);
     camera->setRoll(frame.mCameraAngles[2]);
     mDiagnosticGameplayRoute->completeReplayFrame();
+}
+
+void OMW::Engine::prepareDiagnosticGameplayRouteMovement(float dt)
+{
+    if (!mDiagnosticGameplayRoute || !mDiagnosticGameplayRoute->capturingTraversal()
+        || !mDiagnosticGameplayRoute->replaying() || !(dt > 0.f))
+        return;
+
+    MWWorld::Ptr player = mWorld->getPlayerPtr();
+    if (mDiagnosticGameplayRoute->replayFrameIndex() == 0)
+    {
+        const Diagnostics::GameplayRouteFrame& frame = mDiagnosticGameplayRoute->replayFrame();
+        MWWorld::CellStore& cell = mWorld->getWorldModel().getCell(ESM::RefId::deserializeText(frame.mCell));
+        const osg::Vec3f position(frame.mPosition[0], frame.mPosition[1], frame.mPosition[2]);
+        if (player.getCell() == &cell)
+            player = mWorld->moveObject(player, position, true, true);
+        else
+            player = mWorld->moveObject(player, &cell, position, true, true);
+        mWorld->queueMovement(player, osg::Vec3f());
+        return;
+    }
+
+    const Diagnostics::GameplayRouteFrame& frame = mDiagnosticGameplayRoute->replayFrame();
+    const ESM::Position& current = player.getRefData().getPosition();
+    const osg::Vec3f velocity(
+        (frame.mPosition[0] - current.pos[0]) / dt, (frame.mPosition[1] - current.pos[1]) / dt, 0.f);
+    mWorld->queueMovement(player, velocity);
 }
 
 void OMW::Engine::configureDiagnostics(

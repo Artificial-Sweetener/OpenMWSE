@@ -20,11 +20,13 @@
 #include <osgViewer/ViewerEventHandlers>
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <limits>
 
 #include "mwgui/windowmanagerimp.hpp"
+#include "mwphysics/physicssystem.hpp"
 #include "mwrender/atmospherediagnosticcontroller.hpp"
 #include "mwrender/camera.hpp"
 #include "mwrender/postprocessor.hpp"
@@ -39,6 +41,83 @@
 #include "mwworld/timestamp.hpp"
 #include "mwworld/weather.hpp"
 #include "mwworld/worldimp.hpp"
+
+namespace
+{
+    /// Append one complete request-scoped Bullet route-clearance report as stable YAML.
+    void reportRouteClearance(const std::vector<OMW::DiagnosticRouteClearanceFrame>& frames, std::ostringstream& output)
+    {
+        const std::size_t blockedFrames
+            = std::count_if(frames.begin(), frames.end(), [](const auto& frame) { return !frame.mContacts.empty(); });
+        const std::streamsize originalPrecision = output.precision();
+        output << std::setprecision(std::numeric_limits<float>::max_digits10);
+        output << "route-clearance:\n"
+               << "  provider: bullet-standing-actor@1\n"
+               << "  tested-frames: " << frames.size() << '\n'
+               << "  blocked-frames: " << blockedFrames << '\n'
+               << "  clear: " << (blockedFrames == 0 ? "true" : "false") << "\n"
+               << "  frames:\n";
+        for (const OMW::DiagnosticRouteClearanceFrame& frame : frames)
+        {
+            output << "    - route-frame: " << frame.mRouteFrame << '\n'
+                   << "      cell: " << OMW::quoteDiagnosticYaml(frame.mCell) << '\n'
+                   << "      position: [" << frame.mPosition.x() << ", " << frame.mPosition.y() << ", "
+                   << frame.mPosition.z() << "]\n"
+                   << "      actor-shape: " << frame.mShape << '\n'
+                   << "      half-extents: [" << frame.mHalfExtents.x() << ", " << frame.mHalfExtents.y() << ", "
+                   << frame.mHalfExtents.z() << "]\n"
+                   << "      support-clearance: " << frame.mLift << '\n'
+                   << "      blocked: " << (frame.mContacts.empty() ? "false" : "true") << '\n'
+                   << "      contacts:\n";
+            for (const OMW::DiagnosticRouteClearanceContact& contact : frame.mContacts)
+            {
+                output << "        - object-id: " << OMW::quoteDiagnosticYaml(contact.mObjectId) << '\n'
+                       << "          reference: " << OMW::quoteDiagnosticYaml(contact.mReference) << '\n'
+                       << "          point: [" << contact.mPoint.x() << ", " << contact.mPoint.y() << ", "
+                       << contact.mPoint.z() << "]\n"
+                       << "          normal: [" << contact.mNormal.x() << ", " << contact.mNormal.y() << ", "
+                       << contact.mNormal.z() << "]\n"
+                       << "          penetration-depth: " << contact.mPenetrationDepth << '\n';
+            }
+        }
+        output.precision(originalPrecision);
+    }
+
+    /// Append one complete request-scoped authoritative player-movement report as stable YAML.
+    void reportRouteTraversal(const std::vector<OMW::DiagnosticRouteTraversalFrame>& frames, std::ostringstream& output)
+    {
+        const std::size_t testedTransitions
+            = std::count_if(frames.begin(), frames.end(), [](const auto& frame) { return !frame.mInitialized; });
+        const std::size_t exactTargetTransitions = std::count_if(frames.begin(), frames.end(),
+            [](const auto& frame) { return !frame.mInitialized && frame.mTargetReached; });
+        const std::streamsize originalPrecision = output.precision();
+        output << std::setprecision(std::numeric_limits<float>::max_digits10);
+        output << "route-traversal:\n"
+               << "  provider: bullet-player-movement@1\n"
+               << "  target-frames: " << frames.size() << '\n'
+               << "  tested-transitions: " << testedTransitions << '\n'
+               << "  exact-target-transitions: " << exactTargetTransitions << '\n'
+               << "  missed-target-transitions: " << testedTransitions - exactTargetTransitions << '\n'
+               << "  horizontal-tolerance: " << OMW::diagnosticRouteHorizontalTolerance << '\n'
+               << "  vertical-tolerance: " << OMW::diagnosticRouteVerticalTolerance << '\n'
+               << "  frames:\n";
+        for (const OMW::DiagnosticRouteTraversalFrame& frame : frames)
+        {
+            output << "    - route-frame: " << frame.mRouteFrame << '\n'
+                   << "      target-cell: " << OMW::quoteDiagnosticYaml(frame.mTargetCell) << '\n'
+                   << "      target-position: [" << frame.mTargetPosition.x() << ", " << frame.mTargetPosition.y()
+                   << ", " << frame.mTargetPosition.z() << "]\n"
+                   << "      actual-cell: " << OMW::quoteDiagnosticYaml(frame.mActualCell) << '\n'
+                   << "      actual-position: [" << frame.mActualPosition.x() << ", " << frame.mActualPosition.y()
+                   << ", " << frame.mActualPosition.z() << "]\n"
+                   << "      horizontal-error: " << frame.mHorizontalError << '\n'
+                   << "      vertical-error: " << frame.mVerticalError << '\n'
+                   << "      initialized: " << (frame.mInitialized ? "true" : "false") << '\n'
+                   << "      target-reached: " << (frame.mTargetReached ? "true" : "false") << '\n';
+        }
+        output.precision(originalPrecision);
+    }
+}
 
 void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
 {
@@ -56,17 +135,32 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
         std::ostringstream output;
         if (completed->mHistoryExpired)
         {
+            if (mDiagnosticGameplayRoute)
+            {
+                mDiagnosticGameplayRoute->discardClearanceCapture(completed->mRequestId);
+                mDiagnosticGameplayRoute->discardTraversalCapture(completed->mRequestId);
+            }
             mDiagnosticSession->respond({ completed->mRequestId, Diagnostics::ErrorCode::InvalidFrame,
                 diagnosticBytes("route rendering exceeded retained statistics; replay with fewer performance samples "
                                 "per segment") });
         }
         else
         {
+            const auto clearance = mDiagnosticGameplayRoute
+                ? mDiagnosticGameplayRoute->finishClearanceCapture(completed->mRequestId)
+                : std::nullopt;
+            const auto traversal = mDiagnosticGameplayRoute
+                ? mDiagnosticGameplayRoute->finishTraversalCapture(completed->mRequestId)
+                : std::nullopt;
             output << "request-frame: " << completed->mFirstFrame << '\n'
                    << "readback-rendered-frames: " << frameNumber - completed->mLastFrame << '\n'
                    << "fixed-step: " << (mDiagnosticChild ? "true" : "false") << '\n'
                    << "fixed-step-duration: " << mDiagnosticStepScheduler.frameDuration() << '\n';
             reportDiagnosticRouteFrames(completed->mRouteFrames, output);
+            if (clearance)
+                reportRouteClearance(*clearance, output);
+            if (traversal)
+                reportRouteTraversal(*traversal, output);
             reportDiagnosticPerformance(completed->mFirstFrame, completed->mLastFrame, *mViewer, output);
             mDiagnosticSession->respond(
                 { completed->mRequestId, Diagnostics::ErrorCode::None, diagnosticBytes(output.str()) });
@@ -211,7 +305,9 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                     const bool bypassShadows = (routeOptions & 0x2u) != 0;
                     const bool terrainCastersOnly = (routeOptions & 0x4u) != 0;
                     const bool objectCastersOnly = (routeOptions & 0x8u) != 0;
-                    if ((routeOptions & ~0x1fu) != 0 || (nativeResolution && !captureRenderedFrames)
+                    const bool captureClearance = (routeOptions & 0x20u) != 0;
+                    const bool captureTraversal = (routeOptions & 0x40u) != 0;
+                    if ((routeOptions & ~0x7fu) != 0 || (nativeResolution && !captureRenderedFrames)
                         || !mDiagnosticChild || !mDiagnosticGameplayRoute
                         || (command.mPayload.size() != sizeof(std::uint32_t)
                             && command.mPayload.size() != sizeof(std::uint32_t) + 1)
@@ -232,6 +328,10 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                         response.mError = Diagnostics::ErrorCode::InvalidState;
                         break;
                     }
+                    if (captureClearance)
+                        mDiagnosticGameplayRoute->startClearanceCapture(command.mRequestId, count);
+                    if (captureTraversal)
+                        mDiagnosticGameplayRoute->startTraversalCapture(command.mRequestId, count);
                     if (captureRenderedFrames)
                     {
                         const std::filesystem::path outputPath = mDiagnosticArtifactRoot

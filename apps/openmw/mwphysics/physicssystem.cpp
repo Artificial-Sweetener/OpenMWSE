@@ -1,7 +1,10 @@
 #include "physicssystem.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 #include <osg/Group>
@@ -58,6 +61,39 @@
 
 namespace
 {
+    /// Collect world and door contacts for a temporary actor-shaped object while excluding terrain and actors.
+    class StandingActorClearanceCallback final : public btCollisionWorld::ContactResultCallback
+    {
+    public:
+        explicit StandingActorClearanceCallback(const btCollisionObject& probe)
+            : mProbe(&probe)
+        {
+            m_collisionFilterGroup = MWPhysics::CollisionType_Actor;
+            m_collisionFilterMask = MWPhysics::CollisionType_World | MWPhysics::CollisionType_Door;
+        }
+
+        /// Retain the blocking object's stable pointer and the deepest manifold contact Bullet reports.
+        btScalar addSingleResult(btManifoldPoint& contact, const btCollisionObjectWrapper* first, int, int,
+            const btCollisionObjectWrapper* second, int, int) override
+        {
+            const bool probeIsFirst = first->m_collisionObject == mProbe;
+            const btCollisionObject* other = probeIsFirst ? second->m_collisionObject : first->m_collisionObject;
+            const auto* holder = static_cast<MWPhysics::PtrHolder*>(other->getUserPointer());
+            if (holder == nullptr)
+                return 0.f;
+            const btVector3 point = probeIsFirst ? contact.m_positionWorldOnB : contact.m_positionWorldOnA;
+            const btVector3 normal = probeIsFirst ? contact.m_normalWorldOnB : -contact.m_normalWorldOnB;
+            mContacts.push_back({ holder->getPtr(), Misc::Convert::toOsg(point), Misc::Convert::toOsg(normal),
+                std::max(0.f, -static_cast<float>(contact.getDistance())) });
+            return 0.f;
+        }
+
+        std::vector<MWPhysics::StandingActorClearanceContact> mContacts;
+
+    private:
+        const btCollisionObject* mProbe;
+    };
+
     void handleJump(const MWWorld::Ptr& ptr)
     {
         if (!ptr.getClass().isActor())
@@ -372,6 +408,38 @@ namespace MWPhysics
         for (auto& [actor, point, normal] : getCollisionsPoints(ptr, collisionGroup, collisionMask))
             actors.emplace_back(actor);
         return actors;
+    }
+
+    StandingActorClearance PhysicsSystem::probeStandingActorClearance(
+        const MWWorld::ConstPtr& ptr, const float lift) const
+    {
+        if (!std::isfinite(lift) || lift < 0.f)
+            throw std::invalid_argument("standing actor clearance lift must be finite and nonnegative");
+        const Actor* actor = getActor(ptr);
+        if (actor == nullptr)
+            throw std::invalid_argument("standing actor clearance requires a loaded physics actor");
+
+        const btCollisionObject* body = actor->getCollisionObject();
+        btCollisionObject probe;
+        probe.setCollisionShape(actor->getConvexShape());
+        btTransform transform = body->getWorldTransform();
+        transform.getOrigin().setZ(transform.getOrigin().z() + lift);
+        probe.setWorldTransform(transform);
+
+        StandingActorClearanceCallback callback(probe);
+        mTaskScheduler->contactTest(&probe, callback);
+        std::sort(callback.mContacts.begin(), callback.mContacts.end(), [](const auto& left, const auto& right) {
+            const std::string leftIdentity = left.mObject.toString();
+            const std::string rightIdentity = right.mObject.toString();
+            return leftIdentity < rightIdentity
+                || (leftIdentity == rightIdentity && left.mPenetrationDepth > right.mPenetrationDepth);
+        });
+        callback.mContacts.erase(std::unique(callback.mContacts.begin(), callback.mContacts.end(),
+                                     [](const auto& left, const auto& right) {
+                                         return left.mObject.toString() == right.mObject.toString();
+                                     }),
+            callback.mContacts.end());
+        return { actor->getCollisionShapeType(), actor->getHalfExtents(), lift, std::move(callback.mContacts) };
     }
 
     osg::Vec3f PhysicsSystem::traceDown(const MWWorld::Ptr& ptr, const osg::Vec3f& position, float maxHeight)

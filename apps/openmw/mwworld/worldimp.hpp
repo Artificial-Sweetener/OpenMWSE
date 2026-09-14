@@ -192,6 +192,9 @@ namespace MWWorld
         WorldModel& getWorldModel() { return mWorldModel; }
         Scene& getWorldScene() { return *mWorldScene; }
 
+        /// Return the physics owner for engine-level diagnostic queries.
+        MWPhysics::PhysicsSystem& getPhysicsSystem() { return *mPhysics; }
+
         // FIXME
         void addContainerScripts(const Ptr& reference, CellStore* cell) override;
         void removeContainerScripts(const Ptr& reference) override;

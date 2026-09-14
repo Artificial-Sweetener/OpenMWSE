@@ -402,3 +402,29 @@ issue = "architecture:structural-review"
 review_by = 2027-03-12
 fingerprint = "sha256:e760bc2df5df813240612d8a0d6c9dce6e447a3ab5512e09a39f53e7608055e8"
 max_lines = 818
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-033"
+area = "diagnostics"
+owner = "OpenMWSE diagnostic bridge"
+rule = "STRUCT003"
+path = "apps/openmw-diagnosticctl/isolatedrun.cpp"
+kind = "structural"
+justification = "The isolated-run implementation owns one controller lifecycle: validate an isolated launch, materialize its temporary profile, start and connect to the child, execute bounded capture or replay requests, retain requested evidence, and clean up. These stages share the same launch options, child identity, endpoint, artifact root, and failure cleanup contract; extracting a stage would divide one transactional owner across pass-through interfaces."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:5b65b082480d2dd395c517103866afd6ddb67b8b4a6d1fa6001a9d864eecd909"
+max_lines = 594
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-034"
+area = "diagnostics"
+owner = "OpenMWSE diagnostic bridge"
+rule = "STRUCT003"
+path = "apps/openmw/diagnosticcommands.cpp"
+kind = "structural"
+justification = "Diagnostic commands form one engine-side protocol boundary that validates request envelopes, coordinates request-scoped capture state, and serializes the corresponding responses. Clearance and traversal reports depend on the same request identity, replay lifetime, response framing, and error translation as existing graphics and performance commands; separating them would duplicate protocol dispatch and cleanup policy."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:9498475bda589c1f057492162c4734ff39827191d291abf5c91edcccc6b075f9"
+max_lines = 596

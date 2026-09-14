@@ -12,10 +12,12 @@ file(GLOB UNITTEST_SRC_FILES
     diagnosticstartup.cpp
     diagnosticworkcounter.cpp
     diagnosticgameplayrouteexecution.cpp
+    diagnosticisolatedoptions.cpp
     diagnosticisolatedsettings.cpp
     diagnosticreplaystate.cpp
     ../openmw-diagnosticctl/replaystate.cpp
     ../openmw-diagnosticctl/gameplayrouteexecution.cpp
+    ../openmw-diagnosticctl/isolatedoptions.cpp
     ../openmw-diagnosticctl/isolatedsettings.cpp
 
     mwworld/teststore.cpp

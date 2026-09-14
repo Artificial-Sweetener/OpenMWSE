@@ -2,6 +2,7 @@
 
 #include "controllerprotocol.hpp"
 #include "gameplayrouteexecution.hpp"
+#include "isolatedoptions.hpp"
 #include "isolatedsettings.hpp"
 #include "isolatedworkspace.hpp"
 #include "settingssequences.hpp"
@@ -26,9 +27,27 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
+
+namespace
+{
+    /// Write diagnostic YAML with enough precision to reconstruct every serialized floating-point value.
+    void writePreciseYaml(
+        const std::filesystem::path& path, const YAML::Node& evidence, std::string_view failureContext)
+    {
+        YAML::Emitter output;
+        output.SetFloatPrecision(std::numeric_limits<float>::max_digits10);
+        output.SetDoublePrecision(std::numeric_limits<double>::max_digits10);
+        output << evidence;
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        stream << output.c_str();
+        if (!stream)
+            throw std::runtime_error(std::string("failed writing ") + std::string(failureContext));
+    }
+}
 
 namespace DiagnosticCtl
 {
@@ -38,9 +57,13 @@ namespace DiagnosticCtl
         const std::filesystem::path executableOption = findOption(arguments, "--openmw").value_or("openmw.exe");
         const std::filesystem::path sourceConfigOption = findOption(arguments, "--config").value_or(std::string());
         const std::filesystem::path artifactsOption = findOption(arguments, "--artifacts").value_or(std::string());
+        const std::chrono::seconds startupTimeout = parseStartupTimeout(findOption(arguments, "--startup-timeout"));
+        const bool newGame = hasFlag(arguments, "--new-game");
         const bool headed = hasFlag(arguments, "--headed");
         const bool captureRouteNativeFrames = hasFlag(arguments, "--capture-route-native-frames");
         const bool captureRouteFrames = captureRouteNativeFrames || hasFlag(arguments, "--capture-route-frames");
+        const bool auditRouteClearance = hasFlag(arguments, "--audit-route-clearance");
+        const bool auditRouteTraversal = hasFlag(arguments, "--audit-route-traversal");
         const bool captureGraphics = !hasFlag(arguments, "--skip-graphics-capture");
         const bool normalOnlyGraphicsCapture = hasFlag(arguments, "--normal-only-graphics-capture");
         if (!captureGraphics && normalOnlyGraphicsCapture)
@@ -83,6 +106,11 @@ namespace DiagnosticCtl
         copyProfileConfiguration(sourceConfig, isolatedConfig);
         for (const std::string& setting : findOptions(arguments, "--setting"))
             DiagnosticCtl::applyIsolatedSetting(isolatedConfig, DiagnosticCtl::parseIsolatedSetting(setting));
+        if (auditRouteTraversal)
+        {
+            DiagnosticCtl::applyIsolatedSetting(
+                isolatedConfig, DiagnosticCtl::parseIsolatedSetting("Physics:async num threads=0"));
+        }
         std::filesystem::create_directories(isolatedData);
 
         const std::string endpoint = uniqueEndpoint();
@@ -135,10 +163,13 @@ namespace DiagnosticCtl
             isolatedSave = workspace.path() / "replay.omwsave";
             std::filesystem::copy_file(*save, *isolatedSave);
         }
-        if (isolatedSave)
-            childArguments.insert(childArguments.end(), { "--load-savegame", isolatedSave->string(), "--skip-menu" });
+        addWorldStartArguments(childArguments, isolatedSave, newGame);
         if (captureRouteNativeFrames && gameplayRoute.empty())
             throw std::runtime_error("native route capture requires a capsule containing a gameplay route");
+        if (auditRouteClearance && gameplayRoute.empty())
+            throw std::runtime_error("route clearance audit requires a capsule containing a gameplay route");
+        if (auditRouteTraversal && gameplayRoute.empty())
+            throw std::runtime_error("route traversal audit requires a capsule containing a gameplay route");
         if (findOption(arguments, "--atmosphere-settings-sequence") && gameplayRoute.empty())
             throw std::invalid_argument("live atmosphere settings require a capsule containing a gameplay route");
         if (findOption(arguments, "--distance-settings-sequence") && gameplayRoute.empty())
@@ -148,7 +179,7 @@ namespace DiagnosticCtl
 
         ChildProcess child(executable, childArguments);
         Diagnostics::Command hello{ 1, Diagnostics::CommandType::Hello, std::move(replayManifest) };
-        const Diagnostics::Response ready = transactWhenReady(endpoint, hello, std::chrono::minutes(3), &child, headed);
+        const Diagnostics::Response ready = transactWhenReady(endpoint, hello, startupTimeout, &child, headed);
         if (printResponse(ready) != 0)
             return 2;
         validateIsolatedSession(ready, headed);
@@ -325,6 +356,13 @@ namespace DiagnosticCtl
             const auto settingsSequence = loadAtmosphereSettingsSequence(arguments, sequenceContext);
             std::size_t completedFrames = 0;
             unsigned segmentIndex = 0;
+            YAML::Node clearanceFrames(YAML::NodeType::Sequence);
+            std::size_t blockedClearanceFrames = 0;
+            YAML::Node traversalFrames(YAML::NodeType::Sequence);
+            std::size_t testedTraversalTransitions = 0;
+            std::size_t exactTargetTraversalTransitions = 0;
+            std::size_t missedTargetTraversalTransitions = 0;
+            std::size_t initializedTraversalFrames = 0;
             const auto optimizationSequence = loadOptimizationSettingsSequence(arguments, sequenceContext);
             const auto distanceSequence = loadDistanceSettingsSequence(arguments, sequenceContext);
             while (completedFrames < routePlan.mFrameCount)
@@ -381,11 +419,13 @@ namespace DiagnosticCtl
                 const std::uint64_t segmentRequestId = runSegment.mRequestId;
                 for (std::size_t byte = 0; byte < sizeof(segmentFrames); ++byte)
                     runSegment.mPayload.push_back(static_cast<std::byte>((segmentFrames >> (byte * 8)) & 0xffu));
-                if (captureRouteFrames || bypassRouteShadows || routeShadowCasters)
+                if (captureRouteFrames || bypassRouteShadows || routeShadowCasters || auditRouteClearance
+                    || auditRouteTraversal)
                 {
                     const unsigned routeOptions = (captureRouteFrames ? 0x1u : 0u) | (bypassRouteShadows ? 0x2u : 0u)
                         | (routeShadowCasters == "terrain" ? 0x4u : 0u) | (routeShadowCasters == "objects" ? 0x8u : 0u)
-                        | (captureRouteNativeFrames ? 0x10u : 0u);
+                        | (captureRouteNativeFrames ? 0x10u : 0u) | (auditRouteClearance ? 0x20u : 0u)
+                        | (auditRouteTraversal ? 0x40u : 0u);
                     runSegment.mPayload.push_back(static_cast<std::byte>(routeOptions));
                 }
                 const Diagnostics::Response performance
@@ -400,6 +440,43 @@ namespace DiagnosticCtl
                     static_cast<std::streamsize>(performance.mPayload.size()));
                 if (!performanceFile)
                     throw std::runtime_error("failed writing gameplay-route performance evidence");
+                if (auditRouteClearance)
+                {
+                    const std::string performanceText = payloadText(performance.mPayload);
+                    const YAML::Node report
+                        = YAML::Load(extractGameplayRouteClearanceReport(performanceText))["route-clearance"];
+                    const YAML::Node frames = report["frames"];
+                    if (report["provider"].as<std::string>("") != "bullet-standing-actor@1" || !frames.IsSequence()
+                        || report["tested-frames"].as<std::size_t>(0) != segmentFrames
+                        || frames.size() != segmentFrames)
+                        throw std::runtime_error("engine returned invalid gameplay-route clearance evidence");
+                    blockedClearanceFrames += report["blocked-frames"].as<std::size_t>(0);
+                    for (const YAML::Node& frame : frames)
+                        clearanceFrames.push_back(frame);
+                }
+                if (auditRouteTraversal)
+                {
+                    const std::string performanceText = payloadText(performance.mPayload);
+                    const YAML::Node report
+                        = YAML::Load(extractGameplayRouteTraversalReport(performanceText))["route-traversal"];
+                    const YAML::Node frames = report["frames"];
+                    if (report["provider"].as<std::string>("") != "bullet-player-movement@1" || !frames.IsSequence()
+                        || report["target-frames"].as<std::size_t>(0) != segmentFrames
+                        || frames.size() != segmentFrames)
+                        throw std::runtime_error("engine returned invalid gameplay-route traversal evidence");
+                    testedTraversalTransitions += report["tested-transitions"].as<std::size_t>(0);
+                    exactTargetTraversalTransitions += report["exact-target-transitions"].as<std::size_t>(0);
+                    missedTargetTraversalTransitions += report["missed-target-transitions"].as<std::size_t>(0);
+                    if (report["exact-target-transitions"].as<std::size_t>(0)
+                            + report["missed-target-transitions"].as<std::size_t>(0)
+                        != report["tested-transitions"].as<std::size_t>(0))
+                        throw std::runtime_error("engine returned inconsistent gameplay-route traversal counts");
+                    for (const YAML::Node& frame : frames)
+                    {
+                        initializedTraversalFrames += frame["initialized"].as<bool>(false) ? 1 : 0;
+                        traversalFrames.push_back(frame);
+                    }
+                }
                 completedFixedFrames += segmentFrames;
                 waitForScheduledFrames(endpoint, requestId, completedFixedFrames);
                 const Diagnostics::Response routeStatus
@@ -427,6 +504,40 @@ namespace DiagnosticCtl
                 }
             }
             std::cout << "executed-route-frames: " << completedFrames << '\n';
+            if (auditRouteClearance)
+            {
+                YAML::Node evidence;
+                evidence["route-clearance-version"] = 1;
+                evidence["provider"] = "bullet-standing-actor@1";
+                evidence["tested-frames"] = completedFrames;
+                evidence["blocked-frames"] = blockedClearanceFrames;
+                evidence["clear"] = blockedClearanceFrames == 0;
+                evidence["frames"] = clearanceFrames;
+                const std::filesystem::path path = artifacts / "route-clearance.yaml";
+                writePreciseYaml(path, evidence, "gameplay-route clearance evidence");
+                std::cout << "route-clearance: " << path << '\n';
+            }
+            if (auditRouteTraversal)
+            {
+                if (initializedTraversalFrames != 1
+                    || testedTraversalTransitions + initializedTraversalFrames != completedFrames
+                    || exactTargetTraversalTransitions + missedTargetTraversalTransitions != testedTraversalTransitions)
+                    throw std::runtime_error("gameplay-route traversal evidence is incomplete");
+                YAML::Node evidence;
+                evidence["route-traversal-version"] = 1;
+                evidence["provider"] = "bullet-player-movement@1";
+                evidence["target-frames"] = completedFrames;
+                evidence["initialized-frames"] = initializedTraversalFrames;
+                evidence["tested-transitions"] = testedTraversalTransitions;
+                evidence["exact-target-transitions"] = exactTargetTraversalTransitions;
+                evidence["missed-target-transitions"] = missedTargetTraversalTransitions;
+                evidence["horizontal-tolerance"] = 8;
+                evidence["vertical-tolerance"] = 16;
+                evidence["frames"] = traversalFrames;
+                const std::filesystem::path path = artifacts / "route-traversal.yaml";
+                writePreciseYaml(path, evidence, "gameplay-route traversal evidence");
+                std::cout << "route-traversal: " << path << '\n';
+            }
         }
         else
         {

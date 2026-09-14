@@ -236,7 +236,10 @@ namespace OMW
         /// Toggle bounded live route recording from the reserved input shortcut.
         void toggleDiagnosticGameplayRoute();
 
-        /// Apply recorded movement and camera input before simulation without idle-camera interference.
+        /// Queue one diagnostic route target through normal player physics when traversal capture is active.
+        void prepareDiagnosticGameplayRouteMovement(float dt);
+
+        /// Apply replay state or observe the position reached by diagnostic player movement.
         void applyDiagnosticGameplayRoute();
 
         /// Record the authoritative state produced by the current rendered frame.

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 
 namespace DiagnosticCtl
@@ -23,6 +24,12 @@ namespace DiagnosticCtl
     /// Reject a rendered segment that did not consume exactly its scheduled route states.
     void validateGameplayRouteProgress(
         std::size_t remainingBefore, std::size_t scheduledFrames, std::size_t remainingAfter);
+
+    /// Extract the route-clearance YAML document from a combined route performance response.
+    std::string extractGameplayRouteClearanceReport(std::string_view response);
+
+    /// Extract the route-traversal YAML document from a combined route performance response.
+    std::string extractGameplayRouteTraversalReport(std::string_view response);
 }
 
 #endif

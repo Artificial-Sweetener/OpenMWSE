@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace OMW
 {
@@ -67,6 +68,8 @@ namespace OMW
 
     void DiagnosticGameplayRoute::loadReplay(std::span<const std::byte> payload)
     {
+        if (mClearanceRequestId || mTraversalRequestId)
+            throw std::logic_error("cannot replace a gameplay route during diagnostic capture");
         mReplayFrames = Diagnostics::decodeGameplayRoute(payload);
         mReplayIndex = 0;
     }
@@ -93,6 +96,109 @@ namespace OMW
     std::size_t DiagnosticGameplayRoute::remainingReplayFrames() const noexcept
     {
         return mReplayFrames.size() - mReplayIndex;
+    }
+
+    void DiagnosticGameplayRoute::startClearanceCapture(std::uint64_t requestId, std::size_t frameCount)
+    {
+        if (mClearanceRequestId)
+            throw std::logic_error("gameplay route clearance capture is already active");
+        if (frameCount == 0 || frameCount > remainingReplayFrames())
+            throw std::invalid_argument("gameplay route clearance frame count exceeds the remaining replay");
+        mClearanceRequestId = requestId;
+        mClearanceFrameCount = frameCount;
+        mClearanceFrames.clear();
+        mClearanceFrames.reserve(frameCount);
+    }
+
+    bool DiagnosticGameplayRoute::capturingClearance() const noexcept
+    {
+        return mClearanceRequestId.has_value();
+    }
+
+    std::size_t DiagnosticGameplayRoute::replayFrameIndex() const noexcept
+    {
+        return mReplayIndex;
+    }
+
+    void DiagnosticGameplayRoute::recordClearance(DiagnosticRouteClearanceFrame frame)
+    {
+        if (!mClearanceRequestId || mClearanceFrames.size() >= mClearanceFrameCount)
+            throw std::logic_error("gameplay route clearance frame is outside an active capture");
+        if (frame.mRouteFrame != mReplayIndex)
+            throw std::logic_error("gameplay route clearance frame index does not match replay progress");
+        mClearanceFrames.push_back(std::move(frame));
+    }
+
+    std::optional<std::vector<DiagnosticRouteClearanceFrame>> DiagnosticGameplayRoute::finishClearanceCapture(
+        std::uint64_t requestId)
+    {
+        if (!mClearanceRequestId)
+            return std::nullopt;
+        if (*mClearanceRequestId != requestId)
+            throw std::logic_error("gameplay route clearance request does not match the completed segment");
+        if (mClearanceFrames.size() != mClearanceFrameCount)
+            throw std::logic_error("gameplay route clearance capture did not observe every requested frame");
+        mClearanceRequestId.reset();
+        mClearanceFrameCount = 0;
+        return std::exchange(mClearanceFrames, {});
+    }
+
+    void DiagnosticGameplayRoute::discardClearanceCapture(const std::uint64_t requestId) noexcept
+    {
+        if (mClearanceRequestId != requestId)
+            return;
+        mClearanceRequestId.reset();
+        mClearanceFrameCount = 0;
+        mClearanceFrames.clear();
+    }
+
+    void DiagnosticGameplayRoute::startTraversalCapture(std::uint64_t requestId, std::size_t frameCount)
+    {
+        if (mTraversalRequestId)
+            throw std::logic_error("gameplay route traversal capture is already active");
+        if (frameCount == 0 || frameCount > remainingReplayFrames())
+            throw std::invalid_argument("gameplay route traversal frame count exceeds the remaining replay");
+        mTraversalRequestId = requestId;
+        mTraversalFrameCount = frameCount;
+        mTraversalFrames.clear();
+        mTraversalFrames.reserve(frameCount);
+    }
+
+    bool DiagnosticGameplayRoute::capturingTraversal() const noexcept
+    {
+        return mTraversalRequestId.has_value();
+    }
+
+    void DiagnosticGameplayRoute::recordTraversal(DiagnosticRouteTraversalFrame frame)
+    {
+        if (!mTraversalRequestId || mTraversalFrames.size() >= mTraversalFrameCount)
+            throw std::logic_error("gameplay route traversal frame is outside an active capture");
+        if (frame.mRouteFrame != mReplayIndex)
+            throw std::logic_error("gameplay route traversal frame index does not match replay progress");
+        mTraversalFrames.push_back(std::move(frame));
+    }
+
+    std::optional<std::vector<DiagnosticRouteTraversalFrame>> DiagnosticGameplayRoute::finishTraversalCapture(
+        std::uint64_t requestId)
+    {
+        if (!mTraversalRequestId)
+            return std::nullopt;
+        if (*mTraversalRequestId != requestId)
+            throw std::logic_error("gameplay route traversal request does not match the completed segment");
+        if (mTraversalFrames.size() != mTraversalFrameCount)
+            throw std::logic_error("gameplay route traversal capture did not observe every requested frame");
+        mTraversalRequestId.reset();
+        mTraversalFrameCount = 0;
+        return std::exchange(mTraversalFrames, {});
+    }
+
+    void DiagnosticGameplayRoute::discardTraversalCapture(const std::uint64_t requestId) noexcept
+    {
+        if (mTraversalRequestId != requestId)
+            return;
+        mTraversalRequestId.reset();
+        mTraversalFrameCount = 0;
+        mTraversalFrames.clear();
     }
 
     std::filesystem::path DiagnosticGameplayRoute::finishRecording()

@@ -22,6 +22,33 @@ namespace
 
 namespace DiagnosticCtl
 {
+    namespace
+    {
+        /// Extract one named route report through the following performance provider boundary.
+        std::string extractRouteReport(std::string_view response, std::string_view reportMarker)
+        {
+            constexpr std::string_view performanceMarker = "\nprovider: performance@";
+            const std::size_t reportBegin = response.find(reportMarker);
+            const std::size_t reportEnd = response.find(performanceMarker, reportBegin);
+            if (reportBegin == std::string_view::npos || reportEnd == std::string_view::npos)
+                throw std::runtime_error(
+                    "engine omitted " + std::string(reportMarker.substr(0, reportMarker.size() - 2)) + " evidence");
+            return std::string(response.substr(reportBegin, reportEnd - reportBegin));
+        }
+    }
+
+    std::string extractGameplayRouteClearanceReport(std::string_view response)
+    {
+        constexpr std::string_view reportMarker = "route-clearance:\n";
+        return extractRouteReport(response, reportMarker);
+    }
+
+    std::string extractGameplayRouteTraversalReport(std::string_view response)
+    {
+        constexpr std::string_view reportMarker = "route-traversal:\n";
+        return extractRouteReport(response, reportMarker);
+    }
+
     void validateGameplayRouteProgress(
         std::size_t remainingBefore, std::size_t scheduledFrames, std::size_t remainingAfter)
     {
