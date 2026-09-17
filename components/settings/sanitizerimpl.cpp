@@ -123,6 +123,26 @@ namespace Settings
         };
 
         template <class T>
+        struct FallbackEnum final : Sanitizer<T>
+        {
+            std::vector<T> mValues;
+            T mFallback;
+
+            FallbackEnum(std::initializer_list<T> values, T fallback)
+                : mValues(values)
+                , mFallback(std::move(fallback))
+            {
+                if (std::find(mValues.begin(), mValues.end(), mFallback) == mValues.end())
+                    throw std::invalid_argument("Enum fallback is not an allowed value");
+            }
+
+            T apply(const T& value) const override
+            {
+                return std::find(mValues.begin(), mValues.end(), value) == mValues.end() ? mFallback : value;
+            }
+        };
+
+        template <class T>
         struct EqualOrMax final : Sanitizer<T>
         {
             T mEqual;
@@ -206,6 +226,12 @@ namespace Settings
     std::unique_ptr<Sanitizer<std::string>> makeEnumSanitizerString(std::initializer_list<std::string> values)
     {
         return std::make_unique<Enum<std::string>>(values);
+    }
+
+    std::unique_ptr<Sanitizer<std::string>> makeFallbackEnumSanitizerString(
+        std::initializer_list<std::string> values, std::string fallback)
+    {
+        return std::make_unique<FallbackEnum<std::string>>(values, std::move(fallback));
     }
 
     std::unique_ptr<Sanitizer<float>> makeEqualOrMaxSanitizerFloat(float equal, float max)

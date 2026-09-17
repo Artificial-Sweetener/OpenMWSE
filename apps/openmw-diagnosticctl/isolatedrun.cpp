@@ -176,6 +176,8 @@ namespace DiagnosticCtl
             throw std::invalid_argument("live distance settings require a capsule containing a gameplay route");
         if (findOption(arguments, "--optimization-settings-sequence") && gameplayRoute.empty())
             throw std::invalid_argument("live optimization settings require a capsule containing a gameplay route");
+        if (findOption(arguments, "--water-settings-sequence") && gameplayRoute.empty())
+            throw std::invalid_argument("live water settings require a capsule containing a gameplay route");
 
         ChildProcess child(executable, childArguments);
         Diagnostics::Command hello{ 1, Diagnostics::CommandType::Hello, std::move(replayManifest) };
@@ -365,6 +367,7 @@ namespace DiagnosticCtl
             std::size_t initializedTraversalFrames = 0;
             const auto optimizationSequence = loadOptimizationSettingsSequence(arguments, sequenceContext);
             const auto distanceSequence = loadDistanceSettingsSequence(arguments, sequenceContext);
+            const auto waterSequence = loadWaterSettingsSequence(arguments, sequenceContext);
             while (completedFrames < routePlan.mFrameCount)
             {
                 if (!optimizationSequence.empty())
@@ -401,6 +404,22 @@ namespace DiagnosticCtl
                     if (!evidence)
                         throw std::runtime_error("failed writing live distance settings evidence");
                     std::cout << "live-distance-settings-parity: " << segmentIndex << " true\n";
+                }
+                if (!waterSequence.empty())
+                {
+                    const auto& requested = waterSequence.at(segmentIndex);
+                    const auto applied = Diagnostics::transact(endpoint,
+                        { requestId++, Diagnostics::CommandType::SetWaterSettings,
+                            textPayload(Diagnostics::serializeWaterSettings(requested)) });
+                    requireSuccessfulResponse(applied);
+                    const auto observed = Diagnostics::deserializeWaterSettings(payloadText(applied.mPayload));
+                    if (observed != requested)
+                        throw std::runtime_error("live water control did not match the requested wave height");
+                    std::ofstream evidence(artifacts / ("water-settings-" + std::to_string(segmentIndex) + ".yaml"));
+                    evidence << Diagnostics::serializeWaterSettings(observed);
+                    if (!evidence)
+                        throw std::runtime_error("failed writing live water settings evidence");
+                    std::cout << "live-water-settings-parity: " << segmentIndex << " true\n";
                 }
                 if (!settingsSequence.empty())
                 {

@@ -84,6 +84,9 @@ namespace MWRender
         const osg::ref_ptr<osg::Texture>& getSceneTexture(size_t frameId) const { return mTextureScene; }
 
     private:
+        /// Capture the resolved production frame even when no post-processing technique is active.
+        void captureDiagnostics(osg::RenderInfo& renderInfo, unsigned int framebuffer, int width, int height) const;
+
         bool mAvgLum = false;
         bool mPostprocessing = false;
 

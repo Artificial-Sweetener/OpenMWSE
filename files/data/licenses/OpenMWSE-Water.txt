@@ -1,0 +1,31 @@
+OpenMWSE selectable water appearances
+======================================
+
+MGE XE baseline water and water normal volume
+----------------------------------------------
+
+Source: MGE XE, revision 2697fdfa7fd5af48a321a8b6cee3303a0a256690
+Authors: Hrnchamd and MGE XE contributors
+Upstream files: assets/Data Files/shaders/core/XE Common.fx,
+assets/Data Files/shaders/core/XE Mod Water.fx, and
+assets/Data Files/textures/MGE/water_NRM.dds
+Texture SHA-256: 8a4e3698b2808e46391d5a6fa5e3e37281a51417430b286a6bc71fab23d54cab
+License: GNU General Public License version 2. These MGE XE materials keep
+their original license and are not relicensed under GPL version 3.
+
+Enhanced Water Shader 2.2
+-------------------------
+
+Author: Krokantor
+Contributors credited by the shader: Hrnchamd, vtastek, phal, harnlarnm, and abot
+Source release: Enhanced Water Shader 2.2 (Nexus Mods file 49964)
+The shader's included permissions allow modification and redistribution with
+credit. OpenMWSE translates its equations and options to the OpenGL renderer.
+
+Pixel Shader Style Water 1.0
+----------------------------
+
+Author: Hrnchamd
+Source release: Pixel Shader Style Water for MGE XE 1.0 (Nexus Mods file 50044)
+The release permits distribution and code reuse with credit. OpenMWSE translates
+the shader equations to the OpenGL renderer.

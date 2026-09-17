@@ -37,6 +37,12 @@ namespace MWGui
         void setDistanceValues(
             bool useCellEditor, float view, float grass, float shadow, std::optional<int> resolution);
 
+        /// Exercise the live geometric-wave slider with an isolated diagnostic value.
+        void setGeometricWaveHeight(float height);
+
+        /// Exercise the live geometric-wave and caustic controls with isolated diagnostic values.
+        void setWaterValues(float height, bool caustics, bool reflectedCaustics, float causticsStrength);
+
     private:
         /// Preserve the aggregate shadow enable setting after a caster category changes.
         void onShadowCasterChanged(MyGUI::Widget* sender);
@@ -54,6 +60,12 @@ namespace MWGui
         void onDistantShadowQualityChanged(MyGUI::ComboBox* sender, std::size_t position);
         /// Apply the selected atmospheric appearance immediately.
         void onAtmosphereAppearanceChanged(MyGUI::ComboBox* sender, std::size_t position);
+        /// Apply the selected water appearance immediately.
+        void onWaterAppearanceChanged(MyGUI::ComboBox* sender, std::size_t position);
+        /// Apply the enhanced-water color treatment immediately.
+        void onEnhancedWaterColorChanged(MyGUI::ComboBox* sender, std::size_t position);
+        /// Refresh caustic-strength availability after either live prerequisite changes.
+        void onWaterCausticsChanged(MyGUI::Widget* sender);
         /// Refresh subordinate optimization availability after the prerequisite changes.
         void onOptimizationPrerequisiteChanged(MyGUI::Widget* sender);
 
@@ -63,6 +75,8 @@ namespace MWGui
         void refreshAtmosphereControls();
         /// Synchronize subordinate optimization availability without changing saved selections.
         void refreshOptimizationControls();
+        /// Synchronize water choices and dependent enhanced controls without discarding preferences.
+        void refreshWaterControls();
 
         Layout& mLayout;
         std::function<void()> mApply;
@@ -72,6 +86,13 @@ namespace MWGui
         MyGUI::Button* mReflectCloudsButton;
         MyGUI::ComboBox* mVolumetricQuality;
         MyGUI::ComboBox* mAtmosphereAppearance;
+        MyGUI::ComboBox* mWaterAppearance;
+        MyGUI::ScrollBar* mGeometricWaveHeight;
+        MyGUI::Button* mWaterCaustics;
+        MyGUI::Button* mWaterReflectedCaustics;
+        MyGUI::ScrollBar* mWaterCausticsStrength;
+        MyGUI::ComboBox* mEnhancedWaterColor;
+        std::array<MyGUI::Button*, 3> mEnhancedWaterButtons;
         MyGUI::ComboBox* mShadowFilteringQuality;
         MyGUI::Button* mDistantShadowsButton;
         MyGUI::ComboBox* mDistantShadowQuality;

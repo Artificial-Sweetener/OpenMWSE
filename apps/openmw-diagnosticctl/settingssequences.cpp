@@ -56,4 +56,11 @@ namespace DiagnosticCtl
             "optimization-settings-sequence.yaml", "optimization settings sequence",
             Diagnostics::deserializeOptimizationSettings);
     }
+
+    std::vector<Diagnostics::WaterSettings> loadWaterSettingsSequence(
+        std::span<char*> arguments, const SettingsSequenceContext& context)
+    {
+        return loadSequence<Diagnostics::WaterSettings>(arguments, context, "--water-settings-sequence",
+            "water-settings-sequence.yaml", "water settings sequence", Diagnostics::deserializeWaterSettings);
+    }
 }

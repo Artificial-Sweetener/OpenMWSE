@@ -734,7 +734,126 @@
                     <Widget type="TabItem" name="WaterPage">
                         <Property key="Caption" value=" #{OMWEngine:Water} "/>
 
-                        <Widget type="VBox" position_real="0 0 1 1" align="Stretch">
+                        <Widget type="ScrollView" skin="MW_ScrollView" position_real="0 0 1 1" align="Stretch">
+                            <Property key="CanvasSize" value="660 780"/>
+                            <Property key="CanvasAlign" value="Left Top"/>
+                            <Property key="VisibleHScroll" value="false"/>
+                            <Widget type="VBox" position="0 0 660 780" align="Left Top">
+
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/>
+                                <UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedTextBox" skin="NormalText">
+                                    <Property key="Caption" value="#{OMWEngine:WaterAppearance}"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:WaterAppearanceTooltip}"/>
+                                </Widget>
+                                <Widget type="ComboBox" skin="MW_ComboBox" position="0 0 220 24" name="WaterAppearance">
+                                    <Property key="AddItem" value="#{OMWEngine:WaterAppearanceOpenMW}"/>
+                                    <Property key="AddItem" value="#{OMWEngine:WaterAppearanceMGEXE}"/>
+                                    <Property key="AddItem" value="#{OMWEngine:WaterAppearanceEnhanced}"/>
+                                    <Property key="AddItem" value="#{OMWEngine:WaterAppearanceVanilla}"/>
+                                </Widget>
+                            </Widget>
+
+                            <Widget type="AutoSizedTextBox" skin="NormalText" name="GeometricWaveHeightLabel">
+                                <UserString key="HStretch" value="true"/>
+                            </Widget>
+                            <Widget type="ScrollBar" skin="MW_HScroll" position="0 0 620 18" align="Left Top" name="GeometricWaveHeight">
+                                <Property key="Range" value="251"/>
+                                <Property key="Page" value="1"/>
+                                <Property key="WheelPage" value="1"/>
+                                <UserString key="SettingCategory" value="OpenMWSE Water"/>
+                                <UserString key="SettingName" value="geometric wave height"/>
+                                <UserString key="SettingType" value="Slider"/>
+                                <UserString key="SettingValueType" value="Float"/>
+                                <UserString key="SettingMin" value="0"/>
+                                <UserString key="SettingMax" value="250"/>
+                                <UserString key="SettingLabelWidget" value="GeometricWaveHeightLabel"/>
+                                <UserString key="SettingLabelCaption" value="GeometricWaveHeightValue"/>
+                                <UserString key="ToolTipType" value="Layout"/>
+                                <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                <UserString key="Caption_Text" value="#{OMWEngine:GeometricWaveHeightTooltip}"/>
+                            </Widget>
+
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/><UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedButton" skin="MW_Button" name="WaterCausticsButton">
+                                    <UserString key="SettingCategory" value="OpenMWSE Water"/><UserString key="SettingName" value="caustics"/><UserString key="SettingType" value="CheckButton"/>
+                                </Widget>
+                                <Widget type="AutoSizedTextBox" skin="SandText"><Property key="Caption" value="#{OMWEngine:WaterCaustics}"/></Widget>
+                            </Widget>
+
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/><UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedButton" skin="MW_Button" name="WaterReflectedCausticsButton">
+                                    <UserString key="SettingCategory" value="OpenMWSE Water"/><UserString key="SettingName" value="reflected caustics"/><UserString key="SettingType" value="CheckButton"/>
+                                </Widget>
+                                <Widget type="AutoSizedTextBox" skin="SandText">
+                                    <Property key="Caption" value="#{OMWEngine:WaterReflectedCaustics}"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:WaterReflectedCausticsTooltip}"/>
+                                </Widget>
+                            </Widget>
+
+                            <Widget type="AutoSizedTextBox" skin="NormalText" name="WaterCausticsStrengthLabel">
+                                <UserString key="HStretch" value="true"/>
+                            </Widget>
+                            <Widget type="ScrollBar" skin="MW_HScroll" position="0 0 620 18" align="Left Top" name="WaterCausticsStrength">
+                                <Property key="Range" value="201"/>
+                                <Property key="Page" value="1"/>
+                                <Property key="WheelPage" value="5"/>
+                                <UserString key="SettingCategory" value="OpenMWSE Water"/>
+                                <UserString key="SettingName" value="caustics strength"/>
+                                <UserString key="SettingType" value="Slider"/>
+                                <UserString key="SettingValueType" value="Float"/>
+                                <UserString key="SettingMin" value="0"/>
+                                <UserString key="SettingMax" value="2"/>
+                                <UserString key="SettingLabelWidget" value="WaterCausticsStrengthLabel"/>
+                                <UserString key="SettingLabelCaption" value="WaterCausticsStrengthValue"/>
+                                <UserString key="ToolTipType" value="Layout"/>
+                                <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                <UserString key="Caption_Text" value="#{OMWEngine:WaterCausticsTooltip}"/>
+                            </Widget>
+
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/>
+                                <UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedTextBox" skin="NormalText">
+                                    <Property key="Caption" value="#{OMWEngine:EnhancedWaterColor}"/>
+                                </Widget>
+                                <Widget type="ComboBox" skin="MW_ComboBox" position="0 0 200 24" name="EnhancedWaterColor">
+                                    <Property key="AddItem" value="#{OMWEngine:EnhancedWaterColorGreenBlue}"/>
+                                    <Property key="AddItem" value="#{OMWEngine:EnhancedWaterColorBlue}"/>
+                                    <Property key="AddItem" value="#{OMWEngine:EnhancedWaterColorGreen}"/>
+                                </Widget>
+                            </Widget>
+
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/><UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedButton" skin="MW_Button" name="EnhancedWaterFoamButton">
+                                    <UserString key="SettingCategory" value="OpenMWSE Water"/><UserString key="SettingName" value="enhanced foam"/><UserString key="SettingType" value="CheckButton"/>
+                                </Widget>
+                                <Widget type="AutoSizedTextBox" skin="SandText"><Property key="Caption" value="#{OMWEngine:EnhancedWaterFoam}"/></Widget>
+                            </Widget>
+
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/><UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedButton" skin="MW_Button" name="EnhancedWaterDistantWavesButton">
+                                    <UserString key="SettingCategory" value="OpenMWSE Water"/><UserString key="SettingName" value="enhanced distant waves"/><UserString key="SettingType" value="CheckButton"/>
+                                </Widget>
+                                <Widget type="AutoSizedTextBox" skin="SandText"><Property key="Caption" value="#{OMWEngine:EnhancedWaterDistantWaves}"/></Widget>
+                            </Widget>
+
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/><UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedButton" skin="MW_Button" name="EnhancedWaterSewerRipplesButton">
+                                    <UserString key="SettingCategory" value="OpenMWSE Water"/><UserString key="SettingName" value="enhanced sewer ripples"/><UserString key="SettingType" value="CheckButton"/>
+                                </Widget>
+                                <Widget type="AutoSizedTextBox" skin="SandText"><Property key="Caption" value="#{OMWEngine:EnhancedWaterSewerRipples}"/></Widget>
+                            </Widget>
 
                             <Widget type="HBox" align="Stretch">
                                 <UserString key="HStretch" value="true"/>
@@ -869,6 +988,7 @@
                                 <Widget type="Spacer" />
                             </Widget>
 
+                            </Widget>
                         </Widget>
 
                     </Widget>

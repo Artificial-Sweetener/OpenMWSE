@@ -36,8 +36,8 @@ kind = "structural"
 justification = "SettingsWindow is the composition root for one modal settings surface: it binds the shared widget tree, coordinates tabs and focus, applies one pending-settings transaction, and owns the input, localization, and script-page presentation tied to that lifetime. Fork-specific live graphics policy, distance editing, shadow validation, and diagnostic exercise now belong to GraphicsSettings."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:bcebd24c1fea907b55786c973ecb485232b982f07073785feebfa6fe3ddbf0e6"
-max_lines = 985
+fingerprint = "sha256:2521adc4ae379bdea63b6eeccb9a23ce060fae2430610e93f4c1fcafdcbe8836"
+max_lines = 993
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-003"
@@ -127,8 +127,8 @@ kind = "structural"
 justification = "RenderingManager is the renderer composition root and scene-facing facade: subsystem construction, ordered frame advancement, scene mutation, settings propagation, and renderer queries all coordinate the same owned object graph. Atmosphere diagnostic policy and applied capture state now belong to a separate controller."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:a321c1cd9a4c6ea2dd359c89502825a6c6d64de731b70d6c3ed5ceeaa2884d51"
-max_lines = 2033
+fingerprint = "sha256:328d7eec26e52530a56fdf48c8071ef7013a1da25a5e03d7a1ff54bf2609a788"
+max_lines = 2040
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-008"
@@ -166,8 +166,8 @@ kind = "structural"
 justification = "Water owns one surface-rendering lifecycle comprising geometry, reflection resources, material state, ripple emission, and cell transitions. These behaviors share the same water plane, cameras, masks, and settings invalidation, so splitting them would distribute one render invariant across coupled owners."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:4cfa037d31a1734d42c1beb4d7f4436d276198eadc08e2015600b44c6b9913ad"
-max_lines = 629
+fingerprint = "sha256:f2de6e76d148bc9dedaaf468e6eeff366aa42d5ac8d17a197a8d92e7df8414f7"
+max_lines = 801
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-011"
@@ -270,8 +270,8 @@ kind = "structural"
 justification = "GPU timing owns one graphics-context query lifecycle and its publication into OSG frame statistics. Camera and render-bin instruments share query pools, frame identity, pass naming, and delayed availability rules; keeping them together preserves the single timing protocol and synchronization boundary."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:0c46753874e2dc52be439439e354bc91675aca7968de9a20ec811e2f9caa0945"
-max_lines = 602
+fingerprint = "sha256:f7f5f4fbf830394520dbd71f889b1ef40a73c00f6e7985a6806238b15b44a48e"
+max_lines = 603
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-019"
@@ -322,8 +322,8 @@ kind = "structural"
 justification = "ShaderManager owns one cached shader-program lifecycle from template preprocessing and define resolution through material-mode program derivation, sampler allocation, compilation, linking, and reload invalidation. Each stage contributes to the same cache key and diagnostic context, so it remains a cohesive compilation owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:7b1a00b9dba6b95246209b660c118165d0252fb45ece931a347e9f4728d4c753"
-max_lines = 966
+fingerprint = "sha256:c9eb474cfb81b56c3aaa5add94269fd2e742a765112528fbc76975c71fb2d114"
+max_lines = 970
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-022"
@@ -335,8 +335,8 @@ kind = "structural"
 justification = "ShaderVisitor performs one scene traversal that infers shader requirements and applies the resulting program and material state, while retaining enough state to restore removals. Analysis and mutation share node-local facts and traversal order; splitting them would require a duplicate intermediate scene model."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:76d3f89848ec71d96b944ce6c11f435b998630da0b2405e734396250885a2e47"
-max_lines = 716
+fingerprint = "sha256:b515969ad9a0d1ac4a4f787f3e5337b41835905afa42badfea2038913ab810b5"
+max_lines = 722
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-023"
@@ -413,8 +413,8 @@ kind = "structural"
 justification = "The isolated-run implementation owns one controller lifecycle: validate an isolated launch, materialize its temporary profile, start and connect to the child, execute bounded capture or replay requests, retain requested evidence, and clean up. These stages share the same launch options, child identity, endpoint, artifact root, and failure cleanup contract; extracting a stage would divide one transactional owner across pass-through interfaces."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:5b65b082480d2dd395c517103866afd6ddb67b8b4a6d1fa6001a9d864eecd909"
-max_lines = 594
+fingerprint = "sha256:aae2cb3f6a91d03a15fd742bdc8720120880c99e52c90acd3960ed3e41b24556"
+max_lines = 613
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-034"
@@ -426,5 +426,5 @@ kind = "structural"
 justification = "Diagnostic commands form one engine-side protocol boundary that validates request envelopes, coordinates request-scoped capture state, and serializes the corresponding responses. Clearance and traversal reports depend on the same request identity, replay lifetime, response framing, and error translation as existing graphics and performance commands; separating them would duplicate protocol dispatch and cleanup policy."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:9498475bda589c1f057492162c4734ff39827191d291abf5c91edcccc6b075f9"
-max_lines = 596
+fingerprint = "sha256:4ce1bbf521529a9c1c5d103f381f95fa73444a51d77eb325d808afa9d65a7f3f"
+max_lines = 597

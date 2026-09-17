@@ -174,6 +174,9 @@ namespace MWRender
                 state.popStateSet();
             }
 
+            captureDiagnostics(
+                renderInfo, 0, static_cast<int>(resolveViewport->width()), static_cast<int>(resolveViewport->height()));
+
             cacheEmptyUniformStacks(uniformMap, emptyUniformStacks);
             return;
         }
@@ -439,6 +442,16 @@ namespace MWRender
             bindDestinationFbo();
         }
 
+        captureDiagnostics(renderInfo, destinationHandle, static_cast<int>(resolveViewport->width()),
+            static_cast<int>(resolveViewport->height()));
+
+        cacheEmptyUniformStacks(uniformMap, emptyUniformStacks);
+        mDirtyAttachments.clear();
+    }
+
+    void PingPongCanvas::captureDiagnostics(
+        osg::RenderInfo& renderInfo, unsigned int framebuffer, int width, int height) const
+    {
         if (mAtmosphereDiagnostics && mAtmosphereDiagnostics->captureRequested())
         {
             mAtmosphereDiagnostics->captureFrame(renderInfo, mTextureScene.get(), mTextureOpaqueColor.get(),
@@ -449,17 +462,10 @@ namespace MWRender
                 findRenderTarget("AtmosphereVolumeMetadataHistory"), findRenderTarget("AtmosphereShafts"),
                 mPreviousCanvas ? mPreviousCanvas->findRenderTarget("AtmosphereVolumeHistory") : nullptr,
                 mPreviousCanvas ? mPreviousCanvas->findRenderTarget("AtmosphereVolumeMetadataHistory") : nullptr,
-                destinationHandle, static_cast<int>(resolveViewport->width()),
-                static_cast<int>(resolveViewport->height()));
+                framebuffer, width, height);
         }
 
         if (mRenderFrameDiagnostics && mRenderFrameDiagnostics->captureRequested())
-        {
-            mRenderFrameDiagnostics->captureFrame(renderInfo, destinationHandle,
-                static_cast<int>(resolveViewport->width()), static_cast<int>(resolveViewport->height()));
-        }
-
-        cacheEmptyUniformStacks(uniformMap, emptyUniformStacks);
-        mDirtyAttachments.clear();
+            mRenderFrameDiagnostics->captureFrame(renderInfo, framebuffer, width, height);
     }
 }

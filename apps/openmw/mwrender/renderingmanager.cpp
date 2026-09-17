@@ -1095,6 +1095,11 @@ namespace MWRender
         mStateUpdater->setUnderwaterFogStart(fogUnderwaterStart);
         mStateUpdater->setUnderwaterFogEnd(fogUnderwaterEnd);
         mStateUpdater->setUnderwaterFogColor(fogUnderwaterColor);
+        const WaterOpticsParameters& waterOptics = mWater->getSurfaceParameters().mOptics;
+        mStateUpdater->setWaterOptics(static_cast<int>(waterOptics.mAppearance), waterOptics.mEnhancedDistantWaves,
+            Settings::water().mShader && waterOptics.mCaustics,
+            Settings::water().mShader && waterOptics.mReflectedCaustics, waterOptics.mCausticsStrength,
+            mWater->getSurfaceParameters().mGeometricWaveHeight, mWater->getRainIntensity());
 
         const AtmosphereState& atmosphere = mSky->getAtmosphereState();
         const CloudAdvectionState& cloudAdvection = mCloudAdvection.getState();
@@ -1992,6 +1997,10 @@ namespace MWRender
         // Only perform a projection matrix update once if a relevant setting is changed.
         bool updateProjection = false;
         bool updateShadows = false;
+        const bool updateWater = std::any_of(changed.begin(), changed.end(), [](const auto& setting) {
+            return (setting.first == "Water" && setting.second != "reflect clouds")
+                || setting.first == "OpenMWSE Water";
+        });
 
         for (Settings::CategorySettingVector::const_iterator it = changed.begin(); it != changed.end(); ++it)
         {
@@ -2029,10 +2038,6 @@ namespace MWRender
                 && (it->second == "texture filter" || it->second == "texture mipmap" || it->second == "anisotropy"))
             {
                 updateTextureFiltering();
-            }
-            else if (it->first == "Water" && it->second != "reflect clouds")
-            {
-                mWater->processChangedSettings(changed);
             }
             else if (it->first == "Shaders" && it->second == "minimum interior brightness")
             {
@@ -2146,6 +2151,9 @@ namespace MWRender
             }
             mViewer->startThreading();
         }
+
+        if (updateWater)
+            mWater->processChangedSettings(changed);
 
         if (updateProjection)
         {

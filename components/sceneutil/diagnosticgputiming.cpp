@@ -38,6 +38,7 @@ namespace SceneUtil
             DiagnosticGpuPass{ "post-processing", postProcessingCameraName },
             DiagnosticGpuPass{ "precipitation-occlusion", precipitationOcclusionCameraName },
             DiagnosticGpuPass{ "ripples", ripplesCameraName },
+            DiagnosticGpuPass{ "water-wave-occlusion", waterWaveOcclusionCameraName },
             DiagnosticGpuPass{ "terrain-composite", terrainCompositeCameraName },
         };
 

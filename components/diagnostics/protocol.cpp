@@ -141,7 +141,7 @@ namespace Diagnostics
     bool isSupportedCommand(std::uint16_t value) noexcept
     {
         return value >= static_cast<std::uint16_t>(CommandType::Hello)
-            && value <= static_cast<std::uint16_t>(CommandType::SetOptimizationSettings);
+            && value <= static_cast<std::uint16_t>(CommandType::SetWaterSettings);
     }
 
     std::string_view getErrorName(ErrorCode code) noexcept

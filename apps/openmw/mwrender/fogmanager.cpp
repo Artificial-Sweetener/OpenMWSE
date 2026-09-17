@@ -87,7 +87,23 @@ namespace MWRender
     {
         if (isUnderwater)
         {
-            return mUnderwaterColor * mUnderwaterWeight + mFogColor * (1.f - mUnderwaterWeight);
+            osg::Vec4f underwaterColor = mUnderwaterColor;
+            if (Settings::openmwseWater().appearance() == Settings::WaterAppearance::Enhanced)
+            {
+                switch (Settings::openmwseWater().enhancedColor())
+                {
+                    case Settings::EnhancedWaterColor::Blue:
+                        underwaterColor.set(0.08f, 0.12f, 0.22f, 1.f);
+                        break;
+                    case Settings::EnhancedWaterColor::Green:
+                        underwaterColor.set(0.08f, 0.22f, 0.12f, 1.f);
+                        break;
+                    case Settings::EnhancedWaterColor::GreenBlue:
+                        underwaterColor.set(0.08f, 0.20f, 0.17f, 1.f);
+                        break;
+                }
+            }
+            return underwaterColor * mUnderwaterWeight + mFogColor * (1.f - mUnderwaterWeight);
         }
 
         return mFogColor;

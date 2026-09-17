@@ -36,6 +36,7 @@ namespace Diagnostics
         ShowVideoSettings = 17,
         SetDistanceSettings = 18,
         SetOptimizationSettings = 19,
+        SetWaterSettings = 20,
     };
 
     /// Classifies protocol failures so clients can distinguish invalid requests from runtime failures.

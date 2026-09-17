@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -22,6 +23,8 @@ namespace
 {
     constexpr std::array<std::string_view, 5> sShadowFilteringQualities{ "legacy", "low", "medium", "high", "ultra" };
     constexpr std::array<std::string_view, 4> sDistantShadowQualities{ "low", "medium", "high", "ultra" };
+    constexpr std::array<std::string_view, 4> sWaterAppearances{ "openmw", "mge-xe", "enhanced", "vanilla" };
+    constexpr std::array<std::string_view, 3> sEnhancedWaterColors{ "green-blue", "blue", "green" };
 }
 
 MWGui::GraphicsSettings::GraphicsSettings(Layout& layout, std::function<void()> apply)
@@ -33,6 +36,15 @@ MWGui::GraphicsSettings::GraphicsSettings(Layout& layout, std::function<void()> 
     , mReflectCloudsButton(layout.getWidget("ReflectCloudsButton")->castType<MyGUI::Button>())
     , mVolumetricQuality(layout.getWidget("VolumetricQuality")->castType<MyGUI::ComboBox>())
     , mAtmosphereAppearance(layout.getWidget("AtmosphereAppearance")->castType<MyGUI::ComboBox>())
+    , mWaterAppearance(layout.getWidget("WaterAppearance")->castType<MyGUI::ComboBox>())
+    , mGeometricWaveHeight(layout.getWidget("GeometricWaveHeight")->castType<MyGUI::ScrollBar>())
+    , mWaterCaustics(layout.getWidget("WaterCausticsButton")->castType<MyGUI::Button>())
+    , mWaterReflectedCaustics(layout.getWidget("WaterReflectedCausticsButton")->castType<MyGUI::Button>())
+    , mWaterCausticsStrength(layout.getWidget("WaterCausticsStrength")->castType<MyGUI::ScrollBar>())
+    , mEnhancedWaterColor(layout.getWidget("EnhancedWaterColor")->castType<MyGUI::ComboBox>())
+    , mEnhancedWaterButtons{ layout.getWidget("EnhancedWaterFoamButton")->castType<MyGUI::Button>(),
+        layout.getWidget("EnhancedWaterDistantWavesButton")->castType<MyGUI::Button>(),
+        layout.getWidget("EnhancedWaterSewerRipplesButton")->castType<MyGUI::Button>() }
     , mShadowFilteringQuality(layout.getWidget("ShadowFilteringQuality")->castType<MyGUI::ComboBox>())
     , mDistantShadowsButton(layout.getWidget("DistantShadowsButton")->castType<MyGUI::Button>())
     , mDistantShadowQuality(layout.getWidget("DistantShadowQuality")->castType<MyGUI::ComboBox>())
@@ -61,6 +73,12 @@ MWGui::GraphicsSettings::GraphicsSettings(Layout& layout, std::function<void()> 
         += MyGUI::newDelegate(this, &GraphicsSettings::onDistantShadowQualityChanged);
     mAtmosphereAppearance->eventComboChangePosition
         += MyGUI::newDelegate(this, &GraphicsSettings::onAtmosphereAppearanceChanged);
+    mWaterAppearance->eventComboChangePosition += MyGUI::newDelegate(this, &GraphicsSettings::onWaterAppearanceChanged);
+    mEnhancedWaterColor->eventComboChangePosition
+        += MyGUI::newDelegate(this, &GraphicsSettings::onEnhancedWaterColorChanged);
+    mWaterCaustics->eventMouseButtonClick += MyGUI::newDelegate(this, &GraphicsSettings::onWaterCausticsChanged);
+    mWaterReflectedCaustics->eventMouseButtonClick
+        += MyGUI::newDelegate(this, &GraphicsSettings::onWaterCausticsChanged);
 
     for (const std::string_view name :
         { "ActorShadowsButton", "PlayerShadowsButton", "TerrainShadowsButton", "ObjectShadowsButton" })
@@ -85,6 +103,7 @@ void MWGui::GraphicsSettings::refresh()
     refreshShadowResolution();
     refreshAtmosphereControls();
     refreshOptimizationControls();
+    refreshWaterControls();
 }
 
 void MWGui::GraphicsSettings::updateLayout()
@@ -133,6 +152,31 @@ void MWGui::GraphicsSettings::setDistanceValues(
     }
     if (Settings::shadows().mShadowMapResolution != *resolution)
         throw std::runtime_error("shadow resolution entry did not retain the requested size");
+}
+
+void MWGui::GraphicsSettings::setGeometricWaveHeight(float height)
+{
+    if (!std::isfinite(height) || height < 0.f || height > 250.f || height != std::round(height))
+        throw std::invalid_argument("diagnostic geometric wave height must be a whole number from 0 to 250");
+    const std::size_t position = static_cast<std::size_t>(height);
+    mGeometricWaveHeight->setScrollPosition(position);
+    mGeometricWaveHeight->eventScrollChangePosition(mGeometricWaveHeight, position);
+}
+
+void MWGui::GraphicsSettings::setWaterValues(
+    float height, bool caustics, bool reflectedCaustics, float causticsStrength)
+{
+    if (!std::isfinite(causticsStrength) || causticsStrength < 0.f || causticsStrength > 2.f)
+        throw std::invalid_argument("diagnostic caustics strength must be between 0 and 2");
+    setGeometricWaveHeight(height);
+    Settings::openmwseWater().mCaustics.set(caustics);
+    Settings::openmwseWater().mReflectedCaustics.set(reflectedCaustics);
+    mWaterCaustics->setCaptionWithReplacing(caustics ? "#{Interface:On}" : "#{Interface:Off}");
+    mWaterReflectedCaustics->setCaptionWithReplacing(reflectedCaustics ? "#{Interface:On}" : "#{Interface:Off}");
+    const std::size_t strengthPosition = static_cast<std::size_t>(std::round(causticsStrength * 100.f));
+    mWaterCausticsStrength->setScrollPosition(strengthPosition);
+    mWaterCausticsStrength->eventScrollChangePosition(mWaterCausticsStrength, strengthPosition);
+    refreshWaterControls();
 }
 
 void MWGui::GraphicsSettings::onShadowCasterChanged(MyGUI::Widget*)
@@ -212,6 +256,28 @@ void MWGui::GraphicsSettings::onAtmosphereAppearanceChanged(MyGUI::ComboBox* sen
     mApply();
 }
 
+void MWGui::GraphicsSettings::onWaterAppearanceChanged(MyGUI::ComboBox* sender, std::size_t position)
+{
+    if (position >= sender->getItemCount() || position >= sWaterAppearances.size())
+        return;
+    Settings::openmwseWater().mAppearance.set(std::string(sWaterAppearances[position]));
+    mApply();
+    refreshWaterControls();
+}
+
+void MWGui::GraphicsSettings::onEnhancedWaterColorChanged(MyGUI::ComboBox* sender, std::size_t position)
+{
+    if (position >= sender->getItemCount() || position >= sEnhancedWaterColors.size())
+        return;
+    Settings::openmwseWater().mEnhancedColor.set(std::string(sEnhancedWaterColors[position]));
+    mApply();
+}
+
+void MWGui::GraphicsSettings::onWaterCausticsChanged(MyGUI::Widget*)
+{
+    refreshWaterControls();
+}
+
 void MWGui::GraphicsSettings::onOptimizationPrerequisiteChanged(MyGUI::Widget*)
 {
     refreshOptimizationControls();
@@ -261,4 +327,26 @@ void MWGui::GraphicsSettings::refreshOptimizationControls()
 {
     for (MyGUI::Button* button : mOptimizationButtons)
         button->setEnabled(Settings::optimizations().mEnabled);
+}
+
+void MWGui::GraphicsSettings::refreshWaterControls()
+{
+    const auto& water = Settings::openmwseWater();
+    const auto appearance = std::find(sWaterAppearances.begin(), sWaterAppearances.end(), water.mAppearance.get());
+    mWaterAppearance->setIndexSelected(
+        appearance == sWaterAppearances.end() ? 0 : static_cast<std::size_t>(appearance - sWaterAppearances.begin()));
+    const auto color = std::find(sEnhancedWaterColors.begin(), sEnhancedWaterColors.end(), water.mEnhancedColor.get());
+    mEnhancedWaterColor->setIndexSelected(
+        color == sEnhancedWaterColors.end() ? 0 : static_cast<std::size_t>(color - sEnhancedWaterColors.begin()));
+
+    const bool shader = Settings::water().mShader;
+    mWaterAppearance->setEnabled(shader);
+    mGeometricWaveHeight->setEnabled(shader);
+    mWaterCaustics->setEnabled(shader);
+    mWaterReflectedCaustics->setEnabled(shader);
+    mWaterCausticsStrength->setEnabled(shader && (water.mCaustics || water.mReflectedCaustics));
+    const bool enhanced = shader && water.appearance() == Settings::WaterAppearance::Enhanced;
+    mEnhancedWaterColor->setEnabled(enhanced);
+    for (MyGUI::Button* button : mEnhancedWaterButtons)
+        button->setEnabled(enhanced);
 }

@@ -2401,6 +2401,16 @@ namespace MWGui
         mSettingsWindow->setDistanceValues(useCellEditor, view, grass, shadow, resolution);
     }
 
+    void WindowManager::setVideoGeometricWaveHeight(float height)
+    {
+        mSettingsWindow->setGeometricWaveHeight(height);
+    }
+
+    void WindowManager::setVideoWaterValues(float height, bool caustics, bool reflectedCaustics, float causticsStrength)
+    {
+        mSettingsWindow->setWaterValues(height, caustics, reflectedCaustics, causticsStrength);
+    }
+
     void WindowManager::showVideoSettings(std::string_view page)
     {
         if (!mSettingsWindow->isVisible())

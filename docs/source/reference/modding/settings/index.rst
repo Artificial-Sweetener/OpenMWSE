@@ -65,6 +65,7 @@ The ranges included with each setting are the physically possible ranges, not re
         Models <models>
         Navigator <navigator>
         OpenMWSE Shadows <openmwseshadows>
+        OpenMWSE Water <openmwsewater>
         Optimizations <optimizations>
         Physics <physics>
         Post-Processing <postprocessing>

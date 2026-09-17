@@ -26,6 +26,7 @@ uniform float near;
 
 #include "compatibility/fog.glsl"
 #include "compatibility/shadows_fragment.glsl"
+#include "lib/water/caustics.glsl"
 
 #if @softParticles
 #include "lib/particle/soft.glsl"
@@ -60,12 +61,14 @@ void main()
 
     gl_FragData[0].a = alphaTest(gl_FragData[0].a, getAlphaRef());
 
+    float shadowing = unshadowedLightRatio(linearDepth);
+    vec3 viewNormal = normalize(gl_NormalMatrix * passNormal);
+    gl_FragData[0].xyz = applyWaterCaustics(gl_FragData[0].xyz, passViewPos, viewNormal, shadowing);
     gl_FragData[0] = applyFogAtDist(gl_FragData[0], passViewPos, euclideanDepth, linearDepth, near, far);
 
 #if !defined(FORCE_OPAQUE) && @softParticles
     vec2 screenCoords = gl_FragCoord.xy / screenRes;
     vec3 viewVec = normalize(passViewPos.xyz);
-    vec3 viewNormal = normalize(gl_NormalMatrix * passNormal);
 
     gl_FragData[0].a *= calcSoftParticleFade(
         viewVec,

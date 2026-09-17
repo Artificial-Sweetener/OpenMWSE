@@ -8,6 +8,7 @@
 #include <components/diagnostics/atmospheresettings.hpp>
 #include <components/diagnostics/distancesettings.hpp>
 #include <components/diagnostics/optimizationsettings.hpp>
+#include <components/diagnostics/watersettings.hpp>
 
 namespace DiagnosticCtl
 {
@@ -29,6 +30,10 @@ namespace DiagnosticCtl
 
     /// Load and preserve the optional optimization settings sequence for one route.
     std::vector<Diagnostics::OptimizationSettings> loadOptimizationSettingsSequence(
+        std::span<char*> arguments, const SettingsSequenceContext& context);
+
+    /// Load and preserve the optional displacement-and-caustics settings sequence for one route.
+    std::vector<Diagnostics::WaterSettings> loadWaterSettingsSequence(
         std::span<char*> arguments, const SettingsSequenceContext& context);
 }
 

@@ -31,6 +31,12 @@ namespace MWGui
         void setDistanceValues(
             bool useCellEditor, float view, float grass, float shadow, std::optional<int> resolution);
 
+        /// Apply isolated diagnostic input through the ordinary geometric-wave slider.
+        void setGeometricWaveHeight(float height);
+
+        /// Exercise live water displacement and caustic controls for isolated diagnostics.
+        void setWaterValues(float height, bool caustics, bool reflectedCaustics, float causticsStrength);
+
         void onClose() override;
 
         void onFrame(float duration) override;

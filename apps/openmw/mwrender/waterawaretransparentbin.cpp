@@ -11,6 +11,7 @@
 #include <osgUtil/StateGraph>
 
 #include <components/misc/constants.hpp>
+#include <components/sceneutil/waterutil.hpp>
 
 #include "opaqueblit.hpp"
 #include "renderworkcounter.hpp"
@@ -33,6 +34,26 @@ namespace
 
 namespace MWRender
 {
+    WaterDrawSide classifyWaterDrawSide(
+        double minimumHeight, double maximumHeight, double clipHeight, bool cameraUnderwater) noexcept
+    {
+        if (cameraUnderwater)
+        {
+            if (minimumHeight > clipHeight)
+                return WaterDrawSide::Opposite;
+            if (maximumHeight <= clipHeight)
+                return WaterDrawSide::Camera;
+        }
+        else
+        {
+            if (maximumHeight < clipHeight)
+                return WaterDrawSide::Opposite;
+            if (minimumHeight >= clipHeight)
+                return WaterDrawSide::Camera;
+        }
+        return WaterDrawSide::Straddling;
+    }
+
     WaterAwareTransparentBin::WaterAwareTransparentBin(OpaqueColorBinCallback* opaqueColorResolve, const Water* water)
         : osgUtil::RenderBin(osgUtil::RenderBin::SORT_BACK_TO_FRONT)
         , mOpaqueColorResolve(opaqueColorResolve)
@@ -63,9 +84,9 @@ namespace MWRender
         if (!isSceneCamera())
             return;
 
-        mUnderwaterLeaves.clear();
+        mOppositeSideLeaves.clear();
         mWaterLeaves.clear();
-        mAboveWaterLeaves.clear();
+        mCameraSideLeaves.clear();
         mStraddlingLeaves.clear();
 
         const osg::Matrixd inverseView = osg::Matrixd::inverse(*getStage()->getInitialViewMatrix());
@@ -73,6 +94,9 @@ namespace MWRender
         const osg::Vec3d cameraPosition = osg::Vec3d() * inverseView;
 
         mCameraUnderwater = cameraPosition.z() < waterHeight;
+        const double clipHeight = waterHeight
+            + (mCameraUnderwater ? SceneUtil::waterSurfaceInteractionTolerance
+                                 : -SceneUtil::waterSurfaceInteractionTolerance);
 
         std::size_t classifiedLeafCount = 0;
         for (osgUtil::RenderLeaf* leaf : _renderLeafList)
@@ -87,12 +111,18 @@ namespace MWRender
             {
                 const osg::BoundingBox bound = worldBound(leaf, inverseView);
 
-                if (bound.zMax() < waterHeight)
-                    mUnderwaterLeaves.push_back(leaf);
-                else if (bound.zMin() > waterHeight)
-                    mAboveWaterLeaves.push_back(leaf);
-                else
-                    mStraddlingLeaves.push_back(leaf);
+                switch (classifyWaterDrawSide(bound.zMin(), bound.zMax(), clipHeight, mCameraUnderwater))
+                {
+                    case WaterDrawSide::Opposite:
+                        mOppositeSideLeaves.push_back(leaf);
+                        break;
+                    case WaterDrawSide::Camera:
+                        mCameraSideLeaves.push_back(leaf);
+                        break;
+                    case WaterDrawSide::Straddling:
+                        mStraddlingLeaves.push_back(leaf);
+                        break;
+                }
             }
         }
 
@@ -107,9 +137,9 @@ namespace MWRender
         if (mWaterLeaves.empty())
         {
             mCameraUnderwater = false;
-            mUnderwaterLeaves.clear();
+            mOppositeSideLeaves.clear();
             mStraddlingLeaves.clear();
-            mAboveWaterLeaves = _renderLeafList;
+            mCameraSideLeaves = _renderLeafList;
         }
     }
 
@@ -122,15 +152,13 @@ namespace MWRender
             return;
         }
 
-        const RenderLeafList& farSideLeaves = mCameraUnderwater ? mAboveWaterLeaves : mUnderwaterLeaves;
-        const RenderLeafList& nearSideLeaves = mCameraUnderwater ? mUnderwaterLeaves : mAboveWaterLeaves;
-
         const osg::Matrixd inverseView = osg::Matrixd::inverse(*getStage()->getInitialViewMatrix());
         const double waterHeight = mWater->getHeight();
 
         // Does a good job at hiding blending artifacts at the water plane intersection, though it's not perfect
-        constexpr double clipOffset = 4.0;
-        const double clipHeight = waterHeight + (mCameraUnderwater ? clipOffset : -clipOffset);
+        const double clipHeight = waterHeight
+            + (mCameraUnderwater ? SceneUtil::waterSurfaceInteractionTolerance
+                                 : -SceneUtil::waterSurfaceInteractionTolerance);
 
         const double direction = mCameraUnderwater ? -1.0 : 1.0;
 
@@ -138,9 +166,9 @@ namespace MWRender
         osg::Plane farSidePlane(0.0, 0.0, -direction, direction * clipHeight);
 
         drawLeavesWithClippedStraddlers(
-            farSideLeaves, mStraddlingLeaves, renderInfo, previous, farSidePlane, inverseView, false);
+            mOppositeSideLeaves, mStraddlingLeaves, renderInfo, previous, farSidePlane, inverseView, false);
 
-        if (!farSideLeaves.empty() || !mStraddlingLeaves.empty())
+        if (!mOppositeSideLeaves.empty() || !mStraddlingLeaves.empty())
             mOpaqueColorResolve->resolve(this, renderInfo);
 
         for (osgUtil::RenderLeaf* leaf : mWaterLeaves)
@@ -150,7 +178,7 @@ namespace MWRender
         }
 
         drawLeavesWithClippedStraddlers(
-            nearSideLeaves, mStraddlingLeaves, renderInfo, previous, nearSidePlane, inverseView, true);
+            mCameraSideLeaves, mStraddlingLeaves, renderInfo, previous, nearSidePlane, inverseView, true);
     }
 
     void WaterAwareTransparentBin::drawLeavesWithClippedStraddlers(const osgUtil::RenderBin::RenderLeafList& leaves,

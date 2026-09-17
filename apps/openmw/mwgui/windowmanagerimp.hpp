@@ -373,9 +373,16 @@ namespace MWGui
         void togglePostProcessorHud() override;
         void toggleSettingsWindow() override;
 
-        /// Exercise distance and shadow-resolution controls in isolated diagnostic sessions without changing menu visibility.
+        /// Exercise distance and shadow-resolution controls in isolated diagnostic sessions without changing menu
+        /// visibility.
         void setVideoDistanceValues(
             bool useCellEditor, float view, float grass, float shadow, std::optional<int> resolution);
+
+        /// Exercise the geometric-wave slider in an isolated diagnostic session.
+        void setVideoGeometricWaveHeight(float height);
+
+        /// Exercise live water displacement and caustic controls for isolated diagnostics.
+        void setVideoWaterValues(float height, bool caustics, bool reflectedCaustics, float causticsStrength);
 
         /// Display a named video settings page through the ordinary settings window lifecycle.
         void showVideoSettings(std::string_view page);

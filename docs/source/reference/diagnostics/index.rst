@@ -126,7 +126,8 @@ For single-state captures, ``--frames`` advances the exact fixed-step warm-up wo
 report keeps every sampled OSG statistic and summarizes stable CPU,
 cull, draw, camera-owned GPU-pass, and frame-duration metrics with median, p95, p99, and worst values. Named
 GPU passes cover the main scene, shadow maps, water reflection, sky render target, post-processing, precipitation occlusion,
-and ripple simulation. A sample count must not exceed the frame count or 600. Visual capture begins after the timed window so
+ripple simulation, and water-wave occlusion. A sample count must not exceed the frame count or 600. Visual capture begins after
+the timed window so
 synchronous readback does not contaminate its distributions.
 
 Render-to-texture cameras join diagnostic collection when they are created during culling. This includes water reflections,
@@ -404,6 +405,18 @@ Shadow camera work statistics include ``texture-width`` and ``texture-height`` f
 Version 1 retains the current shadow resolution. The sequence contains one entry per segment, at most 64. The selected field's arrow steps and performance note are verified, and the requested value is restored.
 Both numeric fields are checked after entry, and the
 controller verifies the resulting canonical settings and records ``distance-settings-<segment>.yaml``.
+This operation is restricted to isolated diagnostic children. The source profile remains unchanged.
+
+Live water controls
+-------------------
+
+``replay --water-settings-sequence sequence.yaml`` drives the real geometric-wave and caustic controls before each
+gameplay-route segment while keeping the Water settings page open. Version 3 entries have ``water-version: 3``, an integer
+``geometric-wave-height`` from 0 through 250 Morrowind world units, booleans ``caustics`` and ``reflected-caustics``, and
+``caustics-strength`` from 0 through 2. Version 1 height-only entries and version 2 entries without reflected caustics remain
+accepted with missing controls disabled and strength 1 where absent. The sequence contains one entry per
+segment, at most 64. The controller verifies the values observed after the control events and records
+``water-settings-<segment>.yaml``.
 This operation is restricted to isolated diagnostic children. The source profile remains unchanged.
 
 Live optimization controls

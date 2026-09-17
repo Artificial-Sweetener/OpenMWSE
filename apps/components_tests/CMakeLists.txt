@@ -60,6 +60,7 @@ file(GLOB UNITTEST_SRC_FILES
     sceneutil/shadowcascade.cpp
     sceneutil/shadowfrustum.cpp
     sceneutil/texturedclouds.cpp
+    sceneutil/waterutil.cpp
 
     sqlite3/db.cpp
     sqlite3/request.cpp
@@ -78,6 +79,7 @@ file(GLOB UNITTEST_SRC_FILES
     diagnostics/atmospheresettings.cpp
     diagnostics/distancesettings.cpp
     diagnostics/optimizationsettings.cpp
+    diagnostics/watersettings.cpp
     diagnostics/commandqueue.cpp
     diagnostics/capsule.cpp
     diagnostics/gameplayroute.cpp

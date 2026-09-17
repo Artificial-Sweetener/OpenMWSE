@@ -13,6 +13,18 @@ namespace MWRender
     class OpaqueColorBinCallback;
     class Water;
 
+    /// Identify which side of the water draw a transparent bound belongs to for the current camera.
+    enum class WaterDrawSide
+    {
+        Opposite,
+        Camera,
+        Straddling,
+    };
+
+    /// Classify a transparent bound against the same offset plane used while drawing it.
+    WaterDrawSide classifyWaterDrawSide(
+        double minimumHeight, double maximumHeight, double clipHeight, bool cameraUnderwater) noexcept;
+
     class WaterAwareTransparentBin : public osgUtil::RenderBin
     {
     public:
@@ -37,9 +49,9 @@ namespace MWRender
         bool isSceneCamera() const;
 
         osg::ref_ptr<OpaqueColorBinCallback> mOpaqueColorResolve;
-        osgUtil::RenderBin::RenderLeafList mUnderwaterLeaves;
+        osgUtil::RenderBin::RenderLeafList mOppositeSideLeaves;
         osgUtil::RenderBin::RenderLeafList mWaterLeaves;
-        osgUtil::RenderBin::RenderLeafList mAboveWaterLeaves;
+        osgUtil::RenderBin::RenderLeafList mCameraSideLeaves;
         osgUtil::RenderBin::RenderLeafList mStraddlingLeaves;
         osg::ref_ptr<osg::StateSet> mClipStateSet;
         bool mCameraUnderwater = false;

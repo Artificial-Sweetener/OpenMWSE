@@ -2141,6 +2141,27 @@ void main()
             std::string::npos);
         EXPECT_NE(objects->getShaderSource().find("atmosphereScatter"), std::string::npos);
         EXPECT_NE(groundcover->getShaderSource().find("atmosphereScatter"), std::string::npos);
+        EXPECT_NE(terrain->getShaderSource().find("applyWaterCaustics"), std::string::npos);
+        EXPECT_NE(
+            objects->getShaderSource().find("sampleWaterCausticOpticalNormal(surfacePosition"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("sampleWaterGeometricHeight(surfacePosition"), std::string::npos);
+        EXPECT_EQ(objects->getShaderSource().find("sampleMathematicalCausticNormal"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("if (waveHeight <= 0.0)"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("receiverDepth * (raySlopeX - raySlope)"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("max(24.0 + 0.02 * receiverDepth, 2.0 * pixelFootprint)"),
+            std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("focusedIrradiance - 1.0"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("uniform bool waterReflectedCaustics"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("uniform float waterSurfaceCoverageResolution"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("applyWaterReflectedCaustics"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("focusedIrradiance - 1.0"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("reflect(-lightDirection"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("receiverFacing"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("1.0 - clamp(shadowVisibility"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("sampleWaterEnclosedCoverage(surfacePosition)"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("2.0 - automaticLod"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("receiverFacing * exposedSurface"), std::string::npos);
+        EXPECT_NE(groundcover->getShaderSource().find("shadowVisibility"), std::string::npos);
         EXPECT_NE(sky->getShaderSource().find("if (isReflection)"), std::string::npos);
         EXPECT_NE(sky->getShaderSource().find("position.z = 2.0 * waterHeight - position.z"), std::string::npos);
         EXPECT_NE(water->getShaderSource().find("sampleReflectionMap(screenCoords + reflectionCoordsOffset)"),
@@ -2159,6 +2180,10 @@ void main()
         EXPECT_EQ(objects->getShaderSource().find("!cameraBelowWater && !useWaterDepthFog"), std::string::npos);
         EXPECT_EQ(objects->getShaderSource().find("WATER_COLOR * length(sun.ambient.xyz)"), std::string::npos);
         EXPECT_EQ(water->getShaderSource().find("skyColorEstimate"), std::string::npos);
+        EXPECT_NE(water->getShaderSource().find("return 1e38;"), std::string::npos);
+        EXPECT_NE(water->getShaderSource().find("authoredReflectionCoords"), std::string::npos);
+        EXPECT_NE(water->getShaderSource().find("float waterCutDark"), std::string::npos);
+        EXPECT_NE(water->getShaderSource().find("sampleWaterOpticalField"), std::string::npos);
     }
 
     TEST(AtmosphereShaderTest, waterInScatteringPreservesAmbientSpectrumWithoutNormAmplification)
@@ -2248,16 +2273,9 @@ void main()
         context->close();
     }
 
-    TEST(AtmosphereShaderTest, compilesAndLinksWaterReflectionProgramInGraphicsContext)
+    /// Verify flat, geometric-wave, and obstruction water programs in a real compatibility OpenGL context.
+    TEST(AtmosphereShaderTest, compilesAndLinksWaterProgramsInGraphicsContext)
     {
-        Shader::ShaderManager manager;
-        manager.setShaderPath(std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/shaders");
-        auto defines = getAtmosphereTestDefines();
-        manager.setGlobalDefines(defines);
-
-        const osg::ref_ptr<osg::Program> program = manager.getProgram("compatibility/water");
-        ASSERT_TRUE(program);
-
         osg::ref_ptr<osg::GraphicsContext::Traits> traits = new osg::GraphicsContext::Traits;
         traits->width = 1;
         traits->height = 1;
@@ -2269,13 +2287,74 @@ void main()
         if (!context || !context->realize() || !context->makeCurrent())
             GTEST_SKIP() << "No offscreen compatibility OpenGL context is available";
 
-        program->compileGLObjects(*context->getState());
-        const osg::Program::PerContextProgram* compiled = program->getPCP(*context->getState());
-        std::string infoLog;
-        compiled->getInfoLog(infoLog);
-        EXPECT_TRUE(compiled->isLinked()) << infoLog;
+        for (const bool geometricWaves : { false, true })
+            for (const bool refraction : { false, true })
+            {
+                Shader::ShaderManager manager;
+                manager.setShaderPath(std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/shaders");
+                auto defines = getAtmosphereTestDefines();
+                defines["waterGeometricWaves"] = geometricWaves ? "1" : "0";
+                defines["waterRefraction"] = refraction ? "1" : "0";
+                manager.setGlobalDefines(defines);
+
+                const osg::ref_ptr<osg::Program> program = manager.getProgram("compatibility/water");
+                ASSERT_TRUE(program);
+                program->compileGLObjects(*context->getState());
+                const osg::Program::PerContextProgram* compiled = program->getPCP(*context->getState());
+                std::string infoLog;
+                compiled->getInfoLog(infoLog);
+                EXPECT_TRUE(compiled->isLinked())
+                    << "geometric waves=" << geometricWaves << " refraction=" << refraction << '\n'
+                    << infoLog;
+            }
+
+        Shader::ShaderManager blockerManager;
+        blockerManager.setShaderPath(std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/shaders");
+        auto blockerDefines = getAtmosphereTestDefines();
+        blockerManager.setGlobalDefines(blockerDefines);
+        const osg::ref_ptr<osg::Program> blockerProgram = blockerManager.getProgram("waterwaveblocker");
+        ASSERT_TRUE(blockerProgram);
+        blockerProgram->compileGLObjects(*context->getState());
+        const osg::Program::PerContextProgram* compiledBlocker = blockerProgram->getPCP(*context->getState());
+        std::string blockerInfoLog;
+        compiledBlocker->getInfoLog(blockerInfoLog);
+        EXPECT_TRUE(compiledBlocker->isLinked()) << blockerInfoLog;
+
+        for (const std::string_view receiver : { "compatibility/terrain" })
+        {
+            SCOPED_TRACE(testing::Message() << "caustic receiver=" << receiver);
+            Shader::ShaderManager receiverManager;
+            receiverManager.setShaderPath(std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/shaders");
+            auto receiverDefines = getAtmosphereTestDefines();
+            receiverManager.setGlobalDefines(receiverDefines);
+            const osg::ref_ptr<osg::Program> receiverProgram = receiverManager.getProgram(std::string(receiver));
+            ASSERT_TRUE(receiverProgram);
+            receiverProgram->compileGLObjects(*context->getState());
+            const osg::Program::PerContextProgram* compiledReceiver = receiverProgram->getPCP(*context->getState());
+            std::string receiverInfoLog;
+            compiledReceiver->getInfoLog(receiverInfoLog);
+            EXPECT_TRUE(compiledReceiver->isLinked()) << receiverInfoLog;
+        }
         context->releaseContext();
         context->close();
+    }
+
+    /// Verify that the authored MGE XE normal volume survives VFS loading with all spatial and temporal slices intact.
+    TEST(AtmosphereShaderTest, loadsPackagedMgeXeWaterNormalVolume)
+    {
+        VFS::Manager vfs;
+        vfs.addArchive(
+            std::make_unique<VFS::FileSystemArchive>(std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/data"));
+        vfs.buildIndex();
+        Resource::ImageManager imageManager(&vfs, 0.0);
+
+        const osg::ref_ptr<osg::Image> image
+            = imageManager.getImage(VFS::Path::NormalizedView("textures/openmwse/mge_xe_water_nrm.dds"), true);
+        ASSERT_TRUE(image);
+        EXPECT_EQ(image->s(), 256);
+        EXPECT_EQ(image->t(), 256);
+        EXPECT_EQ(image->r(), 32);
+        EXPECT_EQ(image->getPixelSizeInBits(), 32u);
     }
 
     /// Exercise both linked lighting stages with reversed grass normals and ordinary one-sided surfaces.

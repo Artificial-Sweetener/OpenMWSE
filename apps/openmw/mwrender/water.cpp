@@ -1,5 +1,6 @@
 #include "water.hpp"
 
+#include <algorithm>
 #include <sstream>
 
 #include <osg/ClipNode>
@@ -9,6 +10,7 @@
 #include <osg/Geometry>
 #include <osg/Group>
 #include <osg/PositionAttitudeTransform>
+#include <osg/Texture3D>
 #include <osg/ViewportIndexed>
 
 #include <osgUtil/CullVisitor>
@@ -47,9 +49,24 @@
 #include "ripplesimulation.hpp"
 #include "util.hpp"
 #include "vismask.hpp"
+#include "waterwaveocclusion.hpp"
 
 namespace MWRender
 {
+    namespace
+    {
+        /// Encode the validated appearance for the runtime shader selector.
+        int shaderAppearance(Settings::WaterAppearance appearance)
+        {
+            return static_cast<int>(appearance);
+        }
+
+        /// Encode the validated enhanced color for the runtime shader selector.
+        int shaderEnhancedColor(Settings::EnhancedWaterColor color)
+        {
+            return static_cast<int>(color);
+        }
+    }
 
     // --------------------------------------------------------------------------------------------------------------------------------
 
@@ -359,6 +376,7 @@ namespace MWRender
         , mSceneRoot(sceneRoot)
         , mResourceSystem(resourceSystem)
         , mGpuScene(gpuScene)
+        , mSurfaceParameters(defaultWaterSurfaceParameters())
         , mEnabled(true)
         , mToggled(true)
         , mTop(0)
@@ -382,11 +400,13 @@ namespace MWRender
         mWaterNode->addCullCallback(new FudgeCallback);
 
         // simple water fallback for the local map
-        osg::ref_ptr<osg::Geometry> geom2(osg::clone(mWaterGeom.get(), osg::CopyOp::DEEP_COPY_NODES));
-        createSimpleWaterStateSet(geom2, Fallback::Map::getFloat("Water_Map_Alpha"));
-        geom2->setNodeMask(Mask_SimpleWater);
-        geom2->setName("Simple Water Geometry");
-        mWaterNode->addChild(geom2);
+        mSimpleWaterGeom = SceneUtil::createWaterGeometry(Constants::CellSizeInUnits * 150, 40, 900);
+        createSimpleWaterStateSet(mSimpleWaterGeom, Fallback::Map::getFloat("Water_Map_Alpha"));
+        mSimpleWaterGeom->setNodeMask(Mask_SimpleWater);
+        mSimpleWaterGeom->setName("Simple Water Geometry");
+        mWaterNode->addChild(mSimpleWaterGeom);
+
+        updateWaterGeometry();
 
         mSceneRoot->addChild(mWaterNode);
 
@@ -396,6 +416,46 @@ namespace MWRender
 
         if (ico)
             ico->add(mWaterNode);
+    }
+
+    void Water::updateWaterGeometry()
+    {
+        const bool useDisplacedGeometry = Settings::water().mShader && mSurfaceParameters.useGeometricWaves();
+        const bool useSurfaceCoverage = Settings::water().mShader && mSurfaceParameters.useSurfaceCoverage();
+        if (mUsesDisplacedGeometry != useDisplacedGeometry)
+        {
+            mWaterNode->removeChild(mWaterGeom);
+            mWaterGeom = useDisplacedGeometry
+                ? SceneUtil::createDisplacedWaterGeometry(Constants::CellSizeInUnits * 150, 900)
+                : SceneUtil::createWaterGeometry(Constants::CellSizeInUnits * 150, 40, 900);
+            if (mGpuScene == nullptr || !mGpuScene->isEnabled())
+                mWaterGeom->setDrawCallback(new DepthClampCallback);
+            mWaterGeom->setNodeMask(Mask_Water);
+            mWaterGeom->setDataVariance(osg::Object::STATIC);
+            mWaterGeom->setName(useDisplacedGeometry ? "Displaced Water Geometry" : "Water Geometry");
+            mWaterNode->addChild(mWaterGeom);
+            mUsesDisplacedGeometry = useDisplacedGeometry;
+        }
+
+        if (mUsesSurfaceCoverage == useSurfaceCoverage)
+            return;
+
+        if (useSurfaceCoverage)
+        {
+            mWaveOcclusion = std::make_unique<WaterWaveOcclusion>(mParent, mSceneRoot, mResourceSystem);
+            const osg::Vec3d position = mWaterNode->getPosition();
+            mWaveOcclusion->setCenter(osg::Vec2f(static_cast<float>(position.x()), static_cast<float>(position.y())));
+            mWaveOcclusion->setWaterHeight(mTop);
+            mWaveOcclusion->setMaximumClearance(
+                SceneUtil::waterWaveInteractionHeight(mSurfaceParameters.mGeometricWaveHeight));
+            mWaveOcclusion->setEnabled(true);
+        }
+        else if (mWaveOcclusion)
+        {
+            mWaveOcclusion->setEnabled(false);
+            mWaveOcclusion.reset();
+        }
+        mUsesSurfaceCoverage = useSurfaceCoverage;
     }
 
     void Water::setCullCallback(osg::Callback* callback)
@@ -472,6 +532,26 @@ namespace MWRender
         updateVisible();
     }
 
+    void Water::updateShaderWaterState()
+    {
+        if (mShaderWaterStateSetUpdater)
+        {
+            mWaterNode->removeCullCallback(mShaderWaterStateSetUpdater);
+            mShaderWaterStateSetUpdater = nullptr;
+        }
+
+        mWaterNode->setStateSet(nullptr);
+        mWaterGeom->setStateSet(nullptr);
+        mWaterNode->setUpdateCallback(nullptr);
+        createShaderWaterStateSet(mWaterNode);
+        mResourceSystem->getSceneManager()->setUpNormalsRTForStateSet(mWaterGeom->getOrCreateStateSet(), true);
+        if (mGpuScene != nullptr && mGpuScene->isEnabled())
+        {
+            mWaterGeom->getOrCreateStateSet()->setMode(GL_DEPTH_CLAMP, osg::StateAttribute::ON);
+            mGpuScene->capture(*mWaterGeom);
+        }
+    }
+
     osg::Vec3d Water::getPosition() const
     {
         return mWaterNode->getPosition();
@@ -528,17 +608,21 @@ namespace MWRender
     {
     public:
         ShaderWaterStateSetUpdater(Water* water, Resource::ResourceSystem* resourceSystem, Reflection* reflection,
-            Ripples* ripples, osg::ref_ptr<osg::Program> program, osg::ref_ptr<osg::Texture2D> normalMap)
+            Ripples* ripples, osg::ref_ptr<osg::Program> program, osg::ref_ptr<osg::Texture2D> normalMap,
+            osg::ref_ptr<osg::Texture3D> mgeWaterVolume)
             : mWater(water)
             , mReflection(reflection)
             , mRipples(ripples)
             , mProgram(std::move(program))
             , mNormalMap(std::move(normalMap))
+            , mMgeWaterVolume(std::move(mgeWaterVolume))
             , mResourceSystem(resourceSystem)
             , mOpaqueDepthTextureUnit(resourceSystem->getSceneManager()->getShaderManager().reserveGlobalTextureUnits(
                   Shader::ShaderManager::Slot::OpaqueDepthTexture))
             , mOpaqueColorTextureUnit(resourceSystem->getSceneManager()->getShaderManager().reserveGlobalTextureUnits(
                   Shader::ShaderManager::Slot::OpaqueColorTexture))
+            , mWaterOpticalTextureUnit(resourceSystem->getSceneManager()->getShaderManager().reserveGlobalTextureUnits(
+                  Shader::ShaderManager::Slot::WaterOptics, 3))
         {
         }
 
@@ -546,6 +630,12 @@ namespace MWRender
         {
             stateset->addUniform(new osg::Uniform("normalMap", 0));
             stateset->setTextureAttribute(0, mNormalMap, osg::StateAttribute::ON);
+            stateset->addUniform(new osg::Uniform("mgeWaterVolume", 6));
+            stateset->setTextureAttribute(6, mMgeWaterVolume, osg::StateAttribute::ON);
+            stateset->addUniform(new osg::Uniform("waterOpticalNormalMap", mWaterOpticalTextureUnit));
+            stateset->setTextureAttribute(mWaterOpticalTextureUnit, mNormalMap, osg::StateAttribute::ON);
+            stateset->addUniform(new osg::Uniform("waterOpticalVolume", mWaterOpticalTextureUnit + 1));
+            stateset->setTextureAttribute(mWaterOpticalTextureUnit + 1, mMgeWaterVolume, osg::StateAttribute::ON);
             stateset->setMode(GL_CULL_FACE, osg::StateAttribute::OFF);
             stateset->setAttributeAndModes(mProgram, osg::StateAttribute::ON);
 
@@ -554,6 +644,14 @@ namespace MWRender
             stateset->addUniform(new osg::Uniform("opaqueDepthTex", mOpaqueDepthTextureUnit));
             stateset->setMode(GL_BLEND, osg::StateAttribute::ON);
             stateset->addUniform(new osg::Uniform("waterSurface", true));
+            stateset->addUniform(new osg::Uniform(
+                "waterAppearance", shaderAppearance(mWater->getSurfaceParameters().mOptics.mAppearance)));
+            stateset->addUniform(new osg::Uniform(
+                "enhancedWaterColor", shaderEnhancedColor(mWater->getSurfaceParameters().mOptics.mEnhancedColor)));
+            stateset->addUniform(
+                new osg::Uniform("enhancedWaterFoam", mWater->getSurfaceParameters().mOptics.mEnhancedFoam));
+            stateset->addUniform(new osg::Uniform(
+                "enhancedWaterDistantWaves", mWater->getSurfaceParameters().mOptics.mEnhancedDistantWaves));
             stateset->setRenderBinDetails(MWRender::RenderBin_DepthSorted, "DepthSortedBin");
             osg::ref_ptr<osg::Depth> depth = new SceneUtil::AutoDepth;
             depth->setWriteMask(false);
@@ -564,6 +662,8 @@ namespace MWRender
                 stateset->addUniform(new osg::Uniform("rippleMap", 4));
             }
             stateset->addUniform(new osg::Uniform("nodePosition", osg::Vec3f(mWater->getPosition())));
+            stateset->addUniform(
+                new osg::Uniform("geometricWaveHeight", mWater->getSurfaceParameters().mGeometricWaveHeight));
         }
 
         void apply(osg::StateSet* stateset, osg::NodeVisitor* nv) override
@@ -582,6 +682,14 @@ namespace MWRender
                 stateset->setTextureAttribute(4, mRipples->getColorTexture(), osg::StateAttribute::ON);
             }
             stateset->getUniform("nodePosition")->set(osg::Vec3f(mWater->getPosition()));
+            stateset->getUniform("geometricWaveHeight")->set(mWater->getSurfaceParameters().mGeometricWaveHeight);
+            stateset->getUniform("waterAppearance")
+                ->set(shaderAppearance(mWater->getSurfaceParameters().mOptics.mAppearance));
+            stateset->getUniform("enhancedWaterColor")
+                ->set(shaderEnhancedColor(mWater->getSurfaceParameters().mOptics.mEnhancedColor));
+            stateset->getUniform("enhancedWaterFoam")->set(mWater->getSurfaceParameters().mOptics.mEnhancedFoam);
+            stateset->getUniform("enhancedWaterDistantWaves")
+                ->set(mWater->getSurfaceParameters().mOptics.mEnhancedDistantWaves);
         }
 
     private:
@@ -590,9 +698,11 @@ namespace MWRender
         Ripples* mRipples;
         osg::ref_ptr<osg::Program> mProgram;
         osg::ref_ptr<osg::Texture2D> mNormalMap;
+        osg::ref_ptr<osg::Texture3D> mMgeWaterVolume;
         Resource::ResourceSystem* mResourceSystem;
         int mOpaqueDepthTextureUnit;
         int mOpaqueColorTextureUnit;
+        int mWaterOpticalTextureUnit;
     };
 
     void Water::createShaderWaterStateSet(osg::Node* node)
@@ -606,6 +716,7 @@ namespace MWRender
         defineMap["rippleMapSize"] = std::to_string(RipplesSurface::sRTTSize) + ".0";
         defineMap["sunlightScattering"] = Settings::water().mSunlightScattering ? "1" : "0";
         defineMap["wobblyShores"] = Settings::water().mWobblyShores ? "1" : "0";
+        defineMap["waterGeometricWaves"] = mSurfaceParameters.useGeometricWaves() ? "1" : "0";
 
         Stereo::shaderStereoDefines(defineMap);
 
@@ -620,17 +731,66 @@ namespace MWRender
         normalMap->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
         mResourceSystem->getSceneManager()->applyFilterSettings(normalMap);
 
+        osg::ref_ptr<osg::Texture3D> normalVolume(new osg::Texture3D(normalMap->getImage()));
+        normalVolume->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
+        normalVolume->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
+        normalVolume->setWrap(osg::Texture::WRAP_R, osg::Texture::CLAMP_TO_EDGE);
+        normalVolume->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
+        normalVolume->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
+
+        constexpr VFS::Path::NormalizedView mgeWaterImage("textures/openmwse/mge_xe_water_nrm.dds");
+        osg::ref_ptr<osg::Texture3D> mgeWaterVolume(
+            new osg::Texture3D(mResourceSystem->getImageManager()->getImage(mgeWaterImage, true)));
+        mgeWaterVolume->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
+        mgeWaterVolume->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
+        mgeWaterVolume->setWrap(osg::Texture::WRAP_R, osg::Texture::REPEAT);
+        mgeWaterVolume->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
+        mgeWaterVolume->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
+
+        const int waterOpticalTextureUnit
+            = shaderMgr.reserveGlobalTextureUnits(Shader::ShaderManager::Slot::WaterOptics, 3);
+        osg::StateSet* sceneState = mSceneRoot->getOrCreateStateSet();
+        sceneState->addUniform(new osg::Uniform("waterOpticalNormalMap", waterOpticalTextureUnit));
+        sceneState->setTextureAttribute(waterOpticalTextureUnit, normalVolume, osg::StateAttribute::ON);
+        sceneState->addUniform(new osg::Uniform("waterOpticalVolume", waterOpticalTextureUnit + 1));
+        sceneState->setTextureAttribute(waterOpticalTextureUnit + 1, mgeWaterVolume, osg::StateAttribute::ON);
+        if (mWaveOcclusion)
+        {
+            sceneState->addUniform(new osg::Uniform("waterSurfaceCoverageMap", waterOpticalTextureUnit + 2));
+            sceneState->setTextureAttribute(
+                waterOpticalTextureUnit + 2, mWaveOcclusion->texture(), osg::StateAttribute::ON);
+            sceneState->addUniform(new osg::Uniform("waterSurfaceCoverageCenter", mWaveOcclusion->center()));
+            sceneState->addUniform(
+                new osg::Uniform("waterSurfaceCoverageInverseSize", mWaveOcclusion->inverseWorldSize()));
+            sceneState->addUniform(
+                new osg::Uniform("waterSurfaceCoverageResolution", mWaveOcclusion->textureResolution()));
+        }
+
         mRainSettingsUpdater = new RainSettingsUpdater();
         node->setUpdateCallback(mRainSettingsUpdater);
 
-        mShaderWaterStateSetUpdater = new ShaderWaterStateSetUpdater(
-            this, mResourceSystem, mReflection, mRipples, std::move(program), std::move(normalMap));
+        mShaderWaterStateSetUpdater = new ShaderWaterStateSetUpdater(this, mResourceSystem, mReflection, mRipples,
+            std::move(program), std::move(normalMap), std::move(mgeWaterVolume));
         node->addCullCallback(mShaderWaterStateSetUpdater);
     }
 
     void Water::processChangedSettings(const Settings::CategorySettingVector& settings)
     {
-        updateWaterMaterial();
+        const bool usedDisplacedGeometry = mUsesDisplacedGeometry;
+        const bool usedSurfaceCoverage = mUsesSurfaceCoverage;
+        mSurfaceParameters = defaultWaterSurfaceParameters();
+        updateWaterGeometry();
+        if (mWaveOcclusion)
+            mWaveOcclusion->setMaximumClearance(
+                SceneUtil::waterWaveInteractionHeight(mSurfaceParameters.mGeometricWaveHeight));
+        const bool waterSettingsChanged = settings.empty()
+            || std::any_of(
+                settings.begin(), settings.end(), [](const auto& setting) { return setting.first == "Water"; });
+        if (waterSettingsChanged)
+            updateWaterMaterial();
+        else if (Settings::water().mShader
+            && (usedDisplacedGeometry != mUsesDisplacedGeometry || usedSurfaceCoverage != mUsesSurfaceCoverage))
+            updateShaderWaterState();
     }
 
     Water::~Water()
@@ -685,6 +845,13 @@ namespace MWRender
         }
         if (mInterior != wasInterior && mReflection)
             mReflection->setInterior(mInterior);
+        const osg::Vec3d position = mWaterNode->getPosition();
+        if (mWaveOcclusion)
+        {
+            mWaveOcclusion->setCenter(osg::Vec2f(static_cast<float>(position.x()), static_cast<float>(position.y())));
+            if (osg::Uniform* center = mSceneRoot->getOrCreateStateSet()->getUniform("waterSurfaceCoverageCenter"))
+                center->set(mWaveOcclusion->center());
+        }
     }
 
     void Water::setHeight(const float height)
@@ -699,10 +866,13 @@ namespace MWRender
 
         if (mReflection)
             mReflection->setWaterLevel(mTop);
+        if (mWaveOcclusion)
+            mWaveOcclusion->setWaterHeight(height);
     }
 
     void Water::setRainIntensity(float rainIntensity)
     {
+        mRainIntensity = rainIntensity;
         if (mRainSettingsUpdater)
             mRainSettingsUpdater->setRainIntensity(rainIntensity);
     }
@@ -712,12 +882,26 @@ namespace MWRender
         if (!paused)
         {
             mSimulation->update(dt);
+            if (!mInterior && mRipples && mSurfaceParameters.mOptics.mAppearance == Settings::WaterAppearance::Enhanced
+                && mSurfaceParameters.mOptics.mEnhancedSewerRipples)
+            {
+                mSewerRippleTimer -= dt;
+                if (mSewerRippleTimer <= 0.f)
+                {
+                    mRipples->emitNearbySewerRipples();
+                    mSewerRippleTimer = 0.75f;
+                }
+            }
+            else
+                mSewerRippleTimer = 0.f;
         }
 
         if (mRipples)
         {
             mRipples->setPaused(paused);
         }
+        if (mWaveOcclusion)
+            mWaveOcclusion->update(paused ? 0.f : dt);
     }
 
     void Water::updateVisible()

@@ -9,6 +9,7 @@ set(BUILTIN_DATA_FILES
     textures/openmwse/atmosphere_cloud_curl.dds
     textures/openmwse/atmosphere_cloud_weather.dds
     textures/openmwse/atmosphere_blue_noise.dds
+    textures/openmwse/mge_xe_water_nrm.dds
     textures/omw_map_color_palette.dds
     textures/omw_menu_scroll_down.dds
     textures/omw_menu_scroll_up.dds
@@ -58,6 +59,7 @@ set(BUILTIN_DATA_FILES
     fonts/MysticCards.omwfont
     fonts/MysticCardsFontLicense.txt
 
+    licenses/OpenMWSE-Water.txt
 
     # Default animation blending config
     animations/animation-config.yaml

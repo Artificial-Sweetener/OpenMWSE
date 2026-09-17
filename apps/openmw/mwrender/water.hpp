@@ -11,6 +11,8 @@
 #include <components/settings/settings.hpp>
 #include <components/vfs/pathutil.hpp>
 
+#include "watersurface.hpp"
+
 namespace osg
 {
     class Group;
@@ -50,6 +52,7 @@ namespace MWRender
     class RippleSimulation;
     class RainSettingsUpdater;
     class Ripples;
+    class WaterWaveOcclusion;
 
     /// Water rendering
     class Water
@@ -60,11 +63,14 @@ namespace MWRender
         osg::ref_ptr<osg::Group> mSceneRoot;
         osg::ref_ptr<osg::PositionAttitudeTransform> mWaterNode;
         osg::ref_ptr<osg::Geometry> mWaterGeom;
+        osg::ref_ptr<osg::Geometry> mSimpleWaterGeom;
         Resource::ResourceSystem* mResourceSystem;
         GpuScene* mGpuScene;
         osg::ref_ptr<osgUtil::IncrementalCompileOperation> mIncrementalCompileOperation;
 
         std::unique_ptr<RippleSimulation> mSimulation;
+        std::unique_ptr<WaterWaveOcclusion> mWaveOcclusion;
+        WaterSurfaceParameters mSurfaceParameters;
 
         osg::ref_ptr<Reflection> mReflection;
         osg::ref_ptr<Ripples> mRipples;
@@ -77,6 +83,10 @@ namespace MWRender
 
         osg::Callback* mCullCallback;
         osg::ref_ptr<osg::Callback> mShaderWaterStateSetUpdater;
+        bool mUsesDisplacedGeometry = false;
+        bool mUsesSurfaceCoverage = false;
+        float mSewerRippleTimer = 0.f;
+        float mRainIntensity = 0.f;
 
         osg::Vec3f getSceneNodeCoordinates(int gridX, int gridY);
         void updateVisible();
@@ -86,6 +96,12 @@ namespace MWRender
         void createShaderWaterStateSet(osg::Node* node);
 
         void updateWaterMaterial();
+
+        /// Rebuild only the shader state while retaining reflection and ripple render targets.
+        void updateShaderWaterState();
+
+        /// Select the water mesh and synchronize shared near-surface coverage resources.
+        void updateWaterGeometry();
 
     public:
         Water(osg::Group* parent, osg::Group* sceneRoot, Resource::ResourceSystem* resourceSystem,
@@ -128,6 +144,13 @@ namespace MWRender
 
         osg::Drawable* getDrawable() const;
 
+        /// Return the independently owned policy for the default world-water surface.
+        const WaterSurfaceParameters& getSurfaceParameters() const { return mSurfaceParameters; }
+
+        /// Return the current rain contribution used by the active optical field.
+        float getRainIntensity() const { return mRainIntensity; }
+
+        /// Apply changed global settings to the default surface while preserving unrelated render targets.
         void processChangedSettings(const Settings::CategorySettingVector& settings);
 
         void showWorld(bool show);

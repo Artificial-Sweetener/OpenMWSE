@@ -1065,6 +1065,16 @@ namespace MWGui
         mGraphicsSettings->setDistanceValues(useCellEditor, view, grass, shadow, resolution);
     }
 
+    void SettingsWindow::setGeometricWaveHeight(float height)
+    {
+        mGraphicsSettings->setGeometricWaveHeight(height);
+    }
+
+    void SettingsWindow::setWaterValues(float height, bool caustics, bool reflectedCaustics, float causticsStrength)
+    {
+        mGraphicsSettings->setWaterValues(height, caustics, reflectedCaustics, causticsStrength);
+    }
+
     void SettingsWindow::onOpen()
     {
         mGraphicsSettings->refresh();

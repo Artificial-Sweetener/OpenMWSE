@@ -157,6 +157,41 @@ namespace Settings
             EXPECT_EQ(shadows().mShadowMapResolution.get(), 1024);
         }
 
+        /// Start an existing installation without requiring newly introduced water preferences.
+        TEST_F(SettingsStartupTest, loadsExistingConfigurationWithoutOpenMWSEWaterPreferences)
+        {
+            std::ofstream(mDirectory / "settings.cfg")
+                << "[Water]\nshader = true\nrefraction = true\nreflection detail = 4\n";
+            ASSERT_NO_FATAL_FAILURE(load());
+            EXPECT_TRUE(water().mShader);
+            EXPECT_TRUE(water().mRefraction);
+            EXPECT_EQ(water().mReflectionDetail.get(), 4);
+            EXPECT_EQ(openmwseWater().appearance(), WaterAppearance::OpenMW);
+            EXPECT_FLOAT_EQ(openmwseWater().mGeometricWaveHeight.get(), 0.f);
+            EXPECT_FALSE(openmwseWater().mCaustics);
+            EXPECT_FALSE(openmwseWater().mReflectedCaustics);
+            EXPECT_FLOAT_EQ(openmwseWater().mCausticsStrength.get(), 1.f);
+            EXPECT_EQ(openmwseWater().enhancedColor(), EnhancedWaterColor::GreenBlue);
+            EXPECT_TRUE(openmwseWater().mEnhancedFoam);
+            EXPECT_TRUE(openmwseWater().mEnhancedDistantWaves);
+            EXPECT_FALSE(openmwseWater().mEnhancedSewerRipples);
+        }
+
+        /// Recover water preferences written by a newer or manually edited installation without preventing startup.
+        TEST_F(SettingsStartupTest, sanitizesUnrecognizedOpenMWSEWaterPreferences)
+        {
+            std::ofstream(mDirectory / "settings.cfg")
+                << "[OpenMWSE Water]\nappearance = future-water\nenhanced color = ultraviolet\n"
+                   "geometric wave height = 999\ncaustics strength = 99\n";
+            ASSERT_NO_FATAL_FAILURE(load());
+            EXPECT_EQ(openmwseWater().mAppearance.get(), "openmw");
+            EXPECT_EQ(openmwseWater().appearance(), WaterAppearance::OpenMW);
+            EXPECT_EQ(openmwseWater().mEnhancedColor.get(), "green-blue");
+            EXPECT_EQ(openmwseWater().enhancedColor(), EnhancedWaterColor::GreenBlue);
+            EXPECT_FLOAT_EQ(openmwseWater().mGeometricWaveHeight.get(), 250.f);
+            EXPECT_FLOAT_EQ(openmwseWater().mCausticsStrength.get(), 2.f);
+        }
+
         struct SettingsValuesTest : Test
         {
             CategorySettingValueMap mSavedDefaults = Manager::mDefaultSettings;
@@ -215,6 +250,39 @@ namespace Settings
             values.mOpenMWSEShadows.mCloudShadowIntensity.set(2.f);
             EXPECT_EQ(values.mOpenMWSEShadows.mFilteringQuality.get(), "medium");
             EXPECT_FLOAT_EQ(values.mOpenMWSEShadows.mCloudShadowIntensity.get(), 1.f);
+        }
+
+        /// Keep water appearances stable, bounded, and dormant by default for existing installations.
+        TEST_F(SettingsValuesTest, openmwseWaterControlsUseCompatibleDefaultsAndSanitizers)
+        {
+            Index index;
+            Values values(index);
+            EXPECT_EQ(values.mOpenMWSEWater.appearance(), WaterAppearance::OpenMW);
+            EXPECT_FLOAT_EQ(values.mOpenMWSEWater.mGeometricWaveHeight.get(), 0.f);
+            EXPECT_FALSE(values.mOpenMWSEWater.useGeometricWaves());
+            EXPECT_FALSE(values.mOpenMWSEWater.mCaustics);
+            EXPECT_FALSE(values.mOpenMWSEWater.mReflectedCaustics);
+            EXPECT_FLOAT_EQ(values.mOpenMWSEWater.mCausticsStrength.get(), 1.f);
+            EXPECT_EQ(values.mOpenMWSEWater.enhancedColor(), EnhancedWaterColor::GreenBlue);
+
+            values.mOpenMWSEWater.mAppearance.set("enhanced");
+            values.mOpenMWSEWater.mEnhancedColor.set("blue");
+            EXPECT_EQ(values.mOpenMWSEWater.appearance(), WaterAppearance::Enhanced);
+            EXPECT_EQ(values.mOpenMWSEWater.enhancedColor(), EnhancedWaterColor::Blue);
+
+            values.mOpenMWSEWater.mAppearance.set("future-water");
+            values.mOpenMWSEWater.mEnhancedColor.set("ultraviolet");
+            EXPECT_EQ(values.mOpenMWSEWater.appearance(), WaterAppearance::OpenMW);
+            EXPECT_EQ(values.mOpenMWSEWater.enhancedColor(), EnhancedWaterColor::GreenBlue);
+
+            values.mOpenMWSEWater.mGeometricWaveHeight.set(999.f);
+            EXPECT_FLOAT_EQ(values.mOpenMWSEWater.mGeometricWaveHeight.get(), 250.f);
+            values.mOpenMWSEWater.mGeometricWaveHeight.set(-1.f);
+            EXPECT_FLOAT_EQ(values.mOpenMWSEWater.mGeometricWaveHeight.get(), 0.f);
+            values.mOpenMWSEWater.mCausticsStrength.set(9.f);
+            EXPECT_FLOAT_EQ(values.mOpenMWSEWater.mCausticsStrength.get(), 2.f);
+            values.mOpenMWSEWater.mCausticsStrength.set(-1.f);
+            EXPECT_FLOAT_EQ(values.mOpenMWSEWater.mCausticsStrength.get(), 0.f);
         }
 
         /// Keep subordinate optimization selections dormant until the shared prerequisite is enabled.

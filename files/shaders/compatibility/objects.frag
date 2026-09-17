@@ -79,6 +79,7 @@ varying vec4 passTangent;
 #include "lib/util/distortion.glsl"
 
 #include "fog.glsl"
+#include "lib/water/caustics.glsl"
 #include "lib/material/vertexcolors.glsl"
 #include "shadows_fragment.glsl"
 #include "compatibility/normals.glsl"
@@ -272,6 +273,7 @@ vec2 screenCoords = gl_FragCoord.xy / screenRes;
         gl_FragData[0].xyz += sampleEmissiveMap(emissiveMapUV).xyz;
 #endif
 
+    gl_FragData[0].xyz = applyWaterCaustics(gl_FragData[0].xyz, passViewPos, viewNormal, shadowing);
     gl_FragData[0] = applyFogAtPos(gl_FragData[0], passViewPos, near, far);
 
 #if !defined(FORCE_OPAQUE) && @softParticles

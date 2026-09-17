@@ -37,6 +37,7 @@ varying vec3 passViewPos;
 #include "shadows_fragment.glsl"
 #include "lib/material/alpha.glsl"
 #include "fog.glsl"
+#include "lib/water/caustics.glsl"
 #include "compatibility/normals.glsl"
 
 centroid varying vec4 passColor;
@@ -84,6 +85,7 @@ void main()
 #endif
 
     gl_FragData[0].xyz *= lighting;
+    gl_FragData[0].xyz = applyWaterCaustics(gl_FragData[0].xyz, passViewPos, viewNormal, shadowing);
     gl_FragData[0] = applyFogAtDist(gl_FragData[0], passViewPos, euclideanDepth, linearDepth, near, far);
 
 #if !@disableNormals

@@ -23,6 +23,85 @@
 
 namespace MWRender
 {
+    namespace
+    {
+        // Enhanced Water Shader 2.2 sewer outlets by Krokantor, Hrnchamd, vtastek, phal, harnlarnm, and abot.
+        // The original shader grants reuse with attribution; OpenMWSE drives its bounded ripple simulation instead of
+        // evaluating all 70 radial waves in every water fragment.
+        const std::array<osg::Vec2f, 70> sewerOutlets = { {
+            { 19160, -86825 },
+            { 46500, -81930 },
+            { 31475, -104345 },
+            { 32165, -76700 },
+            { 19160, -81900 },
+            { 20260, -80775 },
+            { 20300, -87915 },
+            { 24125, -80775 },
+            { 24225, -87915 },
+            { 25275, -86700 },
+            { 25275, -81850 },
+            { 25550, -95230 },
+            { 25550, -91390 },
+            { 25550, -88840 },
+            { 25550, -84940 },
+            { 26300, -81750 },
+            { 26300, -77825 },
+            { 26630, -89955 },
+            { 26650, -96365 },
+            { 26700, -83850 },
+            { 27185, -90260 },
+            { 27625, -82800 },
+            { 27635, -76700 },
+            { 31180, -96925 },
+            { 31200, -103770 },
+            { 31540, -83850 },
+            { 31615, -96365 },
+            { 31765, -90260 },
+            { 31895, -89955 },
+            { 32150, -82800 },
+            { 32675, -95020 },
+            { 32675, -91785 },
+            { 32675, -88690 },
+            { 32675, -85300 },
+            { 32975, -95365 },
+            { 32975, -91190 },
+            { 32975, -89110 },
+            { 32975, -84720 },
+            { 33450, -81635 },
+            { 33450, -77945 },
+            { 34095, -96365 },
+            { 34120, -90260 },
+            { 34175, -104345 },
+            { 34480, -83850 },
+            { 34585, -89955 },
+            { 34640, -96925 },
+            { 34695, -103770 },
+            { 38500, -89955 },
+            { 38965, -96365 },
+            { 38980, -83850 },
+            { 39060, -90260 },
+            { 40100, -95300 },
+            { 40100, -91395 },
+            { 40100, -88790 },
+            { 40100, -84900 },
+            { 40400, -86900 },
+            { 40400, -81955 },
+            { 41350, -87915 },
+            { 41475, -80775 },
+            { 45300, -87915 },
+            { 45480, -80775 },
+            { 46500, -86790 },
+            { 107090, -63820 },
+            { 114215, -59905 },
+            { 113110, -64890 },
+            { 107090, -59875 },
+            { 108085, -58800 },
+            { 108110, -64890 },
+            { 113170, -58800 },
+            { 114215, -63780 },
+        } };
+    }
+
     RipplesSurface::RipplesSurface(Resource::ResourceSystem* resourceSystem)
         : osg::Geometry()
         , mResourceSystem(resourceSystem)
@@ -362,6 +441,19 @@ namespace MWRender
     void Ripples::emit(const osg::Vec3f pos, float sizeInCellUnits)
     {
         mRipples->emit(pos, sizeInCellUnits);
+    }
+
+    void Ripples::emitNearbySewerRipples()
+    {
+        const ESM::Position& position = MWMechanics::getPlayer().getRefData().getPosition();
+        const osg::Vec2f playerPosition(position.pos[0], position.pos[1]);
+        constexpr float activeRadius = RipplesSurface::sRTTSize * RipplesSurface::sWorldScaleFactor * 0.45f;
+        constexpr float activeRadiusSquared = activeRadius * activeRadius;
+        for (const osg::Vec2f& outlet : sewerOutlets)
+        {
+            if ((outlet - playerPosition).length2() <= activeRadiusSquared)
+                emit(osg::Vec3f(outlet.x(), outlet.y(), 0.f), 18.f);
+        }
     }
 
     void Ripples::setPaused(bool paused)

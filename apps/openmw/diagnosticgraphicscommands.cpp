@@ -7,6 +7,7 @@
 #include <components/diagnostics/distancesettings.hpp>
 #include <components/diagnostics/optimizationsettings.hpp>
 #include <components/diagnostics/session.hpp>
+#include <components/diagnostics/watersettings.hpp>
 #include <components/settings/values.hpp>
 
 #include <osg/Camera>
@@ -114,6 +115,23 @@ void OMW::Engine::processDiagnosticGraphicsCommand(
                     Settings::shadows().mMaximumShadowMapDistance, settings.mUseCellEditor,
                     settings.mShadowResolution ? std::optional<int>(Settings::shadows().mShadowMapResolution)
                                                : std::nullopt }));
+            break;
+        }
+
+        case Diagnostics::CommandType::SetWaterSettings:
+        {
+            if (!mDiagnosticChild)
+            {
+                response.mError = Diagnostics::ErrorCode::PermissionDenied;
+                break;
+            }
+            const auto settings = Diagnostics::deserializeWaterSettings(diagnosticText(command.mPayload));
+            mWindowManager->showVideoSettings("water");
+            mWindowManager->setVideoWaterValues(settings.mGeometricWaveHeight, settings.mCaustics,
+                settings.mReflectedCaustics, settings.mCausticsStrength);
+            response.mPayload = diagnosticBytes(Diagnostics::serializeWaterSettings(
+                { Settings::openmwseWater().mGeometricWaveHeight, Settings::openmwseWater().mCaustics,
+                    Settings::openmwseWater().mReflectedCaustics, Settings::openmwseWater().mCausticsStrength }));
             break;
         }
 

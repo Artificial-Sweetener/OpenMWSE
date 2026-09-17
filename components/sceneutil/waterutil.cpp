@@ -4,12 +4,20 @@
 #include <osg/Geometry>
 #include <osg/StateSet>
 
+#include <algorithm>
+#include <cmath>
+
 #include <components/sceneutil/material.hpp>
 
 #include "depth.hpp"
 
 namespace SceneUtil
 {
+    float waterWaveInteractionHeight(float waveHeight)
+    {
+        return std::max(32.f, 2.f * std::max(0.f, waveHeight) + 32.f);
+    }
+
     // disable nonsense test against a worldsize bb what will always pass
     class WaterBoundCallback : public osg::Drawable::ComputeBoundingBoxCallback
     {
@@ -64,6 +72,74 @@ namespace SceneUtil
         waterGeom->setComputeBoundingBoxCallback(new WaterBoundCallback);
         waterGeom->setCullingActive(false);
         return waterGeom;
+    }
+
+    osg::ref_ptr<osg::Geometry> createDisplacedWaterGeometry(float size, float textureRepeats)
+    {
+        constexpr unsigned int angularSegments = 150;
+        constexpr unsigned int radialSegments = 120;
+        constexpr float detailedRadius = 9600.f;
+        constexpr float horizonRadius = 500000.f;
+        constexpr float twoPi = 6.28318530717958647692f;
+
+        osg::ref_ptr<osg::Vec3Array> vertices(new osg::Vec3Array);
+        osg::ref_ptr<osg::Vec2Array> texcoords(new osg::Vec2Array);
+        vertices->reserve(1 + angularSegments * radialSegments);
+        texcoords->reserve(1 + angularSegments * radialSegments);
+        vertices->push_back(osg::Vec3f(0.f, 0.f, -1.f));
+        texcoords->push_back(osg::Vec2f(textureRepeats * 0.5f, textureRepeats * 0.5f));
+
+        for (unsigned int ring = 0; ring < radialSegments; ++ring)
+        {
+            const float fraction = static_cast<float>(ring) / static_cast<float>(radialSegments);
+            const float radius = ring + 1 == radialSegments
+                ? horizonRadius
+                : detailedRadius * (0.9f * fraction * fraction * fraction + 0.1f * fraction);
+            for (unsigned int segment = 0; segment < angularSegments; ++segment)
+            {
+                const float angle = twoPi * static_cast<float>(segment) / static_cast<float>(angularSegments);
+                const float x = radius * std::cos(angle);
+                const float y = radius * std::sin(angle);
+                vertices->push_back(osg::Vec3f(x, y, -1.f));
+                texcoords->push_back(
+                    osg::Vec2f((x / size + 0.5f) * textureRepeats, (0.5f - y / size) * textureRepeats));
+            }
+        }
+
+        osg::ref_ptr<osg::DrawElementsUInt> indices(new osg::DrawElementsUInt(osg::PrimitiveSet::TRIANGLES));
+        indices->reserve(angularSegments * (1 + 6 * (radialSegments - 1)));
+        for (unsigned int segment = 0; segment < angularSegments; ++segment)
+        {
+            indices->push_back(0);
+            indices->push_back(1 + segment);
+            indices->push_back(1 + (segment + 1) % angularSegments);
+        }
+        for (unsigned int ring = 1; ring < radialSegments; ++ring)
+        {
+            const unsigned int inner = 1 + angularSegments * (ring - 1);
+            const unsigned int outer = inner + angularSegments;
+            for (unsigned int segment = 0; segment < angularSegments; ++segment)
+            {
+                const unsigned int next = (segment + 1) % angularSegments;
+                indices->push_back(inner + segment);
+                indices->push_back(outer + segment);
+                indices->push_back(inner + next);
+                indices->push_back(outer + segment);
+                indices->push_back(outer + next);
+                indices->push_back(inner + next);
+            }
+        }
+
+        osg::ref_ptr<osg::Geometry> geometry(new osg::Geometry);
+        geometry->setVertexArray(vertices);
+        geometry->setTexCoordArray(0, texcoords);
+        osg::ref_ptr<osg::Vec3Array> normal(new osg::Vec3Array);
+        normal->push_back(osg::Vec3f(0.f, 0.f, 1.f));
+        geometry->setNormalArray(normal, osg::Array::BIND_OVERALL);
+        geometry->addPrimitiveSet(indices);
+        geometry->setComputeBoundingBoxCallback(new WaterBoundCallback);
+        geometry->setCullingActive(false);
+        return geometry;
     }
 
     osg::ref_ptr<osg::StateSet> createSimpleWaterStateSet(float alpha, int renderBin)

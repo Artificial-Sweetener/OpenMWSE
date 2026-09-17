@@ -19,6 +19,7 @@ namespace MWRender
         void configure(float viewDistance, float fogDepth, float underwaterFog, float dlFactor, float dlOffset,
             const osg::Vec4f& color);
 
+        /// Return the active fog color, including the enhanced surface's paired underwater treatment.
         osg::Vec4f getFogColor(bool isUnderwater) const;
         float getFogStart(bool isUnderwater) const;
         float getFogEnd(bool isUnderwater) const;

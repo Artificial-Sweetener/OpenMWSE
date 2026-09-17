@@ -105,6 +105,9 @@ namespace MWRender
 
         void emit(const osg::Vec3f pos, float sizeInCellUnits);
 
+        /// Emit the bounded subset of Enhanced Water sewer disturbances inside the active ripple tile.
+        void emitNearbySewerRipples();
+
         void setPaused(bool paused);
 
         osg::ref_ptr<RipplesSurface> mRipples;

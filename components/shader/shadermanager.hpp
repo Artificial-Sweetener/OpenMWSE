@@ -126,6 +126,7 @@ namespace Shader
             SkyTexture,
             TexturedCloudOpacity,
             ShadowMaps,
+            WaterOptics,
             SLOT_COUNT
         };
 

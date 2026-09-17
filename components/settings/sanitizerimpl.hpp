@@ -39,6 +39,10 @@ namespace Settings
 
     std::unique_ptr<Sanitizer<std::string>> makeEnumSanitizerString(std::initializer_list<std::string> values);
 
+    /// Accept known strings and replace unrecognized persisted values with a stable fallback.
+    std::unique_ptr<Sanitizer<std::string>> makeFallbackEnumSanitizerString(
+        std::initializer_list<std::string> values, std::string fallback);
+
     std::unique_ptr<Sanitizer<float>> makeEqualOrMaxSanitizerFloat(float equal, float max);
 }
 

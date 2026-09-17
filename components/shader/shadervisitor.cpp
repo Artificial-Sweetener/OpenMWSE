@@ -638,6 +638,15 @@ namespace Shader
             addedState->addUniform("opaqueDepthTex");
         }
 
+        // Material programs sample caustics through both water volumes. Bind their units locally so auxiliary camera
+        // state stacks cannot leave heterogeneous sampler uniforms at OpenGL's default unit zero.
+        const int waterOpticalTextureUnit
+            = mShaderManager.reserveGlobalTextureUnits(Shader::ShaderManager::Slot::WaterOptics, 2);
+        writableStateSet->addUniform(new osg::Uniform("waterOpticalNormalMap", waterOpticalTextureUnit));
+        writableStateSet->addUniform(new osg::Uniform("waterOpticalVolume", waterOpticalTextureUnit + 1));
+        addedState->addUniform("waterOpticalNormalMap");
+        addedState->addUniform("waterOpticalVolume");
+
         if (writableStateSet->getMode(GL_ALPHA_TEST) != osg::StateAttribute::INHERIT
             && !previousAddedState->hasMode(GL_ALPHA_TEST))
             removedState->setMode(GL_ALPHA_TEST, writableStateSet->getMode(GL_ALPHA_TEST));

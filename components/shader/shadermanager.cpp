@@ -1044,6 +1044,9 @@ namespace Shader
             case Slot::ShadowMaps:
                 slotDescr = "shadow maps";
                 break;
+            case Slot::WaterOptics:
+                slotDescr = "water optics";
+                break;
             default:
                 slotDescr = "UNKNOWN";
         }
@@ -1081,6 +1084,7 @@ namespace Shader
             { "exponentialFog", "0" },
             { "reverseZ", "0" },
             { "waterRefraction", "0" },
+            { "waterGeometricWaves", "0" },
             { "classicFalloff", "1" },
             { "skyBlending", "0" },
             { "disableNormals", "1" },

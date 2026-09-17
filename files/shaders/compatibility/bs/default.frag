@@ -37,6 +37,7 @@ uniform float distortionStrength;
 
 #include "compatibility/shadows_fragment.glsl"
 #include "compatibility/fog.glsl"
+#include "lib/water/caustics.glsl"
 #include "compatibility/normals.glsl"
 
 centroid varying vec4 passColor;
@@ -102,6 +103,7 @@ void main()
     clampLighting(lighting);
 
     gl_FragData[0].xyz = gl_FragData[0].xyz * lighting + specular;
+    gl_FragData[0].xyz = applyWaterCaustics(gl_FragData[0].xyz, passViewPos, viewNormal, shadowing);
 
     gl_FragData[0] = applyFogAtDist(gl_FragData[0], passViewPos, euclideanDepth, linearDepth, near, far);
 

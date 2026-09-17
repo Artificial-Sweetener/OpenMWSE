@@ -557,6 +557,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                 case Diagnostics::CommandType::ShowVideoSettings:
                 case Diagnostics::CommandType::SetDistanceSettings:
                 case Diagnostics::CommandType::SetOptimizationSettings:
+                case Diagnostics::CommandType::SetWaterSettings:
                 case Diagnostics::CommandType::SetAtmosphereSettings:
                 case Diagnostics::CommandType::SetAtmosphereScenario:
                     processDiagnosticGraphicsCommand(command, response, output);

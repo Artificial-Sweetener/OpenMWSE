@@ -83,6 +83,7 @@ add_component_dir (settings
     categories/models
     categories/navigator
     categories/openmwseshadows
+    categories/openmwsewater
     categories/physics
     categories/postprocessing
     categories/saves
@@ -327,7 +328,7 @@ add_component_dir (files
     )
 
 add_component_dir (diagnostics
-    protocol commandqueue capsule gameplayroute localtransport session fixedstepscheduler atmospherescenario atmospheresettings distancesettings optimizationsettings
+    protocol commandqueue capsule gameplayroute localtransport session fixedstepscheduler atmospherescenario atmospheresettings distancesettings optimizationsettings watersettings
     )
 
 if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")

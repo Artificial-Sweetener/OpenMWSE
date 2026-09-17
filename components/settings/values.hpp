@@ -15,6 +15,7 @@
 #include "categories/models.hpp"
 #include "categories/navigator.hpp"
 #include "categories/openmwseshadows.hpp"
+#include "categories/openmwsewater.hpp"
 #include "categories/optimizations.hpp"
 #include "categories/physics.hpp"
 #include "categories/postprocessing.hpp"
@@ -59,6 +60,7 @@ namespace Settings
         NavigatorCategory mNavigator{ mIndex };
         ShadowsCategory mShadows{ mIndex };
         OpenMWSEShadowsCategory mOpenMWSEShadows{ mIndex };
+        OpenMWSEWaterCategory mOpenMWSEWater{ mIndex };
         OptimizationsCategory mOptimizations{ mIndex };
         PhysicsCategory mPhysics{ mIndex };
         ModelsCategory mModels{ mIndex };
@@ -192,6 +194,12 @@ namespace Settings
     inline OpenMWSEShadowsCategory& openmwseShadows()
     {
         return values().mOpenMWSEShadows;
+    }
+
+    /// Return OpenMWSE-specific water presentation settings.
+    inline OpenMWSEWaterCategory& openmwseWater()
+    {
+        return values().mOpenMWSEWater;
     }
 
     /// Return the prerequisite and selections for optional engine optimizations.

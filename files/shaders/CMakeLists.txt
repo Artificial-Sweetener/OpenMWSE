@@ -34,6 +34,9 @@ set(SHADER_FILES
     lib/atmosphere/uniforms.glsl
     lib/atmosphere/units.glsl
     lib/water/fresnel.glsl
+    lib/water/caustics.glsl
+    lib/water/optical_field.glsl
+    lib/water/surface_coverage.glsl
     lib/water/rain_ripples.glsl
     lib/water/ripples.glsl
     lib/view/depth.glsl
@@ -117,6 +120,8 @@ set(SHADER_FILES
     compatibility/outline.vert
     compatibility/depthclipped.vert
     compatibility/depthclipped.frag
+    compatibility/waterwaveblocker.vert
+    compatibility/waterwaveblocker.frag
     compatibility/gui.vert
     compatibility/gui.frag
     compatibility/debug.vert

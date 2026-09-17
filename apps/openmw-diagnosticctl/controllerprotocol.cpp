@@ -296,6 +296,7 @@ namespace DiagnosticCtl
                   "      [--video-settings-page atmosphere|water|shadows|detail|optimizations]\n"
                   "      [--distance-settings-sequence <yaml>]\n"
                   "      [--optimization-settings-sequence <yaml>]\n"
+                  "      [--water-settings-sequence <yaml>]\n"
                   "      [--setting \"Section:name=value\"]...\n"
                   "  openmw-diagnosticctl inspect-capsule --capsule capture.omwdiag [--entry name]\n"
                   "  openmw-diagnosticctl add-route --capsule capture.omwdiag --route route.yaml --output "

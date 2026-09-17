@@ -1,6 +1,8 @@
 Water Settings
 ##############
 
+Authored surface appearances and geometric waves are controlled by :doc:`OpenMWSE Water <openmwsewater>`.
+
 .. note::
    The settings for the water shader are difficult to describe,
    but can be seen immediately in the Water tab of the Video panel in the Options menu.
