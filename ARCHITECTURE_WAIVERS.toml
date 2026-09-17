@@ -36,8 +36,8 @@ kind = "structural"
 justification = "SettingsWindow is the composition root for one modal settings surface: it binds the shared widget tree, coordinates tabs and focus, applies one pending-settings transaction, and owns the input, localization, and script-page presentation tied to that lifetime. Fork-specific live graphics policy, distance editing, shadow validation, and diagnostic exercise now belong to GraphicsSettings."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:2521adc4ae379bdea63b6eeccb9a23ce060fae2430610e93f4c1fcafdcbe8836"
-max_lines = 993
+fingerprint = "sha256:1d82bcf86b3f4a1db9b5e71d281a6cc2b9623183e5f63538985b8122a1e0d167"
+max_lines = 994
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-003"
@@ -127,7 +127,7 @@ kind = "structural"
 justification = "RenderingManager is the renderer composition root and scene-facing facade: subsystem construction, ordered frame advancement, scene mutation, settings propagation, and renderer queries all coordinate the same owned object graph. Atmosphere diagnostic policy and applied capture state now belong to a separate controller."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:328d7eec26e52530a56fdf48c8071ef7013a1da25a5e03d7a1ff54bf2609a788"
+fingerprint = "sha256:15df26361fb69c8dcb6871c6be3b125479746ba684355f57639bd2936c468cf0"
 max_lines = 2040
 
 [[waivers]]
@@ -166,8 +166,8 @@ kind = "structural"
 justification = "Water owns one surface-rendering lifecycle comprising geometry, reflection resources, material state, ripple emission, and cell transitions. These behaviors share the same water plane, cameras, masks, and settings invalidation, so splitting them would distribute one render invariant across coupled owners."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:f2de6e76d148bc9dedaaf468e6eeff366aa42d5ac8d17a197a8d92e7df8414f7"
-max_lines = 801
+fingerprint = "sha256:004d2d12c74e4dcadfa3c16c9d019772627ae9454aff8c56a1333c5857271be7"
+max_lines = 811
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-011"

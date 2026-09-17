@@ -73,6 +73,7 @@ uniform vec2 screenRes;
 #include "shadows_fragment.glsl"
 #include "fog.glsl"
 #include "lib/water/optical_field.glsl"
+#include "lib/water/local_lighting.glsl"
 
 /// Return whether one normalized depth value represents untouched framebuffer clear depth.
 bool isClearOpaqueDepth(float depth)
@@ -233,10 +234,7 @@ void main(void)
     // no alpha here, so make sure raindrop ripple specularity gets properly subdued
     rainSpecular *= waterTransparency;
 
-    vec3 pointSpecular = doSpecularLighting(gl_FragCoord.xy, (gl_ModelViewMatrix * vec4(position.xyz, 1.0)).xyz, normalize(gl_NormalMatrix * specNormal));
-    pointSpecular *= SPEC_BRIGHTNESS;
-
-    gl_FragData[0].rgb += (specular * sunSpec.rgb + rainSpecular + pointSpecular) * fogScale;
+    gl_FragData[0].rgb += (specular * sunSpec.rgb + rainSpecular) * fogScale;
 
     if (waterAppearance == 1)
     {
@@ -459,6 +457,10 @@ void main(void)
             = sunColorAdjusted * pow(refractedSun, 6.0) * clamp(exp(-distanceToEye / 4096.0), 0.0, 1.0);
         gl_FragData[0].rgb = underwaterResult + underwaterSpecular;
     }
+
+    vec3 pointSpecular = waterLocalLightSurfaceRadiance(
+        gl_FragCoord.xy, passViewPos, normalize(gl_NormalMatrix * specNormal));
+    gl_FragData[0].rgb += pointSpecular * SPEC_BRIGHTNESS * fogScale;
 
 #if @wobblyShores
     if (waterAppearance == 0)

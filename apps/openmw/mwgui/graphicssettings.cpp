@@ -39,8 +39,9 @@ MWGui::GraphicsSettings::GraphicsSettings(Layout& layout, std::function<void()> 
     , mWaterAppearance(layout.getWidget("WaterAppearance")->castType<MyGUI::ComboBox>())
     , mGeometricWaveHeight(layout.getWidget("GeometricWaveHeight")->castType<MyGUI::ScrollBar>())
     , mWaterCaustics(layout.getWidget("WaterCausticsButton")->castType<MyGUI::Button>())
-    , mWaterReflectedCaustics(layout.getWidget("WaterReflectedCausticsButton")->castType<MyGUI::Button>())
     , mWaterCausticsStrength(layout.getWidget("WaterCausticsStrength")->castType<MyGUI::ScrollBar>())
+    , mInteriorWaterLights(layout.getWidget("InteriorWaterLights")->castType<MyGUI::ScrollBar>())
+    , mExteriorWaterLights(layout.getWidget("ExteriorWaterLights")->castType<MyGUI::ScrollBar>())
     , mEnhancedWaterColor(layout.getWidget("EnhancedWaterColor")->castType<MyGUI::ComboBox>())
     , mEnhancedWaterButtons{ layout.getWidget("EnhancedWaterFoamButton")->castType<MyGUI::Button>(),
         layout.getWidget("EnhancedWaterDistantWavesButton")->castType<MyGUI::Button>(),
@@ -77,8 +78,6 @@ MWGui::GraphicsSettings::GraphicsSettings(Layout& layout, std::function<void()> 
     mEnhancedWaterColor->eventComboChangePosition
         += MyGUI::newDelegate(this, &GraphicsSettings::onEnhancedWaterColorChanged);
     mWaterCaustics->eventMouseButtonClick += MyGUI::newDelegate(this, &GraphicsSettings::onWaterCausticsChanged);
-    mWaterReflectedCaustics->eventMouseButtonClick
-        += MyGUI::newDelegate(this, &GraphicsSettings::onWaterCausticsChanged);
 
     for (const std::string_view name :
         { "ActorShadowsButton", "PlayerShadowsButton", "TerrainShadowsButton", "ObjectShadowsButton" })
@@ -164,18 +163,24 @@ void MWGui::GraphicsSettings::setGeometricWaveHeight(float height)
 }
 
 void MWGui::GraphicsSettings::setWaterValues(
-    float height, bool caustics, bool reflectedCaustics, float causticsStrength)
+    float height, bool caustics, float causticsStrength, int interiorLocalLights, int exteriorLocalLights)
 {
     if (!std::isfinite(causticsStrength) || causticsStrength < 0.f || causticsStrength > 2.f)
         throw std::invalid_argument("diagnostic caustics strength must be between 0 and 2");
+    if (interiorLocalLights < 0 || interiorLocalLights > 4 || exteriorLocalLights < 0 || exteriorLocalLights > 4)
+        throw std::invalid_argument("diagnostic local water-light budgets must be between 0 and 4");
     setGeometricWaveHeight(height);
     Settings::openmwseWater().mCaustics.set(caustics);
-    Settings::openmwseWater().mReflectedCaustics.set(reflectedCaustics);
     mWaterCaustics->setCaptionWithReplacing(caustics ? "#{Interface:On}" : "#{Interface:Off}");
-    mWaterReflectedCaustics->setCaptionWithReplacing(reflectedCaustics ? "#{Interface:On}" : "#{Interface:Off}");
     const std::size_t strengthPosition = static_cast<std::size_t>(std::round(causticsStrength * 100.f));
     mWaterCausticsStrength->setScrollPosition(strengthPosition);
     mWaterCausticsStrength->eventScrollChangePosition(mWaterCausticsStrength, strengthPosition);
+    mInteriorWaterLights->setScrollPosition(static_cast<std::size_t>(interiorLocalLights));
+    mInteriorWaterLights->eventScrollChangePosition(
+        mInteriorWaterLights, static_cast<std::size_t>(interiorLocalLights));
+    mExteriorWaterLights->setScrollPosition(static_cast<std::size_t>(exteriorLocalLights));
+    mExteriorWaterLights->eventScrollChangePosition(
+        mExteriorWaterLights, static_cast<std::size_t>(exteriorLocalLights));
     refreshWaterControls();
 }
 
@@ -343,8 +348,9 @@ void MWGui::GraphicsSettings::refreshWaterControls()
     mWaterAppearance->setEnabled(shader);
     mGeometricWaveHeight->setEnabled(shader);
     mWaterCaustics->setEnabled(shader);
-    mWaterReflectedCaustics->setEnabled(shader);
-    mWaterCausticsStrength->setEnabled(shader && (water.mCaustics || water.mReflectedCaustics));
+    mWaterCausticsStrength->setEnabled(shader && water.mCaustics);
+    mInteriorWaterLights->setEnabled(shader);
+    mExteriorWaterLights->setEnabled(shader);
     const bool enhanced = shader && water.appearance() == Settings::WaterAppearance::Enhanced;
     mEnhancedWaterColor->setEnabled(enhanced);
     for (MyGUI::Button* button : mEnhancedWaterButtons)

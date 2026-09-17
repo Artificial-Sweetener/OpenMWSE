@@ -11,8 +11,9 @@ namespace Diagnostics
     {
         float mGeometricWaveHeight = 0.f;
         bool mCaustics = false;
-        bool mReflectedCaustics = false;
         float mCausticsStrength = 1.f;
+        int mInteriorLocalLights = 2;
+        int mExteriorLocalLights = 0;
 
         /// Compare the complete requested water-control state.
         bool operator==(const WaterSettings&) const = default;

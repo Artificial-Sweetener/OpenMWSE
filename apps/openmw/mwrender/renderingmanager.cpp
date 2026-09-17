@@ -1097,9 +1097,9 @@ namespace MWRender
         mStateUpdater->setUnderwaterFogColor(fogUnderwaterColor);
         const WaterOpticsParameters& waterOptics = mWater->getSurfaceParameters().mOptics;
         mStateUpdater->setWaterOptics(static_cast<int>(waterOptics.mAppearance), waterOptics.mEnhancedDistantWaves,
-            Settings::water().mShader && waterOptics.mCaustics,
-            Settings::water().mShader && waterOptics.mReflectedCaustics, waterOptics.mCausticsStrength,
-            mWater->getSurfaceParameters().mGeometricWaveHeight, mWater->getRainIntensity());
+            Settings::water().mShader && waterOptics.mCaustics, waterOptics.mCausticsStrength,
+            mWater->getSurfaceParameters().mGeometricWaveHeight, mWater->getRainIntensity(), !mSky->isEnabled(),
+            Settings::openmwseWater().mInteriorLocalLights, Settings::openmwseWater().mExteriorLocalLights);
 
         const AtmosphereState& atmosphere = mSky->getAtmosphereState();
         const CloudAdvectionState& cloudAdvection = mCloudAdvection.getState();

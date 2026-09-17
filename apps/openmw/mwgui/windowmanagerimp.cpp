@@ -2406,9 +2406,10 @@ namespace MWGui
         mSettingsWindow->setGeometricWaveHeight(height);
     }
 
-    void WindowManager::setVideoWaterValues(float height, bool caustics, bool reflectedCaustics, float causticsStrength)
+    void WindowManager::setVideoWaterValues(
+        float height, bool caustics, float causticsStrength, int interiorLocalLights, int exteriorLocalLights)
     {
-        mSettingsWindow->setWaterValues(height, caustics, reflectedCaustics, causticsStrength);
+        mSettingsWindow->setWaterValues(height, caustics, causticsStrength, interiorLocalLights, exteriorLocalLights);
     }
 
     void WindowManager::showVideoSettings(std::string_view page)

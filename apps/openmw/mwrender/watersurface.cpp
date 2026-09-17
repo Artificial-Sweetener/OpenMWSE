@@ -15,7 +15,6 @@ namespace MWRender
                 .mEnhancedDistantWaves = settings.mEnhancedDistantWaves,
                 .mEnhancedSewerRipples = settings.mEnhancedSewerRipples,
                 .mCaustics = settings.mCaustics,
-                .mReflectedCaustics = settings.mReflectedCaustics,
                 .mCausticsStrength = settings.mCausticsStrength,
             },
             .mGeometricWaveHeight = settings.mGeometricWaveHeight,

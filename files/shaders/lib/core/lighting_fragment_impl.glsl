@@ -17,6 +17,60 @@ uniform float near;
 uniform vec2 screenRes;
 uniform vec3 gridSize;
 
+/// Expose the existing per-receiver light list to water optics without transferring ownership.
+ivec2 waterCanonicalLightRange(vec2 screenCoord, vec3 viewPos)
+{
+#if @lightingMethodClustered
+    LightGrid grid = clusterLights(getClusterTileIndex(screenRes, gridSize, near, screenCoord, viewPos.z));
+    return ivec2(int(grid.offset), int(grid.count));
+#else
+    return ivec2(0, PointLightCount);
+#endif
+}
+
+/// Resolve a light-list entry through the active canonical lighting backend.
+int waterCanonicalLightIndex(int offset, int ordinal)
+{
+#if @lightingMethodClustered
+    return int(lightIndexList[offset + ordinal]);
+#else
+    return ordinal;
+#endif
+}
+
+/// Return canonical point-light geometry in the view space consumed by material shaders.
+vec4 waterCanonicalLightPositionRadius(int index)
+{
+#if @lightingMethodClustered
+    PointLight light = pointLight[index];
+#else
+    PointLight light = loadPointLight(index);
+#endif
+    return vec4(light.position.xyz, light.radius);
+}
+
+/// Return canonical point-light color without imposing a separate water-light palette.
+vec3 waterCanonicalLightColor(int index)
+{
+#if @lightingMethodClustered
+    PointLight light = pointLight[index];
+#else
+    PointLight light = loadPointLight(index);
+#endif
+    return max(light.diffuse.rgb, light.specular.rgb);
+}
+
+/// Reuse the active lighting backend's attenuation policy for water illumination and focusing.
+float waterCanonicalLightAttenuation(int index, float distanceToLight)
+{
+#if @lightingMethodClustered
+    PointLight light = pointLight[index];
+#else
+    PointLight light = loadPointLight(index);
+#endif
+    return calcAttenuation(light, distanceToLight);
+}
+
 #if @clusteredClassic
 #if @gpuInstanced
 flat in uint gpuLightCluster;

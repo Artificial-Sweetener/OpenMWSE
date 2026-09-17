@@ -4,22 +4,22 @@ schema_version = 1
 id = "OMWSE-INVENTORY-RENDERER"
 area = "renderer"
 owner = "OpenMWSE rendering"
-fingerprint = "sha256:9b67f4ee22a9178aa85a92390ab7400a123d755db3b47bad03587c1249412505"
-file_count = 517
-assessed_on = 2026-09-16
+fingerprint = "sha256:418673d907f68dc81d724d79b0fce5f376a5bf5296f15e9d4aab9fcfbbfb0931"
+file_count = 518
+assessed_on = 2026-09-17
 
 [[inventories]]
 id = "OMWSE-INVENTORY-GRAPHICS-SETTINGS-UI"
 area = "graphics-settings-ui"
 owner = "OpenMWSE graphics settings UI"
-fingerprint = "sha256:73279b696a97db14d1dcafc20322fbf41ee68839fefa074f2c604a920a277ef6"
+fingerprint = "sha256:5a1a39ecc14362b89234d37a669db20941db330efdc0cd5c717a3ec0a3a55355"
 file_count = 18
-assessed_on = 2026-09-16
+assessed_on = 2026-09-17
 
 [[inventories]]
 id = "OMWSE-INVENTORY-DIAGNOSTICS"
 area = "diagnostics"
 owner = "OpenMWSE diagnostic bridge"
-fingerprint = "sha256:75f136621c2a73ae40253fc6fab4c832486e7044a41ab0ea19e638eaa282557a"
+fingerprint = "sha256:89e6ca5035eaeb6655c2460a77de60d31b70584935c1e3b3419687c8e372c50e"
 file_count = 67
-assessed_on = 2026-09-16
+assessed_on = 2026-09-17

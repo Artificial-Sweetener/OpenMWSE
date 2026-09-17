@@ -14,7 +14,6 @@ namespace MWRender
         bool mEnhancedDistantWaves = true;
         bool mEnhancedSewerRipples = false;
         bool mCaustics = false;
-        bool mReflectedCaustics = false;
         float mCausticsStrength = 1.f;
     };
 
@@ -27,8 +26,8 @@ namespace MWRender
         /// Return whether this surface class needs displacement geometry and obstruction resources.
         bool useGeometricWaves() const { return mGeometricWaveHeight > 0.f; }
 
-        /// Return whether this surface needs cached near-surface coverage for waves or reflected light.
-        bool useSurfaceCoverage() const { return useGeometricWaves() || mOptics.mReflectedCaustics; }
+        /// Return whether this surface needs cached near-surface coverage for waves or transmitted caustic paths.
+        bool useSurfaceCoverage() const { return useGeometricWaves() || mOptics.mCaustics; }
     };
 
     /// Snapshot the user settings that govern the default world-water surface.

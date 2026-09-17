@@ -19,7 +19,7 @@ namespace Resource
 
 namespace MWRender
 {
-    /// Cache top-down near-surface coverage used to suppress covered-water surface effects.
+    /// Cache the lowest top-down blocker used to suppress covered-water surface effects.
     class WaterWaveOcclusion
     {
     public:
@@ -37,6 +37,9 @@ namespace MWRender
 
         /// Limit blockers to the conservative vertical band that can interact with the waves.
         void setMaximumClearance(float height);
+
+        /// Limit blockers to the vertical band that can occlude water-caustic light paths.
+        void setCausticMaximumClearance(float height);
 
         /// Retire the bounded refresh scheduled for the current obstruction field.
         void update(float dt);
@@ -65,9 +68,11 @@ namespace MWRender
         osg::ref_ptr<osg::Texture2D> mDepthTexture;
         osg::ref_ptr<osg::Uniform> mWaterLevelUniform;
         osg::ref_ptr<osg::Uniform> mMaximumClearanceUniform;
+        osg::ref_ptr<osg::Uniform> mCausticMaximumClearanceUniform;
         osg::Vec2f mCenter;
         float mWaterHeight = 0.f;
         float mMaximumClearance = 32.f;
+        float mCausticMaximumClearance = 32.f;
         bool mEnabled = false;
         int mRefreshFrames = 0;
     };

@@ -2142,25 +2142,41 @@ void main()
         EXPECT_NE(objects->getShaderSource().find("atmosphereScatter"), std::string::npos);
         EXPECT_NE(groundcover->getShaderSource().find("atmosphereScatter"), std::string::npos);
         EXPECT_NE(terrain->getShaderSource().find("applyWaterCaustics"), std::string::npos);
-        EXPECT_NE(
-            objects->getShaderSource().find("sampleWaterCausticOpticalNormal(surfacePosition"), std::string::npos);
-        EXPECT_NE(objects->getShaderSource().find("sampleWaterGeometricHeight(surfacePosition"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("waterMgeXeCausticSample"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("surfacePosition / 1104.0"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("0.4 * osg_SimulationTime"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find(".b;"), std::string::npos);
         EXPECT_EQ(objects->getShaderSource().find("sampleMathematicalCausticNormal"), std::string::npos);
-        EXPECT_NE(objects->getShaderSource().find("if (waveHeight <= 0.0)"), std::string::npos);
-        EXPECT_NE(objects->getShaderSource().find("receiverDepth * (raySlopeX - raySlope)"), std::string::npos);
-        EXPECT_NE(objects->getShaderSource().find("max(24.0 + 0.02 * receiverDepth, 2.0 * pixelFootprint)"),
-            std::string::npos);
-        EXPECT_NE(objects->getShaderSource().find("focusedIrradiance - 1.0"), std::string::npos);
-        EXPECT_NE(objects->getShaderSource().find("uniform bool waterReflectedCaustics"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("125.0 * projectedFootprint"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("exp(-receiverDepth / 400.0)"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("receiverDepth / 30.0"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("fog.underwaterEnd"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("caustic - 0.3"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("2.5 * waterCausticsStrength"), std::string::npos);
+        EXPECT_EQ(objects->getShaderSource().find("waterCausticFocus("), std::string::npos);
+        EXPECT_EQ(objects->getShaderSource().find("waterRefractedRaySlope"), std::string::npos);
+        EXPECT_EQ(objects->getShaderSource().find("uniform bool waterReflectedCaustics"), std::string::npos);
         EXPECT_NE(objects->getShaderSource().find("uniform float waterSurfaceCoverageResolution"), std::string::npos);
-        EXPECT_NE(objects->getShaderSource().find("applyWaterReflectedCaustics"), std::string::npos);
-        EXPECT_NE(objects->getShaderSource().find("focusedIrradiance - 1.0"), std::string::npos);
-        EXPECT_NE(objects->getShaderSource().find("reflect(-lightDirection"), std::string::npos);
-        EXPECT_NE(objects->getShaderSource().find("receiverFacing"), std::string::npos);
-        EXPECT_NE(objects->getShaderSource().find("1.0 - clamp(shadowVisibility"), std::string::npos);
-        EXPECT_NE(objects->getShaderSource().find("sampleWaterEnclosedCoverage(surfacePosition)"), std::string::npos);
+        EXPECT_EQ(objects->getShaderSource().find("applyWaterReflectedCaustics"), std::string::npos);
+        EXPECT_EQ(objects->getShaderSource().find("focusedIrradiance - 1.0"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("sampleWaterCausticPathExposure(surfacePosition"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("waterCausticBlockerHeight"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("0.75 * path.xy"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("1.0 - 128.0 / max(horizontalDistance, 128.0)"), std::string::npos);
+        EXPECT_EQ(objects->getShaderSource().find("waterCausticReceiverGeometryNormal"), std::string::npos);
+        EXPECT_EQ(objects->getShaderSource().find("waterCausticRayHit"), std::string::npos);
         EXPECT_NE(objects->getShaderSource().find("2.0 - automaticLod"), std::string::npos);
-        EXPECT_NE(objects->getShaderSource().find("receiverFacing * exposedSurface"), std::string::npos);
+        EXPECT_NE(
+            objects->getShaderSource().find("lightDirection.xy * receiverDepth / lightDirection.z"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("uniform int waterInteriorLocalLights"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("uniform int waterExteriorLocalLights"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("waterLocalLightVisibility"), std::string::npos);
+        EXPECT_NE(objects->getShaderSource().find("applyWaterPointTransmittedCaustic"), std::string::npos);
+        EXPECT_EQ(objects->getShaderSource().find("applyWaterPointReflectedCaustic"), std::string::npos);
+        EXPECT_NE(
+            objects->getShaderSource().find("receiverDepth <= 0.0 || receiverDepth >= 2600.0"), std::string::npos);
+        EXPECT_NE(
+            objects->getShaderSource().find("if (!waterInterior && lightDirection.z > 0.001)"), std::string::npos);
         EXPECT_NE(groundcover->getShaderSource().find("shadowVisibility"), std::string::npos);
         EXPECT_NE(sky->getShaderSource().find("if (isReflection)"), std::string::npos);
         EXPECT_NE(sky->getShaderSource().find("position.z = 2.0 * waterHeight - position.z"), std::string::npos);
@@ -2169,6 +2185,8 @@ void main()
         EXPECT_NE(water->getShaderSource().find("mix(max(reflection, vec3(0.0)), vec3(1.0), 0.05)"), std::string::npos);
         EXPECT_NE(water->getShaderSource().find("vec3 waterInScatteringColor()"), std::string::npos);
         EXPECT_NE(water->getShaderSource().find("vec3 waterColor = waterInScatteringColor()"), std::string::npos);
+        EXPECT_NE(water->getShaderSource().find("waterLocalLightSurfaceRadiance"), std::string::npos);
+        EXPECT_NE(water->getShaderSource().find("if (budget > 3)"), std::string::npos);
         EXPECT_EQ(water->getShaderSource().find("WATER_COLOR * length(sun.ambient.xyz)"), std::string::npos);
         EXPECT_NE(objects->getShaderSource().find("vec3 waterInScatteringColor()"), std::string::npos);
         EXPECT_NE(objects->getShaderSource().find("colorOffset += waterInScatteringColor()"), std::string::npos);

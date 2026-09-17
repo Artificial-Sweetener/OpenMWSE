@@ -382,7 +382,8 @@ namespace MWGui
         void setVideoGeometricWaveHeight(float height);
 
         /// Exercise live water displacement and caustic controls for isolated diagnostics.
-        void setVideoWaterValues(float height, bool caustics, bool reflectedCaustics, float causticsStrength);
+        void setVideoWaterValues(
+            float height, bool caustics, float causticsStrength, int interiorLocalLights, int exteriorLocalLights);
 
         /// Display a named video settings page through the ordinary settings window lifecycle.
         void showVideoSettings(std::string_view page);

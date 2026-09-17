@@ -157,8 +157,9 @@ namespace SceneUtil
         void setWaterEnabled(bool enabled);
 
         /// Publish the active water optical and geometric fields to nearby material shaders.
-        void setWaterOptics(int appearance, bool distantWaves, bool caustics, bool reflectedCaustics,
-            float causticsStrength, float geometricWaveHeight, float rainIntensity);
+        void setWaterOptics(int appearance, bool distantWaves, bool caustics, float causticsStrength,
+            float geometricWaveHeight, float rainIntensity, bool interior, int interiorLocalLights,
+            int exteriorLocalLights);
 
         /// Select the inert or capture-only compatibility-shader diagnostic output.
         void setAtmosphereDiagnosticMode(int mode);
@@ -220,10 +221,12 @@ namespace SceneUtil
         int mWaterOpticsAppearance = 0;
         bool mWaterOpticsDistantWaves = true;
         bool mWaterCaustics = false;
-        bool mWaterReflectedCaustics = false;
         float mWaterCausticsStrength = 1.f;
         float mWaterGeometricWaveHeight = 0.f;
         float mWaterRainIntensity = 0.f;
+        bool mWaterInterior = false;
+        int mWaterInteriorLocalLights = 2;
+        int mWaterExteriorLocalLights = 0;
         int mAtmosphereDiagnosticMode = 0;
     };
 }

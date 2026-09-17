@@ -448,6 +448,9 @@ namespace MWRender
             mWaveOcclusion->setWaterHeight(mTop);
             mWaveOcclusion->setMaximumClearance(
                 SceneUtil::waterWaveInteractionHeight(mSurfaceParameters.mGeometricWaveHeight));
+            mWaveOcclusion->setCausticMaximumClearance(mSurfaceParameters.mOptics.mCaustics
+                    ? SceneUtil::waterCausticInteractionHeight
+                    : SceneUtil::waterWaveInteractionHeight(mSurfaceParameters.mGeometricWaveHeight));
             mWaveOcclusion->setEnabled(true);
         }
         else if (mWaveOcclusion)
@@ -764,6 +767,8 @@ namespace MWRender
                 new osg::Uniform("waterSurfaceCoverageInverseSize", mWaveOcclusion->inverseWorldSize()));
             sceneState->addUniform(
                 new osg::Uniform("waterSurfaceCoverageResolution", mWaveOcclusion->textureResolution()));
+            sceneState->addUniform(
+                new osg::Uniform("waterCausticMaximumClearance", SceneUtil::waterCausticInteractionHeight));
         }
 
         mRainSettingsUpdater = new RainSettingsUpdater();
@@ -781,8 +786,13 @@ namespace MWRender
         mSurfaceParameters = defaultWaterSurfaceParameters();
         updateWaterGeometry();
         if (mWaveOcclusion)
+        {
             mWaveOcclusion->setMaximumClearance(
                 SceneUtil::waterWaveInteractionHeight(mSurfaceParameters.mGeometricWaveHeight));
+            mWaveOcclusion->setCausticMaximumClearance(mSurfaceParameters.mOptics.mCaustics
+                    ? SceneUtil::waterCausticInteractionHeight
+                    : SceneUtil::waterWaveInteractionHeight(mSurfaceParameters.mGeometricWaveHeight));
+        }
         const bool waterSettingsChanged = settings.empty()
             || std::any_of(
                 settings.begin(), settings.end(), [](const auto& setting) { return setting.first == "Water"; });

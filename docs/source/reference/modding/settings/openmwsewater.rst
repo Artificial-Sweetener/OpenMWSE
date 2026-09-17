@@ -4,8 +4,8 @@ OpenMWSE Water Settings
 The ``OpenMWSE Water`` category owns authored water appearances and geometric-wave controls that upstream OpenMW does not
 interpret. Existing ``Water`` settings remain authoritative for enabling shader water, reflection, refraction, and render-target
 quality. Appearance and enhanced-water choices apply immediately and remain saved while their prerequisite is disabled.
-Optical controls are shared with nearby material receivers independently from geometric displacement, so flat water can
-still focus and reflect light and future water-surface providers can supply their own optical and displacement policies.
+The animated MGE XE water volume is shared with submerged material receivers independently from geometric displacement, so
+flat water retains caustics and future water-surface providers can retain the same receiver-side projection contract.
 
 .. omw-setting::
    :title: appearance
@@ -27,8 +27,8 @@ still focus and reflect light and future water-surface providers can supply thei
 
    Sets geometric wave height in Morrowind world units for the default world water surface. The numeric scale matches MGE XE:
    a value such as ``30`` supplies the same ``30`` world-unit height directly to the translated MGE XE wave
-   equation. Zero retains OpenMW's flat, optimized water geometry path. When reflected caustics are also disabled, it does not
-   allocate or render surface-coverage resources. Positive values constrain crests beneath nearby landscape and static geometry. Water becomes geometrically flat
+   equation. Zero retains OpenMW's flat, optimized water geometry path. When caustics are also disabled, it does not allocate
+   or render surface-coverage resources. Positive values constrain crests beneath nearby landscape and static geometry. Water becomes geometrically flat
    when its local 512-world-unit neighborhood is fully covered, keeping dense surface mats flat without suppressing waves beside
    shores, hulls, and partially covering structures. Near-coplanar coverings within four world units of the water surface are
    treated as surface mats for both wave obstruction and transparent draw ordering. A translucent mat texture must still be
@@ -41,25 +41,13 @@ still focus and reflect light and future water-surface providers can supply thei
    :default: false
    :location: :bdg-info:`In Game > Options > Video > Water`
 
-   Enables sunlight focusing on submerged terrain, statics, foliage, and other compatibility-shader receivers. Each appearance
-   derives its caustics from its own animated optical normals and, when enabled, the shared geometric-wave slope rather than a
-   projected caustic texture. A depth- and pixel-footprint-aware ray differential produces stable bright focuses and darker
-   troughs without screen-space sparkle. Receiver shadow visibility suppresses the effect beneath roofs and other sunlight
-   blockers. It works when geometric wave height is zero and performs no wave-field evaluation while disabled.
-
-.. omw-setting::
-   :title: reflected caustics
-   :type: boolean
-   :range: true, false
-   :default: false
-   :location: :bdg-info:`In Game > Options > Video > Water`
-
-   Enables directional light reflected by the active optical water field on nearby above-water walls, ceilings, terrain, and
-   objects. The receiver-facing response and bounded ray differential derive the moving focus pattern from the selected water
-   appearance rather than a projected texture. Directional cell lighting also supports interior water scenes. The contribution
-   is strongest on shaded receivers and attenuates with height and distance from the water. It works when geometric wave height
-   is zero. Fully covered surface mats suppress the reflected contribution, while exposed water beside river banks, walls, cave
-   geometry, shores, and partially covering structures retains it. The disabled path performs no wave-field evaluation.
+   Enables MGE XE's animated caustic treatment on submerged terrain, statics, foliage, and other compatibility-shader
+   receivers. The translated shader projects each receiver to the water plane along the light direction, samples the blue
+   channel of the original 256 by 256 by 32 water volume at MGE XE's 1104-world-unit scale and 0.4 time rate, and applies its
+   original depth, screen-footprint, fog, and ``caustic - 0.3`` contrast envelope. OpenMWSE additionally suppresses the effect
+   through covered water paths and scene shadows. Bounded local lights reuse the same animated field and projection style in
+   interiors and, when configured, exteriors. Caustics work when geometric wave height is zero and perform no receiver work
+   while disabled.
 
 .. omw-setting::
    :title: caustics strength
@@ -68,7 +56,29 @@ still focus and reflect light and future water-surface providers can supply thei
    :default: 1.0
    :location: :bdg-info:`In Game > Options > Video > Water`
 
-   Scales both submerged and reflected caustic response without changing the selected appearance or geometric wave height.
+   Scales submerged caustic response without changing the selected appearance or geometric wave height. ``1.0`` corresponds
+   to MGE XE's default caustics intensity of ``50``; ``2.0`` corresponds to ``100``.
+
+.. omw-setting::
+   :title: interior local lights
+   :type: integer
+   :range: 0 to 4
+   :default: 2
+   :location: :bdg-info:`In Game > Options > Video > Water`
+
+   Bounds the strongest nearby local lights used for water-surface highlights and transmitted caustics in
+   true interiors. Selection reuses the renderer's canonical light lists and rejects lights whose influence does not reach the
+   water. Zero disables local-light water work without changing sunlight or saved caustic choices.
+
+.. omw-setting::
+   :title: exterior local lights
+   :type: integer
+   :range: 0 to 4
+   :default: 0
+   :location: :bdg-info:`In Game > Options > Video > Water`
+
+   Bounds local-light water illumination and caustics in exteriors and quasi-exteriors. The directional sun is evaluated
+   independently and does not consume this budget. Zero retains the lowest-cost exterior path.
 
 .. omw-setting::
    :title: enhanced color

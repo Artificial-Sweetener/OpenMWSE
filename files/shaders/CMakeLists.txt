@@ -35,6 +35,7 @@ set(SHADER_FILES
     lib/atmosphere/units.glsl
     lib/water/fresnel.glsl
     lib/water/caustics.glsl
+    lib/water/local_lighting.glsl
     lib/water/optical_field.glsl
     lib/water/surface_coverage.glsl
     lib/water/rain_ripples.glsl

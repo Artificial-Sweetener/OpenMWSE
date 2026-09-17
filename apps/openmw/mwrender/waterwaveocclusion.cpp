@@ -2,6 +2,7 @@
 
 #include <osg/Camera>
 #include <osg/ColorMask>
+#include <osg/Depth>
 #include <osg/Group>
 #include <osg/Image>
 #include <osg/Uniform>
@@ -24,7 +25,7 @@ namespace
     constexpr float sWorldSize = 32768.f;
     constexpr float sHeightRange = 65536.f;
 
-    /// Override authored materials so nearby terrain and static triangles contribute coverage regardless of alpha.
+    /// Override authored materials so nearby terrain and placed-object triangles contribute coverage regardless of alpha.
     class WaterWaveCoverageState final : public SceneUtil::StateSetUpdater
     {
     public:
@@ -36,12 +37,14 @@ namespace
         }
 
     private:
-        /// Install coverage-only override state for all traversed terrain and static geometry.
+        /// Install coverage-only override state for all traversed terrain and placed-object geometry.
         void setDefaults(osg::StateSet* stateSet) override
         {
             stateSet->setAttributeAndModes(mProgram, osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE);
             stateSet->setAttributeAndModes(
                 new osg::ColorMask(true, true, true, true), osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE);
+            stateSet->setAttributeAndModes(new SceneUtil::AutoDepth(osg::Depth::GREATER),
+                osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE);
             stateSet->setRenderBinDetails(
                 osg::StateSet::OPAQUE_BIN, "RenderBin", osg::StateSet::OVERRIDE_PROTECTED_RENDERBIN_DETAILS);
         }
@@ -90,7 +93,7 @@ namespace MWRender
         mCamera->setRenderTargetImplementation(osg::Camera::FRAME_BUFFER_OBJECT);
         mCamera->setReferenceFrame(osg::Camera::ABSOLUTE_RF_INHERIT_VIEWPOINT);
         mCamera->setNodeMask(0u);
-        mCamera->setCullMask(Mask_Scene | Mask_Terrain | Mask_Static);
+        mCamera->setCullMask(Mask_Scene | Mask_Terrain | Mask_Object | Mask_Static);
         mCamera->setViewport(0, 0, sTextureSize, sTextureSize);
         mCamera->setClearMask(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         mCamera->setClearColor(osg::Vec4(0.f, 0.f, 0.f, 0.f));
@@ -99,12 +102,15 @@ namespace MWRender
         mCamera->addChild(sceneRoot);
         mWaterLevelUniform = new osg::Uniform("waterWaveLevel", mWaterHeight);
         mMaximumClearanceUniform = new osg::Uniform("waterWaveMaximumClearance", mMaximumClearance);
+        mCausticMaximumClearanceUniform
+            = new osg::Uniform("waterCausticMaximumClearance", mCausticMaximumClearance);
         mCamera->getOrCreateStateSet()->addUniform(mWaterLevelUniform);
         mCamera->getOrCreateStateSet()->addUniform(mMaximumClearanceUniform);
+        mCamera->getOrCreateStateSet()->addUniform(mCausticMaximumClearanceUniform);
         mCamera->getOrCreateStateSet()->addUniform(
             new osg::Uniform("waterWaveSurfaceTolerance", SceneUtil::waterSurfaceInteractionTolerance));
         mCamera->setCullCallback(new WaterWaveCoverageState(*resourceSystem));
-        SceneUtil::setCameraClearDepth(mCamera);
+        mCamera->setClearDepth(SceneUtil::AutoDepth::isReversed() ? 1.0 : 0.0);
         updateCamera();
     }
 
@@ -153,6 +159,15 @@ namespace MWRender
             return;
         mMaximumClearance = height;
         mMaximumClearanceUniform->set(height);
+        requestRefresh();
+    }
+
+    void WaterWaveOcclusion::setCausticMaximumClearance(float height)
+    {
+        if (height == mCausticMaximumClearance)
+            return;
+        mCausticMaximumClearance = height;
+        mCausticMaximumClearanceUniform->set(height);
         requestRefresh();
     }
 

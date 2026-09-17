@@ -1070,9 +1070,10 @@ namespace MWGui
         mGraphicsSettings->setGeometricWaveHeight(height);
     }
 
-    void SettingsWindow::setWaterValues(float height, bool caustics, bool reflectedCaustics, float causticsStrength)
+    void SettingsWindow::setWaterValues(
+        float height, bool caustics, float causticsStrength, int interiorLocalLights, int exteriorLocalLights)
     {
-        mGraphicsSettings->setWaterValues(height, caustics, reflectedCaustics, causticsStrength);
+        mGraphicsSettings->setWaterValues(height, caustics, causticsStrength, interiorLocalLights, exteriorLocalLights);
     }
 
     void SettingsWindow::onOpen()

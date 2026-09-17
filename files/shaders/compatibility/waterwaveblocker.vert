@@ -4,13 +4,15 @@
 #include "lib/core/instance.h.glsl"
 
 uniform float waterWaveLevel;
+uniform mat4 osg_ViewMatrixInverse;
 varying float waterRelativeHeight;
 
-/// Project authored terrain and static triangles into the water obstruction field.
+/// Project authored geometry and classify its height in the shared world-space water frame.
 void main()
 {
-    vec4 worldVertex = instanceWorld() * gl_Vertex;
-    worldVertex.xyz += instanceWorldOffset(vec3(0.0));
+    vec4 vertex = instanceWorld() * gl_Vertex;
+    vec4 viewVertex = modelToView(vertex);
+    vec4 worldVertex = osg_ViewMatrixInverse * viewVertex;
     waterRelativeHeight = worldVertex.z - waterWaveLevel;
-    gl_Position = modelToClip(worldVertex);
+    gl_Position = viewToClip(viewVertex);
 }

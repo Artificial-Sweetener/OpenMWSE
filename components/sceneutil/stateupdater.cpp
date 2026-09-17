@@ -255,10 +255,12 @@ namespace SceneUtil
         stateset->addUniform(new osg::Uniform("waterOpticsAppearance", mWaterOpticsAppearance));
         stateset->addUniform(new osg::Uniform("waterOpticsDistantWaves", mWaterOpticsDistantWaves));
         stateset->addUniform(new osg::Uniform("waterCaustics", mWaterCaustics));
-        stateset->addUniform(new osg::Uniform("waterReflectedCaustics", mWaterReflectedCaustics));
         stateset->addUniform(new osg::Uniform("waterCausticsStrength", mWaterCausticsStrength));
         stateset->addUniform(new osg::Uniform("waterGeometricWaveHeight", mWaterGeometricWaveHeight));
         stateset->addUniform(new osg::Uniform("waterRainIntensity", mWaterRainIntensity));
+        stateset->addUniform(new osg::Uniform("waterInterior", mWaterInterior));
+        stateset->addUniform(new osg::Uniform("waterInteriorLocalLights", mWaterInteriorLocalLights));
+        stateset->addUniform(new osg::Uniform("waterExteriorLocalLights", mWaterExteriorLocalLights));
         stateset->addUniform(new osg::Uniform("openmwseAtmosphereDiagnosticMode", mAtmosphereDiagnosticMode));
     }
 
@@ -323,10 +325,12 @@ namespace SceneUtil
         stateset->getUniform("waterOpticsAppearance")->set(mWaterOpticsAppearance);
         stateset->getUniform("waterOpticsDistantWaves")->set(mWaterOpticsDistantWaves);
         stateset->getUniform("waterCaustics")->set(mWaterCaustics);
-        stateset->getUniform("waterReflectedCaustics")->set(mWaterReflectedCaustics);
         stateset->getUniform("waterCausticsStrength")->set(mWaterCausticsStrength);
         stateset->getUniform("waterGeometricWaveHeight")->set(mWaterGeometricWaveHeight);
         stateset->getUniform("waterRainIntensity")->set(mWaterRainIntensity);
+        stateset->getUniform("waterInterior")->set(mWaterInterior);
+        stateset->getUniform("waterInteriorLocalLights")->set(mWaterInteriorLocalLights);
+        stateset->getUniform("waterExteriorLocalLights")->set(mWaterExteriorLocalLights);
         stateset->getUniform("openmwseAtmosphereDiagnosticMode")->set(mAtmosphereDiagnosticMode);
     }
 
@@ -418,16 +422,18 @@ namespace SceneUtil
         mWaterEnabled = enabled;
     }
 
-    void StateUpdater::setWaterOptics(int appearance, bool distantWaves, bool caustics, bool reflectedCaustics,
-        float causticsStrength, float geometricWaveHeight, float rainIntensity)
+    void StateUpdater::setWaterOptics(int appearance, bool distantWaves, bool caustics, float causticsStrength,
+        float geometricWaveHeight, float rainIntensity, bool interior, int interiorLocalLights, int exteriorLocalLights)
     {
         mWaterOpticsAppearance = appearance;
         mWaterOpticsDistantWaves = distantWaves;
         mWaterCaustics = caustics;
-        mWaterReflectedCaustics = reflectedCaustics;
         mWaterCausticsStrength = causticsStrength;
         mWaterGeometricWaveHeight = geometricWaveHeight;
         mWaterRainIntensity = rainIntensity;
+        mWaterInterior = interior;
+        mWaterInteriorLocalLights = interiorLocalLights;
+        mWaterExteriorLocalLights = exteriorLocalLights;
     }
 
     void StateUpdater::setAtmosphereDiagnosticMode(int mode)

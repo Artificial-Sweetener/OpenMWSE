@@ -38,15 +38,20 @@ namespace Settings
         SettingValue<float> mGeometricWaveHeight{ mIndex, "OpenMWSE Water", "geometric wave height",
             makeClampSanitizerFloat(0.f, 250.f) };
 
-        /// Enable receiver-side sunlight focusing below the active water surface.
+        /// Enable MGE XE-style animated light modulation below the active water surface.
         SettingValue<bool> mCaustics{ mIndex, "OpenMWSE Water", "caustics" };
 
-        /// Enable reflected wave-field light focusing on nearby above-water receivers.
-        SettingValue<bool> mReflectedCaustics{ mIndex, "OpenMWSE Water", "reflected caustics" };
-
-        /// Scale the bounded physical wave-field caustic response.
+        /// Scale the MGE XE caustic response relative to its default intensity of 50.
         SettingValue<float> mCausticsStrength{ mIndex, "OpenMWSE Water", "caustics strength",
             makeClampSanitizerFloat(0.f, 2.f) };
+
+        /// Bound the local lights allowed to illuminate and focus through water in true interiors.
+        SettingValue<int> mInteriorLocalLights{ mIndex, "OpenMWSE Water", "interior local lights",
+            makeClampSanitizerInt(0, 4) };
+
+        /// Bound the local lights allowed to illuminate and focus through water in exterior spaces.
+        SettingValue<int> mExteriorLocalLights{ mIndex, "OpenMWSE Water", "exterior local lights",
+            makeClampSanitizerInt(0, 4) };
 
         /// Select the paired surface and underwater color treatment for enhanced water.
         SettingValue<std::string> mEnhancedColor{ mIndex, "OpenMWSE Water", "enhanced color",

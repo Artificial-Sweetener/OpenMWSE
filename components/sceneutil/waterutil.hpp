@@ -14,6 +14,9 @@ namespace SceneUtil
     /// Allow authored surface coverings to sit slightly above or below the nominal water plane.
     inline constexpr float waterSurfaceInteractionTolerance = 4.f;
 
+    /// Bound cached obstruction heights used by reflected and transmitted water-light paths.
+    inline constexpr float waterCausticInteractionHeight = 1800.f;
+
     /// Return the conservative above-plane clearance that can interact with the configured geometric waves.
     float waterWaveInteractionHeight(float waveHeight);
 

@@ -785,19 +785,6 @@
                                 <Widget type="AutoSizedTextBox" skin="SandText"><Property key="Caption" value="#{OMWEngine:WaterCaustics}"/></Widget>
                             </Widget>
 
-                            <Widget type="HBox" align="Stretch">
-                                <UserString key="HStretch" value="true"/><UserString key="VStretch" value="false"/>
-                                <Widget type="AutoSizedButton" skin="MW_Button" name="WaterReflectedCausticsButton">
-                                    <UserString key="SettingCategory" value="OpenMWSE Water"/><UserString key="SettingName" value="reflected caustics"/><UserString key="SettingType" value="CheckButton"/>
-                                </Widget>
-                                <Widget type="AutoSizedTextBox" skin="SandText">
-                                    <Property key="Caption" value="#{OMWEngine:WaterReflectedCaustics}"/>
-                                    <UserString key="ToolTipType" value="Layout"/>
-                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
-                                    <UserString key="Caption_Text" value="#{OMWEngine:WaterReflectedCausticsTooltip}"/>
-                                </Widget>
-                            </Widget>
-
                             <Widget type="AutoSizedTextBox" skin="NormalText" name="WaterCausticsStrengthLabel">
                                 <UserString key="HStretch" value="true"/>
                             </Widget>
@@ -816,6 +803,46 @@
                                 <UserString key="ToolTipType" value="Layout"/>
                                 <UserString key="ToolTipLayout" value="TextToolTip"/>
                                 <UserString key="Caption_Text" value="#{OMWEngine:WaterCausticsTooltip}"/>
+                            </Widget>
+
+                            <Widget type="AutoSizedTextBox" skin="NormalText" name="InteriorWaterLightsLabel">
+                                <UserString key="HStretch" value="true"/>
+                            </Widget>
+                            <Widget type="ScrollBar" skin="MW_HScroll" position="0 0 620 18" align="Left Top" name="InteriorWaterLights">
+                                <Property key="Range" value="5"/>
+                                <Property key="Page" value="1"/>
+                                <Property key="WheelPage" value="1"/>
+                                <UserString key="SettingCategory" value="OpenMWSE Water"/>
+                                <UserString key="SettingName" value="interior local lights"/>
+                                <UserString key="SettingType" value="Slider"/>
+                                <UserString key="SettingValueType" value="Integer"/>
+                                <UserString key="SettingMin" value="0"/>
+                                <UserString key="SettingMax" value="4"/>
+                                <UserString key="SettingLabelWidget" value="InteriorWaterLightsLabel"/>
+                                <UserString key="SettingLabelCaption" value="InteriorWaterLightsValue"/>
+                                <UserString key="ToolTipType" value="Layout"/>
+                                <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                <UserString key="Caption_Text" value="#{OMWEngine:InteriorWaterLightsTooltip}"/>
+                            </Widget>
+
+                            <Widget type="AutoSizedTextBox" skin="NormalText" name="ExteriorWaterLightsLabel">
+                                <UserString key="HStretch" value="true"/>
+                            </Widget>
+                            <Widget type="ScrollBar" skin="MW_HScroll" position="0 0 620 18" align="Left Top" name="ExteriorWaterLights">
+                                <Property key="Range" value="5"/>
+                                <Property key="Page" value="1"/>
+                                <Property key="WheelPage" value="1"/>
+                                <UserString key="SettingCategory" value="OpenMWSE Water"/>
+                                <UserString key="SettingName" value="exterior local lights"/>
+                                <UserString key="SettingType" value="Slider"/>
+                                <UserString key="SettingValueType" value="Integer"/>
+                                <UserString key="SettingMin" value="0"/>
+                                <UserString key="SettingMax" value="4"/>
+                                <UserString key="SettingLabelWidget" value="ExteriorWaterLightsLabel"/>
+                                <UserString key="SettingLabelCaption" value="ExteriorWaterLightsValue"/>
+                                <UserString key="ToolTipType" value="Layout"/>
+                                <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                <UserString key="Caption_Text" value="#{OMWEngine:ExteriorWaterLightsTooltip}"/>
                             </Widget>
 
                             <Widget type="HBox" align="Stretch">

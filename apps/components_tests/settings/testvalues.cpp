@@ -169,8 +169,9 @@ namespace Settings
             EXPECT_EQ(openmwseWater().appearance(), WaterAppearance::OpenMW);
             EXPECT_FLOAT_EQ(openmwseWater().mGeometricWaveHeight.get(), 0.f);
             EXPECT_FALSE(openmwseWater().mCaustics);
-            EXPECT_FALSE(openmwseWater().mReflectedCaustics);
             EXPECT_FLOAT_EQ(openmwseWater().mCausticsStrength.get(), 1.f);
+            EXPECT_EQ(openmwseWater().mInteriorLocalLights.get(), 2);
+            EXPECT_EQ(openmwseWater().mExteriorLocalLights.get(), 0);
             EXPECT_EQ(openmwseWater().enhancedColor(), EnhancedWaterColor::GreenBlue);
             EXPECT_TRUE(openmwseWater().mEnhancedFoam);
             EXPECT_TRUE(openmwseWater().mEnhancedDistantWaves);
@@ -182,7 +183,9 @@ namespace Settings
         {
             std::ofstream(mDirectory / "settings.cfg")
                 << "[OpenMWSE Water]\nappearance = future-water\nenhanced color = ultraviolet\n"
-                   "geometric wave height = 999\ncaustics strength = 99\n";
+                   "geometric wave height = 999\ncaustics strength = 99\n"
+                   "interior local lights = 99\nexterior local lights = -1\n"
+                   "reflected caustics = true\n";
             ASSERT_NO_FATAL_FAILURE(load());
             EXPECT_EQ(openmwseWater().mAppearance.get(), "openmw");
             EXPECT_EQ(openmwseWater().appearance(), WaterAppearance::OpenMW);
@@ -190,6 +193,8 @@ namespace Settings
             EXPECT_EQ(openmwseWater().enhancedColor(), EnhancedWaterColor::GreenBlue);
             EXPECT_FLOAT_EQ(openmwseWater().mGeometricWaveHeight.get(), 250.f);
             EXPECT_FLOAT_EQ(openmwseWater().mCausticsStrength.get(), 2.f);
+            EXPECT_EQ(openmwseWater().mInteriorLocalLights.get(), 4);
+            EXPECT_EQ(openmwseWater().mExteriorLocalLights.get(), 0);
         }
 
         struct SettingsValuesTest : Test
@@ -261,8 +266,9 @@ namespace Settings
             EXPECT_FLOAT_EQ(values.mOpenMWSEWater.mGeometricWaveHeight.get(), 0.f);
             EXPECT_FALSE(values.mOpenMWSEWater.useGeometricWaves());
             EXPECT_FALSE(values.mOpenMWSEWater.mCaustics);
-            EXPECT_FALSE(values.mOpenMWSEWater.mReflectedCaustics);
             EXPECT_FLOAT_EQ(values.mOpenMWSEWater.mCausticsStrength.get(), 1.f);
+            EXPECT_EQ(values.mOpenMWSEWater.mInteriorLocalLights.get(), 2);
+            EXPECT_EQ(values.mOpenMWSEWater.mExteriorLocalLights.get(), 0);
             EXPECT_EQ(values.mOpenMWSEWater.enhancedColor(), EnhancedWaterColor::GreenBlue);
 
             values.mOpenMWSEWater.mAppearance.set("enhanced");

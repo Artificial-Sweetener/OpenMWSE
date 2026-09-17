@@ -128,10 +128,11 @@ void OMW::Engine::processDiagnosticGraphicsCommand(
             const auto settings = Diagnostics::deserializeWaterSettings(diagnosticText(command.mPayload));
             mWindowManager->showVideoSettings("water");
             mWindowManager->setVideoWaterValues(settings.mGeometricWaveHeight, settings.mCaustics,
-                settings.mReflectedCaustics, settings.mCausticsStrength);
-            response.mPayload = diagnosticBytes(Diagnostics::serializeWaterSettings(
-                { Settings::openmwseWater().mGeometricWaveHeight, Settings::openmwseWater().mCaustics,
-                    Settings::openmwseWater().mReflectedCaustics, Settings::openmwseWater().mCausticsStrength }));
+                settings.mCausticsStrength, settings.mInteriorLocalLights, settings.mExteriorLocalLights);
+            response.mPayload
+                = diagnosticBytes(Diagnostics::serializeWaterSettings({ Settings::openmwseWater().mGeometricWaveHeight,
+                    Settings::openmwseWater().mCaustics, Settings::openmwseWater().mCausticsStrength,
+                    Settings::openmwseWater().mInteriorLocalLights, Settings::openmwseWater().mExteriorLocalLights }));
             break;
         }
 

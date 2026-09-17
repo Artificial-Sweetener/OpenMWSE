@@ -26,4 +26,19 @@ void doLighting(vec2 screenCoord, vec3 viewPos, vec3 viewNormal, float shininess
 
 vec3 doSpecularLighting(vec2 screenCoord, vec3 viewPos, vec3 viewNormal);
 
+/// Return the canonical local-light list offset and count for one shaded receiver.
+ivec2 waterCanonicalLightRange(vec2 screenCoord, vec3 viewPos);
+
+/// Resolve one canonical local-light index from a previously queried receiver range.
+int waterCanonicalLightIndex(int offset, int ordinal);
+
+/// Return one canonical local light's view-space position and influence radius.
+vec4 waterCanonicalLightPositionRadius(int index);
+
+/// Return one canonical local light's strongest authored diffuse or specular color.
+vec3 waterCanonicalLightColor(int index);
+
+/// Evaluate one canonical local light's configured distance attenuation.
+float waterCanonicalLightAttenuation(int index, float distanceToLight);
+
 #endif  // OPENMW_FRAGMENT_H_GLSL
