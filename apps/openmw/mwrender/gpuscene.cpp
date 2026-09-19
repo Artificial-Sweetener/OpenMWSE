@@ -214,8 +214,9 @@ namespace MWRender
             if ((lightList = dynamic_cast<SceneUtil::LightListCallback*>(callback)) != nullptr)
                 break;
         CaptureVisitor visitor(mNode, actor != nullptr);
-        // The sky keeps per-view transforms and state.
-        visitor.setTraversalMask(~(Mask_Sky | (actor != nullptr ? Mask_UpdateVisitor : 0u)));
+        // Sky and renderer-owned water keep per-view transforms, ordered transparency, and dedicated render passes.
+        // Capturing either into generic GPU-scene batches would bypass those authoritative owners after upload.
+        visitor.setTraversalMask(~(Mask_Sky | Mask_Water | (actor != nullptr ? Mask_UpdateVisitor : 0u)));
         node.accept(visitor);
         std::lock_guard<std::mutex> lock(mMutex);
         if (mCaptureCallbacks.size() >= mCaptureWatermark)

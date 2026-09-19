@@ -1,13 +1,18 @@
 #ifndef OPENMW_MWRENDER_WATER_H
 #define OPENMW_MWRENDER_WATER_H
 
+#include <map>
 #include <memory>
+#include <optional>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <osg/Vec3d>
 #include <osg/Vec3f>
 #include <osg/ref_ptr>
 
+#include <components/sceneutil/waterutil.hpp>
 #include <components/settings/settings.hpp>
 #include <components/vfs/pathutil.hpp>
 
@@ -21,6 +26,14 @@ namespace osg
     class Geometry;
     class Node;
     class Callback;
+    class Texture2D;
+    class Texture3D;
+    class Texture;
+}
+
+namespace SceneUtil
+{
+    struct SurfaceEffectProfile;
 }
 
 namespace osgUtil
@@ -53,6 +66,8 @@ namespace MWRender
     class RainSettingsUpdater;
     class Ripples;
     class WaterWaveOcclusion;
+    class MeshWaterObject;
+    class MeshWaterPlane;
 
     /// Water rendering
     class Water
@@ -64,6 +79,7 @@ namespace MWRender
         osg::ref_ptr<osg::PositionAttitudeTransform> mWaterNode;
         osg::ref_ptr<osg::Geometry> mWaterGeom;
         osg::ref_ptr<osg::Geometry> mSimpleWaterGeom;
+        osg::ref_ptr<osg::Group> mMeshWaterSeamRoot;
         Resource::ResourceSystem* mResourceSystem;
         GpuScene* mGpuScene;
         osg::ref_ptr<osgUtil::IncrementalCompileOperation> mIncrementalCompileOperation;
@@ -71,6 +87,7 @@ namespace MWRender
         std::unique_ptr<RippleSimulation> mSimulation;
         std::unique_ptr<WaterWaveOcclusion> mWaveOcclusion;
         WaterSurfaceParameters mSurfaceParameters;
+        float mMeshGeometricWaveHeight = 0.f;
 
         osg::ref_ptr<Reflection> mReflection;
         osg::ref_ptr<Ripples> mRipples;
@@ -83,6 +100,13 @@ namespace MWRender
 
         osg::Callback* mCullCallback;
         osg::ref_ptr<osg::Callback> mShaderWaterStateSetUpdater;
+        osg::ref_ptr<osg::Texture2D> mWaterNormalMap;
+        osg::ref_ptr<osg::Texture3D> mMgeWaterVolume;
+        std::unordered_map<const osg::Node*, std::unique_ptr<MeshWaterObject>> mMeshWaterObjects;
+        std::unordered_set<const osg::Node*> mKnownSurfaceEffectObjects;
+        std::map<SceneUtil::WaterSurfacePlaneKey, std::unique_ptr<MeshWaterPlane>> mMeshWaterPlanes;
+        std::unordered_map<unsigned int, std::vector<osg::ref_ptr<Reflection>>> mMeshWaterReflectionPool;
+        unsigned int mMeshWaterSeamRebuildDelay = 0;
         bool mUsesDisplacedGeometry = false;
         bool mUsesSurfaceCoverage = false;
         float mSewerRippleTimer = 0.f;
@@ -94,6 +118,32 @@ namespace MWRender
         void createSimpleWaterStateSet(osg::Node* node, float alpha);
 
         void createShaderWaterStateSet(osg::Node* node);
+
+        /// Replace one classified authored material scope with renderer-owned mesh water state.
+        void createMeshWaterStateSet(osg::Group& wrapper, Reflection& reflection,
+            const SceneUtil::SurfaceEffectProfile& profile, const osg::Vec3f& nodePosition);
+
+        /// Reallocate one mesh-water reflection at a stable quality-bucket transition.
+        void resizeMeshWaterPlane(MeshWaterPlane& plane, unsigned int resolution);
+
+        /// Acquire and configure a bounded reusable reflection target for one exact plane.
+        osg::ref_ptr<Reflection> acquireMeshWaterReflection(
+            unsigned int resolution, const SceneUtil::WaterSurfacePlane& plane);
+
+        /// Return an unused reflection target to the one-per-resolution reuse pool.
+        void releaseMeshWaterReflection(unsigned int resolution, osg::ref_ptr<Reflection> reflection);
+
+        /// Restore authored geometry for one object without forgetting its live classification source.
+        void removeSurfaceEffectBindings(const osg::Node* objectRoot);
+
+        /// Recompile mesh-water shader state after a global water permutation changes.
+        void rebuildMeshWaterStateSets();
+
+        /// Rebuild bounded bridge geometry between compatible loaded planar-water boundaries.
+        void rebuildMeshWaterSeams();
+
+        /// Return the exact classified mesh-water plane touching a world-space emitter.
+        std::optional<float> meshWaterSurfaceHeight(const osg::Vec3f& position, float maximumVerticalDistance) const;
 
         void updateWaterMaterial();
 
@@ -144,11 +194,26 @@ namespace MWRender
 
         osg::Drawable* getDrawable() const;
 
+        /// Return whether a transparent drawable is any renderer-owned water surface.
+        bool isWaterDrawable(const osg::Drawable* drawable) const;
+
+        /// Register one classified surface-effect object using its current complete world transform.
+        void registerSurfaceEffects(osg::Node* objectRoot);
+
+        /// Register or reclassify a marked surface-effect object after its world transform changes.
+        void synchronizeSurfaceEffects(osg::Node* objectRoot);
+
+        /// Release per-object water bindings and unused planar-reflection cameras.
+        void unregisterSurfaceEffects(const osg::Node* objectRoot);
+
         /// Return the independently owned policy for the default world-water surface.
         const WaterSurfaceParameters& getSurfaceParameters() const { return mSurfaceParameters; }
 
         /// Return the current rain contribution used by the active optical field.
         float getRainIntensity() const { return mRainIntensity; }
+
+        /// Return the current shared ripple target, if shader water owns one.
+        osg::Texture* getRippleTexture() const;
 
         /// Apply changed global settings to the default surface while preserving unrelated render targets.
         void processChangedSettings(const Settings::CategorySettingVector& settings);

@@ -38,6 +38,7 @@ MWGui::GraphicsSettings::GraphicsSettings(Layout& layout, std::function<void()> 
     , mAtmosphereAppearance(layout.getWidget("AtmosphereAppearance")->castType<MyGUI::ComboBox>())
     , mWaterAppearance(layout.getWidget("WaterAppearance")->castType<MyGUI::ComboBox>())
     , mGeometricWaveHeight(layout.getWidget("GeometricWaveHeight")->castType<MyGUI::ScrollBar>())
+    , mMeshGeometricWaveHeight(layout.getWidget("MeshGeometricWaveHeight")->castType<MyGUI::ScrollBar>())
     , mWaterCaustics(layout.getWidget("WaterCausticsButton")->castType<MyGUI::Button>())
     , mWaterCausticsStrength(layout.getWidget("WaterCausticsStrength")->castType<MyGUI::ScrollBar>())
     , mInteriorWaterLights(layout.getWidget("InteriorWaterLights")->castType<MyGUI::ScrollBar>())
@@ -347,6 +348,7 @@ void MWGui::GraphicsSettings::refreshWaterControls()
     const bool shader = Settings::water().mShader;
     mWaterAppearance->setEnabled(shader);
     mGeometricWaveHeight->setEnabled(shader);
+    mMeshGeometricWaveHeight->setEnabled(shader);
     mWaterCaustics->setEnabled(shader);
     mWaterCausticsStrength->setEnabled(shader && water.mCaustics);
     mInteriorWaterLights->setEnabled(shader);

@@ -1,6 +1,9 @@
 #ifndef OPENMW_MWRENDER_RIPPLESIMULATION_H
 #define OPENMW_MWRENDER_RIPPLESIMULATION_H
 
+#include <functional>
+#include <optional>
+
 #include <osg/ref_ptr>
 
 #include "../mwworld/ptr.hpp"
@@ -43,6 +46,8 @@ namespace MWRender
     class RippleSimulation
     {
     public:
+        using SurfaceHeightQuery = std::function<std::optional<float>(const osg::Vec3f&, float)>;
+
         RippleSimulation(osg::Group* parent, Resource::ResourceSystem* resourceSystem);
         ~RippleSimulation();
 
@@ -65,6 +70,9 @@ namespace MWRender
 
         void setRipples(Ripples* ripples) { mRipples = ripples; }
 
+        /// Supply the exact authored water surface beneath an emitter, when one exists.
+        void setSurfaceHeightQuery(SurfaceHeightQuery query) { mSurfaceHeightQuery = std::move(query); }
+
     private:
         osg::ref_ptr<osg::Group> mParent;
 
@@ -74,6 +82,7 @@ namespace MWRender
         std::vector<Emitter> mEmitters;
 
         Ripples* mRipples = nullptr;
+        SurfaceHeightQuery mSurfaceHeightQuery;
 
         int mMaxNumberRipples;
     };

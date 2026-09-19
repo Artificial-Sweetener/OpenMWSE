@@ -993,6 +993,7 @@ namespace Shader
         // TODO: Warn if trampling on the ~8 units needed by model textures
         if (count < 1)
             throw std::invalid_argument("Global texture unit reservation count must be positive");
+        std::lock_guard lock(mMutex);
         const int slotIndex = static_cast<int>(slot);
         auto unit = mReservedTextureUnitsBySlot[slotIndex];
         if (unit.index >= 0 && unit.count >= count)

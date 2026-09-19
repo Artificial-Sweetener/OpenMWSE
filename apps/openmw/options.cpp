@@ -104,6 +104,8 @@ namespace OpenMW
             "run as an isolated hidden diagnostic child");
         addOption("diagnostic-headed", bpo::value<bool>()->implicit_value(true)->default_value(false),
             "give an isolated diagnostic child a visible production window");
+        addOption("diagnostic-stats-overlay", bpo::value<bool>()->implicit_value(true)->default_value(false),
+            "show the production frame-rate overlay in an isolated diagnostic child");
         addOption("diagnostic-fixed-dt", bpo::value<double>()->default_value(1.0 / 60.0),
             "set the deterministic simulation interval used by a diagnostic child");
 

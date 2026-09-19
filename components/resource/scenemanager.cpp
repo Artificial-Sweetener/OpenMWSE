@@ -63,6 +63,7 @@
 #include "imagemanager.hpp"
 #include "niffilemanager.hpp"
 #include "objectcache.hpp"
+#include "surfaceeffectregistry.hpp"
 
 namespace
 {
@@ -497,6 +498,7 @@ namespace Resource
         Resource::NifFileManager* nifFileManager, Resource::BgsmFileManager* bgsmFileManager, double expiryDelay)
         : ResourceManager(vfs, expiryDelay)
         , mShaderManager(new Shader::ShaderManager)
+        , mSurfaceEffectRegistry(std::make_unique<SurfaceEffectRegistry>(*vfs))
         , mSharedStateManager(new SharedStateManager)
         , mImageManager(imageManager)
         , mNifFileManager(nifFileManager)
@@ -1012,7 +1014,13 @@ namespace Resource
             loaded->accept(setFilterSettingsControllerVisitor);
 
             osg::ref_ptr<Shader::ShaderVisitor> shaderVisitor(createShaderVisitor());
+            shaderVisitor->setSurfaceEffectContext(mSurfaceEffectRegistry.get(), path);
             loaded->accept(*shaderVisitor);
+            if (shaderVisitor->hasSurfaceEffects())
+            {
+                loaded->setUserValue("surfaceEffects", true);
+                loaded->setDataVariance(osg::Object::DYNAMIC);
+            }
 
             if (canOptimize(path.value()))
             {

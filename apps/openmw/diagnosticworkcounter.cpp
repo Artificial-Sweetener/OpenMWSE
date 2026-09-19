@@ -30,6 +30,12 @@ namespace OMW
                 "resolve.transferred-bytes", MWRender::resolveByteCounter, DiagnosticStatisticOwner::PrimaryCamera },
             DiagnosticWorkCounter{ "transparent.classified-leaves", MWRender::transparentClassifiedLeafCounter,
                 DiagnosticStatisticOwner::PrimaryCamera },
+            DiagnosticWorkCounter{
+                "water.mesh-leaves", MWRender::meshWaterLeafCounter, DiagnosticStatisticOwner::PrimaryCamera },
+            DiagnosticWorkCounter{
+                "water.mesh-primitives", MWRender::meshWaterPrimitiveCounter, DiagnosticStatisticOwner::PrimaryCamera },
+            DiagnosticWorkCounter{
+                "water.mesh-draws", MWRender::meshWaterDrawCounter, DiagnosticStatisticOwner::PrimaryCamera },
             DiagnosticWorkCounter{ "transparent.replayed-drawables", MWRender::transparentReplayCounter,
                 DiagnosticStatisticOwner::PrimaryCamera },
             DiagnosticWorkCounter{ "first-person.replayed-drawables", MWRender::firstPersonReplayCounter,

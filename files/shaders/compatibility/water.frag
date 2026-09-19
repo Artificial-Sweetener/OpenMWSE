@@ -46,6 +46,13 @@ uniform bool enhancedWaterDistantWaves;
 uniform float windSpeed;
 uniform float geometricWaveHeight;
 uniform vec3 nodePosition;
+#if @waterMeshSurface
+uniform mat4 osg_ViewMatrix;
+uniform vec3 waterPlaneNormal;
+uniform vec3 waterPlaneTangent;
+uniform vec3 waterPlaneBitangent;
+uniform float waterPlaneDistance;
+#endif
 
 varying vec3 worldPos;
 
@@ -112,6 +119,15 @@ vec2 mgeProjectedOffset(vec2 d3dOffset, float clipW)
     return vec2(d3dOffset.x, -d3dOffset.y) / max(clipW, 1.0);
 }
 
+/// Apply a soft shoulder to imported Phong sun glitter so grazing alignments do not clip into solid white plates.
+float boundedWaterSpecular(float cosine, float sharpExponent, float broadExponent, float broadWeight)
+{
+    float clampedCosine = clamp(cosine, 0.0, 1.0);
+    float lobe = pow(clampedCosine, sharpExponent)
+        + broadWeight * pow(clampedCosine, broadExponent);
+    return lobe / (1.0 + 1.5 * lobe);
+}
+
 void main(void)
 {
     float shadow = unshadowedLightRatio(linearDepth);
@@ -125,8 +141,13 @@ void main(void)
 
     vec4 rainRipple;
 
+    vec2 waterSamplePosition = worldPos.xy;
+#if @waterMeshSurface
+    waterSamplePosition = vec2(dot(worldPos, waterPlaneTangent), dot(worldPos, waterPlaneBitangent));
+#endif
+
     if (rainIntensity > 0.01)
-        rainRipple = rainCombined(position.xy/1000.0, waterTimer) * clamp(rainIntensity, 0.0, 1.0);
+        rainRipple = rainCombined(waterSamplePosition / 1000.0, waterTimer) * clamp(rainIntensity, 0.0, 1.0);
     else
         rainRipple = vec4(0.0);
 
@@ -136,20 +157,58 @@ void main(void)
     float blendClose = smoothstep(0.001, 0.02, distToCenter);
     float blendFar = 1.0 - smoothstep(0.3, 0.4, distToCenter);
     float distortionLevel = 2.0;
-    rippleAdd += distortionLevel * vec3(texture2D(rippleMap, rippleMapUV).ba * blendFar * blendClose, 0.0);
+    vec2 rippleSlope = texture2D(rippleMap, rippleMapUV).ba * blendFar * blendClose;
+#if @waterMeshSurface
+    vec3 worldRippleSlope = vec3(rippleSlope, 0.0);
+    rippleAdd += distortionLevel
+        * vec3(dot(worldRippleSlope, waterPlaneTangent), dot(worldRippleSlope, waterPlaneBitangent), 0.0);
+#else
+    rippleAdd += distortionLevel * vec3(rippleSlope, 0.0);
+#endif
 
-    WaterOpticalSample opticalField = sampleWaterOpticalField(worldPos.xy, waterTimer, waterAppearance, playerPos.xy,
+    vec2 opticalPlayerPosition = playerPos.xy;
+#if @waterMeshSurface
+    opticalPlayerPosition = vec2(dot(playerPos, waterPlaneTangent), dot(playerPos, waterPlaneBitangent));
+#endif
+    WaterOpticalSample opticalField = sampleWaterOpticalField(waterSamplePosition, waterTimer, waterAppearance,
+        opticalPlayerPosition,
         enhancedWaterDistantWaves, rippleAdd, rainIntensity);
-    vec3 normal = opticalField.normal;
+    vec3 opticalNormal = opticalField.normal;
+    vec3 normal = opticalNormal;
+    vec3 surfaceUp = vec3(0.0, 0.0, 1.0);
+    vec3 surfaceTangent = vec3(1.0, 0.0, 0.0);
+    vec3 surfaceBitangent = vec3(0.0, 1.0, 0.0);
+    vec2 screenOpticalSlope = opticalNormal.xy;
+#if @waterMeshSurface
+    surfaceUp = waterPlaneNormal;
+    surfaceTangent = waterPlaneTangent;
+    surfaceBitangent = waterPlaneBitangent;
+    normal = normalize(surfaceTangent * opticalNormal.x + surfaceBitangent * opticalNormal.y
+        + surfaceUp * opticalNormal.z);
+    // MGE's offsets are screen-space but its source water is always horizontal. Project a classified surface's
+    // plane-local optical slope through the current view so inclined water retains the same visible breakup.
+    vec3 viewOpticalNormal = normalize((osg_ViewMatrix * vec4(normal, 0.0)).xyz);
+    screenOpticalSlope = viewOpticalNormal.xy;
+#endif
 
+#if @waterMeshSurface
+    vec3 sunWorldDir = normalize((osg_ViewMatrixInverse * sun.position).xyz);
+    vec3 cameraPos = osg_ViewMatrixInverse[3].xyz;
+    vec3 viewDir = normalize(worldPos - cameraPos);
+    vec3 materialPosition = worldPos;
+#else
     vec3 sunWorldDir = normalize((gl_ModelViewMatrixInverse * sun.position).xyz);
     vec3 cameraPos = (gl_ModelViewMatrixInverse * vec4(0,0,0,1)).xyz;
     vec3 viewDir = normalize(position.xyz - cameraPos.xyz);
+    vec3 materialPosition = position.xyz;
+#endif
+    vec3 surfaceViewDir = vec3(dot(viewDir, surfaceTangent), dot(viewDir, surfaceBitangent),
+        dot(viewDir, surfaceUp));
 
     float sunFade = length(sun.ambient.xyz);
 
 #if @radialFog
-    float radialDepth = distance(position.xyz, cameraPos);
+    float radialDepth = distance(materialPosition, cameraPos);
 #else
     float radialDepth = 0.0;
 #endif
@@ -159,10 +218,18 @@ void main(void)
     computeFog(passViewPos, radialDepth, linearDepth, near, far, fogScale, fogOffset);
 
     // fresnel
-    float ior = cameraPos.z >= waterHeight ? 1.333 : 1.0 / 1.333;
+    // Authored mesh water is currently a surface material rather than a gameplay water volume. A lower unrelated tier
+    // must therefore retain above-water optics when another classified plane happens to be above the camera.
+    bool cameraUnderwater = cameraPos.z < waterHeight;
+#if @waterMeshSurface
+    cameraUnderwater = false;
+#endif
+    float ior = cameraUnderwater ? 1.0 / 1.333 : 1.333;
     float fresnel = clamp(fresnel_dielectric(viewDir, normal, ior), 0.0, 1.0);
 
-    vec2 reflectionCoordsOffset = normal.xy * REFL_BUMP;
+    // Screen-space distortion is authored in the water surface's tangent frame. Using the world-space base slope here
+    // turns inclined mesh water into a nearly constant offset and visually erases its animated normal field.
+    vec2 reflectionCoordsOffset = screenOpticalSlope * REFL_BUMP;
     vec2 refractionCoordsOffset = vec2(0.0);
     float surfaceDepth = linearizeDepth(gl_FragCoord.z, near, far);
     float realWaterDepth = waterViewDepth(screenCoords, surfaceDepth);
@@ -188,6 +255,10 @@ void main(void)
     const float SPEC_MAGIC = 1.55; // from the original blender shader, changing it makes the spec vanish or become too bright
 
     vec3 specNormal = normalize(vec3(normal.x * SPEC_BUMPINESS, normal.y * SPEC_BUMPINESS, normal.z));
+#if @waterMeshSurface
+    specNormal = normalize(surfaceTangent * opticalNormal.x * SPEC_BUMPINESS
+        + surfaceBitangent * opticalNormal.y * SPEC_BUMPINESS + surfaceUp * opticalNormal.z);
+#endif
     vec3 viewReflectDir = reflect(viewDir, specNormal);
     float phongTerm = max(dot(viewReflectDir, sunWorldDir), 0.0);
     float specular = pow(atan(phongTerm * SPEC_MAGIC), SPEC_HARDNESS) * SPEC_BRIGHTNESS;
@@ -207,10 +278,10 @@ void main(void)
     rawRefraction = refraction;
 
     // brighten up the refraction underwater
-    if (cameraPos.z < waterHeight)
+    if (cameraUnderwater)
         refraction = clamp(refraction * 1.5, 0.0, 1.0);
 
-    if (cameraPos.z >= waterHeight)
+    if (!cameraUnderwater)
     {
         vec3 deepWaterColor = waterColor * fogScale + fogOffset;
         if (!hasOpaqueGeometry(refractionCoords))
@@ -221,7 +292,11 @@ void main(void)
 
 #if @sunlightScattering
     vec3 scatterNormal = opticalField.scatterNormal;
-    float sunHeight = sunWorldDir.z;
+#if @waterMeshSurface
+    scatterNormal = normalize(surfaceTangent * scatterNormal.x + surfaceBitangent * scatterNormal.y
+        + surfaceUp * scatterNormal.z);
+#endif
+    float sunHeight = dot(sunWorldDir, surfaceUp);
     vec3 scatterColour = mix(SCATTER_COLOUR * vec3(1.0, 0.4, 0.0), SCATTER_COLOUR, max(1.0 - exp(-sunHeight * SUN_EXT), 0.0));
     float scatterLambert = max(dot(sunWorldDir, scatterNormal) * 0.7 + 0.3, 0.0);
     float scatterReflectAngle = max(dot(reflect(sunWorldDir, scatterNormal), viewDir) * 2.0 - 1.2, 0.0);
@@ -238,7 +313,7 @@ void main(void)
 
     if (waterAppearance == 1)
     {
-        float distanceToEye = length(position.xyz - cameraPos);
+        float distanceToEye = length(materialPosition - cameraPos);
         float sunVisibility = clamp(sun.specular.a, 0.0, 1.0);
         float sunlightFactor = 1.0 - pow(1.0 - sunVisibility, 2.0);
         vec3 sunColorAdjusted = sun.diffuse.rgb * sunlightFactor;
@@ -246,7 +321,7 @@ void main(void)
             + (2.0 * atmosphere.skyColor.rgb + fog.color.rgb) * vec3(0.075, 0.08, 0.085);
         vec3 mgeDepthColor = depthBaseColor * fogScale + fogOffset;
         float mgeWind = (abs(windSpeed) + 1.5) / 140.0;
-        vec2 refFactor = (mgeWind * distanceToEye + 0.1) * normal.xy;
+        vec2 refFactor = (mgeWind * distanceToEye + 0.1) * screenOpticalSlope;
         vec2 firstOffset = mgeProjectedOffset(refFactor.yx, surfaceDepth);
         float viewDepth = waterViewDepth(screenCoords + firstOffset, surfaceDepth);
         vec3 mgeRefraction = mgeDepthColor;
@@ -260,9 +335,14 @@ void main(void)
             mgeRefraction = sampleOpaqueColorTex(refractionCoord).rgb;
 #endif
             viewDepth = waterViewDepth(refractionCoord, surfaceDepth);
-            vec3 cameraForward = normalize((gl_ModelViewMatrixInverse * vec4(0.0, 0.0, -1.0, 0.0)).xyz);
+            vec3 cameraForward;
+#if @waterMeshSurface
+            cameraForward = normalize((osg_ViewMatrixInverse * vec4(0.0, 0.0, -1.0, 0.0)).xyz);
+#else
+            cameraForward = normalize((gl_ModelViewMatrixInverse * vec4(0.0, 0.0, -1.0, 0.0)).xyz);
+#endif
             float waterDepth = viewDepth / max(dot(viewDir, cameraForward), 0.0001);
-            waterDepth += 300.0 * (0.95 - normal.z);
+            waterDepth += 300.0 * (0.95 - dot(normal, surfaceUp));
             float depthScale = clamp(exp(-waterDepth / 800.0), 0.0, 1.0);
             shoreFactor = pow(depthScale, 90.0);
             mgeRefraction = mix(mgeDepthColor, mgeRefraction, 0.8 * depthScale + 0.2 * shoreFactor);
@@ -271,14 +351,14 @@ void main(void)
             vec2(-2.1 * refFactor.x, abs(refFactor.y)), surfaceDepth);
         vec3 mgeReflection = sampleReflectionMap(authoredReflectionCoords + reflectionOffset).rgb;
         mgeReflection = mix(fogOffset, mgeReflection, fogScale);
-        vec3 adjustedNormal = mix(vec3(0.0, 0.0, 0.1), normal, pow(clamp(1.05 * fogScale, 0.0, 1.0), 2.0));
-        adjustedNormal = mix(adjustedNormal, vec3(0.0, 0.0, 1.0),
-            (1.0 + viewDir.z) * (1.0 - clamp(1.0 / (distanceToEye / 1000.0 + 1.0), 0.0, 1.0)));
+        vec3 adjustedNormal = mix(surfaceUp * 0.1, normal, pow(clamp(1.05 * fogScale, 0.0, 1.0), 2.0));
+        adjustedNormal = mix(adjustedNormal, surfaceUp,
+            (1.0 + surfaceViewDir.z) * (1.0 - clamp(1.0 / (distanceToEye / 1000.0 + 1.0), 0.0, 1.0)));
         float mgeFresnel = dot(-viewDir, adjustedNormal);
         mgeFresnel = 0.02 + pow(clamp(0.9988 - 0.28 * mgeFresnel, 0.0, 1.0), 16.0);
         float mgeSpecularAngle = clamp(1.0025 * dot(-viewDir, reflect(-sunWorldDir, normal)), 0.0, 1.0);
         vec3 mgeSpecular = sunColorAdjusted
-            * (pow(mgeSpecularAngle, 170.0) + 0.07 * pow(mgeSpecularAngle, 4.0));
+            * boundedWaterSpecular(mgeSpecularAngle, 170.0, 4.0, 0.07);
         vec3 mgeResult = mix(mgeRefraction, mgeReflection, mgeFresnel) + mgeSpecular * fogScale;
         gl_FragData[0].rgb = mix(mgeResult, mgeRefraction, shoreFactor * fogScale);
     }
@@ -295,9 +375,9 @@ void main(void)
         float sunVisibility = clamp(sun.specular.a, 0.0, 1.0);
         float sunlightFactor = 1.0 - pow(1.0 - sunVisibility, 2.0);
         vec3 sunColorAdjusted = sun.diffuse.rgb * sunlightFactor;
-        float distanceToEye = length(position.xyz - cameraPos);
+        float distanceToEye = length(materialPosition - cameraPos);
         float enhancedWind = (abs(windSpeed) + 1.5) / 120.0;
-        vec2 refFactor = 0.5 * (enhancedWind * distanceToEye + 0.1) * normal.xy;
+        vec2 refFactor = 0.5 * (enhancedWind * distanceToEye + 0.1) * screenOpticalSlope;
         vec2 firstOffset = mgeProjectedOffset(refFactor.yx, surfaceDepth);
         float viewDepth = waterViewDepth(screenCoords + firstOffset, surfaceDepth);
         vec2 refractionOffset = mgeProjectedOffset(
@@ -314,7 +394,7 @@ void main(void)
         float shoreFactor = 0.0;
         if (viewDepth < 10000.0)
         {
-            vec2 aberration = reflect(viewDir, normal).xy;
+            vec2 aberration = reflect(surfaceViewDir, opticalNormal).xy;
 #if @waterRefraction
             enhancedRefraction.r = sampleOpaqueColorTex(refractionCoord).r;
             enhancedRefraction.g = sampleOpaqueColorTex(
@@ -323,9 +403,14 @@ void main(void)
                 refractionCoord + mgeProjectedOffset(-0.1 * aberration, surfaceDepth)).b;
 #endif
             float distortedViewDepth = waterViewDepth(refractionCoord, surfaceDepth);
-            vec3 cameraForward = normalize((gl_ModelViewMatrixInverse * vec4(0.0, 0.0, -1.0, 0.0)).xyz);
+            vec3 cameraForward;
+#if @waterMeshSurface
+            cameraForward = normalize((osg_ViewMatrixInverse * vec4(0.0, 0.0, -1.0, 0.0)).xyz);
+#else
+            cameraForward = normalize((gl_ModelViewMatrixInverse * vec4(0.0, 0.0, -1.0, 0.0)).xyz);
+#endif
             float waterDepth = distortedViewDepth / max(dot(viewDir, cameraForward), 0.0001);
-            waterDepth += 50.0 * (0.99 - normal.z);
+            waterDepth += 50.0 * (0.99 - dot(normal, surfaceUp));
             depthScale = clamp(exp(-waterDepth / 800.0), 0.0, 1.0);
             shoreFactor = pow(depthScale, 90.0);
             enhancedRefraction = mix(
@@ -335,16 +420,16 @@ void main(void)
             vec2(-1.5 * refFactor.x, abs(refFactor.y)), surfaceDepth);
         vec3 enhancedReflection = sampleReflectionMap(authoredReflectionCoords + reflectionOffset).rgb;
         enhancedReflection = mix(fogOffset, enhancedReflection, fogScale);
-        vec3 adjustedNormal = mix(vec3(0.0, 0.0, 0.1), normal, pow(clamp(1.05 * fogScale, 0.0, 1.0), 2.0));
-        adjustedNormal = mix(adjustedNormal, vec3(0.0, 0.0, 1.0),
-            (1.0 + viewDir.z) * (1.0 - clamp(1.0 / (distanceToEye / 1300.0 + 6.0), 0.0, 1.0)));
+        vec3 adjustedNormal = mix(surfaceUp * 0.1, normal, pow(clamp(1.05 * fogScale, 0.0, 1.0), 2.0));
+        adjustedNormal = mix(adjustedNormal, surfaceUp,
+            (1.0 + surfaceViewDir.z) * (1.0 - clamp(1.0 / (distanceToEye / 1300.0 + 6.0), 0.0, 1.0)));
         float enhancedFresnel = dot(-viewDir, adjustedNormal);
         enhancedFresnel = 0.015 + pow(clamp(0.9988 - 0.28 * enhancedFresnel, 0.0, 1.0), 20.0);
         float enhancedSpecularAngle = clamp(1.0025 * dot(-viewDir, reflect(-sunWorldDir, normal)), 0.0, 1.0);
         vec3 enhancedResult = mix(enhancedRefraction, enhancedReflection, enhancedFresnel);
         vec3 enhancedSpecular = sunColorAdjusted
-            * (pow(enhancedSpecularAngle, 200.0) + 0.07 * pow(enhancedSpecularAngle, 30.0));
-        enhancedSpecular += 0.25 * pow(normal.z, 100.0) * sun.ambient.rgb / 12.0;
+            * boundedWaterSpecular(enhancedSpecularAngle, 200.0, 30.0, 0.07);
+        enhancedSpecular += 0.25 * pow(max(dot(normal, surfaceUp), 0.0), 100.0) * sun.ambient.rgb / 12.0;
         enhancedSpecular = enhancedSpecular * fogScale + fogOffset;
         enhancedResult += enhancedSpecular * fogScale;
         if (enhancedWaterFoam && viewDepth < 10000.0)
@@ -355,17 +440,21 @@ void main(void)
 #else
             float foamVisibility = 1.0;
 #endif
-            vec3 edgeNoiseColor = texture3D(mgeWaterVolume, vec3(worldPos.xy / 60.0, waterTimer * 0.2)).rgb;
+            vec3 edgeNoiseColor = texture3D(mgeWaterVolume, vec3(waterSamplePosition / 60.0, waterTimer * 0.2)).rgb;
             edgeNoiseColor = mix(vec3(-1.0), edgeNoiseColor * 1.29, fogScale * 0.9);
             float edgeNoise = dot(edgeNoiseColor, vec3(0.3, 0.3, 0.4));
             float edgeFoamFactor = pow(depthScale, 25.0);
             float edgeFoam = clamp(-5.0 * pow(edgeFoamFactor - 0.5, 2.0) + 1.0, 0.0, 1.0) * 0.5;
             edgeFoam *= edgeNoise > 1.0 - edgeFoam ? edgeNoise : edgeNoise / 3.0;
-            vec3 waveNoiseColor = texture3D(mgeWaterVolume, vec3(worldPos.xy / 45.0, waterTimer)).rgb;
+            vec3 waveNoiseColor = texture3D(mgeWaterVolume, vec3(waterSamplePosition / 45.0, waterTimer)).rgb;
             waveNoiseColor = mix(vec3(-1.0), waveNoiseColor * 1.25, fogScale * 1.1);
             float waveNoise = dot(waveNoiseColor, vec3(0.25, 0.25, 0.5));
+            float waveSurfaceOffset = worldPos.z - waterHeight;
+#if @waterMeshSurface
+            waveSurfaceOffset = dot(worldPos, waterPlaneNormal) - waterPlaneDistance;
+#endif
             float waveFoam = geometricWaveHeight > 0.0
-                ? clamp((worldPos.z + 10.0 - waterHeight + 0.1 * geometricWaveHeight)
+                ? clamp((waveSurfaceOffset + 10.0 + 0.1 * geometricWaveHeight)
                     / max(0.6 * geometricWaveHeight, 0.001), 0.0, 1.0)
                 : 0.0;
             waveFoam *= waveNoise > 1.0 - waveFoam ? waveNoise : waveNoise / 3.0;
@@ -379,16 +468,16 @@ void main(void)
                     * (randomFactor + 0.3), 0.0, 1.0) * foamVisibility);
         }
         enhancedResult = mix(enhancedResult, enhancedRefraction, shoreFactor * fogScale);
-        float distanceFade = (1.0 + viewDir.z)
+        float distanceFade = (1.0 + surfaceViewDir.z)
             * (1.0 - clamp(1.0 / max(distanceToEye / 3000.0, 0.0001), 0.0, 1.0));
         float fogFade = pow(clamp(mix(1.0, fogScale, distanceFade), 0.0, 1.0), 1.1);
         enhancedResult = mix(fogOffset, enhancedResult, fogFade);
         float waterCut = smoothstep(0.09, 0.1, distanceToEye / 1200.0);
         waterCut = (1.0 - clamp(abs(waterCut * 5.0), 0.0, 1.0))
-            * step(0.5, 1.0 - clamp(cameraPos.z - waterHeight + 1.0, 0.0, 1.0));
+            * step(0.5, cameraUnderwater ? 1.0 : 0.0);
         waterCut = 1.0 - clamp(waterCut, 0.0, 1.0);
         float waterCutDark = smoothstep(0.0889, 0.101, distanceToEye / 1200.0)
-            * step(0.5, 1.0 - clamp(cameraPos.z - waterHeight + 1.0, 0.0, 1.0));
+            * step(0.5, cameraUnderwater ? 1.0 : 0.0);
         waterCutDark = clamp(3.0 * waterCutDark * (1.0 - waterCutDark), 0.0, 1.0);
         enhancedResult = mix(enhancedRefraction, enhancedResult, waterCut);
         enhancedResult = mix(enhancedResult, enhancedResult * 0.1, waterCutDark);
@@ -396,7 +485,7 @@ void main(void)
     }
     else if (waterAppearance == 3)
     {
-        float distanceToEye = length(position.xyz - cameraPos);
+        float distanceToEye = length(materialPosition - cameraPos);
         float sunVisibility = clamp(sun.specular.a, 0.0, 1.0);
         float sunlightFactor = 1.0 - pow(1.0 - sunVisibility, 2.0);
         vec3 sunColorAdjusted = 0.4 * sun.diffuse.rgb * sunlightFactor;
@@ -404,7 +493,7 @@ void main(void)
             + (2.0 * atmosphere.skyColor.rgb + fog.color.rgb) * vec3(0.075, 0.08, 0.085);
         vec3 vanillaDepth = depthBaseColor * fogScale + fogOffset;
         float vanillaWind = (abs(windSpeed) + 1.5) / 140.0;
-        vec2 refFactor = (vanillaWind * distanceToEye + 5.0) * normal.xy;
+        vec2 refFactor = (vanillaWind * distanceToEye + 5.0) * screenOpticalSlope;
         vec2 refractionOffset = mgeProjectedOffset(0.2 * refFactor.yx, surfaceDepth);
         vec3 vanillaScene = vanillaDepth;
 #if @waterRefraction
@@ -419,18 +508,19 @@ void main(void)
         vec3 vanillaReflection = sampleReflectionMap(authoredReflectionCoords + reflectionOffset).rgb;
         vanillaReflection = mix(fogOffset, vanillaReflection, fogScale);
         float vanillaFresnel = 0.02
-            + pow(clamp(0.9988 - 0.28 * (-viewDir.z), 0.0, 1.0), 6.0);
-        float vanillaSpecularAngle = max(dot(-viewDir,
-            vec3(sunWorldDir.x, sunWorldDir.y, -sunWorldDir.z)), 0.0);
+            + pow(clamp(0.9988 - 0.28 * (-surfaceViewDir.z), 0.0, 1.0), 6.0);
+        vec3 mirroredSun = sunWorldDir - 2.0 * surfaceUp * dot(sunWorldDir, surfaceUp);
+        float vanillaSpecularAngle = max(dot(-viewDir, mirroredSun), 0.0);
         vec3 vanillaResult = mix(vanillaRefraction, vanillaReflection, vanillaFresnel);
-        vanillaResult += sunColorAdjusted * normal.z * pow(vanillaSpecularAngle, 300.0) * fogScale;
+        vanillaResult += sunColorAdjusted * max(dot(normal, surfaceUp), 0.0)
+            * boundedWaterSpecular(vanillaSpecularAngle, 300.0, 300.0, 0.0) * fogScale;
         gl_FragData[0].rgb = mix(vanillaResult, vanillaRefraction, shoreFactor * fogScale);
     }
 
-    if (waterAppearance != 0 && cameraPos.z < waterHeight)
+    if (waterAppearance != 0 && cameraUnderwater)
     {
         vec3 underwaterNormal = -normal;
-        float distanceToEye = length(position.xyz - cameraPos);
+            float distanceToEye = length(materialPosition - cameraPos);
         float windDivisor = waterAppearance == 2 ? 120.0 : 140.0;
         float distortionBase = waterAppearance == 3 ? 5.0 : 0.1;
         float underwaterWind = (abs(windSpeed) + 1.5) / windDivisor;

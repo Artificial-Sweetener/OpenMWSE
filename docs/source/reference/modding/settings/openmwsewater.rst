@@ -35,6 +35,18 @@ flat water retains caustics and future water-surface providers can retain the sa
    used by a mesh with an alpha property so its color composites over the reflective water instead of replacing it.
 
 .. omw-setting::
+   :title: mesh geometric wave height
+   :type: float32
+   :range: 0.0 to 250.0
+   :default: 0.0
+   :location: :bdg-info:`In Game > Options > Video > Water`
+
+   Sets geometric wave height independently for water supplied by classified mesh materials. The value uses the same
+   Morrowind-world-unit scale as default water. Zero retains the authored mesh's flat geometry path. Positive values apply
+   the selected water appearance's geometric displacement, while player and weather ripples remain shared with all water.
+   A surface-effect profile can override this value for a deliberately calm or unusually rough material.
+
+.. omw-setting::
    :title: caustics
    :type: boolean
    :range: true, false

@@ -1,0 +1,26 @@
+version: 1
+
+profiles:
+  community-water:
+    effect: water
+
+rules:
+  - profile: community-water
+    mesh: meshes/x/ex_vivec_p_water_01.nif
+
+  # These numbered families are community conventions for authored water planes.
+  # They are classification signals only; the source images never tint the rendered water.
+  - profile: community-water
+    textures:
+      - textures/tr/env/tr_water*.dds
+      - textures/tr/env/tr_water*.tga
+
+  - profile: community-water
+    textures:
+      - textures/oaab/water/tr_water*.dds
+      - textures/oaab/water/tr_water*.tga
+
+  - profile: community-water
+    textures:
+      - textures/water/water??.dds
+      - textures/water/water??.tga

@@ -232,6 +232,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << "native-window: " << (mDiagnosticChild && !mDiagnosticHeaded ? "absent" : "present")
                            << '\n'
                            << "input-source: " << (mDiagnosticChild ? "device-free" : "host-devices") << '\n'
+                           << "stats-overlay: " << (mDiagnosticStatsOverlay ? "active" : "inactive") << '\n'
                            << "scheduled-frames-remaining: " << mDiagnosticStepScheduler.remainingFrames() << '\n'
                            << "completed-fixed-frames: " << mDiagnosticStepScheduler.completedFrames() << '\n'
                            << "route-frames-remaining: "

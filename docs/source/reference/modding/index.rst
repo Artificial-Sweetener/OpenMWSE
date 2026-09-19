@@ -30,6 +30,7 @@ about creating new content for OpenMW, please refer to
         sound-effects
         music
         sky-system
+        surface-effects
         doors-and-teleports
         custom-shader-effects
         extended

@@ -147,7 +147,7 @@ namespace MWRender
     public:
         CharacterPreviewRTTNode(uint32_t sizeX, uint32_t sizeY)
             : RTTNode(sizeX, sizeY, Settings::video().mAntialiasing, false, 0,
-                  StereoAwareness::Unaware_MultiViewShaders, shouldAddMSAAIntermediateTarget())
+                StereoAwareness::Unaware_MultiViewShaders, shouldAddMSAAIntermediateTarget())
             , mAspectRatio(static_cast<float>(sizeX) / static_cast<float>(sizeY))
         {
             if (SceneUtil::AutoDepth::isReversed())
@@ -179,7 +179,7 @@ namespace MWRender
             camera->addChild(mGroup);
         }
 
-        void apply(osg::Camera* camera) override
+        void apply(osg::Camera* camera, osgUtil::CullVisitor* /*cv*/) override
         {
             if (mCameraStateset)
                 camera->setStateSet(mCameraStateset);
@@ -496,7 +496,7 @@ namespace MWRender
 
     RaceSelectionPreview::RaceSelectionPreview(osg::Group* parent, Resource::ResourceSystem* resourceSystem)
         : CharacterPreview(
-              parent, resourceSystem, MWMechanics::getPlayer(), 512, 512, osg::Vec3f(0, 125, 8), osg::Vec3f(0, 0, 8))
+            parent, resourceSystem, MWMechanics::getPlayer(), 512, 512, osg::Vec3f(0, 125, 8), osg::Vec3f(0, 0, 8))
         , mBase(*mCharacter.get<ESM::NPC>()->mBase)
         , mRef(ESM::makeBlankCellRef(), &mBase)
         , mPitchRadians(osg::DegreesToRadians(6.f))

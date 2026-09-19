@@ -39,4 +39,12 @@ namespace DiagnosticCtl
         else if (newGame)
             arguments.insert(arguments.end(), { "--skip-menu", "--new-game" });
     }
+
+    void addDiagnosticPresentationArguments(std::vector<std::string>& arguments, bool headed, bool statsOverlay)
+    {
+        if (headed)
+            arguments.emplace_back("--diagnostic-headed");
+        if (statsOverlay)
+            arguments.emplace_back("--diagnostic-stats-overlay");
+    }
 }

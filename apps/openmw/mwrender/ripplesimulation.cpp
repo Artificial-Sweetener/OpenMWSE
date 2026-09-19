@@ -157,8 +157,12 @@ namespace MWRender
 
             osg::Vec3f currentPos(ptr.getRefData().getPosition().asVec3());
 
+            const float actorHeight = 2.f * world->getHalfExtents(ptr, true).z();
+            const std::optional<float> authoredSurfaceHeight
+                = mSurfaceHeightQuery ? mSurfaceHeightQuery(currentPos, actorHeight) : std::nullopt;
+
             bool shouldEmit = (world->isUnderwater(ptr.getCell(), currentPos) && !world->isSubmerged(ptr))
-                || world->isWalkingOnWater(ptr);
+                || world->isWalkingOnWater(ptr) || authoredSurfaceHeight.has_value();
 
             if (!shouldEmit)
             {
@@ -168,7 +172,7 @@ namespace MWRender
             {
                 // Ripple simulation needs to continously apply impulses to keep simulation alive.
                 // Adding a timer delay will introduce many smaller ripples around actor instead of a smooth wake
-                currentPos.z() = static_cast<float>(mParticleNode->getPosition().z());
+                currentPos.z() = authoredSurfaceHeight.value_or(static_cast<float>(mParticleNode->getPosition().z()));
                 emitRipple(currentPos);
             }
             else if (emitter.mTimer <= 0.f || (currentPos - emitter.mLastEmitPosition).length() > 10)
@@ -176,7 +180,7 @@ namespace MWRender
                 emitter.mLastEmitPosition = currentPos;
                 emitter.mTimer = 1.5f;
 
-                currentPos.z() = static_cast<float>(mParticleNode->getPosition().z());
+                currentPos.z() = authoredSurfaceHeight.value_or(static_cast<float>(mParticleNode->getPosition().z()));
 
                 emitRipple(currentPos);
             }
@@ -233,33 +237,29 @@ namespace MWRender
 
     void RippleSimulation::emitRipple(const osg::Vec3f& pos)
     {
-        if (std::abs(pos.z() - mParticleNode->getPosition().z()) < 20)
+        if (mRipples)
         {
-            if (mRipples)
-            {
-                constexpr float particleRippleSizeInUnits = 12.f;
-                mRipples->emit(osg::Vec3f(pos.x(), pos.y(), 0.f), particleRippleSizeInUnits);
-            }
-            else
-            {
-                if (mMaxNumberRipples <= 0)
-                    return;
-
-                osgParticle::ParticleSystem::ScopedWriteLock lock(*mParticleSystem->getReadWriteMutex());
-                if (mParticleSystem->numParticles() - mParticleSystem->numDeadParticles() > mMaxNumberRipples)
-                {
-                    // osgParticle::ParticleSystem design requires this to be O(N)
-                    // However, the number of particles we'll have to go through is not large
-                    // If the user makes the limit absurd and manages to actually hit it this could be a problem
-                    const int oldest = findOldestParticleAlive(mParticleSystem);
-                    if (oldest != -1)
-                        mParticleSystem->reuseParticle(oldest);
-                }
-                osgParticle::Particle* p = mParticleSystem->createParticle(nullptr);
-                p->setPosition(osg::Vec3f(pos.x(), pos.y(), 0.f));
-                p->setAngle(osg::Vec3f(0, 0, Misc::Rng::rollProbability() * osg::PIf * 2 - osg::PIf));
-            }
+            constexpr float particleRippleSizeInUnits = 12.f;
+            mRipples->emit(osg::Vec3f(pos.x(), pos.y(), 0.f), particleRippleSizeInUnits);
+            return;
         }
+
+        if (std::abs(pos.z() - mParticleNode->getPosition().z()) >= 20 || mMaxNumberRipples <= 0)
+            return;
+
+        osgParticle::ParticleSystem::ScopedWriteLock lock(*mParticleSystem->getReadWriteMutex());
+        if (mParticleSystem->numParticles() - mParticleSystem->numDeadParticles() > mMaxNumberRipples)
+        {
+            // osgParticle::ParticleSystem design requires this to be O(N)
+            // However, the number of particles we'll have to go through is not large
+            // If the user makes the limit absurd and manages to actually hit it this could be a problem
+            const int oldest = findOldestParticleAlive(mParticleSystem);
+            if (oldest != -1)
+                mParticleSystem->reuseParticle(oldest);
+        }
+        osgParticle::Particle* p = mParticleSystem->createParticle(nullptr);
+        p->setPosition(osg::Vec3f(pos.x(), pos.y(), 0.f));
+        p->setAngle(osg::Vec3f(0, 0, Misc::Rng::rollProbability() * osg::PIf * 2 - osg::PIf));
     }
 
     void RippleSimulation::setWaterHeight(float height)

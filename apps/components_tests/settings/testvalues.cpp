@@ -168,6 +168,7 @@ namespace Settings
             EXPECT_EQ(water().mReflectionDetail.get(), 4);
             EXPECT_EQ(openmwseWater().appearance(), WaterAppearance::OpenMW);
             EXPECT_FLOAT_EQ(openmwseWater().mGeometricWaveHeight.get(), 0.f);
+            EXPECT_FLOAT_EQ(openmwseWater().mMeshGeometricWaveHeight.get(), 0.f);
             EXPECT_FALSE(openmwseWater().mCaustics);
             EXPECT_FLOAT_EQ(openmwseWater().mCausticsStrength.get(), 1.f);
             EXPECT_EQ(openmwseWater().mInteriorLocalLights.get(), 2);
@@ -184,6 +185,7 @@ namespace Settings
             std::ofstream(mDirectory / "settings.cfg")
                 << "[OpenMWSE Water]\nappearance = future-water\nenhanced color = ultraviolet\n"
                    "geometric wave height = 999\ncaustics strength = 99\n"
+                   "mesh geometric wave height = 999\n"
                    "interior local lights = 99\nexterior local lights = -1\n"
                    "reflected caustics = true\n";
             ASSERT_NO_FATAL_FAILURE(load());
@@ -192,6 +194,7 @@ namespace Settings
             EXPECT_EQ(openmwseWater().mEnhancedColor.get(), "green-blue");
             EXPECT_EQ(openmwseWater().enhancedColor(), EnhancedWaterColor::GreenBlue);
             EXPECT_FLOAT_EQ(openmwseWater().mGeometricWaveHeight.get(), 250.f);
+            EXPECT_FLOAT_EQ(openmwseWater().mMeshGeometricWaveHeight.get(), 250.f);
             EXPECT_FLOAT_EQ(openmwseWater().mCausticsStrength.get(), 2.f);
             EXPECT_EQ(openmwseWater().mInteriorLocalLights.get(), 4);
             EXPECT_EQ(openmwseWater().mExteriorLocalLights.get(), 0);
@@ -264,6 +267,7 @@ namespace Settings
             Values values(index);
             EXPECT_EQ(values.mOpenMWSEWater.appearance(), WaterAppearance::OpenMW);
             EXPECT_FLOAT_EQ(values.mOpenMWSEWater.mGeometricWaveHeight.get(), 0.f);
+            EXPECT_FLOAT_EQ(values.mOpenMWSEWater.mMeshGeometricWaveHeight.get(), 0.f);
             EXPECT_FALSE(values.mOpenMWSEWater.useGeometricWaves());
             EXPECT_FALSE(values.mOpenMWSEWater.mCaustics);
             EXPECT_FLOAT_EQ(values.mOpenMWSEWater.mCausticsStrength.get(), 1.f);
@@ -285,6 +289,10 @@ namespace Settings
             EXPECT_FLOAT_EQ(values.mOpenMWSEWater.mGeometricWaveHeight.get(), 250.f);
             values.mOpenMWSEWater.mGeometricWaveHeight.set(-1.f);
             EXPECT_FLOAT_EQ(values.mOpenMWSEWater.mGeometricWaveHeight.get(), 0.f);
+            values.mOpenMWSEWater.mMeshGeometricWaveHeight.set(999.f);
+            EXPECT_FLOAT_EQ(values.mOpenMWSEWater.mMeshGeometricWaveHeight.get(), 250.f);
+            values.mOpenMWSEWater.mMeshGeometricWaveHeight.set(-1.f);
+            EXPECT_FLOAT_EQ(values.mOpenMWSEWater.mMeshGeometricWaveHeight.get(), 0.f);
             values.mOpenMWSEWater.mCausticsStrength.set(9.f);
             EXPECT_FLOAT_EQ(values.mOpenMWSEWater.mCausticsStrength.get(), 2.f);
             values.mOpenMWSEWater.mCausticsStrength.set(-1.f);

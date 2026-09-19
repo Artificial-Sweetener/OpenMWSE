@@ -32,6 +32,22 @@ TEST(DiagnosticGameplayRouteExecutionTest, RejectsInvalidAndOutOfRangeLimits)
     EXPECT_THROW(DiagnosticCtl::makeGameplayRouteExecutionPlan(100, "20", "21"), std::invalid_argument);
 }
 
+/// Retain only the requested delayed interval while executing every preceding route state.
+TEST(DiagnosticGameplayRouteExecutionTest, SelectsOnlySegmentsIntersectingTheCaptureTail)
+{
+    EXPECT_EQ(DiagnosticCtl::resolveGameplayRouteCaptureStart(std::nullopt, 1000), 0u);
+    EXPECT_EQ(DiagnosticCtl::resolveGameplayRouteCaptureStart("900", 1000), 900u);
+    EXPECT_THROW(DiagnosticCtl::resolveGameplayRouteCaptureStart("1000", 1000), std::invalid_argument);
+    EXPECT_THROW(DiagnosticCtl::resolveGameplayRouteCaptureStart("-1", 1000), std::invalid_argument);
+    EXPECT_THROW(DiagnosticCtl::resolveGameplayRouteCaptureStart("tail", 1000), std::invalid_argument);
+
+    EXPECT_FALSE(DiagnosticCtl::shouldCaptureGameplayRouteSegment(0, 256, 900));
+    EXPECT_FALSE(DiagnosticCtl::shouldCaptureGameplayRouteSegment(512, 256, 900));
+    EXPECT_TRUE(DiagnosticCtl::shouldCaptureGameplayRouteSegment(768, 256, 900));
+    EXPECT_TRUE(DiagnosticCtl::shouldCaptureGameplayRouteSegment(1024, 16, 900));
+    EXPECT_FALSE(DiagnosticCtl::shouldCaptureGameplayRouteSegment(768, 0, 900));
+}
+
 TEST(DiagnosticGameplayRouteExecutionTest, RequiresExactRouteProgressRatherThanRenderedFrameCount)
 {
     EXPECT_NO_THROW(DiagnosticCtl::validateGameplayRouteProgress(100, 40, 60));

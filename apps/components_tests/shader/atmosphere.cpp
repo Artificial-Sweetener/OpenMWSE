@@ -2086,6 +2086,7 @@ void main()
         manager.setShaderPath(std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/shaders");
 
         auto defines = getAtmosphereTestDefines();
+        defines["waterMeshSurface"] = "0";
         manager.setGlobalDefines(defines);
 
         const osg::ref_ptr<osg::Shader> skyVertex
@@ -2313,6 +2314,7 @@ void main()
                 auto defines = getAtmosphereTestDefines();
                 defines["waterGeometricWaves"] = geometricWaves ? "1" : "0";
                 defines["waterRefraction"] = refraction ? "1" : "0";
+                defines["waterMeshSurface"] = "0";
                 manager.setGlobalDefines(defines);
 
                 const osg::ref_ptr<osg::Program> program = manager.getProgram("compatibility/water");

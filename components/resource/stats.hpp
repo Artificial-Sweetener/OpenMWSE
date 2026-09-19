@@ -5,6 +5,7 @@
 
 namespace osgViewer
 {
+    class Viewer;
     class ViewerBase;
 }
 
@@ -31,6 +32,12 @@ namespace Resource
         explicit Profiler(bool offlineCollect, const VFS::Manager& vfs);
 
         bool handle(const osgGA::GUIEventAdapter& ea, osgGA::GUIActionAdapter& aa) override;
+
+        /// Activate the same frame-rate page selected by the production F3 input binding.
+        void showFrameRate(osgViewer::Viewer& viewer);
+
+        /// Return whether the frame-rate page is currently active.
+        bool frameRateVisible() const noexcept;
 
     private:
         /// Configure fonts and extend OSG's camera overlay with GPU-scene statistics.

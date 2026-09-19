@@ -1510,4 +1510,26 @@ namespace
         cullNode(*root, *camera, 4);
         EXPECT_GT(statValue(*scene, "GPU mesh bytes"), 0.0);
     }
+
+    /// Keep renderer-owned water on its ordered transparency path throughout asynchronous GPU-scene capture.
+    TEST_F(GpuSceneArrayTest, KeepsRendererOwnedWaterClassic)
+    {
+        forceMode("array");
+        const std::unique_ptr<GpuScene> scene = makeScene();
+        ASSERT_TRUE(scene->isSupported());
+
+        const osg::ref_ptr<osg::Texture2D> texture = makeTexture(makeImage(sSide, 139));
+        const osg::ref_ptr<osg::Group> root = new osg::Group;
+        root->setStateSet(makeState(*texture));
+        const osg::ref_ptr<osg::Group> water = new osg::Group;
+        water->setNodeMask(MWRender::Mask_Water);
+        water->addChild(makeTriangle());
+        root->addChild(water);
+        scene->capture(*root);
+
+        const osg::ref_ptr<osg::Camera> camera = new osg::Camera;
+        cullNode(*scene->getNode(), *camera, 1);
+        cullNode(*root, *camera, 1);
+        EXPECT_EQ(statValue(*scene, "GPU mesh bytes"), 0.0);
+    }
 }

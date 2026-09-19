@@ -32,6 +32,7 @@ namespace SceneUtil
 namespace MWRender
 {
     class GpuScene;
+    class Water;
 
     class Animation;
 
@@ -67,10 +68,14 @@ namespace MWRender
     public:
         void setGpuScene(GpuScene* scene);
 
+        /// Connect object lifetime to renderer-owned classified surface effects.
+        void setWater(Water* water) { mWater = water; }
+
     private:
         osg::ref_ptr<osg::Group> mRootNode;
         Resource::ResourceSystem* mResourceSystem;
         GpuScene* mGpuScene;
+        Water* mWater = nullptr;
         SceneUtil::UnrefQueue& mUnrefQueue;
 
         osg::Group* createCellNode(const MWWorld::CellStore* store);

@@ -18,6 +18,19 @@ namespace
         }
         return result;
     }
+
+    /// Parse one zero-based route ordinal without accepting partial values.
+    std::size_t parseRouteOrdinal(std::string_view value, std::size_t frameCount)
+    {
+        std::size_t result = 0;
+        const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), result);
+        if (error != std::errc() || end != value.data() + value.size() || result >= frameCount)
+        {
+            throw std::invalid_argument(
+                "route capture start frame must be within [0, " + std::to_string(frameCount - 1) + "]");
+        }
+        return result;
+    }
 }
 
 namespace DiagnosticCtl
@@ -71,5 +84,19 @@ namespace DiagnosticCtl
             ? parseBoundedCount(*requestedSegmentFrameCount, maximumSegmentFrameCount, "route performance sample count")
             : maximumSegmentFrameCount;
         return { frameCount, static_cast<std::uint32_t>(segmentFrameCount) };
+    }
+
+    std::size_t resolveGameplayRouteCaptureStart(
+        std::optional<std::string_view> requestedStartFrame, std::size_t executedFrameCount)
+    {
+        if (executedFrameCount == 0)
+            throw std::invalid_argument("gameplay route must contain at least one executed frame");
+        return requestedStartFrame ? parseRouteOrdinal(*requestedStartFrame, executedFrameCount) : 0;
+    }
+
+    bool shouldCaptureGameplayRouteSegment(
+        std::size_t completedFrames, std::size_t scheduledFrames, std::size_t captureStartFrame)
+    {
+        return scheduledFrames != 0 && completedFrames + scheduledFrames > captureStartFrame;
     }
 }

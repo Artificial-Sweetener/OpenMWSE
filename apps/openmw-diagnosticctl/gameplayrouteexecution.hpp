@@ -21,6 +21,14 @@ namespace DiagnosticCtl
         std::optional<std::string_view> requestedFrameCount,
         std::optional<std::string_view> requestedSegmentFrameCount);
 
+    /// Resolve the first route state whose containing segment should retain rendered-frame evidence.
+    std::size_t resolveGameplayRouteCaptureStart(
+        std::optional<std::string_view> requestedStartFrame, std::size_t executedFrameCount);
+
+    /// Return whether one scheduled segment intersects the requested retained-capture interval.
+    bool shouldCaptureGameplayRouteSegment(
+        std::size_t completedFrames, std::size_t scheduledFrames, std::size_t captureStartFrame);
+
     /// Reject a rendered segment that did not consume exactly its scheduled route states.
     void validateGameplayRouteProgress(
         std::size_t remainingBefore, std::size_t scheduledFrames, std::size_t remainingAfter);

@@ -294,6 +294,19 @@ namespace Resource
         return handled;
     }
 
+    void Profiler::showFrameRate(osgViewer::Viewer& viewer)
+    {
+        osg::ref_ptr<osgGA::GUIEventAdapter> event = new osgGA::GUIEventAdapter;
+        event->setEventType(osgGA::GUIEventAdapter::KEYDOWN);
+        event->setKey(osgGA::GUIEventAdapter::KEY_F3);
+        handle(*event, viewer);
+    }
+
+    bool Profiler::frameRateVisible() const noexcept
+    {
+        return _statsType == FRAME_RATE;
+    }
+
     StatsHandler::StatsHandler(bool offlineCollect, const VFS::Manager& vfs)
         : mOfflineCollect(offlineCollect)
         , mSwitch(new osg::Switch)

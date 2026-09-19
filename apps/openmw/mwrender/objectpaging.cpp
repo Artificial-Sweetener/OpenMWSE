@@ -60,6 +60,13 @@
 
 namespace MWRender
 {
+    bool objectPagingCanRepresent(const osg::Node& node)
+    {
+        bool hasSurfaceEffects = false;
+        node.getUserValue("surfaceEffects", hasSurfaceEffects);
+        return !hasSurfaceEffects;
+    }
+
     namespace
     {
         bool typeFilter(int type, bool far, bool lights)
@@ -894,6 +901,11 @@ namespace MWRender
                 cnode = mSceneManager->getTemplate(model, false);
                 resolvedTemplates.insert_or_assign(std::move(model), cnode.get());
             }
+
+            // Classified materials require their live renderer owner. Keeping a second source-material copy in either
+            // paging path produces a distance-dependent overlap during the chunk-to-live handoff.
+            if (!objectPagingCanRepresent(*cnode))
+                continue;
 
             if (activeGrid)
             {

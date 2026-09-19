@@ -21,11 +21,13 @@
 #include <components/misc/osguservalues.hpp>
 #include <components/misc/strings/algorithm.hpp>
 #include <components/resource/imagemanager.hpp>
+#include <components/resource/surfaceeffectregistry.hpp>
 #include <components/sceneutil/glextensions.hpp>
 #include <components/sceneutil/material.hpp>
 #include <components/sceneutil/morphgeometry.hpp>
 #include <components/sceneutil/riggeometry.hpp>
 #include <components/sceneutil/riggeometryosgaextension.hpp>
+#include <components/sceneutil/surfaceeffect.hpp>
 #include <components/sceneutil/texturetype.hpp>
 #include <components/sceneutil/util.hpp>
 #include <components/settings/settings.hpp>
@@ -176,6 +178,13 @@ namespace Shader
     {
     }
 
+    void ShaderVisitor::setSurfaceEffectContext(
+        const Resource::SurfaceEffectRegistry* registry, VFS::Path::NormalizedView meshPath)
+    {
+        mSurfaceEffectRegistry = registry;
+        mMeshPath = VFS::Path::Normalized(meshPath);
+    }
+
     void ShaderVisitor::apply(osg::Node& node)
     {
         bool needPop = false;
@@ -268,6 +277,7 @@ namespace Shader
 
         // Make sure to disregard any state that came from a previous call to createProgram
         osg::ref_ptr<AddedState> addedState = getAddedState(*stateset);
+        std::vector<VFS::Path::Normalized> sourceTextures;
 
         if (!texAttributes.empty())
         {
@@ -283,6 +293,19 @@ namespace Shader
                     const osg::Texture* texture = attr->asTexture();
                     if (texture)
                     {
+                        if (const osg::Image* image = texture->getImage(0); image && !image->getFileName().empty())
+                        {
+                            try
+                            {
+                                sourceTextures.emplace_back(image->getFileName());
+                            }
+                            catch (const std::exception& error)
+                            {
+                                Log(Debug::Warning)
+                                    << "Ignoring invalid material texture path '" << image->getFileName() << "' in '"
+                                    << mMeshPath << "': " << error.what();
+                            }
+                        }
                         std::string texName = SceneUtil::getTextureType(*stateset, *texture, unit);
                         if ((texName.empty() || !isTextureNameRecognized(texName)) && unit == 0)
                             texName = "diffuseMap";
@@ -419,6 +442,33 @@ namespace Shader
                         unit, new SceneUtil::TextureType("specularMap"), osg::StateAttribute::ON);
                     mRequirements.back().mTextures[unit] = "specularMap";
                 }
+            }
+        }
+
+        if (mSurfaceEffectRegistry)
+        {
+            if (const auto profile = mSurfaceEffectRegistry->match(mMeshPath, node.getName(), sourceTextures))
+            {
+                Log(Debug::Verbose) << "Classified material '" << node.getName() << "' in '" << mMeshPath
+                                    << "' as surface-effect profile '" << profile->mId << "'";
+                osg::UserDataContainer* userData = node.getOrCreateUserDataContainer();
+                const unsigned int index = userData->getUserObjectIndex("surfaceEffect");
+                osg::ref_ptr<SceneUtil::SurfaceEffect> effect = new SceneUtil::SurfaceEffect(*profile);
+                if (index < userData->getNumUserObjects())
+                    userData->setUserObject(index, effect);
+                else
+                    userData->addUserObject(effect);
+                osg::StateSet* effectStateSet = writableStateSet ? writableStateSet : getWritableStateSet(node);
+                osg::UserDataContainer* stateUserData = effectStateSet->getOrCreateUserDataContainer();
+                const unsigned int stateIndex = stateUserData->getUserObjectIndex("surfaceEffect");
+                if (stateIndex < stateUserData->getNumUserObjects())
+                    stateUserData->setUserObject(stateIndex, effect);
+                else
+                    stateUserData->addUserObject(effect);
+                // The classification is a semantic material boundary. Optimizer merging would erase the
+                // identity required to replace this surface independently from adjacent authored geometry.
+                node.setDataVariance(osg::Object::DYNAMIC);
+                mHasSurfaceEffects = true;
             }
         }
 
@@ -639,13 +689,17 @@ namespace Shader
         }
 
         // Material programs sample caustics through both water volumes. Bind their units locally so auxiliary camera
-        // state stacks cannot leave heterogeneous sampler uniforms at OpenGL's default unit zero.
-        const int waterOpticalTextureUnit
-            = mShaderManager.reserveGlobalTextureUnits(Shader::ShaderManager::Slot::WaterOptics, 2);
-        writableStateSet->addUniform(new osg::Uniform("waterOpticalNormalMap", waterOpticalTextureUnit));
-        writableStateSet->addUniform(new osg::Uniform("waterOpticalVolume", waterOpticalTextureUnit + 1));
-        addedState->addUniform("waterOpticalNormalMap");
-        addedState->addUniform("waterOpticalVolume");
+        // state stacks cannot leave heterogeneous sampler uniforms at OpenGL's default unit zero. A zero limit means
+        // this visitor is running before graphics-capability initialization, as in headless resource consumers.
+        if (mShaderManager.getMaxTextureUnits() > 0)
+        {
+            const int waterOpticalTextureUnit = mShaderManager.reserveGlobalTextureUnits(
+                Shader::ShaderManager::Slot::WaterOptics, Shader::waterOpticsTextureUnitCount);
+            writableStateSet->addUniform(new osg::Uniform("waterOpticalNormalMap", waterOpticalTextureUnit));
+            writableStateSet->addUniform(new osg::Uniform("waterOpticalVolume", waterOpticalTextureUnit + 1));
+            addedState->addUniform("waterOpticalNormalMap");
+            addedState->addUniform("waterOpticalVolume");
+        }
 
         if (writableStateSet->getMode(GL_ALPHA_TEST) != osg::StateAttribute::INHERIT
             && !previousAddedState->hasMode(GL_ALPHA_TEST))

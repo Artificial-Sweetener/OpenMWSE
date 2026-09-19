@@ -181,7 +181,7 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             artifactRoot = cfgMgr.getUserDataPath() / "diagnostics";
         engine.configureDiagnostics(std::move(diagnosticEndpoint), std::move(artifactRoot),
             variables["diagnostic-child"].as<bool>(), variables["diagnostic-headed"].as<bool>(),
-            variables["diagnostic-fixed-dt"].as<double>());
+            variables["diagnostic-stats-overlay"].as<bool>(), variables["diagnostic-fixed-dt"].as<double>());
     }
 
     return true;

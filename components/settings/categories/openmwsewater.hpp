@@ -38,6 +38,10 @@ namespace Settings
         SettingValue<float> mGeometricWaveHeight{ mIndex, "OpenMWSE Water", "geometric wave height",
             makeClampSanitizerFloat(0.f, 250.f) };
 
+        /// Set classified mesh-water wave height independently from the default world surface.
+        SettingValue<float> mMeshGeometricWaveHeight{ mIndex, "OpenMWSE Water", "mesh geometric wave height",
+            makeClampSanitizerFloat(0.f, 250.f) };
+
         /// Enable MGE XE-style animated light modulation below the active water surface.
         SettingValue<bool> mCaustics{ mIndex, "OpenMWSE Water", "caustics" };
 

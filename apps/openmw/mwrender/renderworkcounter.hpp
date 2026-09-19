@@ -15,6 +15,13 @@ namespace MWRender
     inline constexpr std::string_view resolveByteCounter = "Diagnostic Resolve Bytes";
     inline constexpr std::string_view transparentReplayCounter = "Diagnostic Transparent Replay Drawables";
     inline constexpr std::string_view transparentClassifiedLeafCounter = "Diagnostic Transparent Classified Leaves";
+    inline constexpr std::string_view meshWaterLeafCounter = "Diagnostic Mesh Water Leaves";
+    inline constexpr std::string_view meshWaterPrimitiveCounter = "Diagnostic Mesh Water Primitives";
+    inline constexpr std::string_view meshWaterDrawCounter = "Diagnostic Mesh Water Draws";
+    inline constexpr std::string_view meshWaterReflectionActiveCounter = "Diagnostic Mesh Water Reflection Active";
+    inline constexpr std::string_view meshWaterReflectionHeightCounter = "Diagnostic Mesh Water Reflection Height";
+    inline constexpr std::string_view meshWaterReflectionResolutionCounter
+        = "Diagnostic Mesh Water Reflection Resolution";
     inline constexpr std::string_view firstPersonReplayCounter = "Diagnostic First Person Replay Drawables";
     inline constexpr std::string_view groundcoverInstanceTestCounter = "Diagnostic Groundcover Instances Tested";
     inline constexpr std::string_view groundcoverInstanceRenderCounter = "Diagnostic Groundcover Instances Rendered";

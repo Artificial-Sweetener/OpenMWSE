@@ -1056,14 +1056,24 @@ void OMW::Engine::go()
                                 << "\": " << std::generic_category().message(errno);
     }
 
-    if (!mDiagnosticChild)
+    if (!mDiagnosticChild || mDiagnosticStatsOverlay)
     {
         osg::ref_ptr<Resource::Profiler> statsHandler = new Resource::Profiler(stats.is_open(), *mVFS);
         initStatsHandler(*statsHandler);
         mViewer->addEventHandler(statsHandler);
 
-        osg::ref_ptr<Resource::StatsHandler> resourcesHandler = new Resource::StatsHandler(stats.is_open(), *mVFS);
-        mViewer->addEventHandler(resourcesHandler);
+        if (mDiagnosticStatsOverlay)
+        {
+            statsHandler->showFrameRate(*mViewer);
+            if (!statsHandler->frameRateVisible())
+                throw std::runtime_error("failed activating diagnostic frame-rate overlay");
+        }
+
+        if (!mDiagnosticChild)
+        {
+            osg::ref_ptr<Resource::StatsHandler> resourcesHandler = new Resource::StatsHandler(stats.is_open(), *mVFS);
+            mViewer->addEventHandler(resourcesHandler);
+        }
 
         if (stats.is_open())
             Resource::collectStatistics(*mViewer);
@@ -1390,8 +1400,8 @@ void OMW::Engine::prepareDiagnosticGameplayRouteMovement(float dt)
     mWorld->queueMovement(player, velocity);
 }
 
-void OMW::Engine::configureDiagnostics(
-    std::string endpoint, std::filesystem::path artifactRoot, bool child, bool headed, double fixedFrameDuration)
+void OMW::Engine::configureDiagnostics(std::string endpoint, std::filesystem::path artifactRoot, bool child,
+    bool headed, bool statsOverlay, double fixedFrameDuration)
 {
     if (endpoint.empty() || artifactRoot.empty())
         throw std::invalid_argument("diagnostic session requires an endpoint and artifact root");
@@ -1400,8 +1410,11 @@ void OMW::Engine::configureDiagnostics(
     mDiagnosticGameplayRoute = std::make_unique<DiagnosticGameplayRoute>(mDiagnosticArtifactRoot);
     mDiagnosticChild = child;
     mDiagnosticHeaded = headed;
+    mDiagnosticStatsOverlay = statsOverlay;
     if (headed && !child)
         throw std::invalid_argument("headed diagnostics require isolated child mode");
+    if (statsOverlay && !child)
+        throw std::invalid_argument("diagnostic stats overlay requires isolated child mode");
     mDiagnosticStepScheduler.setFrameDuration(fixedFrameDuration);
     if (child)
     {

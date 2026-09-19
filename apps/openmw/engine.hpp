@@ -205,6 +205,7 @@ namespace OMW
         std::optional<Diagnostics::AtmosphereScenario> mDiagnosticAtmosphereScenario;
         bool mDiagnosticChild = false;
         bool mDiagnosticHeaded = false;
+        bool mDiagnosticStatsOverlay = false;
 
         // not implemented
         Engine(const Engine&);
@@ -284,7 +285,7 @@ namespace OMW
 
         /// Enable the protected diagnostic bridge and optional isolated child behavior.
         void configureDiagnostics(std::string endpoint, std::filesystem::path artifactRoot, bool child, bool headed,
-            double fixedFrameDuration);
+            bool statsOverlay, double fixedFrameDuration);
 
         /// Compile all scripts (excludign dialogue scripts) at startup?
         void setCompileAll(bool all);

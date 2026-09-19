@@ -18,6 +18,9 @@ namespace MWRender
             resolveByteCounter,
             transparentReplayCounter,
             transparentClassifiedLeafCounter,
+            meshWaterLeafCounter,
+            meshWaterPrimitiveCounter,
+            meshWaterDrawCounter,
             firstPersonReplayCounter,
             groundcoverInstanceTestCounter,
             groundcoverInstanceRenderCounter,
@@ -30,8 +33,7 @@ namespace MWRender
             stats.setAttribute(frameNumber, std::string(counter), 0.0);
     }
 
-    void addDiagnosticRenderWorkCounter(
-        osg::Stats& stats, unsigned frameNumber, std::string_view counter, double value)
+    void addDiagnosticRenderWorkCounter(osg::Stats& stats, unsigned frameNumber, std::string_view counter, double value)
     {
         if (!stats.collectStats("scene"))
             return;

@@ -55,7 +55,7 @@ namespace SceneUtil
         auto* vdd = getViewDependentData(cv);
         if (frameNumber > vdd->mFrameNumber)
         {
-            apply(vdd->mCamera);
+            apply(vdd->mCamera, cv);
             if (Stereo::getStereo())
             {
                 auto& sm = Stereo::Manager::instance();

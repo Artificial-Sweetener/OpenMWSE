@@ -40,6 +40,9 @@ namespace MWRender
         void sortImplementation() override;
         void drawImplementation(osg::RenderInfo& renderInfo, osgUtil::RenderLeaf*& previous) override;
 
+        /// Return the mesh-water leaves submitted by the most recent primary draw on this bin.
+        std::size_t lastMeshWaterDrawCount() const { return mLastMeshWaterDrawCount; }
+
     private:
         void drawLeavesWithClippedStraddlers(const osgUtil::RenderBin::RenderLeafList& leaves,
             const osgUtil::RenderBin::RenderLeafList& straddlingLeaves, osg::RenderInfo& renderInfo,
@@ -51,10 +54,12 @@ namespace MWRender
         osg::ref_ptr<OpaqueColorBinCallback> mOpaqueColorResolve;
         osgUtil::RenderBin::RenderLeafList mOppositeSideLeaves;
         osgUtil::RenderBin::RenderLeafList mWaterLeaves;
+        osgUtil::RenderBin::RenderLeafList mMeshWaterLeaves;
         osgUtil::RenderBin::RenderLeafList mCameraSideLeaves;
         osgUtil::RenderBin::RenderLeafList mStraddlingLeaves;
         osg::ref_ptr<osg::StateSet> mClipStateSet;
         bool mCameraUnderwater = false;
+        std::size_t mLastMeshWaterDrawCount = 0;
         const Water* mWater;
     };
 }

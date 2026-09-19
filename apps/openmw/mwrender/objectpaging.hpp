@@ -27,6 +27,9 @@ namespace MWRender
     class GpuScene;
     struct GpuTemplate;
 
+    /// Return whether a source template may be represented without its live material-effect owner.
+    bool objectPagingCanRepresent(const osg::Node& node);
+
     typedef std::tuple<osg::Vec2f, float, bool> ChunkId; // Center, Size, ActiveGrid
 
     class ObjectPaging : public Resource::GenericResourceManager<ChunkId>, public Terrain::QuadTreeWorld::ChunkManager

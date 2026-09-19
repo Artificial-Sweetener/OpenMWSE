@@ -49,6 +49,8 @@ set(BUILTIN_DATA_FILES
     textures/omw_xbox_button_rt.dds
     textures/omw/water_nm.png
 
+    material-effects/openmwse-water.yaml
+
     fonts/DejaVuFontLicense.txt
     fonts/DejaVuLGCSansMono.ttf
     fonts/DejaVuLGCSansMono.omwfont

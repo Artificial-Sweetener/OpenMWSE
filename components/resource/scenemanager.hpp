@@ -34,6 +34,7 @@ namespace Resource
     class NifFileManager;
     class BgsmFileManager;
     class SharedStateManager;
+    class SurfaceEffectRegistry;
 }
 
 namespace osgUtil
@@ -231,6 +232,7 @@ namespace Resource
         mutable std::mutex mSharedStateMutex;
 
         std::unique_ptr<Shader::ShaderManager> mShaderManager;
+        std::unique_ptr<SurfaceEffectRegistry> mSurfaceEffectRegistry;
         std::string mNormalMapPattern;
         std::string mNormalHeightMapPattern;
         std::string mSpecularMapPattern;

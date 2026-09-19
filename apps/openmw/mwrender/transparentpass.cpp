@@ -2,6 +2,7 @@
 
 #include "renderworkcounter.hpp"
 #include "water.hpp"
+#include "waterawaretransparentbin.hpp"
 
 #include <osg/AlphaFunc>
 #include <osg/BlendFunc>
@@ -103,7 +104,7 @@ namespace MWRender
             if (rl->_drawable->getNodeMask() == Mask_ParticleSystem)
                 continue;
 
-            if (mWater && rl->_drawable.get() == mWater->getDrawable())
+            if (mWater && mWater->isWaterDrawable(rl->_drawable.get()))
                 continue;
 
             if (ss->getAttribute(osg::StateAttribute::MATERIAL))
@@ -121,8 +122,15 @@ namespace MWRender
         state.removeStateSet(insertStateSetPosition);
 
         if (osg::Stats* stats = bin->getStage()->getCamera()->getStats())
+        {
             addDiagnosticRenderWorkCounter(
                 *stats, state.getFrameStamp()->getFrameNumber(), transparentReplayCounter, replayedDrawables);
+            if (const auto* waterBin = dynamic_cast<const WaterAwareTransparentBin*>(bin))
+            {
+                addDiagnosticRenderWorkCounter(*stats, state.getFrameStamp()->getFrameNumber(), meshWaterDrawCounter,
+                    static_cast<double>(waterBin->lastMeshWaterDrawCount()));
+            }
+        }
 
         msaaFbo ? msaaFbo->apply(state, osg::FrameBufferObject::DRAW_FRAMEBUFFER)
                 : fbo->apply(state, osg::FrameBufferObject::DRAW_FRAMEBUFFER);

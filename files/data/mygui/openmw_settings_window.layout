@@ -735,10 +735,10 @@
                         <Property key="Caption" value=" #{OMWEngine:Water} "/>
 
                         <Widget type="ScrollView" skin="MW_ScrollView" position_real="0 0 1 1" align="Stretch">
-                            <Property key="CanvasSize" value="660 780"/>
+                            <Property key="CanvasSize" value="660 830"/>
                             <Property key="CanvasAlign" value="Left Top"/>
                             <Property key="VisibleHScroll" value="false"/>
-                            <Widget type="VBox" position="0 0 660 780" align="Left Top">
+                            <Widget type="VBox" position="0 0 660 830" align="Left Top">
 
                             <Widget type="HBox" align="Stretch">
                                 <UserString key="HStretch" value="true"/>
@@ -775,6 +775,26 @@
                                 <UserString key="ToolTipType" value="Layout"/>
                                 <UserString key="ToolTipLayout" value="TextToolTip"/>
                                 <UserString key="Caption_Text" value="#{OMWEngine:GeometricWaveHeightTooltip}"/>
+                            </Widget>
+
+                            <Widget type="AutoSizedTextBox" skin="NormalText" name="MeshGeometricWaveHeightLabel">
+                                <UserString key="HStretch" value="true"/>
+                            </Widget>
+                            <Widget type="ScrollBar" skin="MW_HScroll" position="0 0 620 18" align="Left Top" name="MeshGeometricWaveHeight">
+                                <Property key="Range" value="251"/>
+                                <Property key="Page" value="1"/>
+                                <Property key="WheelPage" value="1"/>
+                                <UserString key="SettingCategory" value="OpenMWSE Water"/>
+                                <UserString key="SettingName" value="mesh geometric wave height"/>
+                                <UserString key="SettingType" value="Slider"/>
+                                <UserString key="SettingValueType" value="Float"/>
+                                <UserString key="SettingMin" value="0"/>
+                                <UserString key="SettingMax" value="250"/>
+                                <UserString key="SettingLabelWidget" value="MeshGeometricWaveHeightLabel"/>
+                                <UserString key="SettingLabelCaption" value="MeshGeometricWaveHeightValue"/>
+                                <UserString key="ToolTipType" value="Layout"/>
+                                <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                <UserString key="Caption_Text" value="#{OMWEngine:MeshGeometricWaveHeightTooltip}"/>
                             </Widget>
 
                             <Widget type="HBox" align="Stretch">

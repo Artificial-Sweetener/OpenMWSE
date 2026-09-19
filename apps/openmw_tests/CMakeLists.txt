@@ -50,6 +50,7 @@ file(GLOB UNITTEST_SRC_FILES
     mwrender/testgpunightday.cpp
     mwrender/testluminance.cpp
     mwrender/testpagedref.cpp
+    mwrender/testobjectpaging.cpp
     mwrender/testgpuresidency.cpp
 
     mwinput/testdiagnosticinputmanager.cpp

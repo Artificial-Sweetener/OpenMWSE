@@ -4,9 +4,12 @@
 #include <osg/NodeVisitor>
 #include <osg/Program>
 
+#include <components/vfs/pathutil.hpp>
+
 namespace Resource
 {
     class ImageManager;
+    class SurfaceEffectRegistry;
 }
 
 namespace SceneUtil
@@ -52,6 +55,13 @@ namespace Shader
 
         void setWeatherParticleOcclusion(bool value) { mWeatherParticleOcclusion = value; }
 
+        /// Classify authored materials in one source mesh without retaining their textures as rendering inputs.
+        void setSurfaceEffectContext(
+            const Resource::SurfaceEffectRegistry* registry, VFS::Path::NormalizedView meshPath);
+
+        /// Return whether this traversal assigned at least one material surface-effect profile.
+        bool hasSurfaceEffects() const { return mHasSurfaceEffects; }
+
         void apply(osg::Node& node) override;
 
         void apply(osg::Drawable& drawable) override;
@@ -80,6 +90,9 @@ namespace Shader
 
         ShaderManager& mShaderManager;
         Resource::ImageManager& mImageManager;
+        const Resource::SurfaceEffectRegistry* mSurfaceEffectRegistry = nullptr;
+        bool mHasSurfaceEffects = false;
+        VFS::Path::Normalized mMeshPath;
 
         struct ShaderRequirements
         {

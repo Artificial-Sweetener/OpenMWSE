@@ -60,8 +60,12 @@ namespace DiagnosticCtl
         const std::chrono::seconds startupTimeout = parseStartupTimeout(findOption(arguments, "--startup-timeout"));
         const bool newGame = hasFlag(arguments, "--new-game");
         const bool headed = hasFlag(arguments, "--headed");
+        const bool statsOverlay = hasFlag(arguments, "--stats-overlay");
         const bool captureRouteNativeFrames = hasFlag(arguments, "--capture-route-native-frames");
         const bool captureRouteFrames = captureRouteNativeFrames || hasFlag(arguments, "--capture-route-frames");
+        const std::optional<std::string> routeCaptureStart = findOption(arguments, "--capture-route-from");
+        if (routeCaptureStart && !captureRouteFrames)
+            throw std::invalid_argument("--capture-route-from requires route-frame capture");
         const bool auditRouteClearance = hasFlag(arguments, "--audit-route-clearance");
         const bool auditRouteTraversal = hasFlag(arguments, "--audit-route-traversal");
         const bool captureGraphics = !hasFlag(arguments, "--skip-graphics-capture");
@@ -118,8 +122,7 @@ namespace DiagnosticCtl
             "--user-data", isolatedData.string(), "--diagnostic-session", endpoint, "--diagnostic-artifacts",
             artifacts.string(), "--diagnostic-child", "--diagnostic-fixed-dt",
             findOption(arguments, "--fixed-dt").value_or("0.0166666666666667"), "--no-sound", "--no-grab" };
-        if (headed)
-            childArguments.emplace_back("--diagnostic-headed");
+        addDiagnosticPresentationArguments(childArguments, headed, statsOverlay);
         std::optional<std::filesystem::path> isolatedSave;
         std::vector<std::byte> replayManifest;
         std::vector<std::byte> expectedWorldState;
@@ -343,6 +346,8 @@ namespace DiagnosticCtl
                 = Diagnostics::decodeGameplayRoute(gameplayRoute);
             const DiagnosticCtl::GameplayRouteExecutionPlan routePlan = DiagnosticCtl::makeGameplayRouteExecutionPlan(
                 routeFrames.size(), findOption(arguments, "--frames"), findOption(arguments, "--performance-samples"));
+            const std::size_t captureStartFrame
+                = resolveGameplayRouteCaptureStart(routeCaptureStart, routePlan.mFrameCount);
             requireSuccessfulResponse(Diagnostics::transact(
                 endpoint, { requestId++, Diagnostics::CommandType::LoadGameplayRoute, gameplayRoute }));
             if (captureRouteNativeFrames)
@@ -434,17 +439,19 @@ namespace DiagnosticCtl
                 }
                 const std::uint32_t segmentFrames = static_cast<std::uint32_t>(
                     std::min<std::size_t>(routePlan.mSegmentFrameCount, routePlan.mFrameCount - completedFrames));
+                const bool captureThisSegment = captureRouteFrames
+                    && shouldCaptureGameplayRouteSegment(completedFrames, segmentFrames, captureStartFrame);
                 Diagnostics::Command runSegment{ requestId++, Diagnostics::CommandType::RunGameplayRouteSegment, {} };
                 const std::uint64_t segmentRequestId = runSegment.mRequestId;
                 for (std::size_t byte = 0; byte < sizeof(segmentFrames); ++byte)
                     runSegment.mPayload.push_back(static_cast<std::byte>((segmentFrames >> (byte * 8)) & 0xffu));
-                if (captureRouteFrames || bypassRouteShadows || routeShadowCasters || auditRouteClearance
+                if (captureThisSegment || bypassRouteShadows || routeShadowCasters || auditRouteClearance
                     || auditRouteTraversal)
                 {
-                    const unsigned routeOptions = (captureRouteFrames ? 0x1u : 0u) | (bypassRouteShadows ? 0x2u : 0u)
+                    const unsigned routeOptions = (captureThisSegment ? 0x1u : 0u) | (bypassRouteShadows ? 0x2u : 0u)
                         | (routeShadowCasters == "terrain" ? 0x4u : 0u) | (routeShadowCasters == "objects" ? 0x8u : 0u)
-                        | (captureRouteNativeFrames ? 0x10u : 0u) | (auditRouteClearance ? 0x20u : 0u)
-                        | (auditRouteTraversal ? 0x40u : 0u);
+                        | (captureThisSegment && captureRouteNativeFrames ? 0x10u : 0u)
+                        | (auditRouteClearance ? 0x20u : 0u) | (auditRouteTraversal ? 0x40u : 0u);
                     runSegment.mPayload.push_back(static_cast<std::byte>(routeOptions));
                 }
                 const Diagnostics::Response performance
@@ -506,7 +513,7 @@ namespace DiagnosticCtl
                     status["route-frames-remaining"].as<std::size_t>());
                 completedFrames += segmentFrames;
                 ++segmentIndex;
-                if (captureRouteFrames)
+                if (captureThisSegment)
                 {
                     waitForRenderFrameCapture(endpoint, requestId);
                     const std::filesystem::path frameBundle

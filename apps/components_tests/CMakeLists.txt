@@ -56,6 +56,7 @@ file(GLOB UNITTEST_SRC_FILES
     shader/parselinks.cpp
     shader/shadermanager.cpp
     shader/shadowcasting.cpp
+    shader/water.cpp
     shader/atmosphere.cpp
     sceneutil/shadowcascade.cpp
     sceneutil/shadowfrustum.cpp
@@ -108,6 +109,7 @@ file(GLOB UNITTEST_SRC_FILES
     resource/testobjectcache.cpp
     resource/testresourcesystem.cpp
     resource/gpustatsoverlay.cpp
+    resource/surfaceeffectregistry.cpp
 
     vfs/testpathutil.cpp
 

@@ -89,6 +89,7 @@ namespace MWGui
         MyGUI::ComboBox* mAtmosphereAppearance;
         MyGUI::ComboBox* mWaterAppearance;
         MyGUI::ScrollBar* mGeometricWaveHeight;
+        MyGUI::ScrollBar* mMeshGeometricWaveHeight;
         MyGUI::Button* mWaterCaustics;
         MyGUI::ScrollBar* mWaterCausticsStrength;
         MyGUI::ScrollBar* mInteriorWaterLights;

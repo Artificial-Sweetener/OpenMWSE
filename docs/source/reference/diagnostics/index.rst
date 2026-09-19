@@ -22,6 +22,8 @@ Execution modes
 * ``run --headed`` and ``replay --headed`` use the same isolated child, copied state, device-free input, evidence providers, and
   cleanup contract in a visible production graphics window. This mode supports representative driver presentation behavior and
   visible route-parity review without automating or modifying the normal game profile.
+* ``--stats-overlay`` activates the production F3 frame-rate HUD inside an isolated child. Use it to reproduce presentation-path
+  regressions that correlate with enabling the overlay without touching the normal game profile.
 
 Interactive OpenMWSE builds start the protected current-user endpoint by default. Set ``OPENMW_DIAGNOSTICS=0`` or pass
 ``--diagnostic-session off`` to disable the bridge for a launch. ``OPENMW_DIAGNOSTICS=1`` and ``--diagnostic-session default``
@@ -113,6 +115,10 @@ pixels on their longest edge.
 Use ``--capture-route-native-frames`` for pixel-scale temporal defects. Native captures preserve the rendering resolution
 by streaming each frame directly to a partial bundle and publishing the completed sequence. Each frame is limited to
 64 million RGBA pixels; only the current frame and its shadow attachments are retained in memory.
+``--capture-route-from <ordinal>`` executes the complete requested route prefix but retains frame bundles only for segments
+that intersect the zero-based ordinal or follow it. The containing segment begins at its ordinary performance-checkpoint
+boundary, preserving the streaming and renderer history needed to diagnose delayed failures without retaining unrelated early
+frames.
 Use ``--skip-graphics-capture`` to omit full attachment captures at route checkpoints.
 Use ``--bypass-route-shadows`` with the same replay to produce a frame-aligned conventional-shadow comparison; shadow rendering
 is restored before boundary graphics evidence is captured.

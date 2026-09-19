@@ -17,6 +17,7 @@
 #include "gpuscene.hpp"
 #include "npcanimation.hpp"
 #include "vismask.hpp"
+#include "water.hpp"
 
 namespace MWRender
 {
@@ -98,6 +99,15 @@ namespace MWRender
         osg::ref_ptr<ObjectAnimation> anim(
             new ObjectAnimation(ptr, animationMesh, mResourceSystem, animated, allowLight, mGpuRefreshPending));
 
+        if (mWater)
+        {
+            bool hasSurfaceEffects = false;
+            ptr.getRefData().getBaseNode()->getUserValue("surfaceEffects", hasSurfaceEffects);
+            if (!hasSurfaceEffects && anim->getObjectRoot())
+                anim->getObjectRoot()->getUserValue("surfaceEffects", hasSurfaceEffects);
+            if (hasSurfaceEffects)
+                ptr.getRefData().getBaseNode()->setUserValue("surfaceEffects", true);
+        }
         anim->setGpuScene(mGpuScene);
         mObjects.emplace(ptr.mRef, std::move(anim));
     }
@@ -167,6 +177,8 @@ namespace MWRender
         const auto iter = mObjects.find(ptr.mRef);
         if (iter != mObjects.end())
         {
+            if (mWater)
+                mWater->unregisterSurfaceEffects(ptr.getRefData().getBaseNode());
             iter->second->removeFromScene();
             mUnrefQueue.push(std::move(iter->second));
             mObjects.erase(iter);
@@ -194,6 +206,8 @@ namespace MWRender
             MWWorld::Ptr ptr = iter->second->getPtr();
             if (ptr.getCell() == store)
             {
+                if (mWater)
+                    mWater->unregisterSurfaceEffects(ptr.getRefData().getBaseNode());
                 if (ptr.getClass().isActor() && ptr.getRefData().getCustomData())
                 {
                     if (ptr.getClass().hasInventoryStore(ptr))

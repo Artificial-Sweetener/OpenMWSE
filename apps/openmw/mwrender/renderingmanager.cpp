@@ -424,6 +424,7 @@ namespace MWRender
         // water goes after terrain for correct waterculling order
         mWater = std::make_unique<Water>(sceneRoot->getParent(0), sceneRoot, mResourceSystem,
             mViewer->getIncrementalCompileOperation(), mGpuScene.get());
+        mObjects->setWater(mWater.get());
         mPostProcessor->setupTransparentBin(mWater.get());
 
         mCamera = std::make_unique<Camera>(mViewer->getCamera());
@@ -1235,6 +1236,7 @@ namespace MWRender
         ptr.getRefData().getBaseNode()->setAttitude(rot);
         if (Animation* anim = mObjects->getAnimation(ptr))
             anim->updateGpuTransform();
+        mWater->synchronizeSurfaceEffects(ptr.getRefData().getBaseNode());
     }
 
     void RenderingManager::moveObject(const MWWorld::Ptr& ptr, const osg::Vec3f& pos)
@@ -1242,6 +1244,7 @@ namespace MWRender
         ptr.getRefData().getBaseNode()->setPosition(pos);
         if (Animation* anim = mObjects->getAnimation(ptr))
             anim->updateGpuTransform();
+        mWater->synchronizeSurfaceEffects(ptr.getRefData().getBaseNode());
     }
 
     void RenderingManager::scaleObject(const MWWorld::Ptr& ptr, const osg::Vec3f& scale)
@@ -1249,6 +1252,7 @@ namespace MWRender
         ptr.getRefData().getBaseNode()->setScale(scale);
         if (Animation* anim = mObjects->getAnimation(ptr))
             anim->updateGpuTransform();
+        mWater->synchronizeSurfaceEffects(ptr.getRefData().getBaseNode());
 
         if (ptr == mCamera->getTrackingPtr()) // update height of camera
             mCamera->processViewChange();

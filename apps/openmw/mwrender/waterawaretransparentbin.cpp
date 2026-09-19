@@ -2,6 +2,7 @@
 
 #include <osg/BoundingBox>
 #include <osg/ClipPlane>
+#include <osg/Geometry>
 #include <osg/Plane>
 #include <osg/State>
 #include <osg/StateSet>
@@ -86,6 +87,7 @@ namespace MWRender
 
         mOppositeSideLeaves.clear();
         mWaterLeaves.clear();
+        mMeshWaterLeaves.clear();
         mCameraSideLeaves.clear();
         mStraddlingLeaves.clear();
 
@@ -99,6 +101,7 @@ namespace MWRender
                                  : -SceneUtil::waterSurfaceInteractionTolerance);
 
         std::size_t classifiedLeafCount = 0;
+        std::size_t meshWaterPrimitiveCount = 0;
         for (osgUtil::RenderLeaf* leaf : _renderLeafList)
         {
             if (!leaf || !leaf->_drawable || !leaf->_modelview)
@@ -107,6 +110,13 @@ namespace MWRender
             ++classifiedLeafCount;
             if (leaf->_drawable == mWater->getDrawable())
                 mWaterLeaves.push_back(leaf);
+            else if (mWater->isWaterDrawable(leaf->_drawable))
+            {
+                mMeshWaterLeaves.push_back(leaf);
+                if (const auto* geometry = leaf->_drawable->asGeometry())
+                    for (unsigned int index = 0; index < geometry->getNumPrimitiveSets(); ++index)
+                        meshWaterPrimitiveCount += geometry->getPrimitiveSet(index)->getNumPrimitives();
+            }
             else
             {
                 const osg::BoundingBox bound = worldBound(leaf, inverseView);
@@ -132,6 +142,10 @@ namespace MWRender
         {
             addDiagnosticRenderWorkCounter(*stats, view->getFrameStamp()->getFrameNumber(),
                 transparentClassifiedLeafCounter, static_cast<double>(classifiedLeafCount));
+            addDiagnosticRenderWorkCounter(*stats, view->getFrameStamp()->getFrameNumber(), meshWaterLeafCounter,
+                static_cast<double>(mMeshWaterLeaves.size()));
+            addDiagnosticRenderWorkCounter(*stats, view->getFrameStamp()->getFrameNumber(), meshWaterPrimitiveCounter,
+                static_cast<double>(meshWaterPrimitiveCount));
         }
 
         if (mWaterLeaves.empty())
@@ -139,14 +153,24 @@ namespace MWRender
             mCameraUnderwater = false;
             mOppositeSideLeaves.clear();
             mStraddlingLeaves.clear();
-            mCameraSideLeaves = _renderLeafList;
+            mCameraSideLeaves.clear();
+            for (osgUtil::RenderLeaf* leaf : _renderLeafList)
+                if (leaf && !mWater->isWaterDrawable(leaf->_drawable))
+                    mCameraSideLeaves.push_back(leaf);
         }
     }
 
     void WaterAwareTransparentBin::drawImplementation(osg::RenderInfo& renderInfo, osgUtil::RenderLeaf*& previous)
     {
-        // Fallback to standard draw order for anything other then the scene camera and when there is no water plane
-        if (!isSceneCamera() || mWaterLeaves.empty())
+        mLastMeshWaterDrawCount = 0;
+        const bool sceneCamera = isSceneCamera();
+        osgUtil::RenderBin::RenderLeafList meshWaterLeaves;
+        for (osgUtil::RenderLeaf* leaf : _renderLeafList)
+            if (leaf && leaf->_drawable != mWater->getDrawable() && mWater->isWaterDrawable(leaf->_drawable))
+                meshWaterLeaves.push_back(leaf);
+
+        // Fallback only when this camera has no renderer-owned water surface to schedule around the opaque resolve.
+        if (!sceneCamera || (mWaterLeaves.empty() && meshWaterLeaves.empty()))
         {
             osgUtil::RenderBin::drawImplementation(renderInfo, previous);
             return;
@@ -164,6 +188,29 @@ namespace MWRender
 
         osg::Plane nearSidePlane(0.0, 0.0, direction, -direction * clipHeight);
         osg::Plane farSidePlane(0.0, 0.0, -direction, direction * clipHeight);
+
+        if (!meshWaterLeaves.empty())
+        {
+            mOpaqueColorResolve->resolve(this, renderInfo);
+            std::size_t drawCount = 0;
+            for (osgUtil::RenderLeaf* leaf : meshWaterLeaves)
+            {
+                leaf->render(renderInfo, previous);
+                previous = leaf;
+                ++drawCount;
+            }
+            mLastMeshWaterDrawCount = drawCount;
+        }
+
+        if (mWaterLeaves.empty())
+        {
+            for (osgUtil::RenderLeaf* leaf : mCameraSideLeaves)
+            {
+                leaf->render(renderInfo, previous);
+                previous = leaf;
+            }
+            return;
+        }
 
         drawLeavesWithClippedStraddlers(
             mOppositeSideLeaves, mStraddlingLeaves, renderInfo, previous, farSidePlane, inverseView, false);

@@ -8,6 +8,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <mutex>
 #include <thread>
 
 namespace
@@ -40,12 +41,25 @@ namespace
 
         constexpr VFS::Path::NormalizedView noSuchPath("meshes/whatever.nif");
         std::vector<std::thread> threads;
+        std::mutex exceptionMutex;
+        std::vector<std::string> exceptions;
 
         for (int i = 0; i < 50; ++i)
         {
-            threads.emplace_back([=]() { sceneManager->getInstance(noSuchPath); });
+            threads.emplace_back([&]() {
+                try
+                {
+                    sceneManager->getInstance(noSuchPath);
+                }
+                catch (const std::exception& error)
+                {
+                    std::lock_guard lock(exceptionMutex);
+                    exceptions.emplace_back(error.what());
+                }
+            });
         }
         for (std::thread& thread : threads)
             thread.join();
+        EXPECT_THAT(exceptions, IsEmpty());
     }
 }

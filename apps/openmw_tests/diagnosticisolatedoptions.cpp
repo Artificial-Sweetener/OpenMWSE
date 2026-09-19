@@ -45,3 +45,19 @@ TEST(DiagnosticIsolatedOptionsTest, StartsFromExactlyOneNonInteractiveWorldSourc
     EXPECT_THROW(DiagnosticCtl::addWorldStartArguments(menu, std::filesystem::path("world.omwsave"), true),
         std::invalid_argument);
 }
+
+/// Forward only explicitly requested diagnostic presentation state to the child process.
+TEST(DiagnosticIsolatedOptionsTest, ForwardsProductionStatsOverlayIndependentlyFromWindowVisibility)
+{
+    std::vector<std::string> arguments;
+    DiagnosticCtl::addDiagnosticPresentationArguments(arguments, false, true);
+    EXPECT_EQ(arguments, (std::vector<std::string>{ "--diagnostic-stats-overlay" }));
+
+    arguments.clear();
+    DiagnosticCtl::addDiagnosticPresentationArguments(arguments, true, false);
+    EXPECT_EQ(arguments, (std::vector<std::string>{ "--diagnostic-headed" }));
+
+    arguments.clear();
+    DiagnosticCtl::addDiagnosticPresentationArguments(arguments, true, true);
+    EXPECT_EQ(arguments, (std::vector<std::string>{ "--diagnostic-headed", "--diagnostic-stats-overlay" }));
+}

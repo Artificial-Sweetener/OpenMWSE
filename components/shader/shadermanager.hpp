@@ -27,6 +27,9 @@ namespace Shader
 {
     struct HotReloadManager;
 
+    /// Reserve the complete shared water-optics sampler range before any material records its base unit.
+    inline constexpr int waterOpticsTextureUnitCount = 3;
+
     // What a program's templates implement.
     enum class ProgramCapability : unsigned int
     {

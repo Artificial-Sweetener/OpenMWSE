@@ -133,7 +133,7 @@ add_component_dir (vfs
 
 add_component_dir (resource
     scenemanager keyframemanager imagemanager animblendrulesmanager bulletshapemanager bulletshape niffilemanager objectcache multiobjectcache resourcesystem
-    resourcemanager stats gpustatsoverlay animation foreachbulletobject errormarker selectionmarker cachestats bgsmfilemanager
+    resourcemanager stats gpustatsoverlay animation foreachbulletobject errormarker selectionmarker cachestats bgsmfilemanager surfaceeffectregistry
     )
 
 add_component_dir (shader
@@ -142,7 +142,7 @@ add_component_dir (shader
 
 add_component_dir (sceneutil
     clone attach visitor util statesetupdater stateupdater controller skeleton riggeometry riggeometrygpu geometrybatch morphgeometry deformationstats diagnosticgputiming diagnosticcamerawork diagnosticthreadwork diagnosticshadowwork lightcontroller
-    lightmanager lightutil positionattitudetransform workqueue pathgridutil waterutil writescene serialize optimizer
+    lightmanager lightutil positionattitudetransform workqueue pathgridutil waterutil surfaceeffect writescene serialize optimizer
     detourdebugdraw navmesh agentpath animblendrules shadow shadowcascade shadowdebughud shadowfrustum mwshadowtechnique recastmesh shadowsbin osgacontroller rtt
     screencapture depth color riggeometryosgaextension extradata unrefqueue lightcommon clearcolor offscreencontext optimizeroptions
     cullsafeboundsvisitor keyframe nodecallback textkeymap glextensions fog texmat material cloudadvection cloudlayer cloudshaderstate atmosphereterraingrid texturedclouds
