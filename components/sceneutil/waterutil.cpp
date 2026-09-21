@@ -493,6 +493,40 @@ namespace SceneUtil
         return std::nullopt;
     }
 
+    WaterReflectionHandoffRequest WaterReflectionHandoffPolicy::request(unsigned int desiredResolution)
+    {
+        if (desiredResolution == mActiveResolution)
+        {
+            if (!mPendingResolution)
+                return {};
+            const unsigned int cancelledResolution = *mPendingResolution;
+            mPendingResolution.reset();
+            return { WaterReflectionHandoffAction::Cancel, cancelledResolution };
+        }
+
+        if (!mPendingResolution)
+        {
+            mPendingResolution = desiredResolution;
+            return { WaterReflectionHandoffAction::Stage, std::nullopt };
+        }
+        if (*mPendingResolution == desiredResolution)
+            return {};
+
+        const unsigned int replacedResolution = *mPendingResolution;
+        mPendingResolution = desiredResolution;
+        return { WaterReflectionHandoffAction::Replace, replacedResolution };
+    }
+
+    std::optional<unsigned int> WaterReflectionHandoffPolicy::publish()
+    {
+        if (!mPendingResolution)
+            return std::nullopt;
+        const unsigned int previousResolution = mActiveResolution;
+        mActiveResolution = *mPendingResolution;
+        mPendingResolution.reset();
+        return previousResolution;
+    }
+
     float waterWaveInteractionHeight(float waveHeight)
     {
         return std::max(32.f, 2.f * std::max(0.f, waveHeight) + 32.f);

@@ -179,6 +179,49 @@ namespace SceneUtil
         unsigned int mDowngradeFrames = 0;
     };
 
+    /// Describe how a requested reflection resolution changes an in-progress target handoff.
+    enum class WaterReflectionHandoffAction
+    {
+        None,
+        Stage,
+        Replace,
+        Cancel,
+    };
+
+    /// Return the staging action and any superseded target that the caller must release.
+    struct WaterReflectionHandoffRequest
+    {
+        WaterReflectionHandoffAction mAction = WaterReflectionHandoffAction::None;
+        std::optional<unsigned int> mReleaseResolution;
+    };
+
+    /// Keep the last complete reflection active while a differently sized target is prepared.
+    class WaterReflectionHandoffPolicy
+    {
+    public:
+        /// Begin with one publishable reflection resolution.
+        explicit WaterReflectionHandoffPolicy(unsigned int activeResolution)
+            : mActiveResolution(activeResolution)
+        {
+        }
+
+        /// Return the resolution currently safe for material sampling.
+        unsigned int activeResolution() const { return mActiveResolution; }
+
+        /// Return the resolution being prepared, if any.
+        std::optional<unsigned int> pendingResolution() const { return mPendingResolution; }
+
+        /// Reconcile a desired resolution without changing the active target.
+        WaterReflectionHandoffRequest request(unsigned int desiredResolution);
+
+        /// Publish the prepared resolution after its render completion and return the replaced resolution.
+        std::optional<unsigned int> publish();
+
+    private:
+        unsigned int mActiveResolution;
+        std::optional<unsigned int> mPendingResolution;
+    };
+
     /// Create the existing uniformly subdivided flat water plane.
     osg::ref_ptr<osg::Geometry> createWaterGeometry(float size, int segments, float textureRepeats);
 

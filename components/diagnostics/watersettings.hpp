@@ -14,6 +14,7 @@ namespace Diagnostics
         float mCausticsStrength = 1.f;
         int mInteriorLocalLights = 2;
         int mExteriorLocalLights = 0;
+        std::string mAppearance = "openmw";
 
         /// Compare the complete requested water-control state.
         bool operator==(const WaterSettings&) const = default;

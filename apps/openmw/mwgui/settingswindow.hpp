@@ -35,8 +35,8 @@ namespace MWGui
         void setGeometricWaveHeight(float height);
 
         /// Exercise live water displacement and caustic controls for isolated diagnostics.
-        void setWaterValues(
-            float height, bool caustics, float causticsStrength, int interiorLocalLights, int exteriorLocalLights);
+        void setWaterValues(std::string_view appearance, float height, bool caustics, float causticsStrength,
+            int interiorLocalLights, int exteriorLocalLights);
 
         void onClose() override;
 

@@ -2,6 +2,8 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <stdexcept>
 
@@ -23,6 +25,9 @@ namespace Diagnostics
             if (settings.mInteriorLocalLights < 0 || settings.mInteriorLocalLights > 4
                 || settings.mExteriorLocalLights < 0 || settings.mExteriorLocalLights > 4)
                 throw std::invalid_argument("local water-light budgets must be between 0 and 4");
+            constexpr std::array<std::string_view, 4> appearances{ "openmw", "mge-xe", "enhanced", "vanilla" };
+            if (std::find(appearances.begin(), appearances.end(), settings.mAppearance) == appearances.end())
+                throw std::invalid_argument("water appearance must be openmw, mge-xe, enhanced, or vanilla");
         }
     }
 
@@ -34,9 +39,14 @@ namespace Diagnostics
         if (!node.IsMap())
             throw std::invalid_argument("water settings must be a map");
         const int version = node["water-version"].as<int>();
-        if (version < 1 || version > 5)
-            throw std::invalid_argument("water settings require a version from 1 through 5");
-        const std::size_t expectedSize = version == 1 ? 2 : version == 2 ? 4 : version == 3 ? 5 : version == 4 ? 7 : 6;
+        if (version < 1 || version > 6)
+            throw std::invalid_argument("water settings require a version from 1 through 6");
+        const std::size_t expectedSize = version == 1 ? 2
+            : version == 2                            ? 4
+            : version == 3                            ? 5
+            : version == 4                            ? 7
+            : version == 5                            ? 6
+                                                      : 7;
         if (node.size() != expectedSize)
             throw std::invalid_argument("water settings contain missing or unknown fields");
         WaterSettings result;
@@ -53,6 +63,8 @@ namespace Diagnostics
             result.mInteriorLocalLights = node["interior-local-lights"].as<int>();
             result.mExteriorLocalLights = node["exterior-local-lights"].as<int>();
         }
+        if (version >= 6)
+            result.mAppearance = node["appearance"].as<std::string>();
         validate(result);
         return result;
     }
@@ -61,12 +73,13 @@ namespace Diagnostics
     {
         validate(settings);
         YAML::Node node;
-        node["water-version"] = 5;
+        node["water-version"] = 6;
         node["geometric-wave-height"] = settings.mGeometricWaveHeight;
         node["caustics"] = settings.mCaustics;
         node["caustics-strength"] = settings.mCausticsStrength;
         node["interior-local-lights"] = settings.mInteriorLocalLights;
         node["exterior-local-lights"] = settings.mExteriorLocalLights;
+        node["appearance"] = settings.mAppearance;
         return YAML::Dump(node);
     }
 }

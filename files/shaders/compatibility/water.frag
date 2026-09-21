@@ -185,10 +185,14 @@ void main(void)
     surfaceBitangent = waterPlaneBitangent;
     normal = normalize(surfaceTangent * opticalNormal.x + surfaceBitangent * opticalNormal.y
         + surfaceUp * opticalNormal.z);
-    // MGE's offsets are screen-space but its source water is always horizontal. Project a classified surface's
-    // plane-local optical slope through the current view so inclined water retains the same visible breakup.
-    vec3 viewOpticalNormal = normalize((osg_ViewMatrix * vec4(normal, 0.0)).xyz);
-    screenOpticalSlope = viewOpticalNormal.xy;
+    // Project only the animated tangent-plane perturbation. Projecting the complete normal adds the viewed plane
+    // normal as a constant texture offset, detaching intersecting geometry from its reflection as the camera pitches.
+    // Preserve the established world-water mapping exactly for horizontal classified surfaces.
+    if (dot(surfaceUp, vec3(0.0, 0.0, 1.0)) < 0.9999)
+    {
+        vec3 opticalPerturbation = surfaceTangent * opticalNormal.x + surfaceBitangent * opticalNormal.y;
+        screenOpticalSlope = (osg_ViewMatrix * vec4(opticalPerturbation, 0.0)).xy;
+    }
 #endif
 
 #if @waterMeshSurface

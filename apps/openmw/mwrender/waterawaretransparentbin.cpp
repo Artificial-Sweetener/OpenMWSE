@@ -55,6 +55,19 @@ namespace MWRender
         return WaterDrawSide::Straddling;
     }
 
+    WaterDrawPlan makeWaterDrawPlan(bool hasMeshWater, bool hasWorldWater) noexcept
+    {
+        WaterDrawPlan result;
+        if (!hasMeshWater && !hasWorldWater)
+            return result;
+        result.mStages[result.mSize++] = WaterDrawStage::ResolveScene;
+        if (hasMeshWater)
+            result.mStages[result.mSize++] = WaterDrawStage::MeshWater;
+        if (hasWorldWater)
+            result.mStages[result.mSize++] = WaterDrawStage::WorldWater;
+        return result;
+    }
+
     WaterAwareTransparentBin::WaterAwareTransparentBin(OpaqueColorBinCallback* opaqueColorResolve, const Water* water)
         : osgUtil::RenderBin(osgUtil::RenderBin::SORT_BACK_TO_FRONT)
         , mOpaqueColorResolve(opaqueColorResolve)
@@ -189,17 +202,37 @@ namespace MWRender
         osg::Plane nearSidePlane(0.0, 0.0, direction, -direction * clipHeight);
         osg::Plane farSidePlane(0.0, 0.0, -direction, direction * clipHeight);
 
-        if (!meshWaterLeaves.empty())
+        if (!mWaterLeaves.empty())
+            drawLeavesWithClippedStraddlers(
+                mOppositeSideLeaves, mStraddlingLeaves, renderInfo, previous, farSidePlane, inverseView, false);
+
+        // Capture the scene once after far-side transparency and before any water draw. Both mesh and world water
+        // sample this immutable pre-water result, preventing either surface from feeding back into the other's
+        // refraction input.
+        const WaterDrawPlan plan = makeWaterDrawPlan(!meshWaterLeaves.empty(), !mWaterLeaves.empty());
+        for (std::size_t stageIndex = 0; stageIndex < plan.mSize; ++stageIndex)
         {
-            mOpaqueColorResolve->resolve(this, renderInfo);
-            std::size_t drawCount = 0;
-            for (osgUtil::RenderLeaf* leaf : meshWaterLeaves)
+            switch (plan.mStages[stageIndex])
             {
-                leaf->render(renderInfo, previous);
-                previous = leaf;
-                ++drawCount;
+                case WaterDrawStage::ResolveScene:
+                    mOpaqueColorResolve->resolve(this, renderInfo);
+                    break;
+                case WaterDrawStage::MeshWater:
+                    for (osgUtil::RenderLeaf* leaf : meshWaterLeaves)
+                    {
+                        leaf->render(renderInfo, previous);
+                        previous = leaf;
+                        ++mLastMeshWaterDrawCount;
+                    }
+                    break;
+                case WaterDrawStage::WorldWater:
+                    for (osgUtil::RenderLeaf* leaf : mWaterLeaves)
+                    {
+                        leaf->render(renderInfo, previous);
+                        previous = leaf;
+                    }
+                    break;
             }
-            mLastMeshWaterDrawCount = drawCount;
         }
 
         if (mWaterLeaves.empty())
@@ -210,18 +243,6 @@ namespace MWRender
                 previous = leaf;
             }
             return;
-        }
-
-        drawLeavesWithClippedStraddlers(
-            mOppositeSideLeaves, mStraddlingLeaves, renderInfo, previous, farSidePlane, inverseView, false);
-
-        if (!mOppositeSideLeaves.empty() || !mStraddlingLeaves.empty())
-            mOpaqueColorResolve->resolve(this, renderInfo);
-
-        for (osgUtil::RenderLeaf* leaf : mWaterLeaves)
-        {
-            leaf->render(renderInfo, previous);
-            previous = leaf;
         }
 
         drawLeavesWithClippedStraddlers(

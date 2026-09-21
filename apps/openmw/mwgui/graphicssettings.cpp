@@ -163,13 +163,19 @@ void MWGui::GraphicsSettings::setGeometricWaveHeight(float height)
     mGeometricWaveHeight->eventScrollChangePosition(mGeometricWaveHeight, position);
 }
 
-void MWGui::GraphicsSettings::setWaterValues(
-    float height, bool caustics, float causticsStrength, int interiorLocalLights, int exteriorLocalLights)
+void MWGui::GraphicsSettings::setWaterValues(std::string_view appearance, float height, bool caustics,
+    float causticsStrength, int interiorLocalLights, int exteriorLocalLights)
 {
     if (!std::isfinite(causticsStrength) || causticsStrength < 0.f || causticsStrength > 2.f)
         throw std::invalid_argument("diagnostic caustics strength must be between 0 and 2");
     if (interiorLocalLights < 0 || interiorLocalLights > 4 || exteriorLocalLights < 0 || exteriorLocalLights > 4)
         throw std::invalid_argument("diagnostic local water-light budgets must be between 0 and 4");
+    const auto appearanceIt = std::find(sWaterAppearances.begin(), sWaterAppearances.end(), appearance);
+    if (appearanceIt == sWaterAppearances.end())
+        throw std::invalid_argument("diagnostic water appearance is not recognized");
+    const std::size_t appearancePosition = static_cast<std::size_t>(appearanceIt - sWaterAppearances.begin());
+    mWaterAppearance->setIndexSelected(appearancePosition);
+    mWaterAppearance->eventComboChangePosition(mWaterAppearance, appearancePosition);
     setGeometricWaveHeight(height);
     Settings::openmwseWater().mCaustics.set(caustics);
     mWaterCaustics->setCaptionWithReplacing(caustics ? "#{Interface:On}" : "#{Interface:Off}");

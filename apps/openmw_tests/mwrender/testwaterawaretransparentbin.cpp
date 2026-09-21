@@ -4,6 +4,29 @@
 
 namespace MWRender
 {
+    TEST(WaterAwareTransparentBin, ResolvesSceneOnceBeforeAllWaterSurfaces)
+    {
+        const WaterDrawPlan plan = makeWaterDrawPlan(true, true);
+
+        ASSERT_EQ(plan.mSize, 3);
+        EXPECT_EQ(plan.mStages[0], WaterDrawStage::ResolveScene);
+        EXPECT_EQ(plan.mStages[1], WaterDrawStage::MeshWater);
+        EXPECT_EQ(plan.mStages[2], WaterDrawStage::WorldWater);
+    }
+
+    TEST(WaterAwareTransparentBin, KeepsSingleSurfacePlansFreeOfFeedback)
+    {
+        const WaterDrawPlan meshPlan = makeWaterDrawPlan(true, false);
+        ASSERT_EQ(meshPlan.mSize, 2);
+        EXPECT_EQ(meshPlan.mStages[0], WaterDrawStage::ResolveScene);
+        EXPECT_EQ(meshPlan.mStages[1], WaterDrawStage::MeshWater);
+
+        const WaterDrawPlan worldPlan = makeWaterDrawPlan(false, true);
+        ASSERT_EQ(worldPlan.mSize, 2);
+        EXPECT_EQ(worldPlan.mStages[0], WaterDrawStage::ResolveScene);
+        EXPECT_EQ(worldPlan.mStages[1], WaterDrawStage::WorldWater);
+    }
+
     TEST(WaterAwareTransparentBin, KeepsSlightlySubmergedSurfaceCoveringsOnCameraSide)
     {
         constexpr double clipHeight = -4.0;

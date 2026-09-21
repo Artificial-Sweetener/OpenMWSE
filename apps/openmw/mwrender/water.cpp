@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <map>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -329,6 +331,21 @@ namespace MWRender
 
     class Reflection : public SceneUtil::RTTNode
     {
+        class CompletionCallback final : public osg::Camera::DrawCallback
+        {
+        public:
+            /// Publish completion only after the render thread finishes the reflection camera.
+            explicit CompletionCallback(std::shared_ptr<std::atomic_bool> completed)
+                : mCompleted(std::move(completed))
+            {
+            }
+
+            void operator()(osg::RenderInfo&) const override { mCompleted->store(true, std::memory_order_release); }
+
+        private:
+            std::shared_ptr<std::atomic_bool> mCompleted;
+        };
+
     public:
         Reflection(uint32_t rttSize, bool isInterior)
             : RTTNode(rttSize, rttSize, 0, false, 0, StereoAwareness::Aware, shouldAddMSAAIntermediateTarget())
@@ -343,14 +360,16 @@ namespace MWRender
             camera->setReferenceFrame(osg::Camera::RELATIVE_RF);
             camera->setSmallFeatureCullingPixelSize(Settings::water().mSmallFeatureCullingPixelSize);
             camera->setName(std::string(SceneUtil::reflectionCameraName));
+            // Define an opaque clear explicitly so newly allocated RTT stages cannot inherit a transparent clear state.
+            camera->setClearColor(osg::Vec4f(0.f, 0.f, 0.f, 1.f));
             camera->addCullCallback(new InheritViewPointCallback);
+            camera->addFinalDrawCallback(new CompletionCallback(mCompleted));
 
             // Inform the shader that we're in a reflection
             camera->getOrCreateStateSet()->addUniform(new osg::Uniform("isReflection", true));
 
-            // XXX: should really flip the FrontFace on each renderable instead of forcing clockwise.
-            osg::ref_ptr<osg::FrontFace> frontFace(new osg::FrontFace);
-            frontFace->setMode(osg::FrontFace::CLOCKWISE);
+            // The reflected view reverses handedness, so define clockwise front faces for this camera.
+            osg::ref_ptr<osg::FrontFace> frontFace = new osg::FrontFace(osg::FrontFace::CLOCKWISE);
             camera->getOrCreateStateSet()->setAttributeAndModes(frontFace, osg::StateAttribute::ON);
 
             camera->addChild(mClipCullNode);
@@ -388,8 +407,12 @@ namespace MWRender
         {
             mVisibilityDriven = enabled;
             mHasRendered = false;
+            mCompleted->store(false, std::memory_order_release);
             mNodeMask = calcNodeMask();
         }
+
+        /// Return whether this target has completed at least one reflection-camera draw since acquisition.
+        bool hasCompletedRender() const { return mCompleted->load(std::memory_order_acquire); }
 
         /// Record that at least one surface using this plane survived scene-camera culling.
         void markVisible(unsigned int frameNumber) { mVisibleFrame = frameNumber; }
@@ -458,6 +481,7 @@ namespace MWRender
         bool mHasRendered = false;
         unsigned int mVisibleFrame = 0;
         SceneUtil::WaterSurfacePlane mWaterPlane;
+        std::shared_ptr<std::atomic_bool> mCompleted = std::make_shared<std::atomic_bool>(false);
     };
 
     /// Own one geometrically exact reflection plane shared by coplanar classified mesh surfaces.
@@ -466,15 +490,17 @@ namespace MWRender
     public:
         MeshWaterPlane(SceneUtil::WaterSurfacePlane plane, unsigned int resolution, osg::ref_ptr<Reflection> reflection)
             : mPlane(std::move(plane))
-            , mResolution(resolution)
             , mReflection(std::move(reflection))
+            , mReflectionHandoff(resolution)
         {
         }
 
         const SceneUtil::WaterSurfacePlane& plane() const { return mPlane; }
         const osg::BoundingBox& worldBound() const { return mWorldBound; }
-        unsigned int resolution() const { return mResolution; }
+        unsigned int resolution() const { return mReflectionHandoff.activeResolution(); }
         Reflection* reflection() const { return mReflection; }
+        unsigned int pendingResolution() const { return mReflectionHandoff.pendingResolution().value_or(0); }
+        Reflection* pendingReflection() const { return mPendingReflection; }
 
         /// Extend the spatial ownership used to join neighboring authored surfaces conservatively.
         void include(const osg::BoundingBox& worldBound) { mWorldBound.expandBy(worldBound); }
@@ -485,15 +511,42 @@ namespace MWRender
         void markVisible(unsigned int frameNumber, unsigned int requestedResolution)
         {
             mReflection->markVisible(frameNumber);
+            if (mPendingReflection)
+                mPendingReflection->markVisible(frameNumber);
             mResolutionPolicy.markVisible(frameNumber, requestedResolution);
         }
 
-        std::optional<unsigned int> consumeRequestedResolution() { return mResolutionPolicy.consume(mResolution); }
+        std::optional<unsigned int> consumeRequestedResolution() { return mResolutionPolicy.consume(resolution()); }
 
-        void replaceReflection(unsigned int resolution, osg::ref_ptr<Reflection> reflection)
+        /// Stage a resized reflection while retaining the last complete target for material sampling.
+        std::pair<unsigned int, osg::ref_ptr<Reflection>> stageReflection(
+            unsigned int resolution, osg::ref_ptr<Reflection> reflection)
         {
-            mResolution = resolution;
-            mReflection = std::move(reflection);
+            const SceneUtil::WaterReflectionHandoffRequest request = mReflectionHandoff.request(resolution);
+            std::pair<unsigned int, osg::ref_ptr<Reflection>> previous(
+                request.mReleaseResolution.value_or(0), std::move(mPendingReflection));
+            mPendingReflection = std::move(reflection);
+            return previous;
+        }
+
+        /// Cancel a staged resize and return its target to the caller for release.
+        std::pair<unsigned int, osg::ref_ptr<Reflection>> cancelStagedReflection()
+        {
+            const SceneUtil::WaterReflectionHandoffRequest request
+                = mReflectionHandoff.request(mReflectionHandoff.activeResolution());
+            std::pair<unsigned int, osg::ref_ptr<Reflection>> cancelled(
+                request.mReleaseResolution.value_or(0), std::move(mPendingReflection));
+            return cancelled;
+        }
+
+        /// Publish a completed staged target and return the prior active target for release.
+        std::pair<unsigned int, osg::ref_ptr<Reflection>> publishStagedReflection()
+        {
+            const std::optional<unsigned int> previousResolution = mReflectionHandoff.publish();
+            std::pair<unsigned int, osg::ref_ptr<Reflection>> previous(
+                previousResolution.value_or(0), std::move(mReflection));
+            mReflection = std::move(mPendingReflection);
+            return previous;
         }
 
         std::size_t mReferenceCount = 0;
@@ -501,9 +554,10 @@ namespace MWRender
     private:
         SceneUtil::WaterSurfacePlane mPlane;
         osg::BoundingBox mWorldBound;
-        unsigned int mResolution;
         osg::ref_ptr<Reflection> mReflection;
+        osg::ref_ptr<Reflection> mPendingReflection;
         SceneUtil::WaterReflectionResolutionPolicy mResolutionPolicy;
+        SceneUtil::WaterReflectionHandoffPolicy mReflectionHandoff;
     };
 
     /// Feed visible projected coverage into one plane's stable reflection-resolution policy.
@@ -702,7 +756,11 @@ namespace MWRender
             if (mReflection)
                 mReflection->removeCullCallback(mCullCallback);
             for (auto& [_, plane] : mMeshWaterPlanes)
+            {
                 plane->reflection()->removeCullCallback(mCullCallback);
+                if (plane->pendingReflection())
+                    plane->pendingReflection()->removeCullCallback(mCullCallback);
+            }
         }
 
         mCullCallback = callback;
@@ -713,7 +771,11 @@ namespace MWRender
             if (mReflection)
                 mReflection->addCullCallback(callback);
             for (auto& [_, plane] : mMeshWaterPlanes)
+            {
                 plane->reflection()->addCullCallback(callback);
+                if (plane->pendingReflection())
+                    plane->pendingReflection()->addCullCallback(callback);
+            }
         }
     }
 
@@ -1130,13 +1192,20 @@ namespace MWRender
 
     void Water::resizeMeshWaterPlane(MeshWaterPlane& plane, unsigned int resolution)
     {
-        osg::ref_ptr<Reflection> previous = plane.reflection();
-        const unsigned int previousResolution = plane.resolution();
+        if (resolution == plane.resolution())
+        {
+            auto [cancelledResolution, cancelled] = plane.cancelStagedReflection();
+            releaseMeshWaterReflection(cancelledResolution, std::move(cancelled));
+            return;
+        }
+        if (resolution == plane.pendingResolution())
+            return;
+
         osg::ref_ptr<Reflection> reflection = acquireMeshWaterReflection(resolution, plane.plane());
-        plane.replaceReflection(resolution, std::move(reflection));
-        releaseMeshWaterReflection(previousResolution, std::move(previous));
-        Log(Debug::Info) << "Resized mesh-water reflection for plane distance " << plane.plane().mDistance << " to "
-                         << resolution << "px";
+        auto [replacedResolution, replaced] = plane.stageReflection(resolution, std::move(reflection));
+        releaseMeshWaterReflection(replacedResolution, std::move(replaced));
+        Log(Debug::Info) << "Staged mesh-water reflection for plane distance " << plane.plane().mDistance << " at "
+                         << resolution << "px while retaining the complete " << plane.resolution() << "px target";
     }
 
     osg::ref_ptr<Reflection> Water::acquireMeshWaterReflection(
@@ -1641,8 +1710,10 @@ namespace MWRender
                 {
                     osg::ref_ptr<Reflection> reflection = planeIt->second->reflection();
                     const unsigned int resolution = planeIt->second->resolution();
+                    auto [pendingResolution, pendingReflection] = planeIt->second->cancelStagedReflection();
                     mMeshWaterPlanes.erase(planeIt);
                     releaseMeshWaterReflection(resolution, std::move(reflection));
+                    releaseMeshWaterReflection(pendingResolution, std::move(pendingReflection));
                 }
             }
         }
@@ -1837,14 +1908,11 @@ namespace MWRender
                     ? SceneUtil::waterCausticInteractionHeight
                     : SceneUtil::waterWaveInteractionHeight(mSurfaceParameters.mGeometricWaveHeight));
         }
-        const bool waterSettingsChanged = settings.empty()
-            || std::any_of(settings.begin(), settings.end(),
-                [](const auto& setting) { return setting.first == "Water" || setting.first == "OpenMWSE Water"; });
-        const bool meshWaveGeometryChanged = usedMeshGeometricWaves != (mMeshGeometricWaveHeight > 0.f);
-        const bool meshShaderPermutationChanged = settings.empty()
+        const bool rendererWaterSettingsChanged = settings.empty()
             || std::any_of(
                 settings.begin(), settings.end(), [](const auto& setting) { return setting.first == "Water"; });
-        if (waterSettingsChanged)
+        const bool meshWaveGeometryChanged = usedMeshGeometricWaves != (mMeshGeometricWaveHeight > 0.f);
+        if (rendererWaterSettingsChanged)
         {
             updateWaterMaterial();
             if (Settings::water().mShader)
@@ -1856,7 +1924,7 @@ namespace MWRender
                         removeSurfaceEffectBindings(root);
                 for (const osg::Node* root : known)
                     registerSurfaceEffects(const_cast<osg::Node*>(root));
-                if (!meshWaveGeometryChanged && meshShaderPermutationChanged)
+                if (!meshWaveGeometryChanged)
                     rebuildMeshWaterStateSets();
             }
             else
@@ -1865,9 +1933,20 @@ namespace MWRender
                     removeSurfaceEffectBindings(mMeshWaterObjects.begin()->first);
             }
         }
-        else if (Settings::water().mShader
-            && (usedDisplacedGeometry != mUsesDisplacedGeometry || usedSurfaceCoverage != mUsesSurfaceCoverage))
-            updateShaderWaterState();
+        else if (Settings::water().mShader)
+        {
+            if (meshWaveGeometryChanged)
+            {
+                const std::vector<const osg::Node*> known(
+                    mKnownSurfaceEffectObjects.begin(), mKnownSurfaceEffectObjects.end());
+                for (const osg::Node* root : known)
+                    removeSurfaceEffectBindings(root);
+                for (const osg::Node* root : known)
+                    registerSurfaceEffects(const_cast<osg::Node*>(root));
+            }
+            if (usedDisplacedGeometry != mUsesDisplacedGeometry || usedSurfaceCoverage != mUsesSurfaceCoverage)
+                updateShaderWaterState();
+        }
     }
 
     Water::~Water()
@@ -1927,7 +2006,11 @@ namespace MWRender
             mReflection->setInterior(mInterior);
         if (mInterior != wasInterior)
             for (auto& [_, plane] : mMeshWaterPlanes)
+            {
                 plane->reflection()->setInterior(mInterior);
+                if (plane->pendingReflection())
+                    plane->pendingReflection()->setInterior(mInterior);
+            }
         const osg::Vec3d position = mWaterNode->getPosition();
         if (mWaveOcclusion)
         {
@@ -1965,9 +2048,18 @@ namespace MWRender
         if (mMeshWaterSeamRebuildDelay > 0 && --mMeshWaterSeamRebuildDelay == 0)
             rebuildMeshWaterSeams();
         for (auto& [_, plane] : mMeshWaterPlanes)
-            if (const std::optional<unsigned int> resolution = plane->consumeRequestedResolution();
-                resolution && *resolution != plane->resolution())
+        {
+            if (plane->pendingReflection() && plane->pendingReflection()->hasCompletedRender())
+            {
+                const unsigned int publishedResolution = plane->pendingResolution();
+                auto [previousResolution, previous] = plane->publishStagedReflection();
+                releaseMeshWaterReflection(previousResolution, std::move(previous));
+                Log(Debug::Info) << "Published completed mesh-water reflection for plane distance "
+                                 << plane->plane().mDistance << " at " << publishedResolution << "px";
+            }
+            if (const std::optional<unsigned int> resolution = plane->consumeRequestedResolution(); resolution)
                 resizeMeshWaterPlane(*plane, *resolution);
+        }
 
         if (!paused)
         {
@@ -2006,7 +2098,11 @@ namespace MWRender
         if (mReflection)
             mReflection->setNodeMask(visible ? Mask_RenderToTexture : 0u);
         for (auto& [_, plane] : mMeshWaterPlanes)
+        {
             plane->reflection()->setNodeMask(visible ? Mask_RenderToTexture : 0u);
+            if (plane->pendingReflection())
+                plane->pendingReflection()->setNodeMask(visible ? Mask_RenderToTexture : 0u);
+        }
         if (mRipples)
             mRipples->setNodeMask(visible ? Mask_RenderToTexture : 0u);
     }
@@ -2064,7 +2160,11 @@ namespace MWRender
         if (mReflection)
             mReflection->showWorld(show);
         for (auto& [_, plane] : mMeshWaterPlanes)
+        {
             plane->reflection()->showWorld(show);
+            if (plane->pendingReflection())
+                plane->pendingReflection()->showWorld(show);
+        }
         mShowWorld = show;
     }
 

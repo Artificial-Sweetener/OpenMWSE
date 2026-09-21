@@ -244,6 +244,20 @@ namespace
         EXPECT_NEAR((onPlane - triangles.front()).length(), 0.f, 0.0001f);
     }
 
+    /// Preserve the established world-water camera transform when using the generalized plane representation.
+    TEST(WaterUtilTest, HorizontalReflectionMatrixMatchesEstablishedCameraTransform)
+    {
+        SceneUtil::WaterSurfacePlane plane;
+        plane.mDistance = 173.25f;
+        const osg::Matrixd established
+            = osg::Matrixd::scale(1.0, 1.0, -1.0) * osg::Matrixd::translate(0.0, 0.0, 2.0 * plane.mDistance);
+        const osg::Matrixd generalized = SceneUtil::waterSurfaceReflectionMatrix(plane);
+
+        for (int row = 0; row < 4; ++row)
+            for (int column = 0; column < 4; ++column)
+                EXPECT_DOUBLE_EQ(generalized(row, column), established(row, column));
+    }
+
     /// Bridge only matching lateral boundary seams and leave intentional longitudinal openings alone.
     TEST(WaterUtilTest, BoundarySeamsRequireParallelCompatibleEdges)
     {
@@ -341,6 +355,46 @@ namespace
         }
         policy.markVisible(47, 128);
         EXPECT_EQ(policy.consume(256), 128u);
+    }
+
+    /// Retain the complete reflection until a staged target is explicitly published.
+    TEST(WaterUtilTest, ReflectionHandoffNeverPublishesAnIncompleteResize)
+    {
+        SceneUtil::WaterReflectionHandoffPolicy policy(256);
+
+        const SceneUtil::WaterReflectionHandoffRequest stage = policy.request(512);
+        EXPECT_EQ(stage.mAction, SceneUtil::WaterReflectionHandoffAction::Stage);
+        EXPECT_FALSE(stage.mReleaseResolution);
+        EXPECT_EQ(policy.activeResolution(), 256u);
+        EXPECT_EQ(policy.pendingResolution(), 512u);
+
+        const SceneUtil::WaterReflectionHandoffRequest duplicate = policy.request(512);
+        EXPECT_EQ(duplicate.mAction, SceneUtil::WaterReflectionHandoffAction::None);
+        EXPECT_EQ(policy.activeResolution(), 256u);
+
+        EXPECT_EQ(policy.publish(), 256u);
+        EXPECT_EQ(policy.activeResolution(), 512u);
+        EXPECT_FALSE(policy.pendingResolution());
+    }
+
+    /// Cancel or replace unfinished targets without disturbing the active reflection.
+    TEST(WaterUtilTest, ReflectionHandoffSurvivesResolutionOscillation)
+    {
+        SceneUtil::WaterReflectionHandoffPolicy policy(256);
+        EXPECT_EQ(policy.request(512).mAction, SceneUtil::WaterReflectionHandoffAction::Stage);
+
+        const SceneUtil::WaterReflectionHandoffRequest replace = policy.request(128);
+        EXPECT_EQ(replace.mAction, SceneUtil::WaterReflectionHandoffAction::Replace);
+        EXPECT_EQ(replace.mReleaseResolution, 512u);
+        EXPECT_EQ(policy.activeResolution(), 256u);
+        EXPECT_EQ(policy.pendingResolution(), 128u);
+
+        const SceneUtil::WaterReflectionHandoffRequest cancel = policy.request(256);
+        EXPECT_EQ(cancel.mAction, SceneUtil::WaterReflectionHandoffAction::Cancel);
+        EXPECT_EQ(cancel.mReleaseResolution, 128u);
+        EXPECT_EQ(policy.activeResolution(), 256u);
+        EXPECT_FALSE(policy.pendingResolution());
+        EXPECT_FALSE(policy.publish());
     }
 
     /// Keep obstruction work inside a conservative slab around the displaced surface.

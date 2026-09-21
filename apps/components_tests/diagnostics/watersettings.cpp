@@ -9,7 +9,7 @@ TEST(DiagnosticWaterSettings, PreservesSliderDomainAndProtocolSupport)
 {
     for (const float height : { 0.f, 1.f, 30.f, 128.f, 250.f })
     {
-        const Diagnostics::WaterSettings settings{ height, height > 0.f, 0.75f, 3, 4 };
+        const Diagnostics::WaterSettings settings{ height, height > 0.f, 0.75f, 3, 4, "enhanced" };
         EXPECT_EQ(Diagnostics::deserializeWaterSettings(Diagnostics::serializeWaterSettings(settings)), settings);
     }
     EXPECT_TRUE(
@@ -30,6 +30,7 @@ TEST(DiagnosticWaterSettings, RejectsInvalidPayloadsBeforeMenuMutation)
     EXPECT_ANY_THROW(Diagnostics::serializeWaterSettings({ 0.f, true, 2.1f }));
     EXPECT_ANY_THROW(Diagnostics::serializeWaterSettings({ 0.f, true, 1.f, -1, 0 }));
     EXPECT_ANY_THROW(Diagnostics::serializeWaterSettings({ 0.f, true, 1.f, 0, 5 }));
+    EXPECT_ANY_THROW(Diagnostics::serializeWaterSettings({ 0.f, true, 1.f, 0, 0, "unknown" }));
 }
 
 /// Preserve version-one route fixtures while defaulting newly introduced optical controls safely.

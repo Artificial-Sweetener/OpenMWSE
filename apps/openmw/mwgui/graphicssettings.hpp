@@ -41,8 +41,8 @@ namespace MWGui
         void setGeometricWaveHeight(float height);
 
         /// Exercise the live geometric-wave and caustic controls with isolated diagnostic values.
-        void setWaterValues(
-            float height, bool caustics, float causticsStrength, int interiorLocalLights, int exteriorLocalLights);
+        void setWaterValues(std::string_view appearance, float height, bool caustics, float causticsStrength,
+            int interiorLocalLights, int exteriorLocalLights);
 
     private:
         /// Preserve the aggregate shadow enable setting after a caster category changes.
