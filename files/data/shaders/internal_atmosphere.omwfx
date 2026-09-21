@@ -209,8 +209,8 @@ shared {
         return openmwseCloudFormationTerrain(worldPosition).x;
     }
 
-    /// Evaluate height-fog density in the same integrated world-space advection field as clouds and shadows.
-    float mistDensityAt(vec3 worldPosition)
+    /// Evaluate footprint-filtered height-fog density in the shared world-space advection field.
+    float mistDensityAt(vec3 worldPosition, vec3 rayDirection, float segmentLength)
     {
         float densityScale = max(omw.atmosphereMistParameters.x, 0.0);
         float baseHeight = atmosphereLocalGroundHeight(worldPosition.xy) + omw.atmosphereMistParameters.y;
@@ -220,16 +220,23 @@ shared {
         vec2 advectedWorldPosition = worldPosition.xy + omw.atmosphereCloudAdvectionOffsetWorldUnits;
         vec2 noisePosition
             = advectedWorldPosition * 0.00011 + worldPosition.z * vec2(0.000025, -0.000018);
-        float detail = atmosphereNoise(noisePosition) * 0.68
-            + atmosphereNoise(noisePosition * 2.13 + vec2(9.7, -13.1)) * 0.32;
+        vec2 noiseDirection
+            = rayDirection.xy * 0.00011 + rayDirection.z * vec2(0.000025, -0.000018);
+        float primaryFootprint = length(noiseDirection) * segmentLength;
+        float secondaryFootprint = primaryFootprint * 2.13;
+        float primaryNoise = mix(atmosphereNoise(noisePosition), 0.5,
+            smoothstep(0.35, 1.0, primaryFootprint));
+        float secondaryNoise = mix(atmosphereNoise(noisePosition * 2.13 + vec2(9.7, -13.1)), 0.5,
+            smoothstep(0.35, 1.0, secondaryFootprint));
+        float detail = primaryNoise * 0.68 + secondaryNoise * 0.32;
         float valleyPooling = smoothstep(300.0, 4200.0, omw.atmosphereMediumReferenceParameters.w)
             * openmwseCloudTerrainInfluence(worldPosition.xy);
         return densityScale * heightShape * smoothstep(0.18, 0.82, detail)
             * mix(1.0, 1.58, valleyPooling);
     }
 
-    /// Evaluate sustained volumetric fog as a smoother ground-coupled medium than localized mist.
-    float fogDensityAt(vec3 worldPosition)
+    /// Evaluate footprint-filtered volumetric fog as a smoother ground-coupled medium than localized mist.
+    float fogDensityAt(vec3 worldPosition, vec3 rayDirection, float segmentLength)
     {
         float densityScale = max(omw.atmosphereFogVolumeParameters.x, 0.0);
         float baseHeight = atmosphereLocalGroundHeight(worldPosition.xy) + omw.atmosphereFogVolumeParameters.y;
@@ -239,7 +246,9 @@ shared {
             * (1.0 - smoothstep(0.78, 1.15, relativeHeight));
         vec2 advectedWorldPosition
             = worldPosition.xy + omw.atmosphereCloudAdvectionOffsetWorldUnits * 0.32;
-        float broadVariation = atmosphereNoise(advectedWorldPosition * 0.000035 + vec2(7.1, -23.4));
+        float footprint = length(rayDirection.xy) * segmentLength * 0.000035;
+        float broadVariation = mix(atmosphereNoise(advectedWorldPosition * 0.000035 + vec2(7.1, -23.4)),
+            0.5, smoothstep(0.35, 1.0, footprint));
         float valleyPooling = smoothstep(600.0, 5200.0, omw.atmosphereMediumReferenceParameters.w)
             * openmwseCloudTerrainInfluence(worldPosition.xy);
         return densityScale * heightShape * mix(0.78, 1.08, broadVariation)
@@ -268,6 +277,7 @@ shared {
     }
 
     const float maximumAtmosphereHistoryAdvectionWorldUnits = 128.0;
+    const float localMediaTargetNearStepWorldUnits = 1536.0;
 
     /// Reproject source clouds by camera motion and retain the native fog/mist wind model.
     float atmosphereMediumAdvectionScale(float mediumType)
@@ -427,7 +437,7 @@ shared {
         OpenMWSELocalMedia localMedia;
         localMedia.count = 0;
         localMedia.startDistance = 0.0;
-        localMedia.stepLength = 1.0;
+        localMedia.endDistance = 0.0;
         if (mistEnabled || fogEnabled)
         {
             float mistThickness = max(omw.atmosphereMistParameters.z, 1.0);
@@ -447,10 +457,20 @@ shared {
             if (interval.y > interval.x)
             {
                 int sampleCount = 6 + omw.atmosphereQuality * 3;
-                float stepLength = (interval.y - interval.x) / float(sampleCount);
+                float intervalLength = interval.y - interval.x;
+                float sampleCountValue = float(sampleCount);
+                float linearFirstFraction = 1.0 / sampleCountValue;
+                float qualityShape = float(omw.atmosphereQuality) / 3.0;
+                float shapedFirstFraction = mix(
+                    linearFirstFraction * linearFirstFraction * linearFirstFraction,
+                    linearFirstFraction * linearFirstFraction, qualityShape);
+                float targetFirstFraction
+                    = min(linearFirstFraction, localMediaTargetNearStepWorldUnits / intervalLength);
+                float frontLoading = clamp((linearFirstFraction - targetFirstFraction)
+                    / max(linearFirstFraction - shapedFirstFraction, 1e-5), 0.0, 1.0);
                 localMedia.count = sampleCount;
                 localMedia.startDistance = interval.x;
-                localMedia.stepLength = stepLength;
+                localMedia.endDistance = interval.y;
                 vec3 sunDirection = normalize(omw.sunPos.xyz);
                 float mistWeight = max(omw.atmosphereMistParameters.x, 0.0);
                 float fogWeight = max(omw.atmosphereFogVolumeParameters.x, 0.0);
@@ -460,6 +480,7 @@ shared {
                 OpenMWSECloudLayer mainCloud = openmwseMainCloudLayer();
                 OpenMWSECloudLayer incomingCloud = openmwseIncomingCloudLayer();
                 OpenMWSECloudLayer lowCloud = openmwseLowCloudLayer();
+                vec3 atmosphericTarget = openmwseAtmosphereSkyRadiance(rayDirection, atmosphere);
 
                 float previousLightRecovery = 0.0;
                 OpenMWSEVolumeIllumination illumination
@@ -469,13 +490,25 @@ shared {
                 {
                     if (sampleIndex >= sampleCount)
                         break;
-                    float segmentStart = interval.x + float(sampleIndex) * stepLength;
-                    // Shallow media vary on a much broader scale than one segment. A stable midpoint
-                    // is unbiased for the local linear field and avoids injecting needless temporal variance.
-                    float distanceAlongRay = segmentStart + 0.5 * stepLength;
+                    float segmentFraction = float(sampleIndex) / sampleCountValue;
+                    float nextSegmentFraction = float(sampleIndex + 1) / sampleCountValue;
+                    float shapedSegmentFraction = mix(segmentFraction * segmentFraction * segmentFraction,
+                        segmentFraction * segmentFraction, qualityShape);
+                    float shapedNextSegmentFraction = mix(
+                        nextSegmentFraction * nextSegmentFraction * nextSegmentFraction,
+                        nextSegmentFraction * nextSegmentFraction, qualityShape);
+                    float segmentStart
+                        = interval.x + intervalLength * mix(segmentFraction, shapedSegmentFraction, frontLoading);
+                    float segmentEnd = interval.x
+                        + intervalLength * mix(nextSegmentFraction, shapedNextSegmentFraction, frontLoading);
+                    float segmentLength = segmentEnd - segmentStart;
+                    float distanceAlongRay = segmentStart + 0.5 * segmentLength;
                     vec3 samplePosition = omw.eyePos.xyz + rayDirection * distanceAlongRay;
-                    float mistDensity = mistEnabled ? mistDensityAt(samplePosition) : 0.0;
-                    float fogDensity = fogEnabled ? fogDensityAt(samplePosition) : 0.0;
+                    float mistDensity
+                        = mistEnabled ? mistDensityAt(samplePosition, rayDirection, segmentLength) : 0.0;
+                    float fogDensity
+                        = fogEnabled ? fogDensityAt(samplePosition, rayDirection, segmentLength) : 0.0;
+                    localMedia.intervals[sampleIndex] = vec2(segmentStart, segmentEnd);
                     localMedia.segments[sampleIndex] = vec4(0.0);
                     float density = mistDensity + fogDensity;
                     if (density > 0.0001)
@@ -495,8 +528,10 @@ shared {
                         float solarVisibility = openmwseLocalMediaSunTransmittance(
                             samplePosition, sunDirection, mainCloud, incomingCloud, lowCloud);
                         vec3 directLight = illumination.solarIrradiance * solarVisibility * phase;
-                        localMedia.segments[sampleIndex]
-                            = vec4(illumination.diffuseRadiance + directLight + localLight, extinction);
+                        vec3 localRadiance = illumination.diffuseRadiance + directLight + localLight;
+                        vec3 visibleRadiance = openmwseApplyAerialPerspectiveTowardTarget(localRadiance,
+                            atmosphericTarget, rayDirection, distanceAlongRay, 1e20, atmosphere);
+                        localMedia.segments[sampleIndex] = vec4(visibleRadiance, extinction);
                     }
                 }
             }

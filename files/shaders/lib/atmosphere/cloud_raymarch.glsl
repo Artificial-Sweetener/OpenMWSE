@@ -48,7 +48,7 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
     bool mainLayerEnabled = outgoingLayerEnabled || incomingLayerEnabled;
     bool lowLayerEnabled = openmwseCloudLayerEnabled(lowLayer);
     if (!mainLayerEnabled && !lowLayerEnabled)
-        return openmwseIntegrateLocalMedia(localMedia, maximumDistance, worldDirection, atmosphere, visibleDistanceSum);
+        return openmwseIntegrateLocalMedia(localMedia, maximumDistance, visibleDistanceSum);
 
     vec2 mainInterval = vec2(1.0, 0.0);
     vec2 lowInterval = vec2(1.0, 0.0);
@@ -79,7 +79,7 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
     bool mainIntervalValid = mainInterval.y > mainInterval.x;
     bool lowIntervalValid = lowInterval.y > lowInterval.x;
     if (!mainIntervalValid && !lowIntervalValid)
-        return openmwseIntegrateLocalMedia(localMedia, maximumDistance, worldDirection, atmosphere, visibleDistanceSum);
+        return openmwseIntegrateLocalMedia(localMedia, maximumDistance, visibleDistanceSum);
 
     vec2 lowRayHeightBounds = lowIntervalValid
         ? openmwseLowCloudRayDensityHeightBounds(rayOrigin, worldDirection, lowInterval, lowLayer)
@@ -338,8 +338,7 @@ vec4 openmwseIntegrateCloudsInternal(vec3 rayOrigin, vec3 worldDirection, float 
     openmwseAdvanceLocalMedia(localMedia, maximumDistance, localCursor, transmittance,
         localScatteredLight, localOpacity, localDistanceSum);
     vec3 scatteredLight = mainScatteredLight + lowScatteredLight;
-    scatteredLight += openmwseLocalMediaRadiance(
-        localScatteredLight, localOpacity, localDistanceSum, worldDirection, atmosphere);
+    scatteredLight += localScatteredLight;
     visibleCloudOpacity = mainOpacity + lowOpacity;
     visibleDistanceSum = mainRepresentativeDistanceSum + lowRepresentativeDistanceSum + localDistanceSum;
     return vec4(scatteredLight, dot(transmittance, vec3(1.0 / 3.0)));
@@ -365,7 +364,7 @@ vec4 openmwseIntegrateCloudsStable(vec3 rayOrigin, vec3 worldDirection, float ma
     OpenMWSELocalMedia localMedia;
     localMedia.count = 0;
     localMedia.startDistance = 0.0;
-    localMedia.stepLength = 1.0;
+    localMedia.endDistance = 0.0;
     return openmwseIntegrateCloudsInternal(rayOrigin, worldDirection, maximumDistance, quality, solarRadiance,
         skyIrradiance, groundIrradiance, lowIllumination, atmosphericTarget, atmosphere, true, localMedia, visibleDistanceSum, visibleCloudOpacity);
 }

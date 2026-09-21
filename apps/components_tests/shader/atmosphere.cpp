@@ -5777,6 +5777,65 @@ void main()
         EXPECT_GT(warmRedBlue, coolRedBlue + 0.01);
     }
 
+    /// Keep long ocean-horizon mist rays close to the shared sky radiance and stable across supported quality levels.
+    TEST(AtmosphereShaderTest, oceanHorizonMistUsesFilteredDirectionalAtmosphere)
+    {
+        NativePassInputs inputs = makePackagedAtmosphereInputs("Clear", "Sunset");
+        inputs.width = 96;
+        inputs.height = 64;
+        inputs.verticalFov = 55.f;
+        inputs.eyePosition = { -1628413.5f, -614419.938f, 278.785f };
+        inputs.viewDirection = { 0.999809f, 0.f, 0.01953f };
+        inputs.farPlane = 327680.f;
+        inputs.fogNear = 24576.f;
+        inputs.fogFar = 221184.f;
+        inputs.cloudParameters = {};
+        inputs.incomingCloudParameters = {};
+        inputs.lowCloudParameters = {};
+        inputs.mistParameters = { 0.0459402f, 537.497f, 3743.26f, 0.f };
+        inputs.fogVolumeParameters = {};
+        inputs.mediumReferenceParameters = { 0.f, 0.f, 16000.f, 148.823f };
+        inputs.cloudAdvectionOffsetWorldUnits = { 1180.666f, 544.923f };
+        inputs.terrainHeight = [](const osg::Vec2f&) { return 0.f; };
+
+        inputs.quality = 1;
+        const PassImage mediumQuality = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        inputs.quality = 3;
+        const PassImage highQuality = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        inputs.renderCloudSkyReference = true;
+        const PassImage sky = renderNativeAtmospherePass("integrateAtmosphereRayGrid", inputs);
+        ASSERT_EQ(mediumQuality.pixels.size(), highQuality.pixels.size());
+        ASSERT_EQ(mediumQuality.pixels.size(), sky.pixels.size());
+
+        double qualityDifference = 0.0;
+        double skyDifference = 0.0;
+        std::size_t horizonSamples = 0;
+        for (int y = inputs.height / 2; y < inputs.height * 2 / 3; ++y)
+            for (int x = 0; x < inputs.width; ++x)
+            {
+                const osg::Vec4f& mediumVolume = mediumQuality.at(x, y);
+                const osg::Vec4f& highVolume = highQuality.at(x, y);
+                const float opacity = 1.f - mediumVolume.w();
+                if (opacity < 0.15f)
+                    continue;
+                const osg::Vec4f& skyPixel = sky.at(x, y);
+                const osg::Vec3f skyRadiance(skyPixel.x(), skyPixel.y(), skyPixel.z());
+                const osg::Vec3f mediumComposite(mediumVolume.x() + skyRadiance.x() * mediumVolume.w(),
+                    mediumVolume.y() + skyRadiance.y() * mediumVolume.w(),
+                    mediumVolume.z() + skyRadiance.z() * mediumVolume.w());
+                const osg::Vec3f highComposite(highVolume.x() + skyRadiance.x() * highVolume.w(),
+                    highVolume.y() + skyRadiance.y() * highVolume.w(),
+                    highVolume.z() + skyRadiance.z() * highVolume.w());
+                qualityDifference += (mediumComposite - highComposite).length();
+                skyDifference += (mediumComposite - skyRadiance).length();
+                ++horizonSamples;
+            }
+
+        ASSERT_GT(horizonSamples, static_cast<std::size_t>(inputs.width));
+        EXPECT_LT(qualityDifference / horizonSamples, 0.035);
+        EXPECT_LT(skyDifference / horizonSamples, 0.16);
+    }
+
     TEST(AtmosphereShaderTest, executesVolumeDepthTerminationWithReverseZ)
     {
         NativePassInputs openSkyInputs;
