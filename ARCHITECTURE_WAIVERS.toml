@@ -36,8 +36,8 @@ kind = "structural"
 justification = "SettingsWindow is the composition root for one modal settings surface: it binds the shared widget tree, coordinates tabs and focus, applies one pending-settings transaction, and owns the input, localization, and script-page presentation tied to that lifetime. Fork-specific live graphics policy, distance editing, shadow validation, and diagnostic exercise now belong to GraphicsSettings."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:1d82bcf86b3f4a1db9b5e71d281a6cc2b9623183e5f63538985b8122a1e0d167"
-max_lines = 994
+fingerprint = "sha256:e76ac859b2cf8eb6056f99a184df94433dd58294485acb8db4b61d176d0dcbf1"
+max_lines = 995
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-003"
@@ -101,8 +101,8 @@ kind = "structural"
 justification = "Object paging is one chunk-production pipeline that gathers eligible records, builds CPU nodes or GPU chunks and paged-light proxies, and caches the resulting chunks with their statistics. Each stage shares paging keys, compile policy, fallback state, and cache lifetime; extraction would create pass-through interfaces rather than an independent owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:55810c33b6e51f58b0cbe4e84260e1ab4c10d94c28a4e3ecd6aea1af3ea4f74e"
-max_lines = 1219
+fingerprint = "sha256:59124fe978091168bda269ef1825ee9dab709278a5437e39c5e55f98f8f57ea5"
+max_lines = 1227
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-026"
@@ -127,8 +127,8 @@ kind = "structural"
 justification = "RenderingManager is the renderer composition root and scene-facing facade: subsystem construction, ordered frame advancement, scene mutation, settings propagation, and renderer queries all coordinate the same owned object graph. Atmosphere diagnostic policy and applied capture state now belong to a separate controller."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:15df26361fb69c8dcb6871c6be3b125479746ba684355f57639bd2936c468cf0"
-max_lines = 2040
+fingerprint = "sha256:7068143e93b2ee58eabee090b16873a2f59520c114301498abc84f228c9bfcc5"
+max_lines = 2044
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-008"
@@ -163,11 +163,11 @@ owner = "OpenMWSE rendering"
 rule = "STRUCT003"
 path = "apps/openmw/mwrender/water.cpp"
 kind = "structural"
-justification = "Water owns one surface-rendering lifecycle comprising geometry, reflection resources, material state, ripple emission, and cell transitions. These behaviors share the same water plane, cameras, masks, and settings invalidation, so splitting them would distribute one render invariant across coupled owners."
+justification = "Water owns one surface-rendering lifecycle for conventional world water and classified planar mesh water. Geometry replacement, seam repair, reflection allocation and handoff, shared optical material state, ripple interaction, settings invalidation, and cell or object transitions all coordinate the same scene masks, cameras, water planes, and render targets; extracting one path would split those invariants across mutually dependent runtime owners."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:004d2d12c74e4dcadfa3c16c9d019772627ae9454aff8c56a1333c5857271be7"
-max_lines = 811
+fingerprint = "sha256:199475d42843286fb9b58e63931a1ec35048cced55afb479e7c4b09a06d24296"
+max_lines = 1862
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-011"
@@ -244,8 +244,8 @@ kind = "structural"
 justification = "SceneManager is the authoritative cached scene-resource lifecycle from load through clone, optimization, shader preparation, markers, and cache reporting. Those operations share cache keys, object sharing policy, and compile context; extraction would expose private cache invariants without a stable independent owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:17fe1082905f6a9f60f4e4092873ca57d995a3742e5adc20ae8408348782f48d"
-max_lines = 1039
+fingerprint = "sha256:0c325e0868182034474c49a60eeb0c63260872c4471d835356678b93f8fef073"
+max_lines = 1047
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-017"
@@ -257,8 +257,8 @@ kind = "structural"
 justification = "Resource statistics collection, event control, and the core HUD lifecycle form one optional debugging surface backed by the same cache counters and enablement state. GPU-scene overlay composition has a separate owner; the remaining presentation is the direct view of this exact resource-statistics model."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:7117d0e27269ab51cf48bf1ab4b50b4f5aa66854bae21d9f9ddd9dba6b5f8ef1"
-max_lines = 502
+fingerprint = "sha256:ce0bcf49316b146dfdba516f881912a688a45251b6f5cccebace1d4e1cd7412c"
+max_lines = 513
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-018"
@@ -322,8 +322,8 @@ kind = "structural"
 justification = "ShaderManager owns one cached shader-program lifecycle from template preprocessing and define resolution through material-mode program derivation, sampler allocation, compilation, linking, and reload invalidation. Each stage contributes to the same cache key and diagnostic context, so it remains a cohesive compilation owner."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:c9eb474cfb81b56c3aaa5add94269fd2e742a765112528fbc76975c71fb2d114"
-max_lines = 970
+fingerprint = "sha256:e60b4f4174d4e010591639961d9af2d9a059dc39bec5bccb3336d41bd89a7b40"
+max_lines = 971
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-022"
@@ -335,8 +335,8 @@ kind = "structural"
 justification = "ShaderVisitor performs one scene traversal that infers shader requirements and applies the resulting program and material state, while retaining enough state to restore removals. Analysis and mutation share node-local facts and traversal order; splitting them would require a duplicate intermediate scene model."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:b515969ad9a0d1ac4a4f787f3e5337b41835905afa42badfea2038913ab810b5"
-max_lines = 722
+fingerprint = "sha256:e7ecabb3fd42a7bea83c7d87f798214aa3bb38698229e0276cd8d8a891c3635e"
+max_lines = 771
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-023"
@@ -413,8 +413,8 @@ kind = "structural"
 justification = "The isolated-run implementation owns one controller lifecycle: validate an isolated launch, materialize its temporary profile, start and connect to the child, execute bounded capture or replay requests, retain requested evidence, and clean up. These stages share the same launch options, child identity, endpoint, artifact root, and failure cleanup contract; extracting a stage would divide one transactional owner across pass-through interfaces."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:aae2cb3f6a91d03a15fd742bdc8720120880c99e52c90acd3960ed3e41b24556"
-max_lines = 613
+fingerprint = "sha256:f3187835f26609e25d34434470b90db38248d5e2ac38f96b41b30057fcd556a6"
+max_lines = 620
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-034"
@@ -426,5 +426,18 @@ kind = "structural"
 justification = "Diagnostic commands form one engine-side protocol boundary that validates request envelopes, coordinates request-scoped capture state, and serializes the corresponding responses. Clearance and traversal reports depend on the same request identity, replay lifetime, response framing, and error translation as existing graphics and performance commands; separating them would duplicate protocol dispatch and cleanup policy."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:4ce1bbf521529a9c1c5d103f381f95fa73444a51d77eb325d808afa9d65a7f3f"
-max_lines = 597
+fingerprint = "sha256:064a32467aa09a38f62b043b06fe935477e377b44aa097ab48ef2bb3fb19cbac"
+max_lines = 598
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-035"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "components/sceneutil/waterutil.cpp"
+kind = "structural"
+justification = "Water utilities define one stateless surface-geometry and reflection-policy contract shared by world water, classified mesh water, shaders, and focused tests. Plane fitting, topology partitioning, seam construction, reflection sizing and handoff, and canonical water geometry creation use the same coordinate conventions and tolerances; splitting the file would divide one mathematical contract without creating an independent runtime owner or lifecycle."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:21eaf8e2bde395e66e366085af2471b65fb7597cdadb85a4daa5c9d1768e2e2e"
+max_lines = 611

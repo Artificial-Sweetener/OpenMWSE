@@ -52,6 +52,8 @@ source_files = [
   "components/resource/scenemanager.hpp",
   "components/resource/stats.cpp",
   "components/resource/stats.hpp",
+  "components/resource/surfaceeffectregistry.cpp",
+  "components/resource/surfaceeffectregistry.hpp",
   "components/std140/ubo.hpp",
 ]
 
