@@ -10,6 +10,8 @@
 #include <MyGUI_ComboBox.h>
 #include <MyGUI_EditBox.h>
 #include <MyGUI_ScrollBar.h>
+#include <MyGUI_ScrollView.h>
+#include <MyGUI_Widget.h>
 
 #include "distancesettings.hpp"
 
@@ -27,6 +29,9 @@ namespace MWGui
         /// Refresh effective control state and canonical numeric presentation.
         void refresh();
 
+        /// Refresh lighting controls whose effective availability depends on renderer support and GPU-scene policy.
+        void refreshLightingControls(bool supportsClustered);
+
         /// Reflow distance-setting help after the owning window changes size.
         void updateLayout();
 
@@ -37,6 +42,9 @@ namespace MWGui
         void setDistanceValues(
             bool useCellEditor, float view, float grass, float shadow, std::optional<int> resolution);
 
+        /// Exercise the live exterior fog range and independent endpoint locks with isolated diagnostic values.
+        void setFogValues(bool useCellEditor, bool enabled, float start, float end, bool startLocked, bool endLocked);
+
         /// Exercise the live geometric-wave slider with an isolated diagnostic value.
         void setGeometricWaveHeight(float height);
 
@@ -45,6 +53,20 @@ namespace MWGui
             int interiorLocalLights, int exteriorLocalLights);
 
     private:
+        /// Retain one category page and its responsive scrolling content.
+        struct Page
+        {
+            MyGUI::Widget* mPage;
+            MyGUI::ScrollView* mScroll;
+            MyGUI::Widget* mContent;
+        };
+
+        /// Show the selected graphics category without exposing implementation pages as tabs.
+        void onCategoryChanged(MyGUI::ComboBox* sender, std::size_t position);
+        /// Reflow one category to the available viewport and reserve the scrollbar gutter when needed.
+        void updatePageLayout(Page& page);
+        /// Change the visible category and synchronize its selector.
+        void selectCategory(std::size_t position);
         /// Preserve the aggregate shadow enable setting after a caster category changes.
         void onShadowCasterChanged(MyGUI::Widget* sender);
         /// Accept and apply a whole-pixel shadow-map resolution.
@@ -72,16 +94,28 @@ namespace MWGui
 
         /// Synchronize the shadow resolution field and increment boundaries.
         void refreshShadowResolution();
+        /// Synchronize controls that only apply to the selected window mode.
+        void refreshDisplayControls();
         /// Synchronize dependent atmosphere and shadow control states.
         void refreshAtmosphereControls();
         /// Synchronize subordinate optimization availability without changing saved selections.
         void refreshOptimizationControls();
         /// Synchronize water choices and dependent enhanced controls without discarding preferences.
         void refreshWaterControls();
+        /// Show or collapse a contextual group and notify each owning box to reflow immediately.
+        void setContextVisible(MyGUI::Widget& widget, bool visible);
 
         Layout& mLayout;
         std::function<void()> mApply;
+        MyGUI::ComboBox* mCategorySelector;
+        std::array<Page, 7> mPages;
+        bool mShowFogReviewPosition = false;
         std::unique_ptr<DistanceSettings> mDistanceSettings;
+        MyGUI::Widget* mWindowBorderRow;
+        MyGUI::Widget* mDisplayResolutionGroup;
+        MyGUI::Widget* mWindowModeHint;
+        MyGUI::Widget* mAtmosphereAppearanceGroup;
+        MyGUI::Widget* mAtmosphereQualityGroup;
         MyGUI::Button* mCloudShadowsButton;
         MyGUI::ScrollBar* mCloudShadowIntensity;
         MyGUI::Button* mReflectCloudsButton;
@@ -96,12 +130,20 @@ namespace MWGui
         MyGUI::ScrollBar* mExteriorWaterLights;
         MyGUI::ComboBox* mEnhancedWaterColor;
         std::array<MyGUI::Button*, 3> mEnhancedWaterButtons;
+        MyGUI::Widget* mWaterShaderControls;
+        MyGUI::Widget* mEnhancedWaterControls;
+        MyGUI::Widget* mWaterCausticsStrengthGroup;
         MyGUI::ComboBox* mShadowFilteringQuality;
         MyGUI::Button* mDistantShadowsButton;
         MyGUI::ComboBox* mDistantShadowQuality;
         MyGUI::EditBox* mShadowMapResolution;
         MyGUI::Button* mShadowResolutionDecrease;
         MyGUI::Button* mShadowResolutionIncrease;
+        MyGUI::Widget* mShadowFilteringGroup;
+        MyGUI::Widget* mDistantShadowsGroup;
+        MyGUI::Widget* mDistantShadowQualityGroup;
+        MyGUI::Widget* mCloudShadowIntensityGroup;
+        MyGUI::Widget* mGeometryShadowControls;
         MyGUI::Button* mOptimizationsEnabled;
         std::array<MyGUI::Button*, 12> mOptimizationButtons;
     };

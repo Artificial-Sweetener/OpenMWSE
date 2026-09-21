@@ -2,6 +2,8 @@
 
 #include <MyGUI_EditText.h>
 
+#include <cmath>
+
 namespace Gui
 {
     void AutoSizedWidget::notifySizeChange(MyGUI::Widget* w)
@@ -148,6 +150,36 @@ namespace Gui
         }
     }
 
+    MyGUI::IntSize AutoSizedComboBox::getRequestedSize()
+    {
+        const MyGUI::UString originalText = getOnlyText();
+        int contentWidth = getTextSize().width;
+        for (size_t index = 0; index < getItemCount(); ++index)
+        {
+            setOnlyText(getItemNameAt(index));
+            contentWidth = std::max(contentWidth, getTextSize().width);
+        }
+        setOnlyText(originalText);
+        return MyGUI::IntSize(contentWidth + mHorizontalPadding, getHeight());
+    }
+
+    void AutoSizedComboBox::setCaption(const MyGUI::UString& value)
+    {
+        FontWrapper<MyGUI::ComboBox>::setCaption(value);
+        notifySizeChange(this);
+    }
+
+    void AutoSizedComboBox::setPropertyOverride(std::string_view key, std::string_view value)
+    {
+        if (key == "ContentPadding")
+            mHorizontalPadding = MyGUI::utility::parseValue<int>(value);
+        else
+            FontWrapper<MyGUI::ComboBox>::setPropertyOverride(key, value);
+
+        if (key == "AddItem" || key == "ContentPadding")
+            notifySizeChange(this);
+    }
+
     Box::Box()
         : mSpacing(4)
         , mPadding(0)
@@ -179,9 +211,14 @@ namespace Gui
         const size_t count = getChildCount();
         int hStretchedCount = 0;
         int totalWidth = 0;
+        int fixedWidth = 0;
+        int spacingWidth = 0;
         int totalHeight = 0;
         std::vector<std::pair<MyGUI::IntSize, bool>> sizes;
         sizes.resize(count);
+        size_t fractionalChild = count;
+        float stretchFraction = 1.f;
+        int stretchBreakpoint = 0;
 
         for (size_t i = 0; i < count; ++i)
         {
@@ -191,23 +228,50 @@ namespace Gui
             if (hidden)
                 continue;
             hStretchedCount += hstretch;
+            const std::string_view fraction = w->getUserString("HStretchFraction");
+            if (!fraction.empty())
+            {
+                if (!hstretch)
+                    throw std::runtime_error("HStretchFraction requires HStretch on " + std::string(w->getName()));
+                if (fractionalChild != count)
+                    throw std::runtime_error("HBox supports only one HStretchFraction child");
+                stretchFraction = MyGUI::utility::parseValue<float>(fraction);
+                if (!std::isfinite(stretchFraction) || stretchFraction <= 0.f || stretchFraction > 1.f)
+                    throw std::runtime_error(
+                        "HStretchFraction must be finite and in the range (0, 1] on " + std::string(w->getName()));
+                const std::string_view breakpoint = w->getUserString("HStretchBreakpoint");
+                if (breakpoint.empty())
+                    throw std::runtime_error(
+                        "HStretchFraction requires HStretchBreakpoint on " + std::string(w->getName()));
+                stretchBreakpoint = MyGUI::utility::parseValue<int>(breakpoint);
+                if (stretchBreakpoint < 0)
+                    throw std::runtime_error("HStretchBreakpoint must be non-negative on " + std::string(w->getName()));
+                fractionalChild = i;
+            }
             AutoSizedWidget* aw = dynamic_cast<AutoSizedWidget*>(w);
             if (aw)
             {
                 sizes[i] = std::make_pair(aw->getRequestedSize(), hstretch);
                 totalWidth += aw->getRequestedSize().width;
+                if (!hstretch)
+                    fixedWidth += aw->getRequestedSize().width;
                 totalHeight = std::max(totalHeight, aw->getRequestedSize().height);
             }
             else
             {
                 sizes[i] = std::make_pair(w->getSize(), hstretch);
                 totalWidth += w->getSize().width;
+                if (!hstretch)
+                    fixedWidth += w->getSize().width;
                 if (!(w->getUserString("VStretch") == "true"))
                     totalHeight = std::max(totalHeight, w->getSize().height);
             }
 
             if (i != count - 1)
+            {
                 totalWidth += mSpacing;
+                spacingWidth += mSpacing;
+            }
         }
 
         if (mAutoResize
@@ -220,11 +284,21 @@ namespace Gui
             return;
         }
 
+        const bool fractionalLayout = fractionalChild != count;
+        constexpr int responsiveGutter = 8;
+        const int layoutPadding = fractionalLayout ? std::max(mPadding, responsiveGutter) : mPadding;
         int curX = 0;
+        const int totalStretchWidth
+            = std::max(0, getClientCoord().width - layoutPadding * 2 - fixedWidth - spacingWidth);
+        const int fractionalWidth = fractionalLayout
+            ? getResponsiveStretchWidth(totalStretchWidth, stretchFraction, stretchBreakpoint)
+            : totalStretchWidth;
+        int remainingFractionalWidth = totalStretchWidth - fractionalWidth;
+        int remainingFractionalChildren = hStretchedCount - 1;
         for (size_t i = 0; i < count; ++i)
         {
             if (i == 0)
-                curX += mPadding;
+                curX += layoutPadding;
 
             MyGUI::Widget* w = getChildAt(i);
 
@@ -245,7 +319,22 @@ namespace Gui
             {
                 if (hStretchedCount == 0)
                     throw std::logic_error("unexpected");
-                width = sizes[i].first.width + (getClientCoord().width - mPadding * 2 - totalWidth) / hStretchedCount;
+                if (fractionalLayout)
+                {
+                    if (i == fractionalChild)
+                        width = fractionalWidth;
+                    else
+                    {
+                        width = remainingFractionalChildren == 1
+                            ? remainingFractionalWidth
+                            : remainingFractionalWidth / remainingFractionalChildren;
+                        remainingFractionalWidth -= width;
+                        --remainingFractionalChildren;
+                    }
+                }
+                else
+                    width = sizes[i].first.width
+                        + (getClientCoord().width - layoutPadding * 2 - totalWidth) / hStretchedCount;
             }
             else
                 width = sizes[i].first.width;

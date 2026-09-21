@@ -36,8 +36,8 @@ kind = "structural"
 justification = "SettingsWindow is the composition root for one modal settings surface: it binds the shared widget tree, coordinates tabs and focus, applies one pending-settings transaction, and owns the input, localization, and script-page presentation tied to that lifetime. Fork-specific live graphics policy, distance editing, shadow validation, and diagnostic exercise now belong to GraphicsSettings."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:e76ac859b2cf8eb6056f99a184df94433dd58294485acb8db4b61d176d0dcbf1"
-max_lines = 995
+fingerprint = "sha256:ef5201e281aa81c305f72b5365c3e5ab9be6bfc3332c91ed7dd989254ae112cd"
+max_lines = 978
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-003"
@@ -413,8 +413,8 @@ kind = "structural"
 justification = "The isolated-run implementation owns one controller lifecycle: validate an isolated launch, materialize its temporary profile, start and connect to the child, execute bounded capture or replay requests, retain requested evidence, and clean up. These stages share the same launch options, child identity, endpoint, artifact root, and failure cleanup contract; extracting a stage would divide one transactional owner across pass-through interfaces."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:f3187835f26609e25d34434470b90db38248d5e2ac38f96b41b30057fcd556a6"
-max_lines = 620
+fingerprint = "sha256:7f923bacea92f2d1263ba2faf24306c38527e27112a198f0c4f3226dff9f2f59"
+max_lines = 618
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-034"

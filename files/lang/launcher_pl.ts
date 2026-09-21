@@ -227,7 +227,7 @@
         <translation>Pełny ekran</translation>
     </message>
     <message>
-        <source>Windowed Fullscreen</source>
+        <source>Borderless Windowed</source>
         <translation>Okno pełnoekranowe</translation>
     </message>
     <message>
@@ -430,8 +430,16 @@ do domyślnych czcionek Morrowind. Zaznacz to pole, jeśli nadal wolisz oryginal
         <translation>&lt;br&gt;&lt;b&gt;Błąd SDL_GetDisplayMode:&lt;/b&gt;&lt;br&gt;&lt;br&gt;</translation>
     </message>
     <message>
+        <source>Custom window size is unavailable in Fullscreen mode.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Borderless Windowed mode does not draw a window frame.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Custom window size is available only in Windowed mode.</source>
-        <translation>Niestandardowy rozmiar okna jest dostępny tylko w trybie okienkowym.</translation>
+        <translation type="vanished">Niestandardowy rozmiar okna jest dostępny tylko w trybie okienkowym.</translation>
     </message>
     <message>
         <source>Window border is available only in Windowed mode.</source>
@@ -439,7 +447,7 @@ do domyślnych czcionek Morrowind. Zaznacz to pole, jeśli nadal wolisz oryginal
     </message>
     <message>
         <source>Windowed Fullscreen mode always uses the native display resolution.</source>
-        <translation>Tryb pełnoekranowy z oknem zawsze wykorzystuje natywną rozdzielczość ekranu.</translation>
+        <translation type="vanished">Tryb pełnoekranowy z oknem zawsze wykorzystuje natywną rozdzielczość ekranu.</translation>
     </message>
 </context>
 <context>

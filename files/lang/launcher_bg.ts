@@ -227,7 +227,7 @@
         <translation>Цял екран</translation>
     </message>
     <message>
-        <source>Windowed Fullscreen</source>
+        <source>Borderless Windowed</source>
         <translation>Цял екран в прозорец</translation>
     </message>
     <message>
@@ -428,8 +428,16 @@ to default Morrowind fonts. Check this box if you still prefer original fonts ov
         <translation>&lt;br&gt;&lt;b&gt;SDL_GetDisplayMode се провали:&lt;/b&gt;&lt;br&gt;&lt;br&gt;</translation>
     </message>
     <message>
+        <source>Custom window size is unavailable in Fullscreen mode.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Borderless Windowed mode does not draw a window frame.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Custom window size is available only in Windowed mode.</source>
-        <translation>Потребителският размер на прозореца е наличен само в режим прозорец.</translation>
+        <translation type="vanished">Потребителският размер на прозореца е наличен само в режим прозорец.</translation>
     </message>
     <message>
         <source>Window border is available only in Windowed mode.</source>
@@ -437,7 +445,7 @@ to default Morrowind fonts. Check this box if you still prefer original fonts ov
     </message>
     <message>
         <source>Windowed Fullscreen mode always uses the native display resolution.</source>
-        <translation>Режимът цял екран в прозорец винаги използва естествената резолюция.</translation>
+        <translation type="vanished">Режимът цял екран в прозорец винаги използва естествената резолюция.</translation>
     </message>
 </context>
 <context>

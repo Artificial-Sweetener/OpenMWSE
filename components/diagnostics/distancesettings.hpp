@@ -7,6 +7,19 @@
 
 namespace Diagnostics
 {
+    /// Describe the custom exterior fog range and the scaling policy for each endpoint.
+    struct FogDistanceSettings
+    {
+        bool mEnabled = true;
+        float mStart = 24576.f;
+        float mEnd = 221184.f;
+        bool mStartLocked = false;
+        bool mEndLocked = false;
+
+        /// Compare the complete fog-range preference snapshot.
+        bool operator==(const FogDistanceSettings&) const = default;
+    };
+
     /// Describe canonical world-unit distances and the editor used for isolated menu verification.
     struct DistanceSettings
     {
@@ -15,6 +28,7 @@ namespace Diagnostics
         float mShadow = 8192;
         bool mUseCellEditor = true;
         std::optional<int> mShadowResolution;
+        std::optional<FogDistanceSettings> mFog;
 
         /// Compare stored distances and the input editor.
         bool operator==(const DistanceSettings&) const = default;

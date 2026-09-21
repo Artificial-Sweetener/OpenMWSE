@@ -195,7 +195,7 @@
         <translation>Полный экран</translation>
     </message>
     <message>
-        <source>Windowed Fullscreen</source>
+        <source>Borderless Windowed</source>
         <translation>Оконный без полей</translation>
     </message>
     <message>
@@ -428,8 +428,16 @@ to default Morrowind fonts. Check this box if you still prefer original fonts ov
         <translation>&lt;br&gt;&lt;b&gt;Вызов SDL_GetDisplayMode завершился с ошибкой:&lt;/b&gt;&lt;br&gt;&lt;br&gt;</translation>
     </message>
     <message>
+        <source>Custom window size is unavailable in Fullscreen mode.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Borderless Windowed mode does not draw a window frame.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Custom window size is available only in Windowed mode.</source>
-        <translation>Особый размер окна доступен только в оконном режиме.</translation>
+        <translation type="vanished">Особый размер окна доступен только в оконном режиме.</translation>
     </message>
     <message>
         <source>Window border is available only in Windowed mode.</source>
@@ -437,7 +445,7 @@ to default Morrowind fonts. Check this box if you still prefer original fonts ov
     </message>
     <message>
         <source>Windowed Fullscreen mode always uses the native display resolution.</source>
-        <translation>Режим &quot;Оконный без полей&quot; всегда использует родное разрешение экрана.</translation>
+        <translation type="vanished">Режим &quot;Оконный без полей&quot; всегда использует родное разрешение экрана.</translation>
     </message>
 </context>
 <context>

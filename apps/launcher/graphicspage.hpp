@@ -25,6 +25,7 @@ namespace Launcher
         bool loadSettings();
 
     public slots:
+        /// Rebuild resolution choices and size bounds for the selected display.
         void screenChanged(int screen);
 
     private slots:
@@ -39,6 +40,7 @@ namespace Launcher
         static QRect getMaximumResolution();
 
         bool setupSDL();
+        /// Reveal and enable display controls appropriate to the selected window mode.
         void handleWindowModeChange(Settings::WindowMode state);
     };
 }

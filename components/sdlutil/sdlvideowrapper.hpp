@@ -37,7 +37,7 @@ namespace SDLUtil
         /// Apply display gamma and contrast when an interactive window is present.
         void setGammaContrast(float gamma, float contrast);
 
-        /// Apply display mode changes when an interactive window is present.
+        /// Apply exclusive, selected-size borderless, or bordered display mode changes to the interactive window.
         void setVideoMode(int width, int height, Settings::WindowMode windowMode, bool windowBorder);
 
         /// Center the interactive window when one is present.

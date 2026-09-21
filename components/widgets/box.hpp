@@ -1,6 +1,8 @@
 #ifndef OPENMW_WIDGETS_BOX_H
 #define OPENMW_WIDGETS_BOX_H
 
+#include <algorithm>
+
 #include <MyGUI_Button.h>
 #include <MyGUI_ComboBox.h>
 #include <MyGUI_EditBox.h>
@@ -11,6 +13,13 @@
 
 namespace Gui
 {
+    /// Return a responsive stretch width that never shrinks as the available width grows.
+    constexpr int getResponsiveStretchWidth(int availableWidth, float wideFraction, int compactWidth)
+    {
+        const int fractionalWidth = static_cast<int>(availableWidth * wideFraction);
+        return std::min(availableWidth, std::max(compactWidth, fractionalWidth));
+    }
+
     class Button : public FontWrapper<MyGUI::Button>
     {
         MYGUI_RTTI_DERIVED(Button)
@@ -89,6 +98,26 @@ namespace Gui
         std::string mFontSize;
     };
 
+    /// Sizes a combo box to its longest localized option plus the skin's horizontal affordances.
+    class AutoSizedComboBox : public AutoSizedWidget, public FontWrapper<MyGUI::ComboBox>
+    {
+        MYGUI_RTTI_DERIVED(AutoSizedComboBox)
+
+    public:
+        /// Return the width required by the longest option without changing the selected item.
+        MyGUI::IntSize getRequestedSize() override;
+
+        /// Update the caption and notify an owning box that the requested width may have changed.
+        void setCaption(const MyGUI::UString& value) override;
+
+    protected:
+        /// Apply combo-box properties and refresh content sizing when options are added.
+        void setPropertyOverride(std::string_view key, std::string_view value) override;
+
+    private:
+        int mHorizontalPadding = 32;
+    };
+
     /**
      * @brief A container widget that automatically sizes its children
      * @note the box being an AutoSizedWidget as well allows to put boxes inside a box
@@ -134,6 +163,7 @@ namespace Gui
     protected:
         void initialiseOverride() override;
 
+        /// Arrange children horizontally, applying an optional monotonic fractional width after a compact plateau.
         void align() override;
         MyGUI::IntSize getRequestedSize() override;
 

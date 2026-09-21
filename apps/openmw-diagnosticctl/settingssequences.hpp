@@ -3,6 +3,7 @@
 
 #include <filesystem>
 #include <span>
+#include <string_view>
 #include <vector>
 
 #include <components/diagnostics/atmospheresettings.hpp>
@@ -35,6 +36,10 @@ namespace DiagnosticCtl
     /// Load and preserve the optional displacement-and-caustics settings sequence for one route.
     std::vector<Diagnostics::WaterSettings> loadWaterSettingsSequence(
         std::span<char*> arguments, const SettingsSequenceContext& context);
+
+    /// Write one serialized live-settings observation to its evidence artifact.
+    void writeSettingsEvidence(
+        const std::filesystem::path& path, std::string_view evidence, std::string_view failureContext);
 }
 
 #endif

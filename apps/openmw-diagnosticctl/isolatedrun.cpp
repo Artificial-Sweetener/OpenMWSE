@@ -47,6 +47,7 @@ namespace
         if (!stream)
             throw std::runtime_error(std::string("failed writing ") + std::string(failureContext));
     }
+
 }
 
 namespace DiagnosticCtl
@@ -385,11 +386,10 @@ namespace DiagnosticCtl
                     const auto observed = Diagnostics::deserializeOptimizationSettings(payloadText(applied.mPayload));
                     if (observed != requested)
                         throw std::runtime_error("live optimization settings did not match the requested selections");
-                    std::ofstream evidence(
-                        artifacts / ("optimization-settings-" + std::to_string(segmentIndex) + ".yaml"));
-                    evidence << Diagnostics::serializeOptimizationSettings(observed);
-                    if (!evidence)
-                        throw std::runtime_error("failed writing live optimization settings evidence");
+                    writeSettingsEvidence(
+                        artifacts / ("optimization-settings-" + std::to_string(segmentIndex) + ".yaml"),
+                        Diagnostics::serializeOptimizationSettings(observed),
+                        "failed writing live optimization settings evidence");
                     std::cout << "live-optimization-settings-parity: " << segmentIndex << " true\n";
                 }
                 if (!distanceSequence.empty())
@@ -402,12 +402,12 @@ namespace DiagnosticCtl
                     const auto observed = Diagnostics::deserializeDistanceSettings(payloadText(applied.mPayload));
                     if (observed.mView != requested.mView || observed.mGrass != requested.mGrass
                         || observed.mUseCellEditor != requested.mUseCellEditor
+                        || observed.mShadowResolution != requested.mShadowResolution || observed.mFog != requested.mFog
                         || (requested.mShadow > 0 ? observed.mShadow != requested.mShadow : observed.mShadow > 0))
                         throw std::runtime_error("live distance controls did not match the requested preferences");
-                    std::ofstream evidence(artifacts / ("distance-settings-" + std::to_string(segmentIndex) + ".yaml"));
-                    evidence << Diagnostics::serializeDistanceSettings(observed);
-                    if (!evidence)
-                        throw std::runtime_error("failed writing live distance settings evidence");
+                    writeSettingsEvidence(artifacts / ("distance-settings-" + std::to_string(segmentIndex) + ".yaml"),
+                        Diagnostics::serializeDistanceSettings(observed),
+                        "failed writing live distance settings evidence");
                     std::cout << "live-distance-settings-parity: " << segmentIndex << " true\n";
                 }
                 if (!waterSequence.empty())
@@ -420,10 +420,8 @@ namespace DiagnosticCtl
                     const auto observed = Diagnostics::deserializeWaterSettings(payloadText(applied.mPayload));
                     if (observed != requested)
                         throw std::runtime_error("live water control did not match the requested wave height");
-                    std::ofstream evidence(artifacts / ("water-settings-" + std::to_string(segmentIndex) + ".yaml"));
-                    evidence << Diagnostics::serializeWaterSettings(observed);
-                    if (!evidence)
-                        throw std::runtime_error("failed writing live water settings evidence");
+                    writeSettingsEvidence(artifacts / ("water-settings-" + std::to_string(segmentIndex) + ".yaml"),
+                        Diagnostics::serializeWaterSettings(observed), "failed writing live water settings evidence");
                     std::cout << "live-water-settings-parity: " << segmentIndex << " true\n";
                 }
                 if (!settingsSequence.empty())
@@ -612,14 +610,15 @@ namespace DiagnosticCtl
             static_cast<std::streamsize>(finalGameplay.mPayload.size()));
         if (!gameplayFile)
             throw std::runtime_error("failed writing final gameplay evidence");
-        if (const auto page = findOption(arguments, "--video-settings-page"))
+        for (const std::string& page : findOptions(arguments, "--video-settings-page"))
         {
             requireSuccessfulResponse(Diagnostics::transact(
-                endpoint, { requestId++, Diagnostics::CommandType::ShowVideoSettings, textPayload(*page) }));
+                endpoint, { requestId++, Diagnostics::CommandType::ShowVideoSettings, textPayload(page) }));
             Diagnostics::Command settle{ requestId++, Diagnostics::CommandType::StepFrames,
                 { std::byte{ 8 }, std::byte{ 0 }, std::byte{ 0 }, std::byte{ 0 } } };
             requireSuccessfulResponse(Diagnostics::transact(endpoint, settle));
             waitForScheduledFrames(endpoint, requestId, completedFixedFrames + 8);
+            completedFixedFrames += 8;
         }
         if (!headed)
             child.requireNonDisruptiveWindowState();

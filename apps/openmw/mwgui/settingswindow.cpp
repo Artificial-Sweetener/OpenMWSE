@@ -11,6 +11,7 @@
 #include <MyGUI_ScrollBar.h>
 #include <MyGUI_ScrollView.h>
 #include <MyGUI_TabControl.h>
+#include <MyGUI_TabItem.h>
 #include <MyGUI_UString.h>
 #include <MyGUI_Window.h>
 
@@ -277,7 +278,6 @@ namespace MWGui
         getWidget(mSecondaryLanguage, "SecondaryLanguage");
         getWidget(mGmstOverridesL10n, "GmstOverridesL10nButton");
         getWidget(mWindowModeHint, "WindowModeHint");
-        getWidget(mClusteredLightingButton, "ClusteredLightingButton");
         getWidget(mLightsResetButton, "LightsResetButton");
         getWidget(mMaxLights, "MaxLights");
         getWidget(mScriptFilter, "ScriptFilter");
@@ -286,9 +286,6 @@ namespace MWGui
         getWidget(mScriptView, "ScriptView");
         getWidget(mScriptAdapter, "ScriptAdapter");
         getWidget(mScriptDisabled, "ScriptDisabled");
-        getWidget(mClassicFalloffWidget, "ClassicFalloffWidget");
-        getWidget(mMinimumBrightness, "MinimumBrightness");
-        getWidget(mMinimumLightRadius, "MinimumLightRadius");
 
 #ifndef WIN32
         // hide gamma controls since it currently does not work under Linux
@@ -387,8 +384,7 @@ namespace MWGui
         updateMaxLightsComboBox(mMaxLights);
 
         const Settings::WindowMode windowMode = Settings::video().mWindowMode;
-        mWindowBorderButton->setEnabled(
-            windowMode != Settings::WindowMode::Fullscreen && windowMode != Settings::WindowMode::WindowedFullscreen);
+        mWindowBorderButton->setEnabled(windowMode == Settings::WindowMode::Windowed);
 
         mWindowModeHint->setVisible(windowMode == Settings::WindowMode::WindowedFullscreen);
 
@@ -585,16 +581,8 @@ namespace MWGui
             return;
 
         const Settings::WindowMode windowMode = static_cast<Settings::WindowMode>(sender->getIndexSelected());
-        if (windowMode == Settings::WindowMode::WindowedFullscreen)
-        {
-            mResolutionList->setEnabled(false);
-            mWindowModeHint->setVisible(true);
-        }
-        else
-        {
-            mResolutionList->setEnabled(true);
-            mWindowModeHint->setVisible(false);
-        }
+        mResolutionList->setEnabled(true);
+        mWindowModeHint->setVisible(windowMode == Settings::WindowMode::WindowedFullscreen);
 
         if (windowMode == Settings::WindowMode::Windowed)
             mWindowBorderButton->setEnabled(true);
@@ -854,19 +842,7 @@ namespace MWGui
     {
         const bool supportsClustered
             = MWBase::Environment::get().getResourceSystem()->getSceneManager()->isClusteredLightingSupported();
-        const bool optimizedLighting = Settings::optimizations().useGpuSceneLighting();
-        const bool isClustered = supportsClustered && (optimizedLighting || Settings::shaders().mClusteredLighting);
-        const bool usesClassic = Settings::shaders().mClassicFalloff && (!isClustered || optimizedLighting);
-
-        mClusteredLightingButton->setEnabled(supportsClustered && !optimizedLighting);
-        mClassicFalloffWidget->setVisible(optimizedLighting || !isClustered);
-        mMaxLights->setEnabled(!isClustered || usesClassic);
-        mMinimumLightRadius->setVisible(optimizedLighting && !usesClassic);
-        mMinimumLightRadius->setUserString("Hidden", optimizedLighting && !usesClassic ? "false" : "true");
-        const bool showBrightness = !usesClassic;
-        mMinimumBrightness->setVisible(showBrightness);
-        mMinimumBrightness->setUserString("Hidden", showBrightness ? "false" : "true");
-        static_cast<Gui::VBox*>(mMinimumLightRadius->getParent())->notifyChildrenSizeChanged();
+        mGraphicsSettings->refreshLightingControls(supportsClustered);
     }
 
     void SettingsWindow::updateWindowModeSettings()
@@ -876,7 +852,7 @@ namespace MWGui
 
         mWindowModeList->setIndexSelected(windowModeIndex);
 
-        if (windowMode != Settings::WindowMode::Windowed && windowModeIndex != MyGUI::ITEM_NONE)
+        if (windowMode == Settings::WindowMode::Fullscreen && windowModeIndex != MyGUI::ITEM_NONE)
         {
             // check if this resolution is supported in fullscreen
             if (mResolutionList->getIndexSelected() != MyGUI::ITEM_NONE)
@@ -921,8 +897,7 @@ namespace MWGui
             mWindowBorderButton->setEnabled(false);
         }
 
-        if (windowMode == Settings::WindowMode::WindowedFullscreen)
-            mResolutionList->setEnabled(false);
+        mResolutionList->setEnabled(true);
     }
 
     void SettingsWindow::updateVSyncModeSettings()
@@ -1056,6 +1031,15 @@ namespace MWGui
 
     void SettingsWindow::showVideoPage(std::string_view page)
     {
+        const std::string_view tabName = page == "preferences" || page == "prefs" ? "PreferencesPage"
+            : page == "audio"                                                     ? "AudioPage"
+            : page == "controls"                                                  ? "ControlsPage"
+                                                                                  : std::string_view{};
+        if (!tabName.empty())
+        {
+            mSettingsTab->setItemSelected(getWidget(tabName)->castType<MyGUI::TabItem>());
+            return;
+        }
         mGraphicsSettings->showPage(page);
     }
 
@@ -1063,6 +1047,12 @@ namespace MWGui
         bool useCellEditor, float view, float grass, float shadow, std::optional<int> resolution)
     {
         mGraphicsSettings->setDistanceValues(useCellEditor, view, grass, shadow, resolution);
+    }
+
+    void SettingsWindow::setFogValues(
+        bool useCellEditor, bool enabled, float start, float end, bool startLocked, bool endLocked)
+    {
+        mGraphicsSettings->setFogValues(useCellEditor, enabled, start, end, startLocked, endLocked);
     }
 
     void SettingsWindow::setGeometricWaveHeight(float height)
@@ -1120,14 +1110,6 @@ namespace MWGui
         // Need to include window margins
         int margins = mMainWidget->getWidth() - mSettingsTab->getWidth();
         int minimumWindowWidth = tabBarWidth + margins;
-        MyGUI::TabControl* videoTabs;
-        getWidget(videoTabs, "VideoTabs");
-        int videoTabWidth = 0;
-        for (uint32_t i = 0; i < videoTabs->getItemCount(); ++i)
-            videoTabWidth += videoTabs->getButtonWidthAt(i);
-        minimumWindowWidth
-            = std::max(minimumWindowWidth, videoTabWidth + mMainWidget->getWidth() - videoTabs->getWidth());
-
         if (minimumWindowWidth > minSize.width)
         {
             minSize.width = minimumWindowWidth;

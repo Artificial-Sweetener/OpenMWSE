@@ -24,12 +24,15 @@ namespace MWGui
         /// Refresh values, dependencies and the space required by localized tabs.
         void onOpen() override;
 
-        /// Open a named video page using stable layout identities.
+        /// Open a named top-level or video-category page using stable layout identities.
         void showVideoPage(std::string_view page);
 
         /// Apply isolated diagnostic input through the ordinary distance and shadow-resolution controls.
         void setDistanceValues(
             bool useCellEditor, float view, float grass, float shadow, std::optional<int> resolution);
+
+        /// Apply isolated diagnostic input through the custom fog-range controls.
+        void setFogValues(bool useCellEditor, bool enabled, float start, float end, bool startLocked, bool endLocked);
 
         /// Apply isolated diagnostic input through the ordinary geometric-wave slider.
         void setGeometricWaveHeight(float height);
@@ -47,6 +50,7 @@ namespace MWGui
         void updateLightSettings();
         void updateVSyncModeSettings();
 
+        /// Reconcile the saved window mode and resolution with the live display controls.
         void updateWindowModeSettings();
 
         void onResChange(int, int) override;
@@ -71,11 +75,7 @@ namespace MWGui
         MyGUI::ComboBox* mWaterRainRippleDetail;
 
         MyGUI::ComboBox* mMaxLights;
-        MyGUI::Button* mClusteredLightingButton;
-        MyGUI::Widget* mClassicFalloffWidget;
         MyGUI::Button* mLightsResetButton;
-        MyGUI::Widget* mMinimumBrightness;
-        MyGUI::Widget* mMinimumLightRadius;
 
         MyGUI::ComboBox* mPrimaryLanguage;
         MyGUI::ComboBox* mSecondaryLanguage;
@@ -121,6 +121,7 @@ namespace MWGui
         void onLanguageChanged(size_t langPriority, MyGUI::ComboBox* sender, size_t pos);
         void onGmstOverridesL10nChanged(MyGUI::Widget* sender);
 
+        /// Apply a window-mode selection and refresh its contextual controls live.
         void onWindowModeChanged(MyGUI::ComboBox* sender, size_t pos);
         void onVSyncModeChanged(MyGUI::ComboBox* sender, size_t pos);
 

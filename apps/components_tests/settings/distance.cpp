@@ -55,6 +55,35 @@ TEST(DistanceSettingsTest, StepsRespectZeroAndFiniteStorageBoundaries)
     EXPECT_LT(Settings::stepDistance(largest, DistanceUnits::WorldUnits, false, false), largest);
 }
 
+TEST(DistanceSettingsTest, UnlockedFogEndpointsRetainTheirViewingDistanceRatios)
+{
+    const Settings::FogDistanceRange range{ 8192.f, 12288.f };
+    EXPECT_EQ(Settings::scaleFogDistanceRange(range, 16384.f, 32768.f, false, false),
+        (Settings::FogDistanceRange{ 16384.f, 24576.f }));
+}
+
+TEST(DistanceSettingsTest, FogEndpointLocksAreIndependent)
+{
+    const Settings::FogDistanceRange range{ 8192.f, 12288.f };
+    EXPECT_EQ(Settings::scaleFogDistanceRange(range, 16384.f, 32768.f, true, false),
+        (Settings::FogDistanceRange{ 8192.f, 24576.f }));
+    EXPECT_EQ(Settings::scaleFogDistanceRange(range, 16384.f, 8192.f, false, true),
+        (Settings::FogDistanceRange{ 4096.f, 12288.f }));
+    EXPECT_EQ(Settings::scaleFogDistanceRange(range, 16384.f, 32768.f, true, true), range);
+}
+
+TEST(DistanceSettingsTest, MixedFogLocksPreserveStrictEndpointOrdering)
+{
+    const Settings::FogDistanceRange range{ 8192.f, 12288.f };
+    const auto lockedEnd = Settings::scaleFogDistanceRange(range, 16384.f, 32768.f, false, true);
+    EXPECT_LT(lockedEnd.mStart, lockedEnd.mEnd);
+    EXPECT_EQ(lockedEnd.mEnd, range.mEnd);
+
+    const auto lockedStart = Settings::scaleFogDistanceRange(range, 16384.f, 4096.f, true, false);
+    EXPECT_LT(lockedStart.mStart, lockedStart.mEnd);
+    EXPECT_EQ(lockedStart.mStart, range.mStart);
+}
+
 #include <components/settings/shadowresolution.hpp>
 
 TEST(ShadowResolutionSettingsTest, PreservesWholePixelValuesAndRejectsUnsupportedInput)

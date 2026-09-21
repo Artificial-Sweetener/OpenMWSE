@@ -49,6 +49,8 @@ file(GLOB UNITTEST_SRC_FILES
     settings/shadermanager.cpp
     settings/testvalues.cpp
     settings/distance.cpp
+    settings/graphicssettingsvisibility.cpp
+    settings/responsivewidth.cpp
 
     shader/instancedprogram.cpp
     shader/parsedefines.cpp

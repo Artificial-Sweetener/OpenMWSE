@@ -9,13 +9,14 @@
 #include <vector>
 
 #include <MyGUI_Button.h>
+#include <MyGUI_ComboBox.h>
 #include <MyGUI_EditBox.h>
 #include <MyGUI_ScrollView.h>
 
 namespace MWGui
 {
     class Layout;
-    /// Bind video distance editors to canonical settings with simultaneous cell and world-unit entry.
+    /// Bind each video distance to one canonical editor with an independently remembered presentation unit.
     class DistanceSettings
     {
     public:
@@ -32,25 +33,27 @@ namespace MWGui
         /// values.
         void setValues(bool useCellEditor, float view, float grass, float shadow);
 
+        /// Exercise the live exterior fog range and independent lock controls with isolated diagnostic values.
+        void setFogValues(bool useCellEditor, bool enabled, float start, float end, bool startLocked, bool endLocked);
+
     private:
-        /// Retain one setting's paired numeric entries, increment buttons, and performance note.
+        /// Retain one setting's canonical editor, presentation choice, behavior choice, and performance note.
         struct Row
         {
             MyGUI::Widget* mWidget;
             MyGUI::TextBox* mExplanation;
-            int mInitialTop;
             Settings::SettingValue<float>* mSetting;
-            std::array<MyGUI::Button*, 4> mArrows;
+            std::array<MyGUI::Button*, 2> mArrows;
             MyGUI::TextBox* mPerformanceNote;
-            MyGUI::EditBox* mCellEditor;
-            MyGUI::EditBox* mWorldEditor;
-            MyGUI::TextBox* mCellLabel;
-            MyGUI::TextBox* mWorldLabel;
+            MyGUI::EditBox* mEditor;
+            MyGUI::ComboBox* mUnitSelector;
+            Settings::SettingValue<bool>* mUseCells;
+            MyGUI::ComboBox* mBehaviorSelector;
+            Settings::SettingValue<bool>* mLocked;
             bool mLegacyUnlimited;
             float mReferenceDistance;
             bool mAllowZero;
-            std::string mDisplayedCells;
-            std::string mDisplayedWorldUnits;
+            std::string mDisplayedValue;
         };
 
         /// Discover layout-owned bindings without duplicating their configuration keys.
@@ -61,11 +64,29 @@ namespace MWGui
         void onFocusLost(MyGUI::Widget* editor, MyGUI::Widget* next);
         /// Adjust either numeric field without imposing a presentation maximum.
         void onStep(MyGUI::Widget* button);
+        /// Change only one row's presentation units while preserving its canonical distance.
+        void onUnitsChanged(MyGUI::ComboBox* sender, std::size_t position);
+        /// Select proportional or fixed fog behavior without changing the current endpoint.
+        void onBehaviorChanged(MyGUI::ComboBox* sender, std::size_t position);
+        /// Refresh fog editor availability after its live prerequisite changes.
+        void onFogEnabledChanged(MyGUI::Widget* button);
 
-        /// Stack distance sections within their owning containers and return the detail canvas height.
-        int arrangeRows();
+        /// Commit a validated distance and apply relational fog scaling when viewing distance changes.
+        void applyValue(Row& row, float value);
+        /// Return whether a proposed exterior fog endpoint keeps the base range strictly ordered.
+        bool isValidFogValue(const Row& row, float value) const;
+        /// Return the row bound to a canonical setting, or null when that setting is not displayed.
+        Row* findRow(Settings::SettingValue<float>& setting);
+
+        /// Return the row bound to a presentation selector, or null when it is not a distance control.
+        Row* findRow(MyGUI::ComboBox* selector);
+        /// Reflow a layout-owned group after changing a contextual child.
+        static void updateGroupLayout(MyGUI::Widget& widget);
 
         MyGUI::ScrollView* mScroll;
+        MyGUI::Widget* mContent;
+        MyGUI::Widget* mFogControls;
+        MyGUI::Button* mUseDistantFog;
         std::function<void()> mApply;
         std::vector<Row> mRows;
         bool mRefreshing = false;

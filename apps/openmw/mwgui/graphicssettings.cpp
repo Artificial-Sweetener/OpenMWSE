@@ -7,11 +7,9 @@
 #include <string>
 #include <utility>
 
-#include <MyGUI_TabControl.h>
-#include <MyGUI_TabItem.h>
-
 #include <components/l10n/manager.hpp>
 #include <components/sceneutil/shadow.hpp>
+#include <components/settings/graphicssettingsvisibility.hpp>
 #include <components/settings/shadowresolution.hpp>
 #include <components/settings/values.hpp>
 
@@ -30,7 +28,27 @@ namespace
 MWGui::GraphicsSettings::GraphicsSettings(Layout& layout, std::function<void()> apply)
     : mLayout(layout)
     , mApply(std::move(apply))
+    , mCategorySelector(layout.getWidget("GraphicsCategory")->castType<MyGUI::ComboBox>())
+    , mPages{ { { layout.getWidget("DisplayPage"), layout.getWidget("DisplayScrollView")->castType<MyGUI::ScrollView>(),
+                    layout.getWidget("DisplayContent") },
+          { layout.getWidget("VisibilityPage"), layout.getWidget("VisibilityScrollView")->castType<MyGUI::ScrollView>(),
+              layout.getWidget("VisibilityContent") },
+          { layout.getWidget("AtmospherePage"), layout.getWidget("AtmosphereScrollView")->castType<MyGUI::ScrollView>(),
+              layout.getWidget("AtmosphereContent") },
+          { layout.getWidget("WaterPage"), layout.getWidget("WaterScrollView")->castType<MyGUI::ScrollView>(),
+              layout.getWidget("WaterContent") },
+          { layout.getWidget("LightingPage"), layout.getWidget("LightingScrollView")->castType<MyGUI::ScrollView>(),
+              layout.getWidget("LightingContent") },
+          { layout.getWidget("ShadowsPage"), layout.getWidget("ShadowsScrollView")->castType<MyGUI::ScrollView>(),
+              layout.getWidget("ShadowsContent") },
+          { layout.getWidget("AdvancedPage"), layout.getWidget("AdvancedScrollView")->castType<MyGUI::ScrollView>(),
+              layout.getWidget("AdvancedContent") } } }
     , mDistanceSettings(std::make_unique<DistanceSettings>(layout, mApply))
+    , mWindowBorderRow(layout.getWidget("WindowBorderRow"))
+    , mDisplayResolutionGroup(layout.getWidget("DisplayResolutionGroup"))
+    , mWindowModeHint(layout.getWidget("WindowModeHint"))
+    , mAtmosphereAppearanceGroup(layout.getWidget("AtmosphereAppearanceGroup"))
+    , mAtmosphereQualityGroup(layout.getWidget("AtmosphereQualityGroup"))
     , mCloudShadowsButton(layout.getWidget("CloudShadowsButton")->castType<MyGUI::Button>())
     , mCloudShadowIntensity(layout.getWidget("CloudShadowIntensity")->castType<MyGUI::ScrollBar>())
     , mReflectCloudsButton(layout.getWidget("ReflectCloudsButton")->castType<MyGUI::Button>())
@@ -47,12 +65,20 @@ MWGui::GraphicsSettings::GraphicsSettings(Layout& layout, std::function<void()> 
     , mEnhancedWaterButtons{ layout.getWidget("EnhancedWaterFoamButton")->castType<MyGUI::Button>(),
         layout.getWidget("EnhancedWaterDistantWavesButton")->castType<MyGUI::Button>(),
         layout.getWidget("EnhancedWaterSewerRipplesButton")->castType<MyGUI::Button>() }
+    , mWaterShaderControls(layout.getWidget("WaterShaderControls"))
+    , mEnhancedWaterControls(layout.getWidget("EnhancedWaterControls"))
+    , mWaterCausticsStrengthGroup(layout.getWidget("WaterCausticsStrengthGroup"))
     , mShadowFilteringQuality(layout.getWidget("ShadowFilteringQuality")->castType<MyGUI::ComboBox>())
     , mDistantShadowsButton(layout.getWidget("DistantShadowsButton")->castType<MyGUI::Button>())
     , mDistantShadowQuality(layout.getWidget("DistantShadowQuality")->castType<MyGUI::ComboBox>())
     , mShadowMapResolution(layout.getWidget("ShadowMapResolution")->castType<MyGUI::EditBox>())
     , mShadowResolutionDecrease(layout.getWidget("ShadowResolutionDecrease")->castType<MyGUI::Button>())
     , mShadowResolutionIncrease(layout.getWidget("ShadowResolutionIncrease")->castType<MyGUI::Button>())
+    , mShadowFilteringGroup(layout.getWidget("ShadowFilteringGroup"))
+    , mDistantShadowsGroup(layout.getWidget("DistantShadowsGroup"))
+    , mDistantShadowQualityGroup(layout.getWidget("DistantShadowQualityGroup"))
+    , mCloudShadowIntensityGroup(layout.getWidget("CloudShadowIntensityGroup"))
+    , mGeometryShadowControls(layout.getWidget("GeometryShadowControls"))
     , mOptimizationsEnabled(layout.getWidget("OptimizationsEnabledButton")->castType<MyGUI::Button>())
     , mOptimizationButtons{ layout.getWidget("GpuDrivenPagingButton")->castType<MyGUI::Button>(),
         layout.getWidget("GpuSkinningButton")->castType<MyGUI::Button>(),
@@ -67,6 +93,8 @@ MWGui::GraphicsSettings::GraphicsSettings(Layout& layout, std::function<void()> 
         layout.getWidget("GpuDistantPagingButton")->castType<MyGUI::Button>(),
         layout.getWidget("SkipDormantRipplesButton")->castType<MyGUI::Button>() }
 {
+    selectCategory(0);
+    mCategorySelector->eventComboChangePosition += MyGUI::newDelegate(this, &GraphicsSettings::onCategoryChanged);
     mVolumetricQuality->eventComboChangePosition
         += MyGUI::newDelegate(this, &GraphicsSettings::onVolumetricQualityChanged);
     mShadowFilteringQuality->eventComboChangePosition
@@ -100,33 +128,12 @@ MWGui::GraphicsSettings::GraphicsSettings(Layout& layout, std::function<void()> 
 void MWGui::GraphicsSettings::refresh()
 {
     mDistanceSettings->refresh();
+    refreshDisplayControls();
     refreshShadowResolution();
     refreshAtmosphereControls();
     refreshOptimizationControls();
     refreshWaterControls();
-}
-
-void MWGui::GraphicsSettings::updateLayout()
-{
-    mDistanceSettings->updateLayout();
-}
-
-void MWGui::GraphicsSettings::showPage(std::string_view page)
-{
-    const std::string_view pageWidget = page == "atmosphere" ? "AtmospherePage"
-        : page == "detail"                                   ? "DetailPage"
-        : page == "water"                                    ? "WaterPage"
-        : page == "shadows"                                  ? "ShadowsPage"
-        : page == "optimizations"                            ? "OptimizationsPage"
-                                                             : "";
-    if (pageWidget.empty())
-        throw std::invalid_argument("unknown video settings page");
-    auto* settingsTabs = mLayout.getWidget("SettingsTab")->castType<MyGUI::TabControl>();
-    auto* videoPage = mLayout.getWidget("VideoPage")->castType<MyGUI::TabItem>();
-    auto* videoTabs = mLayout.getWidget("VideoTabs")->castType<MyGUI::TabControl>();
-    auto* selectedPage = mLayout.getWidget(pageWidget)->castType<MyGUI::TabItem>();
-    settingsTabs->setItemSelected(videoPage);
-    videoTabs->setItemSelected(selectedPage);
+    updateLayout();
 }
 
 void MWGui::GraphicsSettings::setDistanceValues(
@@ -152,6 +159,12 @@ void MWGui::GraphicsSettings::setDistanceValues(
     }
     if (Settings::shadows().mShadowMapResolution != *resolution)
         throw std::runtime_error("shadow resolution entry did not retain the requested size");
+}
+
+void MWGui::GraphicsSettings::setFogValues(
+    bool useCellEditor, bool enabled, float start, float end, bool startLocked, bool endLocked)
+{
+    mDistanceSettings->setFogValues(useCellEditor, enabled, start, end, startLocked, endLocked);
 }
 
 void MWGui::GraphicsSettings::setGeometricWaveHeight(float height)
@@ -313,10 +326,14 @@ void MWGui::GraphicsSettings::refreshAtmosphereControls()
     mCloudShadowsButton->setEnabled(true);
     mReflectCloudsButton->setEnabled(Settings::water().mShader);
     mVolumetricQuality->setIndexSelected(Settings::shaders().mAtmosphericQuality.get());
-    mVolumetricQuality->setEnabled(
-        clouds || Settings::shaders().mAtmosphericScattering || Settings::shaders().mGodrays);
+    const bool scattering = Settings::shaders().mAtmosphericScattering;
+    const auto atmosphereVisibility
+        = Settings::getAtmosphereControlVisibility({ scattering, clouds, Settings::shaders().mGodrays });
+    mVolumetricQuality->setEnabled(atmosphereVisibility.mQuality);
     mAtmosphereAppearance->setIndexSelected(Settings::shaders().mAtmosphereAppearance.get());
-    mAtmosphereAppearance->setEnabled(Settings::shaders().mAtmosphericScattering);
+    mAtmosphereAppearance->setEnabled(scattering);
+    setContextVisible(*mAtmosphereAppearanceGroup, atmosphereVisibility.mAppearance);
+    setContextVisible(*mAtmosphereQualityGroup, atmosphereVisibility.mQuality);
 
     const auto filteringQuality = Settings::openmwseShadows().mFilteringQuality.get();
     const auto filtering
@@ -330,15 +347,16 @@ void MWGui::GraphicsSettings::refreshAtmosphereControls()
             ? 1
             : static_cast<std::size_t>(distant - sDistantShadowQualities.begin()));
     const bool filteredShadows = filteringQuality != "legacy";
-    mDistantShadowsButton->setEnabled(filteredShadows);
-    mDistantShadowQuality->setEnabled(filteredShadows && Settings::openmwseShadows().mDistantShadows);
-    mCloudShadowIntensity->setEnabled(Settings::shadows().mCloudShadows && filteredShadows);
-}
-
-void MWGui::GraphicsSettings::refreshOptimizationControls()
-{
-    for (MyGUI::Button* button : mOptimizationButtons)
-        button->setEnabled(Settings::optimizations().mEnabled);
+    const auto& shadows = Settings::shadows();
+    const bool geometryShadows
+        = shadows.mActorShadows || shadows.mPlayerShadows || shadows.mTerrainShadows || shadows.mObjectShadows;
+    const auto shadowVisibility = Settings::getShadowControlVisibility(
+        { geometryShadows, shadows.mCloudShadows, filteredShadows, Settings::openmwseShadows().mDistantShadows });
+    setContextVisible(*mShadowFilteringGroup, shadowVisibility.mFiltering);
+    setContextVisible(*mDistantShadowsGroup, shadowVisibility.mDistantShadows);
+    setContextVisible(*mDistantShadowQualityGroup, shadowVisibility.mDistantQuality);
+    setContextVisible(*mCloudShadowIntensityGroup, shadowVisibility.mCloudIntensity);
+    setContextVisible(*mGeometryShadowControls, shadowVisibility.mGeometryControls);
 }
 
 void MWGui::GraphicsSettings::refreshWaterControls()
@@ -352,15 +370,9 @@ void MWGui::GraphicsSettings::refreshWaterControls()
         color == sEnhancedWaterColors.end() ? 0 : static_cast<std::size_t>(color - sEnhancedWaterColors.begin()));
 
     const bool shader = Settings::water().mShader;
-    mWaterAppearance->setEnabled(shader);
-    mGeometricWaveHeight->setEnabled(shader);
-    mMeshGeometricWaveHeight->setEnabled(shader);
-    mWaterCaustics->setEnabled(shader);
-    mWaterCausticsStrength->setEnabled(shader && water.mCaustics);
-    mInteriorWaterLights->setEnabled(shader);
-    mExteriorWaterLights->setEnabled(shader);
-    const bool enhanced = shader && water.appearance() == Settings::WaterAppearance::Enhanced;
-    mEnhancedWaterColor->setEnabled(enhanced);
-    for (MyGUI::Button* button : mEnhancedWaterButtons)
-        button->setEnabled(enhanced);
+    const bool enhanced = water.appearance() == Settings::WaterAppearance::Enhanced;
+    const auto visibility = Settings::getWaterControlVisibility({ shader, enhanced, water.mCaustics });
+    setContextVisible(*mWaterShaderControls, visibility.mShaderControls);
+    setContextVisible(*mEnhancedWaterControls, visibility.mEnhancedControls);
+    setContextVisible(*mWaterCausticsStrengthGroup, visibility.mCausticsStrength);
 }

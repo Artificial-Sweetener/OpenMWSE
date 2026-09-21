@@ -159,7 +159,7 @@
           </item>
           <item>
            <property name="text">
-            <string>Windowed Fullscreen</string>
+            <string>Borderless Windowed</string>
            </property>
           </item>
           <item>

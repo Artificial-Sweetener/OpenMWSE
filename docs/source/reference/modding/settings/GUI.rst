@@ -2,6 +2,47 @@ GUI Settings
 ############
 
 .. omw-setting::
+   :title: view distance in cells
+   :type: boolean
+   :default: true
+   :location: :bdg-success:`In Game > Options > Video > Visibility`
+
+   Presents View Distance in cells instead of world units. This changes only the editor presentation; the canonical
+   distance remains stored in world units.
+
+.. omw-setting::
+   :title: grass distance in cells
+   :type: boolean
+   :default: true
+   :location: :bdg-success:`In Game > Options > Video > Visibility`
+
+   Presents Grass Distance in cells instead of world units.
+
+.. omw-setting::
+   :title: fog start distance in cells
+   :type: boolean
+   :default: true
+   :location: :bdg-success:`In Game > Options > Video > Visibility`
+
+   Presents Fog Start in cells instead of world units.
+
+.. omw-setting::
+   :title: fog end distance in cells
+   :type: boolean
+   :default: true
+   :location: :bdg-success:`In Game > Options > Video > Visibility`
+
+   Presents Fog End in cells instead of world units.
+
+.. omw-setting::
+   :title: shadow distance in cells
+   :type: boolean
+   :default: true
+   :location: :bdg-success:`In Game > Options > Video > Shadows`
+
+   Presents Shadow Distance in cells instead of world units.
+
+.. omw-setting::
    :title: scaling factor
    :type: float32
    :range: 0.5 to 8.0

@@ -14,6 +14,15 @@
 
 namespace Settings
 {
+    /// Store the ordered base distances used by exterior distant fog.
+    struct FogDistanceRange
+    {
+        float mStart;
+        float mEnd;
+
+        bool operator==(const FogDistanceRange&) const = default;
+    };
+
     /// Select the presentation of distances stored in Morrowind world units.
     enum class DistanceUnits
     {
@@ -71,6 +80,35 @@ namespace Settings
         if (value > 0 && distance == 0)
             return std::nullopt;
         return distance;
+    }
+
+    /// Scale unlocked fog endpoints with viewing distance while retaining a strictly ordered finite range.
+    inline FogDistanceRange scaleFogDistanceRange(
+        FogDistanceRange range, float oldViewDistance, float newViewDistance, bool startLocked, bool endLocked)
+    {
+        if (!std::isfinite(range.mStart) || !std::isfinite(range.mEnd) || range.mStart < 0.f
+            || !(range.mEnd > range.mStart) || !std::isfinite(oldViewDistance) || oldViewDistance <= 0.f
+            || !std::isfinite(newViewDistance) || newViewDistance <= 0.f)
+            return range;
+
+        const double scale = static_cast<double>(newViewDistance) / oldViewDistance;
+        const auto scaled = [scale](float value) {
+            const double result = static_cast<double>(value) * scale;
+            return static_cast<float>(std::min(result, static_cast<double>(std::numeric_limits<float>::max())));
+        };
+        if (!startLocked)
+            range.mStart = scaled(range.mStart);
+        if (!endLocked)
+            range.mEnd = scaled(range.mEnd);
+
+        if (!(range.mEnd > range.mStart))
+        {
+            if (!startLocked)
+                range.mStart = std::nextafter(range.mEnd, 0.f);
+            else if (!endLocked)
+                range.mEnd = std::nextafter(range.mStart, std::numeric_limits<float>::infinity());
+        }
+        return range;
     }
 }
 

@@ -40,7 +40,7 @@ Video Settings
       * - 0
         - Exclusive fullscreen
       * - 1
-        - Windowed fullscreen, borderless window that matches screen resolution
+        - Borderless windowed, using the selected resolution up to the selected screen's native resolution
       * - 2
         - Windowed
 

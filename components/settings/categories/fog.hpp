@@ -21,6 +21,10 @@ namespace Settings
         SettingValue<bool> mUseDistantFog{ mIndex, "Fog", "use distant fog" };
         SettingValue<float> mDistantLandFogStart{ mIndex, "Fog", "distant land fog start" };
         SettingValue<float> mDistantLandFogEnd{ mIndex, "Fog", "distant land fog end" };
+        /// Keep the exterior fog start at an absolute distance when viewing distance changes.
+        SettingValue<bool> mDistantLandFogStartLocked{ mIndex, "Fog", "distant land fog start locked" };
+        /// Keep the exterior fog end at an absolute distance when viewing distance changes.
+        SettingValue<bool> mDistantLandFogEndLocked{ mIndex, "Fog", "distant land fog end locked" };
         SettingValue<float> mDistantUnderwaterFogStart{ mIndex, "Fog", "distant underwater fog start" };
         SettingValue<float> mDistantUnderwaterFogEnd{ mIndex, "Fog", "distant underwater fog end" };
         SettingValue<float> mDistantInteriorFogStart{ mIndex, "Fog", "distant interior fog start" };

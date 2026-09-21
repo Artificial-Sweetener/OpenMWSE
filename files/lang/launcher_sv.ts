@@ -195,7 +195,7 @@
         <translation>Helskärm</translation>
     </message>
     <message>
-        <source>Windowed Fullscreen</source>
+        <source>Borderless Windowed</source>
         <translation>Helskärm i fönsterläge</translation>
     </message>
     <message>
@@ -429,8 +429,16 @@ de ordinarie fonterna i Morrowind. Bocka denna ruta om du ändå föredrar ordin
         <translation>&lt;br&gt;&lt;b&gt;SDL_GetDisplayMode misslyckades:&lt;/b&gt;&lt;br&gt;&lt;br&gt;</translation>
     </message>
     <message>
+        <source>Custom window size is unavailable in Fullscreen mode.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Borderless Windowed mode does not draw a window frame.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Custom window size is available only in Windowed mode.</source>
-        <translation>Anpassad fönsterstorlek finns endast tillgänglig i fönsterläge.</translation>
+        <translation type="vanished">Anpassad fönsterstorlek finns endast tillgänglig i fönsterläge.</translation>
     </message>
     <message>
         <source>Window border is available only in Windowed mode.</source>
@@ -438,7 +446,7 @@ de ordinarie fonterna i Morrowind. Bocka denna ruta om du ändå föredrar ordin
     </message>
     <message>
         <source>Windowed Fullscreen mode always uses the native display resolution.</source>
-        <translation>Helskärm i fönsterläge använder alltid skärmens nativa upplösning.</translation>
+        <translation type="vanished">Helskärm i fönsterläge använder alltid skärmens nativa upplösning.</translation>
     </message>
 </context>
 <context>

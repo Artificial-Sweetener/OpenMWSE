@@ -4,6 +4,7 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <fstream>
 #include <stdexcept>
 #include <string>
 
@@ -62,5 +63,14 @@ namespace DiagnosticCtl
     {
         return loadSequence<Diagnostics::WaterSettings>(arguments, context, "--water-settings-sequence",
             "water-settings-sequence.yaml", "water settings sequence", Diagnostics::deserializeWaterSettings);
+    }
+
+    void writeSettingsEvidence(
+        const std::filesystem::path& path, std::string_view evidence, std::string_view failureContext)
+    {
+        std::ofstream stream(path);
+        stream << evidence;
+        if (!stream)
+            throw std::runtime_error(std::string(failureContext));
     }
 }

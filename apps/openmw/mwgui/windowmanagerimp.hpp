@@ -378,6 +378,10 @@ namespace MWGui
         void setVideoDistanceValues(
             bool useCellEditor, float view, float grass, float shadow, std::optional<int> resolution);
 
+        /// Exercise custom fog distances and independent endpoint locks in an isolated diagnostic session.
+        void setVideoFogValues(
+            bool useCellEditor, bool enabled, float start, float end, bool startLocked, bool endLocked);
+
         /// Exercise the geometric-wave slider in an isolated diagnostic session.
         void setVideoGeometricWaveHeight(float height);
 

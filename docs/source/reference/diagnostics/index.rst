@@ -395,9 +395,10 @@ appearance to OpenMWSE, godrays and cloud sun occlusion to enabled, and sun glar
 The controller verifies requested-versus-observed preferences and retains the sequence with replay evidence.
 ``--capture-route-native-frames`` captures the actual rendered transition frames.
 
-``run`` and ``replay`` accept ``--video-settings-page atmosphere|water|shadows|detail|optimizations`` to display the real video settings page
-inside the isolated child for graphical review. Both preference mutation and menu navigation are rejected by interactive
+``run`` and ``replay`` accept repeatable ``--video-settings-page preferences|audio|controls|display|visibility|visibility-fog|atmosphere|water|lighting|shadows|advanced`` options to display and capture real settings pages
+inside the isolated child for graphical review. Each requested page produces a separately named ``video-settings-*.png`` image. Both preference mutation and menu navigation are rejected by interactive
 sessions; the user's normal profile is not changed.
+The ``visibility-fog`` review position shows the lower fog controls and their independent lock states.
 
 Live distance controls
 ----------------------
@@ -407,6 +408,9 @@ distance controls before each route segment. The input-editor flag selects which
 Each entry has ``distance-version: 1``, positive ``view-world-units``,
 non-negative ``grass-world-units``, finite ``shadow-world-units`` (non-positive preserves an imported configuration without a shadow distance limit), and boolean ``use-cell-editor``.
 Version 2 adds a required positive integer ``shadow-resolution`` field and verifies pixel entry and 256-pixel arrow steps.
+Version 3 adds required ``use-distant-fog``, ``fog-start-world-units``, ``fog-end-world-units``,
+``fog-start-locked``, and ``fog-end-locked`` fields. The controller verifies the custom range and both lock states after
+the ordinary live controls accept them.
 Shadow camera work statistics include ``texture-width`` and ``texture-height`` for completed draws.
 Version 1 retains the current shadow resolution. The sequence contains one entry per segment, at most 64. The selected field's arrow steps and performance note are verified, and the requested value is restored.
 Both numeric fields are checked after entry, and the

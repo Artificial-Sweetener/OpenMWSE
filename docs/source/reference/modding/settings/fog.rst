@@ -57,7 +57,8 @@ Fog Settings
 
    Fog end distance should be larger than the fog start distance.
 
-   This setting and all further settings can only be configured by editing the settings configuration file.
+   The exterior base range and its independent endpoint locks are also available live under
+   :bdg-success:`Options > Video > Visibility`. Weather factors and offsets continue to apply after the base range.
 
 .. omw-setting::
    :title: distant land fog start
@@ -76,6 +77,26 @@ Fog Settings
    
 
    This is the base fog end distance used for distant fog calculations in exterior locations.
+
+.. omw-setting::
+   :title: distant land fog start locked
+   :type: boolean
+   :range: true, false
+   :default: false
+   :location: :bdg-success:`Options > Video > Visibility`
+
+   Keeps the exterior base fog start at its absolute world-unit distance when viewing distance changes.
+   When disabled, the start retains its current proportion of viewing distance.
+
+.. omw-setting::
+   :title: distant land fog end locked
+   :type: boolean
+   :range: true, false
+   :default: false
+   :location: :bdg-success:`Options > Video > Visibility`
+
+   Keeps the exterior base fog end at its absolute world-unit distance when viewing distance changes.
+   When disabled, the end retains its current proportion of viewing distance.
 
 .. omw-setting::
    :title: distant underwater fog start

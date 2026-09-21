@@ -8,6 +8,9 @@
 
 #include <SDL_video.h>
 
+#include <algorithm>
+#include <cmath>
+
 namespace SDLUtil
 {
 
@@ -97,20 +100,35 @@ namespace SDLUtil
         int dw, dh;
         SDL_GL_GetDrawableSize(mWindow, &dw, &dh);
 
-        if (windowMode == Settings::WindowMode::Fullscreen || windowMode == Settings::WindowMode::WindowedFullscreen)
+        const float drawableScaleX = w > 0 ? static_cast<float>(dw) / w : 1.f;
+        const float drawableScaleY = h > 0 ? static_cast<float>(dh) / h : 1.f;
+
+        if (windowMode == Settings::WindowMode::Fullscreen)
         {
             SDL_DisplayMode mode;
             SDL_GetWindowDisplayMode(mWindow, &mode);
-            mode.w = width / (dw / w);
-            mode.h = height / (dh / h);
+            mode.w = static_cast<int>(std::round(width / drawableScaleX));
+            mode.h = static_cast<int>(std::round(height / drawableScaleY));
             SDL_SetWindowDisplayMode(mWindow, &mode);
-            SDL_SetWindowFullscreen(mWindow,
-                windowMode == Settings::WindowMode::Fullscreen ? SDL_WINDOW_FULLSCREEN : SDL_WINDOW_FULLSCREEN_DESKTOP);
+            SDL_SetWindowFullscreen(mWindow, SDL_WINDOW_FULLSCREEN);
         }
         else
         {
-            SDL_SetWindowSize(mWindow, width / (dw / w), height / (dh / h));
-            SDL_SetWindowBordered(mWindow, windowBorder ? SDL_TRUE : SDL_FALSE);
+            if (windowMode == Settings::WindowMode::WindowedFullscreen)
+            {
+                SDL_DisplayMode desktop{};
+                const int display = SDL_GetWindowDisplayIndex(mWindow);
+                if (display >= 0 && SDL_GetDesktopDisplayMode(display, &desktop) == 0)
+                {
+                    const auto clamped = Settings::clampWindowSize(windowMode, width, height, desktop.w, desktop.h);
+                    width = clamped.first;
+                    height = clamped.second;
+                }
+            }
+            SDL_SetWindowSize(mWindow, std::max(1, static_cast<int>(std::round(width / drawableScaleX))),
+                std::max(1, static_cast<int>(std::round(height / drawableScaleY))));
+            const bool bordered = windowMode == Settings::WindowMode::Windowed && windowBorder;
+            SDL_SetWindowBordered(mWindow, bordered ? SDL_TRUE : SDL_FALSE);
 
             centerWindow();
         }

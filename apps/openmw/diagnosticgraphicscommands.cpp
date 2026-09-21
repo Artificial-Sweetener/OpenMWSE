@@ -93,9 +93,10 @@ void OMW::Engine::processDiagnosticGraphicsCommand(
                 response.mError = Diagnostics::ErrorCode::PermissionDenied;
             else
             {
-                mWindowManager->showVideoSettings(diagnosticText(command.mPayload));
+                const std::string page = diagnosticText(command.mPayload);
+                mWindowManager->showVideoSettings(page);
                 mWindowManager->setHudVisibility(false);
-                const auto prefix = (mDiagnosticArtifactRoot / "video-settings").string();
+                const auto prefix = (mDiagnosticArtifactRoot / ("video-settings-" + page)).string();
                 captureVideoSettings(*mViewer, prefix);
             }
             break;
@@ -110,11 +111,20 @@ void OMW::Engine::processDiagnosticGraphicsCommand(
             const auto settings = Diagnostics::deserializeDistanceSettings(diagnosticText(command.mPayload));
             mWindowManager->setVideoDistanceValues(
                 settings.mUseCellEditor, settings.mView, settings.mGrass, settings.mShadow, settings.mShadowResolution);
-            response.mPayload = diagnosticBytes(Diagnostics::serializeDistanceSettings(
-                { Settings::camera().mViewingDistance, Settings::groundcover().mRenderingDistance,
-                    Settings::shadows().mMaximumShadowMapDistance, settings.mUseCellEditor,
-                    settings.mShadowResolution ? std::optional<int>(Settings::shadows().mShadowMapResolution)
-                                               : std::nullopt }));
+            if (settings.mFog)
+                mWindowManager->setVideoFogValues(settings.mUseCellEditor, settings.mFog->mEnabled,
+                    settings.mFog->mStart, settings.mFog->mEnd, settings.mFog->mStartLocked, settings.mFog->mEndLocked);
+            Diagnostics::DistanceSettings observed{ Settings::camera().mViewingDistance,
+                Settings::groundcover().mRenderingDistance, Settings::shadows().mMaximumShadowMapDistance,
+                settings.mUseCellEditor,
+                settings.mShadowResolution ? std::optional<int>(Settings::shadows().mShadowMapResolution)
+                                           : std::nullopt,
+                std::nullopt };
+            if (settings.mFog)
+                observed.mFog = Diagnostics::FogDistanceSettings{ Settings::fog().mUseDistantFog,
+                    Settings::fog().mDistantLandFogStart, Settings::fog().mDistantLandFogEnd,
+                    Settings::fog().mDistantLandFogStartLocked, Settings::fog().mDistantLandFogEndLocked };
+            response.mPayload = diagnosticBytes(Diagnostics::serializeDistanceSettings(observed));
             break;
         }
 

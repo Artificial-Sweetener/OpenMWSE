@@ -545,8 +545,8 @@ void OMW::Engine::setSkipMenu(bool skipMenu, bool newGame)
 void OMW::Engine::createGraphicsContext()
 {
     const int screen = Settings::video().mScreen;
-    const int width = Settings::video().mResolutionX;
-    const int height = Settings::video().mResolutionY;
+    int width = Settings::video().mResolutionX;
+    int height = Settings::video().mResolutionY;
     const Settings::WindowMode windowMode = Settings::video().mWindowMode;
     const bool windowBorder = Settings::video().mWindowBorder;
     const SDLUtil::VSyncMode vsync = Settings::video().mVsyncMode;
@@ -574,9 +574,21 @@ void OMW::Engine::createGraphicsContext()
     }
     else
     {
+        if (windowMode == Settings::WindowMode::WindowedFullscreen)
+        {
+            SDL_DisplayMode desktop{};
+            if (SDL_GetDesktopDisplayMode(screen, &desktop) == 0)
+            {
+                const auto clamped = Settings::clampWindowSize(windowMode, width, height, desktop.w, desktop.h);
+                width = clamped.first;
+                height = clamped.second;
+                Settings::video().mResolutionX.set(width);
+                Settings::video().mResolutionY.set(height);
+            }
+        }
         int posX = SDL_WINDOWPOS_CENTERED_DISPLAY(screen);
         int posY = SDL_WINDOWPOS_CENTERED_DISPLAY(screen);
-        if (windowMode == Settings::WindowMode::Fullscreen || windowMode == Settings::WindowMode::WindowedFullscreen)
+        if (windowMode == Settings::WindowMode::Fullscreen)
         {
             posX = SDL_WINDOWPOS_UNDEFINED_DISPLAY(screen);
             posY = SDL_WINDOWPOS_UNDEFINED_DISPLAY(screen);
@@ -585,13 +597,11 @@ void OMW::Engine::createGraphicsContext()
         Uint32 flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_SHOWN;
         if (windowMode == Settings::WindowMode::Fullscreen)
             flags |= SDL_WINDOW_FULLSCREEN;
-        else if (windowMode == Settings::WindowMode::WindowedFullscreen)
-            flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
 
         // Allows for Windows snapping features to properly work in borderless window
         SDL_SetHint("SDL_BORDERLESS_WINDOWED_STYLE", "1");
         SDL_SetHint("SDL_BORDERLESS_RESIZABLE_STYLE", "1");
-        if (!windowBorder)
+        if (!windowBorder || windowMode == Settings::WindowMode::WindowedFullscreen)
             flags |= SDL_WINDOW_BORDERLESS;
         SDL_SetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, Settings::video().mMinimizeOnFocusLoss ? "1" : "0");
 

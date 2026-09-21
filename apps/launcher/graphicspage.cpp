@@ -230,6 +230,14 @@ void Launcher::GraphicsPage::screenChanged(int screen)
     {
         resolutionComboBox->clear();
         resolutionComboBox->addItems(mResolutionsPerScreen[screen]);
+        const QList<QScreen*> screens = QGuiApplication::screens();
+        if (screen < screens.size())
+        {
+            const QRect geometry = screens[screen]->geometry();
+            const qreal scale = screens[screen]->devicePixelRatio();
+            customWidthSpinBox->setMaximum(static_cast<int>(geometry.width() * scale));
+            customHeightSpinBox->setMaximum(static_cast<int>(geometry.height() * scale));
+        }
     }
 }
 
@@ -240,9 +248,21 @@ void Launcher::GraphicsPage::slotFullScreenChanged(int mode)
 
 void Launcher::GraphicsPage::handleWindowModeChange(Settings::WindowMode mode)
 {
-    if (mode == Settings::WindowMode::Fullscreen || mode == Settings::WindowMode::WindowedFullscreen)
+    resolutionComboBox->setEnabled(true);
+    resolutionComboBox->setToolTip("");
+    standardRadioButton->setEnabled(true);
+    standardRadioButton->setToolTip("");
+    customRadioButton->setEnabled(true);
+    customRadioButton->setToolTip("");
+    customWidthSpinBox->setEnabled(customRadioButton->isChecked());
+    customHeightSpinBox->setEnabled(customRadioButton->isChecked());
+    customWidthSpinBox->setToolTip("");
+    customHeightSpinBox->setToolTip("");
+    windowBorderCheckBox->setToolTip("");
+
+    if (mode == Settings::WindowMode::Fullscreen)
     {
-        QString customSizeMessage = tr("Custom window size is available only in Windowed mode.");
+        QString customSizeMessage = tr("Custom window size is unavailable in Fullscreen mode.");
         QString windowBorderMessage = tr("Window border is available only in Windowed mode.");
 
         standardRadioButton->toggle();
@@ -255,37 +275,14 @@ void Launcher::GraphicsPage::handleWindowModeChange(Settings::WindowMode mode)
         customHeightSpinBox->setToolTip(customSizeMessage);
         customRadioButton->setToolTip(customSizeMessage);
     }
-
-    if (mode == Settings::WindowMode::Fullscreen)
-    {
-        resolutionComboBox->setEnabled(true);
-        resolutionComboBox->setToolTip("");
-        standardRadioButton->setToolTip("");
-    }
     else if (mode == Settings::WindowMode::WindowedFullscreen)
     {
-        QString fullScreenMessage = tr("Windowed Fullscreen mode always uses the native display resolution.");
-
-        resolutionComboBox->setEnabled(false);
-        resolutionComboBox->setToolTip(fullScreenMessage);
-        standardRadioButton->setToolTip(fullScreenMessage);
-
-        // Assume that a first item is a native screen resolution
-        resolutionComboBox->setCurrentIndex(0);
+        windowBorderCheckBox->setEnabled(false);
+        windowBorderCheckBox->setToolTip(tr("Borderless Windowed mode does not draw a window frame."));
     }
     else
     {
-        customRadioButton->setEnabled(true);
-        customWidthSpinBox->setEnabled(true);
-        customHeightSpinBox->setEnabled(true);
         windowBorderCheckBox->setEnabled(true);
-        resolutionComboBox->setEnabled(true);
-        resolutionComboBox->setToolTip("");
-        standardRadioButton->setToolTip("");
-        windowBorderCheckBox->setToolTip("");
-        customWidthSpinBox->setToolTip("");
-        customHeightSpinBox->setToolTip("");
-        customRadioButton->setToolTip("");
     }
 }
 

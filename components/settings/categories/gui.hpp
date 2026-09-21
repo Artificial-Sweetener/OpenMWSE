@@ -42,6 +42,17 @@ namespace Settings
         SettingValue<MyGUI::Colour> mColorTopicExhausted{ mIndex, "GUI", "color topic exhausted" };
         SettingValue<MyGUI::Colour> mColorTopicExhaustedOver{ mIndex, "GUI", "color topic exhausted over" };
         SettingValue<MyGUI::Colour> mColorTopicExhaustedPressed{ mIndex, "GUI", "color topic exhausted pressed" };
+
+        /// Present the view-distance editor in cells instead of world units.
+        SettingValue<bool> mViewDistanceInCells{ mIndex, "GUI", "view distance in cells" };
+        /// Present the grass-distance editor in cells instead of world units.
+        SettingValue<bool> mGrassDistanceInCells{ mIndex, "GUI", "grass distance in cells" };
+        /// Present the exterior fog-start editor in cells instead of world units.
+        SettingValue<bool> mFogStartDistanceInCells{ mIndex, "GUI", "fog start distance in cells" };
+        /// Present the exterior fog-end editor in cells instead of world units.
+        SettingValue<bool> mFogEndDistanceInCells{ mIndex, "GUI", "fog end distance in cells" };
+        /// Present the shadow-distance editor in cells instead of world units.
+        SettingValue<bool> mShadowDistanceInCells{ mIndex, "GUI", "shadow distance in cells" };
     };
 }
 

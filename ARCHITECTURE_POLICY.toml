@@ -70,6 +70,7 @@ source_files = [
   "apps/openmw/mwgui/distancesettings.hpp",
   "apps/openmw/mwgui/graphicssettings.cpp",
   "apps/openmw/mwgui/graphicssettings.hpp",
+  "apps/openmw/mwgui/graphicssettingslayout.cpp",
   "apps/openmw/mwgui/settingswindow.cpp",
   "apps/openmw/mwgui/settingswindow.hpp",
   "components/settings/atmospheremigration.hpp",

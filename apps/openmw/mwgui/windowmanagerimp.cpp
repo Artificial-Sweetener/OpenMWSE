@@ -2401,6 +2401,12 @@ namespace MWGui
         mSettingsWindow->setDistanceValues(useCellEditor, view, grass, shadow, resolution);
     }
 
+    void WindowManager::setVideoFogValues(
+        bool useCellEditor, bool enabled, float start, float end, bool startLocked, bool endLocked)
+    {
+        mSettingsWindow->setFogValues(useCellEditor, enabled, start, end, startLocked, endLocked);
+    }
+
     void WindowManager::setVideoGeometricWaveHeight(float height)
     {
         mSettingsWindow->setGeometricWaveHeight(height);
