@@ -420,13 +420,13 @@ This operation is restricted to isolated diagnostic children. The source profile
 Live water controls
 -------------------
 
-``replay --water-settings-sequence sequence.yaml`` drives the real geometric-wave and caustic controls before each
-gameplay-route segment while keeping the Water settings page open. Version 5 entries have ``water-version: 5``, an integer
-``geometric-wave-height`` from 0 through 250 Morrowind world units, boolean ``caustics``, ``caustics-strength`` from 0 through
-2, and integer ``interior-local-lights`` and ``exterior-local-lights`` budgets from 0 through 4. Versions 1 through 4 remain
-accepted with compatible defaults; the retired ``reflected-caustics`` field in versions 3 and 4 is ignored. The sequence
-contains one entry per segment, at most 64. The controller verifies the values observed after the control events and records
-``water-settings-<segment>.yaml``.
+``replay --water-settings-sequence sequence.yaml`` drives the real water controls before each gameplay-route segment while
+keeping the Water settings page open. Version 8 entries have ``water-version: 8``, integer ``geometric-wave-height`` and
+``mesh-geometric-wave-height`` fields from 0 through 250 Morrowind world units, boolean ``mesh-water`` and ``caustics`` fields, ``caustics-strength`` from 0 through 2,
+integer ``interior-local-lights`` and ``exterior-local-lights`` budgets from 0 through 4, and ``appearance`` set to ``openmw``,
+``mge-xe``, ``enhanced``, or ``vanilla``. Versions 1 through 7 remain accepted with compatible defaults; the retired
+``reflected-caustics`` field in versions 3 and 4 is ignored. The sequence contains one entry per segment, at most 64. The
+controller verifies the values observed after the control events and records ``water-settings-<segment>.yaml``.
 This operation is restricted to isolated diagnostic children. The source profile remains unchanged.
 
 Live optimization controls

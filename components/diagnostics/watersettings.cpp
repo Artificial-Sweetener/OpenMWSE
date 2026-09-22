@@ -19,6 +19,11 @@ namespace Diagnostics
                 || settings.mGeometricWaveHeight != std::round(settings.mGeometricWaveHeight))
                 throw std::invalid_argument(
                     "geometric wave height must be a whole number between 0 and 250 Morrowind world units");
+            if (!std::isfinite(settings.mMeshGeometricWaveHeight) || settings.mMeshGeometricWaveHeight < 0.f
+                || settings.mMeshGeometricWaveHeight > 250.f
+                || settings.mMeshGeometricWaveHeight != std::round(settings.mMeshGeometricWaveHeight))
+                throw std::invalid_argument(
+                    "mesh geometric wave height must be a whole number between 0 and 250 Morrowind world units");
             if (!std::isfinite(settings.mCausticsStrength) || settings.mCausticsStrength < 0.f
                 || settings.mCausticsStrength > 2.f)
                 throw std::invalid_argument("caustics strength must be between 0 and 2");
@@ -39,14 +44,16 @@ namespace Diagnostics
         if (!node.IsMap())
             throw std::invalid_argument("water settings must be a map");
         const int version = node["water-version"].as<int>();
-        if (version < 1 || version > 6)
-            throw std::invalid_argument("water settings require a version from 1 through 6");
+        if (version < 1 || version > 8)
+            throw std::invalid_argument("water settings require a version from 1 through 8");
         const std::size_t expectedSize = version == 1 ? 2
             : version == 2                            ? 4
             : version == 3                            ? 5
             : version == 4                            ? 7
             : version == 5                            ? 6
-                                                      : 7;
+            : version == 6                            ? 7
+            : version == 7                            ? 8
+                                                      : 9;
         if (node.size() != expectedSize)
             throw std::invalid_argument("water settings contain missing or unknown fields");
         WaterSettings result;
@@ -65,6 +72,10 @@ namespace Diagnostics
         }
         if (version >= 6)
             result.mAppearance = node["appearance"].as<std::string>();
+        if (version >= 7)
+            result.mMeshWater = node["mesh-water"].as<bool>();
+        if (version >= 8)
+            result.mMeshGeometricWaveHeight = node["mesh-geometric-wave-height"].as<float>();
         validate(result);
         return result;
     }
@@ -73,13 +84,15 @@ namespace Diagnostics
     {
         validate(settings);
         YAML::Node node;
-        node["water-version"] = 6;
+        node["water-version"] = 8;
         node["geometric-wave-height"] = settings.mGeometricWaveHeight;
         node["caustics"] = settings.mCaustics;
         node["caustics-strength"] = settings.mCausticsStrength;
         node["interior-local-lights"] = settings.mInteriorLocalLights;
         node["exterior-local-lights"] = settings.mExteriorLocalLights;
         node["appearance"] = settings.mAppearance;
+        node["mesh-water"] = settings.mMeshWater;
+        node["mesh-geometric-wave-height"] = settings.mMeshGeometricWaveHeight;
         return YAML::Dump(node);
     }
 }

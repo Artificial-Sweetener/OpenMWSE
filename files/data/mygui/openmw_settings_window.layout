@@ -1044,31 +1044,54 @@
                                 <Widget type="Spacer"/>
                             </Widget>
 
-                            <Widget type="AutoSizedTextBox" skin="NormalText" name="MeshGeometricWaveHeightLabel">
-                                <UserString key="HStretch" value="true"/>
-                            </Widget>
                             <Widget type="HBox" align="Stretch">
-                                <UserString key="HStretch" value="true"/><UserString key="VStretch" value="false"/>
-                            <Widget type="ScrollBar" skin="MW_HScroll" position="0 0 176 18" align="Left Top" name="MeshGeometricWaveHeight">
                                 <UserString key="HStretch" value="true"/>
-                                <UserString key="HStretchFraction" value="0.7"/>
-                                <UserString key="HStretchBreakpoint" value="640"/>
-                                <Property key="Range" value="251"/>
-                                <Property key="Page" value="1"/>
-                                <Property key="WheelPage" value="1"/>
-                                <UserString key="SettingCategory" value="OpenMWSE Water"/>
-                                <UserString key="SettingName" value="mesh geometric wave height"/>
-                                <UserString key="SettingType" value="Slider"/>
-                                <UserString key="SettingValueType" value="Float"/>
-                                <UserString key="SettingMin" value="0"/>
-                                <UserString key="SettingMax" value="250"/>
-                                <UserString key="SettingLabelWidget" value="MeshGeometricWaveHeightLabel"/>
-                                <UserString key="SettingLabelCaption" value="MeshGeometricWaveHeightValue"/>
-                                <UserString key="ToolTipType" value="Layout"/>
-                                <UserString key="ToolTipLayout" value="TextToolTip"/>
-                                <UserString key="Caption_Text" value="#{OMWEngine:MeshGeometricWaveHeightTooltip}"/>
+                                <UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedButton" skin="MW_Button" name="MeshWaterButton">
+                                    <UserString key="SettingCategory" value="OpenMWSE Water"/>
+                                    <UserString key="SettingName" value="mesh water"/>
+                                    <UserString key="SettingType" value="CheckButton"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:MeshWaterTooltip}"/>
+                                </Widget>
+                                <Widget type="AutoSizedTextBox" skin="SandText">
+                                    <Property key="Caption" value="#{OMWEngine:MeshWater}"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:MeshWaterTooltip}"/>
+                                </Widget>
                             </Widget>
-                                <Widget type="Spacer"/>
+
+                            <Widget type="VBox" align="HStretch Top" name="MeshWaterControls">
+                                <UserString key="HStretch" value="true"/>
+                                <UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedTextBox" skin="NormalText" name="MeshGeometricWaveHeightLabel">
+                                    <UserString key="HStretch" value="true"/>
+                                </Widget>
+                                <Widget type="HBox" align="Stretch">
+                                    <UserString key="HStretch" value="true"/><UserString key="VStretch" value="false"/>
+                                    <Widget type="ScrollBar" skin="MW_HScroll" position="0 0 176 18" align="Left Top" name="MeshGeometricWaveHeight">
+                                        <UserString key="HStretch" value="true"/>
+                                        <UserString key="HStretchFraction" value="0.7"/>
+                                        <UserString key="HStretchBreakpoint" value="640"/>
+                                        <Property key="Range" value="251"/>
+                                        <Property key="Page" value="1"/>
+                                        <Property key="WheelPage" value="1"/>
+                                        <UserString key="SettingCategory" value="OpenMWSE Water"/>
+                                        <UserString key="SettingName" value="mesh geometric wave height"/>
+                                        <UserString key="SettingType" value="Slider"/>
+                                        <UserString key="SettingValueType" value="Float"/>
+                                        <UserString key="SettingMin" value="0"/>
+                                        <UserString key="SettingMax" value="250"/>
+                                        <UserString key="SettingLabelWidget" value="MeshGeometricWaveHeightLabel"/>
+                                        <UserString key="SettingLabelCaption" value="MeshGeometricWaveHeightValue"/>
+                                        <UserString key="ToolTipType" value="Layout"/>
+                                        <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                        <UserString key="Caption_Text" value="#{OMWEngine:MeshGeometricWaveHeightTooltip}"/>
+                                    </Widget>
+                                    <Widget type="Spacer"/>
+                                </Widget>
                             </Widget>
 
                             <Widget type="TextBox" skin="NormalText" position="0 0 352 26" align="HStretch Top">

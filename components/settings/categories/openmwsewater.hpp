@@ -38,6 +38,9 @@ namespace Settings
         SettingValue<float> mGeometricWaveHeight{ mIndex, "OpenMWSE Water", "geometric wave height",
             makeClampSanitizerFloat(0.f, 250.f) };
 
+        /// Replace classified authored water materials with renderer-owned mesh water.
+        SettingValue<bool> mMeshWater{ mIndex, "OpenMWSE Water", "mesh water" };
+
         /// Set classified mesh-water wave height independently from the default world surface.
         SettingValue<float> mMeshGeometricWaveHeight{ mIndex, "OpenMWSE Water", "mesh geometric wave height",
             makeClampSanitizerFloat(0.f, 250.f) };

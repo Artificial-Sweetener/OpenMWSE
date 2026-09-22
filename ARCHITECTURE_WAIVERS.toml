@@ -36,7 +36,7 @@ kind = "structural"
 justification = "SettingsWindow is the composition root for one modal settings surface: it binds the shared widget tree, coordinates tabs and focus, applies one pending-settings transaction, and owns the input, localization, and script-page presentation tied to that lifetime. Fork-specific live graphics policy, distance editing, shadow validation, and diagnostic exercise now belong to GraphicsSettings."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:ef5201e281aa81c305f72b5365c3e5ab9be6bfc3332c91ed7dd989254ae112cd"
+fingerprint = "sha256:e82a0557d4758b941aa7ac98fac8ede70ab98a09669ac622e6161d0c3fe92e5e"
 max_lines = 978
 
 [[waivers]]
@@ -127,7 +127,7 @@ kind = "structural"
 justification = "RenderingManager is the renderer composition root and scene-facing facade: subsystem construction, ordered frame advancement, scene mutation, settings propagation, and renderer queries all coordinate the same owned object graph. Atmosphere diagnostic policy and applied capture state now belong to a separate controller."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:7068143e93b2ee58eabee090b16873a2f59520c114301498abc84f228c9bfcc5"
+fingerprint = "sha256:92799f20fa61e802d55b9181060f456567a7d79e99e6fe22bc68b43b38712280"
 max_lines = 2044
 
 [[waivers]]
@@ -166,8 +166,8 @@ kind = "structural"
 justification = "Water owns one surface-rendering lifecycle for conventional world water and classified planar mesh water. Geometry replacement, seam repair, reflection allocation and handoff, shared optical material state, ripple interaction, settings invalidation, and cell or object transitions all coordinate the same scene masks, cameras, water planes, and render targets; extracting one path would split those invariants across mutually dependent runtime owners."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:199475d42843286fb9b58e63931a1ec35048cced55afb479e7c4b09a06d24296"
-max_lines = 1862
+fingerprint = "sha256:dc7c600e8d006b2cd94ef60bb45e404f8c6f59099f913b0c52d9047734d2fd33"
+max_lines = 1836
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-011"
@@ -413,7 +413,7 @@ kind = "structural"
 justification = "The isolated-run implementation owns one controller lifecycle: validate an isolated launch, materialize its temporary profile, start and connect to the child, execute bounded capture or replay requests, retain requested evidence, and clean up. These stages share the same launch options, child identity, endpoint, artifact root, and failure cleanup contract; extracting a stage would divide one transactional owner across pass-through interfaces."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:7f923bacea92f2d1263ba2faf24306c38527e27112a198f0c4f3226dff9f2f59"
+fingerprint = "sha256:3b5ca3932d3cefd71369bc925cd2f1c53d25c2d1ec38cf83332895aa4ceddae1"
 max_lines = 618
 
 [[waivers]]
@@ -439,5 +439,5 @@ kind = "structural"
 justification = "Water utilities define one stateless surface-geometry and reflection-policy contract shared by world water, classified mesh water, shaders, and focused tests. Plane fitting, topology partitioning, seam construction, reflection sizing and handoff, and canonical water geometry creation use the same coordinate conventions and tolerances; splitting the file would divide one mathematical contract without creating an independent runtime owner or lifecycle."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:21eaf8e2bde395e66e366085af2471b65fb7597cdadb85a4daa5c9d1768e2e2e"
+fingerprint = "sha256:d00be7bdccb540cfe5d58395a23e1464df8052e59c9a74b08f204ae3ad45c263"
 max_lines = 611

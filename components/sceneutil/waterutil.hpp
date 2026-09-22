@@ -10,9 +10,13 @@
 
 #include <osg/BoundingBox>
 #include <osg/Matrixd>
+#include <osg/PolygonOffset>
+#include <osg/StateSet>
 #include <osg/Vec2f>
 #include <osg/Vec3f>
 #include <osg/ref_ptr>
+
+#include "depth.hpp"
 
 namespace osg
 {
@@ -230,6 +234,15 @@ namespace SceneUtil
 
     /// Create fixed-function-compatible simple-water render state.
     osg::ref_ptr<osg::StateSet> createSimpleWaterStateSet(float alpha, int renderBin);
+
+    /// Keep a finite water sheet in front of a coincident basin floor while preserving ordinary depth occlusion.
+    inline void applyFiniteWaterDepthSeparation(osg::StateSet& stateSet)
+    {
+        osg::ref_ptr<osg::PolygonOffset> offset = new osg::PolygonOffset;
+        offset->setFactor(AutoDepth::isReversed() ? 0.65f : -0.65f);
+        offset->setUnits(AutoDepth::isReversed() ? 1.f : -1.f);
+        stateSet.setAttributeAndModes(offset, osg::StateAttribute::ON);
+    }
 }
 
 #endif

@@ -29,6 +29,8 @@ const float SPEC_BRIGHTNESS = 1.5;                 // boosts the brightness of t
 const float VISIBILITY = 2500.0;
 const float BUMP_SUPPRESS_DEPTH = 300.0;           // at what water depth bumpmap will be suppressed for reflections and refractions (prevents artifacts at shores)
 const float REFR_FOG_DISTORT_DISTANCE = 3000.0;    // at what distance refraction fog will be calculated using real water depth instead of distorted depth (prevents splotchy shores)
+// Preserve the optical body of finite authored sheets over shallow decorative basin geometry.
+#define WATER_OPTICAL_DEPTH(depth) (@waterMeshSurface == 1 ? max(depth, 512.0) : depth)
 
 #if @wobblyShores
 const float WOBBLY_SHORE_FADE_DISTANCE = 6200.0;   // fade out wobbly shores to mask precision errors, the effect is almost impossible to see at a distance
@@ -237,6 +239,7 @@ void main(void)
     vec2 refractionCoordsOffset = vec2(0.0);
     float surfaceDepth = linearizeDepth(gl_FragCoord.z, near, far);
     float realWaterDepth = waterViewDepth(screenCoords, surfaceDepth);
+    float opticalWaterDepth = WATER_OPTICAL_DEPTH(realWaterDepth);
 
 #if @waterRefraction
     refractionCoordsOffset = reflectionCoordsOffset;
@@ -291,7 +294,7 @@ void main(void)
         if (!hasOpaqueGeometry(refractionCoords))
             refraction = deepWaterColor;
         else
-            refraction = mix(refraction, deepWaterColor, clamp(realWaterDepth / VISIBILITY - 1.0, 0.0, 1.0));
+            refraction = mix(refraction, deepWaterColor, clamp(opticalWaterDepth / VISIBILITY - 1.0, 0.0, 1.0));
     }
 
 #if @sunlightScattering
@@ -347,6 +350,7 @@ void main(void)
 #endif
             float waterDepth = viewDepth / max(dot(viewDir, cameraForward), 0.0001);
             waterDepth += 300.0 * (0.95 - dot(normal, surfaceUp));
+            waterDepth = WATER_OPTICAL_DEPTH(waterDepth);
             float depthScale = clamp(exp(-waterDepth / 800.0), 0.0, 1.0);
             shoreFactor = pow(depthScale, 90.0);
             mgeRefraction = mix(mgeDepthColor, mgeRefraction, 0.8 * depthScale + 0.2 * shoreFactor);
@@ -415,6 +419,7 @@ void main(void)
 #endif
             float waterDepth = distortedViewDepth / max(dot(viewDir, cameraForward), 0.0001);
             waterDepth += 50.0 * (0.99 - dot(normal, surfaceUp));
+            waterDepth = WATER_OPTICAL_DEPTH(waterDepth);
             depthScale = clamp(exp(-waterDepth / 800.0), 0.0, 1.0);
             shoreFactor = pow(depthScale, 90.0);
             enhancedRefraction = mix(
@@ -503,8 +508,8 @@ void main(void)
 #if @waterRefraction
         vanillaScene = sampleOpaqueColorTex(screenCoords + refractionOffset).rgb;
 #endif
-        float shoreFactor = clamp(exp(-max(realWaterDepth, 0.0) / 4.0), 0.0, 1.0);
-        float depthAttenuation = clamp(1.0 - max(realWaterDepth, 0.0) / 2700.0, 0.0, 1.0);
+        float shoreFactor = clamp(exp(-max(opticalWaterDepth, 0.0) / 4.0), 0.0, 1.0);
+        float depthAttenuation = clamp(1.0 - max(opticalWaterDepth, 0.0) / 2700.0, 0.0, 1.0);
         vec3 vanillaRefraction = mix(vanillaDepth, vanillaScene,
             max(shoreFactor, clamp(depthAttenuation - 0.4, 0.0, 1.0)));
         vec2 reflectionOffset = mgeProjectedOffset(
@@ -563,7 +568,7 @@ void main(void)
     float shoreRippleRain = sampleWaterOpenMWShoreNoise(
         worldPos.xy, waterTimer, opticalField.shoreLargeNormal, opticalField.shoreSmallNormal);
     float viewFactor = mix(abs(viewDir.z), 1.0, 0.2);
-    float verticalWaterDepth = realWaterDepth * viewFactor; // an estimate
+    float verticalWaterDepth = opticalWaterDepth * viewFactor; // an estimate
     float shoreOffset = verticalWaterDepth
         - (opticalField.shoreBaseNormal.r + mix(0.0, shoreRippleRain, rainIntensity) + 0.15) * 8.0;
     float fuzzFactor = min(1.0, 1000.0 / surfaceDepth) * viewFactor;

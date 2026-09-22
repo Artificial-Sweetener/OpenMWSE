@@ -56,6 +56,7 @@ MWGui::GraphicsSettings::GraphicsSettings(Layout& layout, std::function<void()> 
     , mAtmosphereAppearance(layout.getWidget("AtmosphereAppearance")->castType<MyGUI::ComboBox>())
     , mWaterAppearance(layout.getWidget("WaterAppearance")->castType<MyGUI::ComboBox>())
     , mGeometricWaveHeight(layout.getWidget("GeometricWaveHeight")->castType<MyGUI::ScrollBar>())
+    , mMeshWater(layout.getWidget("MeshWaterButton")->castType<MyGUI::Button>())
     , mMeshGeometricWaveHeight(layout.getWidget("MeshGeometricWaveHeight")->castType<MyGUI::ScrollBar>())
     , mWaterCaustics(layout.getWidget("WaterCausticsButton")->castType<MyGUI::Button>())
     , mWaterCausticsStrength(layout.getWidget("WaterCausticsStrength")->castType<MyGUI::ScrollBar>())
@@ -66,6 +67,7 @@ MWGui::GraphicsSettings::GraphicsSettings(Layout& layout, std::function<void()> 
         layout.getWidget("EnhancedWaterDistantWavesButton")->castType<MyGUI::Button>(),
         layout.getWidget("EnhancedWaterSewerRipplesButton")->castType<MyGUI::Button>() }
     , mWaterShaderControls(layout.getWidget("WaterShaderControls"))
+    , mMeshWaterControls(layout.getWidget("MeshWaterControls"))
     , mEnhancedWaterControls(layout.getWidget("EnhancedWaterControls"))
     , mWaterCausticsStrengthGroup(layout.getWidget("WaterCausticsStrengthGroup"))
     , mShadowFilteringQuality(layout.getWidget("ShadowFilteringQuality")->castType<MyGUI::ComboBox>())
@@ -104,6 +106,7 @@ MWGui::GraphicsSettings::GraphicsSettings(Layout& layout, std::function<void()> 
     mAtmosphereAppearance->eventComboChangePosition
         += MyGUI::newDelegate(this, &GraphicsSettings::onAtmosphereAppearanceChanged);
     mWaterAppearance->eventComboChangePosition += MyGUI::newDelegate(this, &GraphicsSettings::onWaterAppearanceChanged);
+    mMeshWater->eventMouseButtonClick += MyGUI::newDelegate(this, &GraphicsSettings::onMeshWaterChanged);
     mEnhancedWaterColor->eventComboChangePosition
         += MyGUI::newDelegate(this, &GraphicsSettings::onEnhancedWaterColorChanged);
     mWaterCaustics->eventMouseButtonClick += MyGUI::newDelegate(this, &GraphicsSettings::onWaterCausticsChanged);
@@ -171,13 +174,15 @@ void MWGui::GraphicsSettings::setGeometricWaveHeight(float height)
 {
     if (!std::isfinite(height) || height < 0.f || height > 250.f || height != std::round(height))
         throw std::invalid_argument("diagnostic geometric wave height must be a whole number from 0 to 250");
+    if (Settings::openmwseWater().mGeometricWaveHeight.get() == height)
+        return;
     const std::size_t position = static_cast<std::size_t>(height);
     mGeometricWaveHeight->setScrollPosition(position);
     mGeometricWaveHeight->eventScrollChangePosition(mGeometricWaveHeight, position);
 }
 
 void MWGui::GraphicsSettings::setWaterValues(std::string_view appearance, float height, bool caustics,
-    float causticsStrength, int interiorLocalLights, int exteriorLocalLights)
+    float causticsStrength, int interiorLocalLights, int exteriorLocalLights, bool meshWater, float meshHeight)
 {
     if (!std::isfinite(causticsStrength) || causticsStrength < 0.f || causticsStrength > 2.f)
         throw std::invalid_argument("diagnostic caustics strength must be between 0 and 2");
@@ -187,20 +192,49 @@ void MWGui::GraphicsSettings::setWaterValues(std::string_view appearance, float 
     if (appearanceIt == sWaterAppearances.end())
         throw std::invalid_argument("diagnostic water appearance is not recognized");
     const std::size_t appearancePosition = static_cast<std::size_t>(appearanceIt - sWaterAppearances.begin());
-    mWaterAppearance->setIndexSelected(appearancePosition);
-    mWaterAppearance->eventComboChangePosition(mWaterAppearance, appearancePosition);
+    auto& water = Settings::openmwseWater();
+    if (water.mAppearance.get() != appearance)
+    {
+        mWaterAppearance->setIndexSelected(appearancePosition);
+        mWaterAppearance->eventComboChangePosition(mWaterAppearance, appearancePosition);
+    }
     setGeometricWaveHeight(height);
-    Settings::openmwseWater().mCaustics.set(caustics);
-    mWaterCaustics->setCaptionWithReplacing(caustics ? "#{Interface:On}" : "#{Interface:Off}");
-    const std::size_t strengthPosition = static_cast<std::size_t>(std::round(causticsStrength * 100.f));
-    mWaterCausticsStrength->setScrollPosition(strengthPosition);
-    mWaterCausticsStrength->eventScrollChangePosition(mWaterCausticsStrength, strengthPosition);
-    mInteriorWaterLights->setScrollPosition(static_cast<std::size_t>(interiorLocalLights));
-    mInteriorWaterLights->eventScrollChangePosition(
-        mInteriorWaterLights, static_cast<std::size_t>(interiorLocalLights));
-    mExteriorWaterLights->setScrollPosition(static_cast<std::size_t>(exteriorLocalLights));
-    mExteriorWaterLights->eventScrollChangePosition(
-        mExteriorWaterLights, static_cast<std::size_t>(exteriorLocalLights));
+    if (water.mMeshGeometricWaveHeight.get() != meshHeight)
+    {
+        const std::size_t meshHeightPosition = static_cast<std::size_t>(meshHeight);
+        mMeshGeometricWaveHeight->setScrollPosition(meshHeightPosition);
+        mMeshGeometricWaveHeight->eventScrollChangePosition(mMeshGeometricWaveHeight, meshHeightPosition);
+    }
+    if (water.mMeshWater.get() != meshWater)
+    {
+        water.mMeshWater.set(meshWater);
+        mMeshWater->setCaptionWithReplacing(meshWater ? "#{Interface:On}" : "#{Interface:Off}");
+        mApply();
+    }
+    if (water.mCaustics.get() != caustics)
+    {
+        water.mCaustics.set(caustics);
+        mWaterCaustics->setCaptionWithReplacing(caustics ? "#{Interface:On}" : "#{Interface:Off}");
+        mApply();
+    }
+    if (water.mCausticsStrength.get() != causticsStrength)
+    {
+        const std::size_t strengthPosition = static_cast<std::size_t>(std::round(causticsStrength * 100.f));
+        mWaterCausticsStrength->setScrollPosition(strengthPosition);
+        mWaterCausticsStrength->eventScrollChangePosition(mWaterCausticsStrength, strengthPosition);
+    }
+    if (water.mInteriorLocalLights.get() != interiorLocalLights)
+    {
+        mInteriorWaterLights->setScrollPosition(static_cast<std::size_t>(interiorLocalLights));
+        mInteriorWaterLights->eventScrollChangePosition(
+            mInteriorWaterLights, static_cast<std::size_t>(interiorLocalLights));
+    }
+    if (water.mExteriorLocalLights.get() != exteriorLocalLights)
+    {
+        mExteriorWaterLights->setScrollPosition(static_cast<std::size_t>(exteriorLocalLights));
+        mExteriorWaterLights->eventScrollChangePosition(
+            mExteriorWaterLights, static_cast<std::size_t>(exteriorLocalLights));
+    }
     refreshWaterControls();
 }
 
@@ -290,6 +324,11 @@ void MWGui::GraphicsSettings::onWaterAppearanceChanged(MyGUI::ComboBox* sender, 
     refreshWaterControls();
 }
 
+void MWGui::GraphicsSettings::onMeshWaterChanged(MyGUI::Widget*)
+{
+    refreshWaterControls();
+}
+
 void MWGui::GraphicsSettings::onEnhancedWaterColorChanged(MyGUI::ComboBox* sender, std::size_t position)
 {
     if (position >= sender->getItemCount() || position >= sEnhancedWaterColors.size())
@@ -371,8 +410,10 @@ void MWGui::GraphicsSettings::refreshWaterControls()
 
     const bool shader = Settings::water().mShader;
     const bool enhanced = water.appearance() == Settings::WaterAppearance::Enhanced;
-    const auto visibility = Settings::getWaterControlVisibility({ shader, enhanced, water.mCaustics });
+    const auto visibility
+        = Settings::getWaterControlVisibility({ shader, water.mMeshWater, enhanced, water.mCaustics });
     setContextVisible(*mWaterShaderControls, visibility.mShaderControls);
+    setContextVisible(*mMeshWaterControls, visibility.mMeshControls);
     setContextVisible(*mEnhancedWaterControls, visibility.mEnhancedControls);
     setContextVisible(*mWaterCausticsStrengthGroup, visibility.mCausticsStrength);
 }

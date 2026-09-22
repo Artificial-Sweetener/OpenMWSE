@@ -1,9 +1,10 @@
 Surface effects
 ###############
 
-OpenMWSE can replace selected authored mesh materials with renderer-owned surface effects. Classification happens once when an
-asset is loaded. The source mesh, material name, and texture paths identify the surface; their colors and animation do not tint
-or otherwise alter the selected effect.
+OpenMWSE can replace selected authored mesh materials with renderer-owned surface effects while the live ``mesh water`` setting
+is enabled. Classification happens once when an asset is loaded. The source mesh, material name, and texture paths identify the
+surface; their colors and animation do not tint or otherwise alter the selected effect. Disabling mesh water restores the source
+drawables, materials, and animated textures immediately; re-enabling it rebuilds their renderer-owned replacements.
 
 Rule files
 ==========
@@ -51,6 +52,8 @@ topology. Changing the live mesh-water slider rebuilds only classified water bin
 
 Authored-surface reflections retain terrain, statics, objects, effects, actors, and the player at the corresponding reflection
 detail. The groundcover-heavy maximum tier remains exclusive to the single world-water reflection.
+Finite authored sheets retain a minimum optical body over shallow decorative basin geometry, so screen-space shore refraction
+cannot erase stepped pools whose floors sit immediately below the surface.
 
 Only horizontal triangles are converted to mesh water. This keeps the classification format usable for future non-horizontal
 effects without treating a waterfall or vertical decorative face as a planar reflection surface. Classified objects remain on

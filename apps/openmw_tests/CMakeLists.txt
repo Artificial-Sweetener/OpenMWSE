@@ -41,6 +41,7 @@ file(GLOB UNITTEST_SRC_FILES
     mwrender/testgroundcoverlod.cpp
     mwrender/testgroundcovernearfar.cpp
     mwrender/testreflectionsky.cpp
+    mwrender/testsurfaceeffectobjectregistry.cpp
     mwrender/testwatersurface.cpp
     mwrender/testwaterawaretransparentbin.cpp
     mwrender/testreflectedclouds.cpp

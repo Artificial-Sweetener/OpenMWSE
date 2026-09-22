@@ -2413,10 +2413,10 @@ namespace MWGui
     }
 
     void WindowManager::setVideoWaterValues(std::string_view appearance, float height, bool caustics,
-        float causticsStrength, int interiorLocalLights, int exteriorLocalLights)
+        float causticsStrength, int interiorLocalLights, int exteriorLocalLights, bool meshWater, float meshHeight)
     {
-        mSettingsWindow->setWaterValues(
-            appearance, height, caustics, causticsStrength, interiorLocalLights, exteriorLocalLights);
+        mSettingsWindow->setWaterValues(appearance, height, caustics, causticsStrength, interiorLocalLights,
+            exteriorLocalLights, meshWater, meshHeight);
     }
 
     void WindowManager::showVideoSettings(std::string_view page)

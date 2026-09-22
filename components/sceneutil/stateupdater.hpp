@@ -161,6 +161,10 @@ namespace SceneUtil
             float geometricWaveHeight, float rainIntensity, bool interior, int interiorLocalLights,
             int exteriorLocalLights);
 
+        /// Publish the renderer-owned coverage texture and projection used by displaced water and caustics.
+        void setWaterSurfaceCoverage(osg::Texture2D* texture, int textureUnit, const osg::Vec2f& center,
+            float inverseSize, float resolution, float causticMaximumClearance);
+
         /// Select the inert or capture-only compatibility-shader diagnostic output.
         void setAtmosphereDiagnosticMode(int mode);
 
@@ -227,6 +231,12 @@ namespace SceneUtil
         bool mWaterInterior = false;
         int mWaterInteriorLocalLights = 2;
         int mWaterExteriorLocalLights = 0;
+        osg::ref_ptr<osg::Texture2D> mWaterSurfaceCoverageTexture;
+        int mWaterSurfaceCoverageTextureUnit = -1;
+        osg::Vec2f mWaterSurfaceCoverageCenter;
+        float mWaterSurfaceCoverageInverseSize = 0.f;
+        float mWaterSurfaceCoverageResolution = 0.f;
+        float mWaterCausticMaximumClearance = 0.f;
         int mAtmosphereDiagnosticMode = 0;
     };
 }

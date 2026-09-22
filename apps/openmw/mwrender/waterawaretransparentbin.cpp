@@ -121,7 +121,7 @@ namespace MWRender
                 continue;
 
             ++classifiedLeafCount;
-            if (leaf->_drawable == mWater->getDrawable())
+            if (mWater->isWorldWaterDrawable(leaf->_drawable))
                 mWaterLeaves.push_back(leaf);
             else if (mWater->isWaterDrawable(leaf->_drawable))
             {
@@ -179,7 +179,7 @@ namespace MWRender
         const bool sceneCamera = isSceneCamera();
         osgUtil::RenderBin::RenderLeafList meshWaterLeaves;
         for (osgUtil::RenderLeaf* leaf : _renderLeafList)
-            if (leaf && leaf->_drawable != mWater->getDrawable() && mWater->isWaterDrawable(leaf->_drawable))
+            if (leaf && !mWater->isWorldWaterDrawable(leaf->_drawable) && mWater->isWaterDrawable(leaf->_drawable))
                 meshWaterLeaves.push_back(leaf);
 
         // Fallback only when this camera has no renderer-owned water surface to schedule around the opaque resolve.

@@ -5,7 +5,6 @@
 #include <memory>
 #include <optional>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include <osg/Vec3d>
@@ -16,6 +15,7 @@
 #include <components/settings/settings.hpp>
 #include <components/vfs/pathutil.hpp>
 
+#include "surfaceeffectobjectregistry.hpp"
 #include "watersurface.hpp"
 
 namespace osg
@@ -39,6 +39,11 @@ namespace SceneUtil
 namespace osgUtil
 {
     class IncrementalCompileOperation;
+}
+
+namespace SceneUtil
+{
+    class StateUpdater;
 }
 
 namespace Resource
@@ -77,17 +82,21 @@ namespace MWRender
         osg::ref_ptr<osg::Group> mParent;
         osg::ref_ptr<osg::Group> mSceneRoot;
         osg::ref_ptr<osg::PositionAttitudeTransform> mWaterNode;
+        osg::ref_ptr<osg::Geometry> mFlatWaterGeom;
+        osg::ref_ptr<osg::Geometry> mDisplacedWaterGeom;
         osg::ref_ptr<osg::Geometry> mWaterGeom;
         osg::ref_ptr<osg::Geometry> mSimpleWaterGeom;
         osg::ref_ptr<osg::Group> mMeshWaterSeamRoot;
         Resource::ResourceSystem* mResourceSystem;
         GpuScene* mGpuScene;
+        SceneUtil::StateUpdater* mSceneStateUpdater;
         osg::ref_ptr<osgUtil::IncrementalCompileOperation> mIncrementalCompileOperation;
 
         std::unique_ptr<RippleSimulation> mSimulation;
         std::unique_ptr<WaterWaveOcclusion> mWaveOcclusion;
         WaterSurfaceParameters mSurfaceParameters;
-        float mMeshGeometricWaveHeight = 0.f;
+        /// Track whether classified authored materials currently use renderer-owned water replacements.
+        bool mMeshWaterEnabled = true;
 
         osg::ref_ptr<Reflection> mReflection;
         osg::ref_ptr<Ripples> mRipples;
@@ -103,7 +112,7 @@ namespace MWRender
         osg::ref_ptr<osg::Texture2D> mWaterNormalMap;
         osg::ref_ptr<osg::Texture3D> mMgeWaterVolume;
         std::unordered_map<const osg::Node*, std::unique_ptr<MeshWaterObject>> mMeshWaterObjects;
-        std::unordered_set<const osg::Node*> mKnownSurfaceEffectObjects;
+        SurfaceEffectObjectRegistry mKnownSurfaceEffectObjects;
         std::map<SceneUtil::WaterSurfacePlaneKey, std::unique_ptr<MeshWaterPlane>> mMeshWaterPlanes;
         std::unordered_map<unsigned int, std::vector<osg::ref_ptr<Reflection>>> mMeshWaterReflectionPool;
         unsigned int mMeshWaterSeamRebuildDelay = 0;
@@ -136,6 +145,9 @@ namespace MWRender
         /// Restore authored geometry for one object without forgetting its live classification source.
         void removeSurfaceEffectBindings(const osg::Node* objectRoot);
 
+        /// Refresh every loaded surface-effect object, optionally restoring its authored geometry first.
+        void refreshSurfaceEffectBindings(bool rebuildGeometry);
+
         /// Recompile mesh-water shader state after a global water permutation changes.
         void rebuildMeshWaterStateSets();
 
@@ -147,15 +159,16 @@ namespace MWRender
 
         void updateWaterMaterial();
 
-        /// Rebuild only the shader state while retaining reflection and ripple render targets.
-        void updateShaderWaterState();
+        /// Publish optional near-surface coverage through the scene's double-buffered state owner.
+        void updateWaterSurfaceCoverageState();
 
         /// Select the water mesh and synchronize shared near-surface coverage resources.
         void updateWaterGeometry();
 
     public:
+        /// Construct world and authored-mesh water under the shared scene state owner.
         Water(osg::Group* parent, osg::Group* sceneRoot, Resource::ResourceSystem* resourceSystem,
-            osgUtil::IncrementalCompileOperation* ico, GpuScene* gpuScene);
+            osgUtil::IncrementalCompileOperation* ico, GpuScene* gpuScene, SceneUtil::StateUpdater* sceneStateUpdater);
         ~Water();
 
         void setCullCallback(osg::Callback* callback);
@@ -192,9 +205,10 @@ namespace MWRender
 
         float getHeight() const { return mTop; }
 
-        osg::Drawable* getDrawable() const;
+        /// Return whether a drawable is either permanent world-water geometry.
+        bool isWorldWaterDrawable(const osg::Drawable* drawable) const;
 
-        /// Return whether a transparent drawable is any renderer-owned water surface.
+        /// Return whether a drawable belongs to world water or a classified finite water surface.
         bool isWaterDrawable(const osg::Drawable* drawable) const;
 
         /// Register one classified surface-effect object using its current complete world transform.

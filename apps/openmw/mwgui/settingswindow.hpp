@@ -37,9 +37,9 @@ namespace MWGui
         /// Apply isolated diagnostic input through the ordinary geometric-wave slider.
         void setGeometricWaveHeight(float height);
 
-        /// Exercise live water displacement and caustic controls for isolated diagnostics.
+        /// Exercise live water presentation and optical controls for isolated diagnostics.
         void setWaterValues(std::string_view appearance, float height, bool caustics, float causticsStrength,
-            int interiorLocalLights, int exteriorLocalLights);
+            int interiorLocalLights, int exteriorLocalLights, bool meshWater, float meshHeight);
 
         void onClose() override;
 

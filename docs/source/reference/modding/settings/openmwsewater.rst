@@ -1,9 +1,10 @@
 OpenMWSE Water Settings
 #######################
 
-The ``OpenMWSE Water`` category owns authored water appearances and geometric-wave controls that upstream OpenMW does not
-interpret. Existing ``Water`` settings remain authoritative for enabling shader water, reflection, refraction, and render-target
-quality. Appearance and enhanced-water choices apply immediately and remain saved while their prerequisite is disabled.
+The ``OpenMWSE Water`` category owns authored water appearances, classified mesh-water replacement, and geometric-wave controls
+that upstream OpenMW does not interpret. Existing ``Water`` settings remain authoritative for enabling shader water, reflection,
+refraction, and render-target quality. Appearance and enhanced-water choices apply immediately and remain saved while their
+prerequisite is disabled.
 The animated MGE XE water volume is shared with submerged material receivers independently from geometric displacement, so
 flat water retains caustics and future water-surface providers can retain the same receiver-side projection contract.
 
@@ -35,16 +36,27 @@ flat water retains caustics and future water-surface providers can retain the sa
    used by a mesh with an alpha property so its color composites over the reflective water instead of replacing it.
 
 .. omw-setting::
+   :title: mesh water
+   :type: boolean
+   :range: true, false
+   :default: true
+   :location: :bdg-info:`In Game > Options > Video > Water`
+
+   Replaces classified authored water materials with renderer-owned water using the selected appearance. Disabling this setting
+   immediately restores each source drawable, its original material, and its animated textures. Re-enabling it reclassifies the
+   loaded surfaces without reloading the cell. Mesh-specific preferences remain saved while replacement is disabled.
+
+.. omw-setting::
    :title: mesh geometric wave height
    :type: float32
    :range: 0.0 to 250.0
    :default: 0.0
    :location: :bdg-info:`In Game > Options > Video > Water`
 
-   Sets geometric wave height independently for water supplied by classified mesh materials. The value uses the same
-   Morrowind-world-unit scale as default water. Zero retains the authored mesh's flat geometry path. Positive values apply
-   the selected water appearance's geometric displacement, while player and weather ripples remain shared with all water.
-   A surface-effect profile can override this value for a deliberately calm or unusually rough material.
+   Sets geometric wave height independently for water supplied by classified mesh materials while ``mesh water`` is enabled.
+   The value uses the same Morrowind-world-unit scale as default water. Zero retains the authored mesh's flat geometry path.
+   Positive values apply the selected water appearance's geometric displacement, while player and weather ripples remain shared
+   with all water. A surface-effect profile can override this value for a deliberately calm or unusually rough material.
 
 .. omw-setting::
    :title: caustics

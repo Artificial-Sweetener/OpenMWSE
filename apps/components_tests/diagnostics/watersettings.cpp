@@ -9,11 +9,21 @@ TEST(DiagnosticWaterSettings, PreservesSliderDomainAndProtocolSupport)
 {
     for (const float height : { 0.f, 1.f, 30.f, 128.f, 250.f })
     {
-        const Diagnostics::WaterSettings settings{ height, height > 0.f, 0.75f, 3, 4, "enhanced" };
+        const Diagnostics::WaterSettings settings{ height, height > 0.f, 0.75f, 3, 4, "enhanced", false, height };
         EXPECT_EQ(Diagnostics::deserializeWaterSettings(Diagnostics::serializeWaterSettings(settings)), settings);
     }
     EXPECT_TRUE(
         Diagnostics::isSupportedCommand(static_cast<std::uint16_t>(Diagnostics::CommandType::SetWaterSettings)));
+}
+
+/// Preserve version-six routes while enabling the newly controllable mesh-water replacement by default.
+TEST(DiagnosticWaterSettings, ReadsVersionSixPayloadWithMeshWaterEnabled)
+{
+    const Diagnostics::WaterSettings expected{ 32.f, true, 0.75f, 3, 4, "enhanced", true };
+    EXPECT_EQ(Diagnostics::deserializeWaterSettings("water-version: 6\ngeometric-wave-height: 32\ncaustics: true\n"
+                                                    "caustics-strength: 0.75\ninterior-local-lights: 3\n"
+                                                    "exterior-local-lights: 4\nappearance: enhanced"),
+        expected);
 }
 
 TEST(DiagnosticWaterSettings, RejectsInvalidPayloadsBeforeMenuMutation)
@@ -31,6 +41,18 @@ TEST(DiagnosticWaterSettings, RejectsInvalidPayloadsBeforeMenuMutation)
     EXPECT_ANY_THROW(Diagnostics::serializeWaterSettings({ 0.f, true, 1.f, -1, 0 }));
     EXPECT_ANY_THROW(Diagnostics::serializeWaterSettings({ 0.f, true, 1.f, 0, 5 }));
     EXPECT_ANY_THROW(Diagnostics::serializeWaterSettings({ 0.f, true, 1.f, 0, 0, "unknown" }));
+    EXPECT_ANY_THROW(Diagnostics::serializeWaterSettings({ 0.f, true, 1.f, 0, 0, "openmw", true, -1.f }));
+    EXPECT_ANY_THROW(Diagnostics::serializeWaterSettings({ 0.f, true, 1.f, 0, 0, "openmw", true, 251.f }));
+}
+
+/// Preserve version-seven routes while defaulting the newly diagnosed mesh-wave control safely.
+TEST(DiagnosticWaterSettings, ReadsVersionSevenPayloadWithFlatMeshWater)
+{
+    const Diagnostics::WaterSettings expected{ 32.f, true, 0.75f, 3, 4, "enhanced", true, 0.f };
+    EXPECT_EQ(Diagnostics::deserializeWaterSettings("water-version: 7\ngeometric-wave-height: 32\ncaustics: true\n"
+                                                    "caustics-strength: 0.75\ninterior-local-lights: 3\n"
+                                                    "exterior-local-lights: 4\nappearance: enhanced\nmesh-water: true"),
+        expected);
 }
 
 /// Preserve version-one route fixtures while defaulting newly introduced optical controls safely.

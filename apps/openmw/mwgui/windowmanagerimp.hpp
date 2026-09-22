@@ -385,9 +385,9 @@ namespace MWGui
         /// Exercise the geometric-wave slider in an isolated diagnostic session.
         void setVideoGeometricWaveHeight(float height);
 
-        /// Exercise live water displacement and caustic controls for isolated diagnostics.
+        /// Exercise live water presentation and optical controls for isolated diagnostics.
         void setVideoWaterValues(std::string_view appearance, float height, bool caustics, float causticsStrength,
-            int interiorLocalLights, int exteriorLocalLights);
+            int interiorLocalLights, int exteriorLocalLights, bool meshWater, float meshHeight);
 
         /// Display a named video settings page through the ordinary settings window lifecycle.
         void showVideoSettings(std::string_view page);

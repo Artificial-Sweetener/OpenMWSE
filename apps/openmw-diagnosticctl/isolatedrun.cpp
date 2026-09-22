@@ -419,7 +419,7 @@ namespace DiagnosticCtl
                     requireSuccessfulResponse(applied);
                     const auto observed = Diagnostics::deserializeWaterSettings(payloadText(applied.mPayload));
                     if (observed != requested)
-                        throw std::runtime_error("live water control did not match the requested wave height");
+                        throw std::runtime_error("live water controls did not match the requested preferences");
                     writeSettingsEvidence(artifacts / ("water-settings-" + std::to_string(segmentIndex) + ".yaml"),
                         Diagnostics::serializeWaterSettings(observed), "failed writing live water settings evidence");
                     std::cout << "live-water-settings-parity: " << segmentIndex << " true\n";

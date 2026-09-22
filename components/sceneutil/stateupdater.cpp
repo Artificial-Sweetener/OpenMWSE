@@ -261,6 +261,12 @@ namespace SceneUtil
         stateset->addUniform(new osg::Uniform("waterInterior", mWaterInterior));
         stateset->addUniform(new osg::Uniform("waterInteriorLocalLights", mWaterInteriorLocalLights));
         stateset->addUniform(new osg::Uniform("waterExteriorLocalLights", mWaterExteriorLocalLights));
+        stateset->addUniform(
+            new osg::Uniform("waterSurfaceCoverageMap", std::max(0, mWaterSurfaceCoverageTextureUnit)));
+        stateset->addUniform(new osg::Uniform("waterSurfaceCoverageCenter", mWaterSurfaceCoverageCenter));
+        stateset->addUniform(new osg::Uniform("waterSurfaceCoverageInverseSize", mWaterSurfaceCoverageInverseSize));
+        stateset->addUniform(new osg::Uniform("waterSurfaceCoverageResolution", mWaterSurfaceCoverageResolution));
+        stateset->addUniform(new osg::Uniform("waterCausticMaximumClearance", mWaterCausticMaximumClearance));
         stateset->addUniform(new osg::Uniform("openmwseAtmosphereDiagnosticMode", mAtmosphereDiagnosticMode));
     }
 
@@ -331,6 +337,16 @@ namespace SceneUtil
         stateset->getUniform("waterInterior")->set(mWaterInterior);
         stateset->getUniform("waterInteriorLocalLights")->set(mWaterInteriorLocalLights);
         stateset->getUniform("waterExteriorLocalLights")->set(mWaterExteriorLocalLights);
+        stateset->getUniform("waterSurfaceCoverageMap")->set(std::max(0, mWaterSurfaceCoverageTextureUnit));
+        stateset->getUniform("waterSurfaceCoverageCenter")->set(mWaterSurfaceCoverageCenter);
+        stateset->getUniform("waterSurfaceCoverageInverseSize")->set(mWaterSurfaceCoverageInverseSize);
+        stateset->getUniform("waterSurfaceCoverageResolution")->set(mWaterSurfaceCoverageResolution);
+        stateset->getUniform("waterCausticMaximumClearance")->set(mWaterCausticMaximumClearance);
+        if (mWaterSurfaceCoverageTexture && mWaterSurfaceCoverageTextureUnit >= 0)
+            stateset->setTextureAttribute(
+                mWaterSurfaceCoverageTextureUnit, mWaterSurfaceCoverageTexture, osg::StateAttribute::ON);
+        else if (mWaterSurfaceCoverageTextureUnit >= 0)
+            stateset->removeTextureAttribute(mWaterSurfaceCoverageTextureUnit, osg::StateAttribute::TEXTURE);
         stateset->getUniform("openmwseAtmosphereDiagnosticMode")->set(mAtmosphereDiagnosticMode);
     }
 
@@ -434,6 +450,17 @@ namespace SceneUtil
         mWaterInterior = interior;
         mWaterInteriorLocalLights = interiorLocalLights;
         mWaterExteriorLocalLights = exteriorLocalLights;
+    }
+
+    void StateUpdater::setWaterSurfaceCoverage(osg::Texture2D* texture, int textureUnit, const osg::Vec2f& center,
+        float inverseSize, float resolution, float causticMaximumClearance)
+    {
+        mWaterSurfaceCoverageTexture = texture;
+        mWaterSurfaceCoverageTextureUnit = textureUnit;
+        mWaterSurfaceCoverageCenter = center;
+        mWaterSurfaceCoverageInverseSize = inverseSize;
+        mWaterSurfaceCoverageResolution = resolution;
+        mWaterCausticMaximumClearance = causticMaximumClearance;
     }
 
     void StateUpdater::setAtmosphereDiagnosticMode(int mode)

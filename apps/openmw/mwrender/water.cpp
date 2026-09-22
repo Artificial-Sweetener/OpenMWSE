@@ -36,6 +36,7 @@
 #include <components/sceneutil/material.hpp>
 #include <components/sceneutil/rtt.hpp>
 #include <components/sceneutil/shadow.hpp>
+#include <components/sceneutil/stateupdater.hpp>
 #include <components/sceneutil/surfaceeffect.hpp>
 #include <components/sceneutil/waterutil.hpp>
 
@@ -649,14 +650,15 @@ namespace MWRender
     };
 
     Water::Water(osg::Group* parent, osg::Group* sceneRoot, Resource::ResourceSystem* resourceSystem,
-        osgUtil::IncrementalCompileOperation* ico, GpuScene* gpuScene)
+        osgUtil::IncrementalCompileOperation* ico, GpuScene* gpuScene, SceneUtil::StateUpdater* sceneStateUpdater)
         : mRainSettingsUpdater(nullptr)
         , mParent(parent)
         , mSceneRoot(sceneRoot)
         , mResourceSystem(resourceSystem)
         , mGpuScene(gpuScene)
+        , mSceneStateUpdater(sceneStateUpdater)
         , mSurfaceParameters(defaultWaterSurfaceParameters())
-        , mMeshGeometricWaveHeight(Settings::openmwseWater().mMeshGeometricWaveHeight.get())
+        , mMeshWaterEnabled(Settings::openmwseWater().mMeshWater.get())
         , mEnabled(true)
         , mToggled(true)
         , mTop(0)
@@ -670,17 +672,24 @@ namespace MWRender
             return meshWaterSurfaceHeight(position, maximumVerticalDistance);
         });
 
-        mWaterGeom = SceneUtil::createWaterGeometry(Constants::CellSizeInUnits * 150, 40, 900);
-        if (mGpuScene == nullptr || !mGpuScene->isEnabled())
-            mWaterGeom->setDrawCallback(new DepthClampCallback);
-        mWaterGeom->setNodeMask(Mask_Water);
-        mWaterGeom->setDataVariance(osg::Object::STATIC);
-        mWaterGeom->setName("Water Geometry");
-
         mWaterNode = new osg::PositionAttitudeTransform;
         mWaterNode->setName("Water Root");
-        mWaterNode->addChild(mWaterGeom);
         mWaterNode->addCullCallback(new FudgeCallback);
+
+        mFlatWaterGeom = SceneUtil::createWaterGeometry(Constants::CellSizeInUnits * 150, 40, 900);
+        mDisplacedWaterGeom = SceneUtil::createDisplacedWaterGeometry(Constants::CellSizeInUnits * 150, 900);
+        const auto configureGeometry = [this](osg::Geometry& geometry, std::string_view name) {
+            if (mGpuScene == nullptr || !mGpuScene->isEnabled())
+                geometry.setDrawCallback(new DepthClampCallback);
+            geometry.setNodeMask(0);
+            geometry.setDataVariance(osg::Object::STATIC);
+            geometry.setName(std::string(name));
+            mWaterNode->addChild(&geometry);
+        };
+        configureGeometry(*mFlatWaterGeom, "Water Geometry");
+        configureGeometry(*mDisplacedWaterGeom, "Displaced Water Geometry");
+        mWaterGeom = mFlatWaterGeom;
+        mWaterGeom->setNodeMask(Mask_Water);
 
         mMeshWaterSeamRoot = new osg::Group;
         mMeshWaterSeamRoot->setName("Mesh Water Seam Root");
@@ -711,16 +720,9 @@ namespace MWRender
         const bool useSurfaceCoverage = Settings::water().mShader && mSurfaceParameters.useSurfaceCoverage();
         if (mUsesDisplacedGeometry != useDisplacedGeometry)
         {
-            mWaterNode->removeChild(mWaterGeom);
-            mWaterGeom = useDisplacedGeometry
-                ? SceneUtil::createDisplacedWaterGeometry(Constants::CellSizeInUnits * 150, 900)
-                : SceneUtil::createWaterGeometry(Constants::CellSizeInUnits * 150, 40, 900);
-            if (mGpuScene == nullptr || !mGpuScene->isEnabled())
-                mWaterGeom->setDrawCallback(new DepthClampCallback);
+            mWaterGeom->setNodeMask(0);
+            mWaterGeom = useDisplacedGeometry ? mDisplacedWaterGeom : mFlatWaterGeom;
             mWaterGeom->setNodeMask(Mask_Water);
-            mWaterGeom->setDataVariance(osg::Object::STATIC);
-            mWaterGeom->setName(useDisplacedGeometry ? "Displaced Water Geometry" : "Water Geometry");
-            mWaterNode->addChild(mWaterGeom);
             mUsesDisplacedGeometry = useDisplacedGeometry;
         }
 
@@ -834,24 +836,16 @@ namespace MWRender
         updateVisible();
     }
 
-    void Water::updateShaderWaterState()
+    void Water::updateWaterSurfaceCoverageState()
     {
-        if (mShaderWaterStateSetUpdater)
-        {
-            mWaterNode->removeCullCallback(mShaderWaterStateSetUpdater);
-            mShaderWaterStateSetUpdater = nullptr;
-        }
-
-        mWaterNode->setStateSet(nullptr);
-        mWaterGeom->setStateSet(nullptr);
-        mWaterNode->setUpdateCallback(nullptr);
-        createShaderWaterStateSet(mWaterNode);
-        mResourceSystem->getSceneManager()->setUpNormalsRTForStateSet(mWaterGeom->getOrCreateStateSet(), true);
-        if (mGpuScene != nullptr && mGpuScene->isEnabled())
-        {
-            mWaterGeom->getOrCreateStateSet()->setMode(GL_DEPTH_CLAMP, osg::StateAttribute::ON);
-            mGpuScene->capture(*mWaterGeom);
-        }
+        if (!mSceneStateUpdater)
+            return;
+        const int textureUnit = mResourceSystem->getSceneManager()->getShaderManager().reserveGlobalTextureUnits(
+            Shader::ShaderManager::Slot::WaterOptics, Shader::waterOpticsTextureUnitCount);
+        mSceneStateUpdater->setWaterSurfaceCoverage(mWaveOcclusion ? mWaveOcclusion->texture() : nullptr,
+            textureUnit + 2, mWaveOcclusion ? mWaveOcclusion->center() : osg::Vec2f(),
+            mWaveOcclusion ? mWaveOcclusion->inverseWorldSize() : 0.f,
+            mWaveOcclusion ? mWaveOcclusion->textureResolution() : 0.f, SceneUtil::waterCausticInteractionHeight);
     }
 
     osg::Vec3d Water::getPosition() const
@@ -859,14 +853,14 @@ namespace MWRender
         return mWaterNode->getPosition();
     }
 
-    osg::Drawable* Water::getDrawable() const
+    bool Water::isWorldWaterDrawable(const osg::Drawable* drawable) const
     {
-        return mWaterGeom;
+        return drawable == mFlatWaterGeom || drawable == mDisplacedWaterGeom;
     }
 
     bool Water::isWaterDrawable(const osg::Drawable* drawable) const
     {
-        if (drawable == mWaterGeom)
+        if (isWorldWaterDrawable(drawable))
             return true;
         bool meshWaterSurface = false;
         return drawable && drawable->getUserValue("meshWaterSurface", meshWaterSurface) && meshWaterSurface;
@@ -1064,12 +1058,13 @@ namespace MWRender
         }
 
     protected:
-        /// Install the shared material plus finite-surface culling, height, and render-bin state.
+        /// Install shared material, finite-surface culling, depth separation, height, and render-bin state.
         void setDefaults(osg::StateSet* stateset) override
         {
             mMaterial.setDefaults(*stateset);
             osg::ref_ptr<osg::CullFace> cullFace = new osg::CullFace(osg::CullFace::BACK);
             stateset->setAttributeAndModes(cullFace, osg::StateAttribute::ON | osg::StateAttribute::OVERRIDE);
+            SceneUtil::applyFiniteWaterDepthSeparation(*stateset);
             stateset->addUniform(new osg::Uniform("nodePosition", mNodePosition));
             stateset->addUniform(new osg::Uniform("waterPlaneNormal", mPlane->plane().mNormal));
             stateset->addUniform(new osg::Uniform("waterPlaneDistance", mPlane->plane().mDistance));
@@ -1102,8 +1097,8 @@ namespace MWRender
 
     void Water::createShaderWaterStateSet(osg::Node* node)
     {
-        const std::map<std::string, std::string> defineMap
-            = waterShaderDefines(mSurfaceParameters.useGeometricWaves(), false);
+        // Retain one world-water permutation so live wave-height changes only select geometry and update a uniform.
+        const std::map<std::string, std::string> defineMap = waterShaderDefines(true, false);
 
         Shader::ShaderManager& shaderMgr = mResourceSystem->getSceneManager()->getShaderManager();
         osg::ref_ptr<osg::Program> program
@@ -1143,19 +1138,7 @@ namespace MWRender
         sceneState->setTextureAttribute(waterOpticalTextureUnit, normalVolume, osg::StateAttribute::ON);
         sceneState->addUniform(new osg::Uniform("waterOpticalVolume", waterOpticalTextureUnit + 1));
         sceneState->setTextureAttribute(waterOpticalTextureUnit + 1, mMgeWaterVolume, osg::StateAttribute::ON);
-        if (mWaveOcclusion)
-        {
-            sceneState->addUniform(new osg::Uniform("waterSurfaceCoverageMap", waterOpticalTextureUnit + 2));
-            sceneState->setTextureAttribute(
-                waterOpticalTextureUnit + 2, mWaveOcclusion->texture(), osg::StateAttribute::ON);
-            sceneState->addUniform(new osg::Uniform("waterSurfaceCoverageCenter", mWaveOcclusion->center()));
-            sceneState->addUniform(
-                new osg::Uniform("waterSurfaceCoverageInverseSize", mWaveOcclusion->inverseWorldSize()));
-            sceneState->addUniform(
-                new osg::Uniform("waterSurfaceCoverageResolution", mWaveOcclusion->textureResolution()));
-            sceneState->addUniform(
-                new osg::Uniform("waterCausticMaximumClearance", SceneUtil::waterCausticInteractionHeight));
-        }
+        updateWaterSurfaceCoverageState();
 
         mRainSettingsUpdater = new RainSettingsUpdater();
         node->setUpdateCallback(mRainSettingsUpdater);
@@ -1168,12 +1151,10 @@ namespace MWRender
     void Water::createMeshWaterStateSet(osg::Group& wrapper, Reflection& reflection,
         const SceneUtil::SurfaceEffectProfile& profile, const osg::Vec3f& nodePosition)
     {
-        const std::map<std::string, std::string> defineMap
-            = waterShaderDefines(meshWaterWaveHeight(profile) > 0.f, true);
-
         Shader::ShaderManager& shaderManager = mResourceSystem->getSceneManager()->getShaderManager();
-        osg::ref_ptr<osg::Program> program
-            = shaderManager.getProgram("water", defineMap, nullptr, {}, Shader::ProgramCapability::Instanced);
+        // Retain one mesh permutation so live height changes only update a uniform and never replace draw state.
+        osg::ref_ptr<osg::Program> program = shaderManager.getProgram(
+            "water", waterShaderDefines(true, true), nullptr, {}, Shader::ProgramCapability::Instanced);
 
         if (!mWaterNormalMap || !mMgeWaterVolume)
             createShaderWaterStateSet(mWaterNode);
@@ -1186,7 +1167,7 @@ namespace MWRender
             throw std::logic_error("mesh water reflection has no owning plane");
 
         osg::ref_ptr<MeshWaterStateSetUpdater> updater = new MeshWaterStateSetUpdater(
-            this, mResourceSystem, plane, profile, nodePosition, program, mWaterNormalMap, mMgeWaterVolume);
+            this, mResourceSystem, plane, profile, nodePosition, std::move(program), mWaterNormalMap, mMgeWaterVolume);
         wrapper.addCullCallback(updater);
     }
 
@@ -1399,22 +1380,20 @@ namespace MWRender
                             plane.mWorldBound.expandBy(vertex);
                         plane.mWorldTriangles.insert(plane.mWorldTriangles.end(), triangle.mWorldVertices.begin(),
                             triangle.mWorldVertices.end());
-                        if (meshWaterWaveHeight(*profile) > 0.f)
+                        // Keep tessellation independent of the live wave toggle so changing the shader permutation
+                        // never replaces drawables or reflection cameras that the draw thread may still be consuming.
+                        const unsigned int a = triangle.mIndices[0];
+                        const unsigned int b = triangle.mIndices[reverseWinding ? 2 : 1];
+                        const unsigned int c = triangle.mIndices[reverseWinding ? 1 : 2];
+                        const unsigned int worldB = reverseWinding ? 2 : 1;
+                        const unsigned int worldC = reverseWinding ? 1 : 2;
+                        appendWaterTriangle(*plane.mDisplacedVertices, (*vertices)[a], (*vertices)[b], (*vertices)[c],
+                            triangle.mWorldVertices[0], triangle.mWorldVertices[worldB],
+                            triangle.mWorldVertices[worldC]);
+                        if (plane.mLocalNormal.length2() == 0.f)
                         {
-                            const unsigned int a = triangle.mIndices[0];
-                            const unsigned int b = triangle.mIndices[reverseWinding ? 2 : 1];
-                            const unsigned int c = triangle.mIndices[reverseWinding ? 1 : 2];
-                            const unsigned int worldB = reverseWinding ? 2 : 1;
-                            const unsigned int worldC = reverseWinding ? 1 : 2;
-                            appendWaterTriangle(*plane.mDisplacedVertices, (*vertices)[a], (*vertices)[b],
-                                (*vertices)[c], triangle.mWorldVertices[0], triangle.mWorldVertices[worldB],
-                                triangle.mWorldVertices[worldC]);
-                            if (plane.mLocalNormal.length2() == 0.f)
-                            {
-                                plane.mLocalNormal
-                                    = ((*vertices)[b] - (*vertices)[a]) ^ ((*vertices)[c] - (*vertices)[a]);
-                                plane.mLocalNormal.normalize();
-                            }
+                            plane.mLocalNormal = ((*vertices)[b] - (*vertices)[a]) ^ ((*vertices)[c] - (*vertices)[a]);
+                            plane.mLocalNormal.normalize();
                         }
                     }
                     planes.push_back(std::move(plane));
@@ -1446,7 +1425,7 @@ namespace MWRender
                         osg::BoundingBox displacedBound;
                         for (const osg::Vec3f& vertex : *plane.mDisplacedVertices)
                             displacedBound.expandBy(vertex);
-                        const float boundMargin = meshWaterWaveHeight(*profile);
+                        const float boundMargin = profile->mGeometricWaveHeight.value_or(250.f);
                         displacedBound.expandBy(osg::Vec3f(displacedBound.xMin() - boundMargin,
                             displacedBound.yMin() - boundMargin, displacedBound.zMin() - boundMargin));
                         displacedBound.expandBy(osg::Vec3f(displacedBound.xMax() + boundMargin,
@@ -1477,8 +1456,8 @@ namespace MWRender
     {
         if (!objectRoot)
             return;
-        mKnownSurfaceEffectObjects.insert(objectRoot);
-        if (!Settings::water().mShader || mMeshWaterObjects.contains(objectRoot))
+        mKnownSurfaceEffectObjects.remember(*objectRoot);
+        if (!Settings::water().mShader || !mMeshWaterEnabled || mMeshWaterObjects.contains(objectRoot))
             return;
 
         ClassifiedWaterVisitor visitor;
@@ -1615,8 +1594,19 @@ namespace MWRender
 
     void Water::unregisterSurfaceEffects(const osg::Node* objectRoot)
     {
-        mKnownSurfaceEffectObjects.erase(objectRoot);
+        mKnownSurfaceEffectObjects.forget(objectRoot);
         removeSurfaceEffectBindings(objectRoot);
+    }
+
+    void Water::refreshSurfaceEffectBindings(bool rebuildGeometry)
+    {
+        SurfaceEffectObjectRegistry::Snapshot known = mKnownSurfaceEffectObjects.lockLive();
+        std::ranges::for_each(known.mExpired, [this](const osg::Node* root) { removeSurfaceEffectBindings(root); });
+        if (rebuildGeometry)
+            for (const osg::ref_ptr<osg::Node>& root : known.mLive)
+                removeSurfaceEffectBindings(root.get());
+        for (const osg::ref_ptr<osg::Node>& root : known.mLive)
+            registerSurfaceEffects(root.get());
     }
 
     void Water::synchronizeSurfaceEffects(osg::Node* objectRoot)
@@ -1624,21 +1614,20 @@ namespace MWRender
         if (!objectRoot)
             return;
 
-        if (mKnownSurfaceEffectObjects.contains(objectRoot))
-            removeSurfaceEffectBindings(objectRoot);
-        else
+        if (!mKnownSurfaceEffectObjects.contains(objectRoot))
         {
             bool hasSurfaceEffects = false;
             objectRoot->getUserValue("surfaceEffects", hasSurfaceEffects);
             if (!hasSurfaceEffects)
                 return;
         }
+        removeSurfaceEffectBindings(objectRoot);
         registerSurfaceEffects(objectRoot);
     }
 
     std::optional<float> Water::meshWaterSurfaceHeight(const osg::Vec3f& position, float maximumVerticalDistance) const
     {
-        if (!isVisible() || !Settings::water().mShader)
+        if (!isVisible() || !Settings::water().mShader || !mMeshWaterEnabled)
             return std::nullopt;
 
         constexpr float aboveSurfaceTolerance = 20.f;
@@ -1733,7 +1722,7 @@ namespace MWRender
     void Water::rebuildMeshWaterSeams()
     {
         mMeshWaterSeamRoot->removeChildren(0, mMeshWaterSeamRoot->getNumChildren());
-        if (!Settings::water().mShader)
+        if (!Settings::water().mShader || !mMeshWaterEnabled)
             return;
 
         struct EdgeSource
@@ -1894,12 +1883,11 @@ namespace MWRender
 
     void Water::processChangedSettings(const Settings::CategorySettingVector& settings)
     {
-        const bool usedDisplacedGeometry = mUsesDisplacedGeometry;
-        const bool usedSurfaceCoverage = mUsesSurfaceCoverage;
-        const bool usedMeshGeometricWaves = mMeshGeometricWaveHeight > 0.f;
+        const bool usedMeshWater = mMeshWaterEnabled;
         mSurfaceParameters = defaultWaterSurfaceParameters();
-        mMeshGeometricWaveHeight = Settings::openmwseWater().mMeshGeometricWaveHeight.get();
+        mMeshWaterEnabled = Settings::openmwseWater().mMeshWater.get();
         updateWaterGeometry();
+        updateWaterSurfaceCoverageState();
         if (mWaveOcclusion)
         {
             mWaveOcclusion->setMaximumClearance(
@@ -1911,20 +1899,13 @@ namespace MWRender
         const bool rendererWaterSettingsChanged = settings.empty()
             || std::any_of(
                 settings.begin(), settings.end(), [](const auto& setting) { return setting.first == "Water"; });
-        const bool meshWaveGeometryChanged = usedMeshGeometricWaves != (mMeshGeometricWaveHeight > 0.f);
         if (rendererWaterSettingsChanged)
         {
             updateWaterMaterial();
-            if (Settings::water().mShader)
+            if (Settings::water().mShader && mMeshWaterEnabled)
             {
-                const std::vector<const osg::Node*> known(
-                    mKnownSurfaceEffectObjects.begin(), mKnownSurfaceEffectObjects.end());
-                if (meshWaveGeometryChanged)
-                    for (const osg::Node* root : known)
-                        removeSurfaceEffectBindings(root);
-                for (const osg::Node* root : known)
-                    registerSurfaceEffects(const_cast<osg::Node*>(root));
-                if (!meshWaveGeometryChanged)
+                refreshSurfaceEffectBindings(usedMeshWater != mMeshWaterEnabled);
+                if (usedMeshWater == mMeshWaterEnabled)
                     rebuildMeshWaterStateSets();
             }
             else
@@ -1935,22 +1916,19 @@ namespace MWRender
         }
         else if (Settings::water().mShader)
         {
-            if (meshWaveGeometryChanged)
-            {
-                const std::vector<const osg::Node*> known(
-                    mKnownSurfaceEffectObjects.begin(), mKnownSurfaceEffectObjects.end());
-                for (const osg::Node* root : known)
-                    removeSurfaceEffectBindings(root);
-                for (const osg::Node* root : known)
-                    registerSurfaceEffects(const_cast<osg::Node*>(root));
-            }
-            if (usedDisplacedGeometry != mUsesDisplacedGeometry || usedSurfaceCoverage != mUsesSurfaceCoverage)
-                updateShaderWaterState();
+            if (usedMeshWater != mMeshWaterEnabled)
+                refreshSurfaceEffectBindings(true);
         }
     }
 
     Water::~Water()
     {
+        if (mSceneStateUpdater)
+        {
+            const int textureUnit = mResourceSystem->getSceneManager()->getShaderManager().reserveGlobalTextureUnits(
+                Shader::ShaderManager::Slot::WaterOptics, Shader::waterOpticsTextureUnitCount);
+            mSceneStateUpdater->setWaterSurfaceCoverage(nullptr, textureUnit + 2, {}, 0.f, 0.f, 0.f);
+        }
         while (!mMeshWaterObjects.empty())
             removeSurfaceEffectBindings(mMeshWaterObjects.begin()->first);
         mSceneRoot->removeChild(mMeshWaterSeamRoot);
@@ -2015,8 +1993,7 @@ namespace MWRender
         if (mWaveOcclusion)
         {
             mWaveOcclusion->setCenter(osg::Vec2f(static_cast<float>(position.x()), static_cast<float>(position.y())));
-            if (osg::Uniform* center = mSceneRoot->getOrCreateStateSet()->getUniform("waterSurfaceCoverageCenter"))
-                center->set(mWaveOcclusion->center());
+            updateWaterSurfaceCoverageState();
         }
     }
 

@@ -15,6 +15,8 @@ namespace Diagnostics
         int mInteriorLocalLights = 2;
         int mExteriorLocalLights = 0;
         std::string mAppearance = "openmw";
+        bool mMeshWater = true;
+        float mMeshGeometricWaveHeight = 0.f;
 
         /// Compare the complete requested water-control state.
         bool operator==(const WaterSettings&) const = default;

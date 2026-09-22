@@ -54,6 +54,7 @@ namespace Settings
     struct WaterControlInputs
     {
         bool mShader;
+        bool mMeshWater;
         bool mEnhancedAppearance;
         bool mCaustics;
     };
@@ -62,6 +63,7 @@ namespace Settings
     struct WaterControlVisibility
     {
         bool mShaderControls;
+        bool mMeshControls;
         bool mEnhancedControls;
         bool mCausticsStrength;
     };
@@ -69,7 +71,8 @@ namespace Settings
     /// Resolve water dependencies without changing subordinate preferences.
     constexpr WaterControlVisibility getWaterControlVisibility(WaterControlInputs inputs)
     {
-        return { inputs.mShader, inputs.mShader && inputs.mEnhancedAppearance, inputs.mShader && inputs.mCaustics };
+        return { inputs.mShader, inputs.mShader && inputs.mMeshWater, inputs.mShader && inputs.mEnhancedAppearance,
+            inputs.mShader && inputs.mCaustics };
     }
 
     /// Supplies the shadow parent selections used by the graphics menu.

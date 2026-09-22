@@ -47,17 +47,25 @@ namespace
 
     TEST(GraphicsSettingsVisibility, WaterDependenciesCollapseFromTheirImmediateParent)
     {
-        const auto disabled = Settings::getWaterControlVisibility({ false, true, true });
+        const auto disabled = Settings::getWaterControlVisibility({ false, true, true, true });
         EXPECT_FALSE(disabled.mShaderControls);
+        EXPECT_FALSE(disabled.mMeshControls);
         EXPECT_FALSE(disabled.mEnhancedControls);
         EXPECT_FALSE(disabled.mCausticsStrength);
 
-        const auto basic = Settings::getWaterControlVisibility({ true, false, false });
+        const auto basic = Settings::getWaterControlVisibility({ true, false, false, false });
         EXPECT_TRUE(basic.mShaderControls);
+        EXPECT_FALSE(basic.mMeshControls);
         EXPECT_FALSE(basic.mEnhancedControls);
         EXPECT_FALSE(basic.mCausticsStrength);
 
-        const auto enhanced = Settings::getWaterControlVisibility({ true, true, true });
+        const auto meshDisabled = Settings::getWaterControlVisibility({ true, false, true, true });
+        EXPECT_FALSE(meshDisabled.mMeshControls);
+        EXPECT_TRUE(meshDisabled.mEnhancedControls);
+        EXPECT_TRUE(meshDisabled.mCausticsStrength);
+
+        const auto enhanced = Settings::getWaterControlVisibility({ true, true, true, true });
+        EXPECT_TRUE(enhanced.mMeshControls);
         EXPECT_TRUE(enhanced.mEnhancedControls);
         EXPECT_TRUE(enhanced.mCausticsStrength);
     }

@@ -48,9 +48,9 @@ namespace MWGui
         /// Exercise the live geometric-wave slider with an isolated diagnostic value.
         void setGeometricWaveHeight(float height);
 
-        /// Exercise the live geometric-wave and caustic controls with isolated diagnostic values.
+        /// Exercise only changed live water presentation and optical controls with isolated diagnostic values.
         void setWaterValues(std::string_view appearance, float height, bool caustics, float causticsStrength,
-            int interiorLocalLights, int exteriorLocalLights);
+            int interiorLocalLights, int exteriorLocalLights, bool meshWater, float meshHeight);
 
     private:
         /// Retain one category page and its responsive scrolling content.
@@ -85,6 +85,8 @@ namespace MWGui
         void onAtmosphereAppearanceChanged(MyGUI::ComboBox* sender, std::size_t position);
         /// Apply the selected water appearance immediately.
         void onWaterAppearanceChanged(MyGUI::ComboBox* sender, std::size_t position);
+        /// Refresh mesh-water controls after the live replacement policy changes.
+        void onMeshWaterChanged(MyGUI::Widget* sender);
         /// Apply the enhanced-water color treatment immediately.
         void onEnhancedWaterColorChanged(MyGUI::ComboBox* sender, std::size_t position);
         /// Refresh caustic-strength availability after either live prerequisite changes.
@@ -123,6 +125,7 @@ namespace MWGui
         MyGUI::ComboBox* mAtmosphereAppearance;
         MyGUI::ComboBox* mWaterAppearance;
         MyGUI::ScrollBar* mGeometricWaveHeight;
+        MyGUI::Button* mMeshWater;
         MyGUI::ScrollBar* mMeshGeometricWaveHeight;
         MyGUI::Button* mWaterCaustics;
         MyGUI::ScrollBar* mWaterCausticsStrength;
@@ -131,6 +134,7 @@ namespace MWGui
         MyGUI::ComboBox* mEnhancedWaterColor;
         std::array<MyGUI::Button*, 3> mEnhancedWaterButtons;
         MyGUI::Widget* mWaterShaderControls;
+        MyGUI::Widget* mMeshWaterControls;
         MyGUI::Widget* mEnhancedWaterControls;
         MyGUI::Widget* mWaterCausticsStrengthGroup;
         MyGUI::ComboBox* mShadowFilteringQuality;

@@ -7,11 +7,54 @@
 #include <osg/Array>
 #include <osg/BoundingBox>
 #include <osg/Geometry>
+#include <osg/NodeVisitor>
+#include <osg/PolygonOffset>
+#include <osg/StateSet>
+#include <osg/Texture2D>
 
+#include <components/sceneutil/depth.hpp>
+#include <components/sceneutil/stateupdater.hpp>
 #include <components/sceneutil/waterutil.hpp>
 
 namespace
 {
+    /// Keep coverage bindings live within the scene's double-buffered state instead of replacing water callbacks.
+    TEST(WaterUtilTest, SurfaceCoverageStateCanChangeWithoutResettingTheSceneUpdater)
+    {
+        SceneUtil::StateUpdater updater;
+        osg::ref_ptr<osg::StateSet> stateSet = new osg::StateSet;
+        osg::ref_ptr<osg::Texture2D> texture = new osg::Texture2D;
+        osg::NodeVisitor visitor;
+        const osg::Vec2f center(120.f, -80.f);
+
+        updater.setWaterSurfaceCoverage(texture, 11, center, 0.0025f, 512.f, 250.f);
+        updater.setDefaults(stateSet);
+        updater.apply(stateSet, &visitor);
+
+        EXPECT_EQ(stateSet->getTextureAttribute(11, osg::StateAttribute::TEXTURE), texture);
+        osg::Vec2f actualCenter;
+        ASSERT_NE(stateSet->getUniform("waterSurfaceCoverageCenter"), nullptr);
+        stateSet->getUniform("waterSurfaceCoverageCenter")->get(actualCenter);
+        EXPECT_EQ(actualCenter, center);
+
+        updater.setWaterSurfaceCoverage(nullptr, 11, {}, 0.f, 0.f, 0.f);
+        updater.apply(stateSet, &visitor);
+        EXPECT_EQ(stateSet->getTextureAttribute(11, osg::StateAttribute::TEXTURE), nullptr);
+    }
+
+    /// Bias finite water toward the camera in either depth convention without disabling occlusion.
+    TEST(WaterUtilTest, FiniteSurfaceDepthSeparationTracksDepthConvention)
+    {
+        osg::ref_ptr<osg::StateSet> stateSet = new osg::StateSet;
+        SceneUtil::applyFiniteWaterDepthSeparation(*stateSet);
+        const auto* offset
+            = static_cast<const osg::PolygonOffset*>(stateSet->getAttribute(osg::StateAttribute::POLYGONOFFSET));
+        ASSERT_NE(offset, nullptr);
+        const float direction = SceneUtil::AutoDepth::isReversed() ? 1.f : -1.f;
+        EXPECT_FLOAT_EQ(offset->getFactor(), 0.65f * direction);
+        EXPECT_FLOAT_EQ(offset->getUnits(), direction);
+    }
+
     /// Resolve emitter contact against actual water triangles instead of their coarse bounding rectangles.
     TEST(WaterUtilTest, SurfaceTriangleContainmentIncludesEdgesAndRejectsBoundingBoxCorners)
     {
