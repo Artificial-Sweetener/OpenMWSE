@@ -36,8 +36,8 @@ kind = "structural"
 justification = "SettingsWindow is the composition root for one modal settings surface: it binds the shared widget tree, coordinates tabs and focus, applies one pending-settings transaction, and owns the input, localization, and script-page presentation tied to that lifetime. Fork-specific live graphics policy, distance editing, shadow validation, and diagnostic exercise now belong to GraphicsSettings."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:e82a0557d4758b941aa7ac98fac8ede70ab98a09669ac622e6161d0c3fe92e5e"
-max_lines = 978
+fingerprint = "sha256:a237388a35600948cfdea945b28fa9661f28cffd35b155629d63fb666ff554b8"
+max_lines = 979
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-003"
@@ -153,7 +153,7 @@ kind = "structural"
 justification = "Sky utilities implement the private scene objects and callbacks used exclusively by SkyManager, including celestial drawables, cloud state, precipitation emitters, and camera-relative transforms. They share sky masks, coordinate conventions, and update contracts and intentionally have no public lifecycle of their own."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:2bdf2044f54706b49a92e03a99a2296cfd0f7629d96d305fd323cf6911d4211f"
+fingerprint = "sha256:86bdbdbd84d61e8dd76574c61ec9b65927cd334d128b5a27bc4508ba3a467c8a"
 max_lines = 934
 
 [[waivers]]
@@ -163,11 +163,11 @@ owner = "OpenMWSE rendering"
 rule = "STRUCT003"
 path = "apps/openmw/mwrender/water.cpp"
 kind = "structural"
-justification = "Water owns one surface-rendering lifecycle for conventional world water and classified planar mesh water. Geometry replacement, seam repair, reflection allocation and handoff, shared optical material state, ripple interaction, settings invalidation, and cell or object transitions all coordinate the same scene masks, cameras, water planes, and render targets; extracting one path would split those invariants across mutually dependent runtime owners."
+justification = "Water owns one surface-rendering lifecycle for conventional world water and classified planar mesh water. Geometry replacement, seam repair, provider binding, shared optical material state, ripple interaction, settings invalidation, and cell or object transitions all coordinate the same scene masks and water planes; planar capture, reconstruction, and source-selection policy now belong to dedicated provider components."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:dc7c600e8d006b2cd94ef60bb45e404f8c6f59099f913b0c52d9047734d2fd33"
-max_lines = 1836
+fingerprint = "sha256:0d6fccaf240385ce1873867c7dae9051581fb66f3a4d8558e7912d5f00ad1b2f"
+max_lines = 1587
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-011"
@@ -270,8 +270,8 @@ kind = "structural"
 justification = "GPU timing owns one graphics-context query lifecycle and its publication into OSG frame statistics. Camera and render-bin instruments share query pools, frame identity, pass naming, and delayed availability rules; keeping them together preserves the single timing protocol and synchronization boundary."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:f7f5f4fbf830394520dbd71f889b1ef40a73c00f6e7985a6806238b15b44a48e"
-max_lines = 603
+fingerprint = "sha256:c7ca170cbec23fb60ce23656d3d65445d8acc5b788a99e51903b6172995cd5f6"
+max_lines = 604
 
 [[waivers]]
 id = "OMWSE-STRUCTURAL-019"
@@ -413,7 +413,7 @@ kind = "structural"
 justification = "The isolated-run implementation owns one controller lifecycle: validate an isolated launch, materialize its temporary profile, start and connect to the child, execute bounded capture or replay requests, retain requested evidence, and clean up. These stages share the same launch options, child identity, endpoint, artifact root, and failure cleanup contract; extracting a stage would divide one transactional owner across pass-through interfaces."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:3b5ca3932d3cefd71369bc925cd2f1c53d25c2d1ec38cf83332895aa4ceddae1"
+fingerprint = "sha256:93a5f8419b885684fc5e0c37bd3fb937b5a550a0e7d859d805dbef71249c95d6"
 max_lines = 618
 
 [[waivers]]
@@ -426,7 +426,7 @@ kind = "structural"
 justification = "Diagnostic commands form one engine-side protocol boundary that validates request envelopes, coordinates request-scoped capture state, and serializes the corresponding responses. Clearance and traversal reports depend on the same request identity, replay lifetime, response framing, and error translation as existing graphics and performance commands; separating them would duplicate protocol dispatch and cleanup policy."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:064a32467aa09a38f62b043b06fe935477e377b44aa097ab48ef2bb3fb19cbac"
+fingerprint = "sha256:6091a8ae828f77dfa14710fe3416b0c7969c376bb310be571eda473fc24088fe"
 max_lines = 598
 
 [[waivers]]
@@ -439,5 +439,18 @@ kind = "structural"
 justification = "Water utilities define one stateless surface-geometry and reflection-policy contract shared by world water, classified mesh water, shaders, and focused tests. Plane fitting, topology partitioning, seam construction, reflection sizing and handoff, and canonical water geometry creation use the same coordinate conventions and tolerances; splitting the file would divide one mathematical contract without creating an independent runtime owner or lifecycle."
 issue = "architecture:structural-review"
 review_by = 2027-03-12
-fingerprint = "sha256:d00be7bdccb540cfe5d58395a23e1464df8052e59c9a74b08f204ae3ad45c263"
-max_lines = 611
+fingerprint = "sha256:6bbc4e0d7a99cbf4250f54ed5c81451db612d6fbb21c62217aa703d24f69a71b"
+max_lines = 671
+
+[[waivers]]
+id = "OMWSE-STRUCTURAL-036"
+area = "renderer"
+owner = "OpenMWSE rendering"
+rule = "STRUCT003"
+path = "files/shaders/compatibility/water.frag"
+kind = "structural"
+justification = "The compatibility water fragment shader owns one material presentation contract across OpenMW, MGE XE, enhanced, and vanilla appearances. Shared reflection sampling, refraction, depth color, fog, caustics, lighting, shoreline treatment, and appearance-specific response must compose in one final fragment invocation with identical coordinate and blending conventions; splitting those stages would duplicate uniforms and obscure the authoritative output equation."
+issue = "architecture:structural-review"
+review_by = 2027-03-12
+fingerprint = "sha256:45adfa86be170ab870a1bb25c6e182f42031c2c6500417177146c08cb37d3bea"
+max_lines = 515

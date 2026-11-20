@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 
@@ -332,6 +333,8 @@ namespace
         EXPECT_EQ(SceneUtil::waterReflectionResolution(100.0, 512), 128u);
         EXPECT_EQ(SceneUtil::waterReflectionResolution(240.0, 512), 256u);
         EXPECT_EQ(SceneUtil::waterReflectionResolution(700.0, 512), 512u);
+        EXPECT_EQ(SceneUtil::waterReflectionResolution(1500.0, 2048), 1024u);
+        EXPECT_EQ(SceneUtil::waterReflectionResolution(3000.0, 2048), 2048u);
         EXPECT_EQ(SceneUtil::waterReflectionResolution(900.0, 256), 256u);
         EXPECT_EQ(SceneUtil::waterReflectionResolution(900.0, 32), 64u);
     }
@@ -380,6 +383,21 @@ namespace
         EXPECT_DOUBLE_EQ(rect.mBottom, 0.0);
         EXPECT_DOUBLE_EQ(rect.mRight, 1.0);
         EXPECT_DOUBLE_EQ(rect.mTop, 1.0);
+    }
+
+    /// Distinguish a visible horizon plane from one wholly behind the view without relying on camera distance alone.
+    TEST(WaterUtilTest, ReflectionPlaneCoverageMeasuresViewRayIntersections)
+    {
+        osg::Matrixd view;
+        view.makeLookAt(osg::Vec3d(0.0, 0.0, 10.0), osg::Vec3d(0.0, 10.0, 10.0), osg::Vec3d(0.0, 0.0, 1.0));
+        osg::Matrixd projection;
+        projection.makePerspective(60.0, 16.0 / 9.0, 0.1, 1000.0);
+        const SceneUtil::WaterSurfacePlane plane;
+        EXPECT_GT(SceneUtil::waterReflectionPlaneCoverage(plane, view, projection), 0.25);
+        EXPECT_LT(SceneUtil::waterReflectionPlaneCoverage(plane, view, projection), 0.75);
+
+        view.makeLookAt(osg::Vec3d(0.0, 0.0, 10.0), osg::Vec3d(0.0, 10.0, 20.0), osg::Vec3d(0.0, 0.0, 1.0));
+        EXPECT_DOUBLE_EQ(SceneUtil::waterReflectionPlaneCoverage(plane, view, projection), 0.0);
     }
 
     /// Prevent camera motion near a bucket boundary from reallocating a reflection every frame.
@@ -438,6 +456,23 @@ namespace
         EXPECT_EQ(policy.activeResolution(), 256u);
         EXPECT_FALSE(policy.pendingResolution());
         EXPECT_FALSE(policy.publish());
+    }
+
+    /// Keep a near-tie challenger from moving the shared source while allowing a clearly dominant plane after dwell.
+    TEST(WaterUtilTest, ReflectionAnchorUsesImpactHysteresisAndDwell)
+    {
+        SceneUtil::WaterReflectionAnchorPolicy policy;
+        const std::array initial{ SceneUtil::WaterReflectionAnchorCandidate{ 1, 100.0 },
+            SceneUtil::WaterReflectionAnchorCandidate{ 2, 90.0 } };
+        EXPECT_EQ(policy.select(initial, 1), 1u);
+
+        const std::array nearTie{ SceneUtil::WaterReflectionAnchorCandidate{ 1, 100.0 },
+            SceneUtil::WaterReflectionAnchorCandidate{ 2, 115.0 } };
+        EXPECT_EQ(policy.select(nearTie, 40), 1u);
+
+        const std::array dominant{ SceneUtil::WaterReflectionAnchorCandidate{ 1, 100.0 },
+            SceneUtil::WaterReflectionAnchorCandidate{ 2, 130.0 } };
+        EXPECT_EQ(policy.select(dominant, 40), 2u);
     }
 
     /// Keep obstruction work inside a conservative slab around the displaced surface.

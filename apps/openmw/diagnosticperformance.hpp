@@ -16,7 +16,7 @@ namespace OMW
     struct DiagnosticRouteFrame;
 
     /// Identify performance reports and advertise the same version in diagnostic manifests.
-    inline constexpr std::string_view diagnosticPerformanceProvider = "performance@16";
+    inline constexpr std::string_view diagnosticPerformanceProvider = "performance@17";
 
     /// Summarizes one bounded series without hiding unavailable samples.
     struct DiagnosticDistribution

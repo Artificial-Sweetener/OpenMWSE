@@ -4,6 +4,7 @@
 #include <array>
 #include <compare>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <vector>
@@ -115,6 +116,10 @@ namespace SceneUtil
     WaterReflectionScreenRect waterReflectionScreenRect(
         const osg::BoundingBox& worldBound, const osg::Matrixd& viewMatrix, const osg::Matrixd& projectionMatrix);
 
+    /// Estimate the screen fraction whose view rays intersect an unbounded receiver plane.
+    double waterReflectionPlaneCoverage(
+        const WaterSurfacePlane& plane, const osg::Matrixd& viewMatrix, const osg::Matrixd& projectionMatrix);
+
     /// Return whether two horizontal material layers describe the same physical surface footprint.
     bool waterSurfaceLayersCoincide(
         const osg::BoundingBox& first, float firstHeight, const osg::BoundingBox& second, float secondHeight);
@@ -156,6 +161,28 @@ namespace SceneUtil
 
     /// Build the world-space reflection transform for one fitted water plane.
     osg::Matrixd waterSurfaceReflectionMatrix(const WaterSurfacePlane& plane);
+
+    /// Describe one visible receiver competing to anchor the shared reflection source.
+    struct WaterReflectionAnchorCandidate
+    {
+        std::uint64_t mId = 0;
+        double mImpact = 0.0;
+    };
+
+    /// Stabilize shared-source ownership with a meaningful-score advantage and a minimum dwell interval.
+    class WaterReflectionAnchorPolicy
+    {
+    public:
+        /// Select an anchor from the current visible receivers while resisting near-tie oscillation.
+        std::uint64_t select(std::span<const WaterReflectionAnchorCandidate> candidates, unsigned int frameNumber);
+
+        /// Return the receiver currently anchoring the shared source.
+        std::uint64_t current() const { return mCurrent; }
+
+    private:
+        std::uint64_t mCurrent = 0;
+        unsigned int mLastSwitchFrame = 0;
+    };
 
     /// Return whether a horizontal point lies inside one water-surface triangle, including its boundary.
     bool waterSurfaceTriangleContainsPoint(

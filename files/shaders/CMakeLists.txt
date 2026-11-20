@@ -96,6 +96,8 @@ set(SHADER_FILES
     compatibility/globalmap.frag
     compatibility/water.vert
     compatibility/water.frag
+    compatibility/planarreflectionproxy.vert
+    compatibility/planarreflectionproxy.frag
     compatibility/objects.vert
     compatibility/gpuscene_cull.comp
     compatibility/gpuscene_commands.comp

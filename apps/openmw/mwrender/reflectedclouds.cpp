@@ -92,7 +92,7 @@ namespace MWRender
 
     void ReflectedClouds::operator()(osg::Node* node, osgUtil::CullVisitor* visitor)
     {
-        if (!mEnabled || !mUseCloudTarget || visitor->getCurrentCamera()->getName() != SceneUtil::reflectionCameraName)
+        if (!mEnabled || !mUseCloudTarget || !SceneUtil::isReflectionCamera(visitor->getCurrentCamera()->getName()))
         {
             traverse(node, visitor);
             return;

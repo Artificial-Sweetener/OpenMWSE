@@ -44,8 +44,8 @@ namespace Diagnostics
         if (!node.IsMap())
             throw std::invalid_argument("water settings must be a map");
         const int version = node["water-version"].as<int>();
-        if (version < 1 || version > 8)
-            throw std::invalid_argument("water settings require a version from 1 through 8");
+        if (version < 1 || version > 9)
+            throw std::invalid_argument("water settings require a version from 1 through 9");
         const std::size_t expectedSize = version == 1 ? 2
             : version == 2                            ? 4
             : version == 3                            ? 5
@@ -53,7 +53,8 @@ namespace Diagnostics
             : version == 5                            ? 6
             : version == 6                            ? 7
             : version == 7                            ? 8
-                                                      : 9;
+            : version == 8                            ? 9
+                                                      : 10;
         if (node.size() != expectedSize)
             throw std::invalid_argument("water settings contain missing or unknown fields");
         WaterSettings result;
@@ -76,6 +77,8 @@ namespace Diagnostics
             result.mMeshWater = node["mesh-water"].as<bool>();
         if (version >= 8)
             result.mMeshGeometricWaveHeight = node["mesh-geometric-wave-height"].as<float>();
+        if (version >= 9)
+            result.mSharedPlanarReflections = node["shared-planar-reflections"].as<bool>();
         validate(result);
         return result;
     }
@@ -84,7 +87,7 @@ namespace Diagnostics
     {
         validate(settings);
         YAML::Node node;
-        node["water-version"] = 8;
+        node["water-version"] = 9;
         node["geometric-wave-height"] = settings.mGeometricWaveHeight;
         node["caustics"] = settings.mCaustics;
         node["caustics-strength"] = settings.mCausticsStrength;
@@ -93,6 +96,7 @@ namespace Diagnostics
         node["appearance"] = settings.mAppearance;
         node["mesh-water"] = settings.mMeshWater;
         node["mesh-geometric-wave-height"] = settings.mMeshGeometricWaveHeight;
+        node["shared-planar-reflections"] = settings.mSharedPlanarReflections;
         return YAML::Dump(node);
     }
 }

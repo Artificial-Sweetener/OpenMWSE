@@ -100,7 +100,11 @@ namespace SceneUtil
     unsigned int waterReflectionResolution(double projectedDiameter, unsigned int maximumResolution)
     {
         const unsigned int boundedMaximum = std::max(64u, maximumResolution);
-        const unsigned int requested = projectedDiameter >= 700.0 ? 512u : projectedDiameter >= 240.0 ? 256u : 128u;
+        const unsigned int requested = projectedDiameter >= 2200.0 ? 2048u
+            : projectedDiameter >= 1200.0                          ? 1024u
+            : projectedDiameter >= 700.0                           ? 512u
+            : projectedDiameter >= 240.0                           ? 256u
+                                                                   : 128u;
         return std::min(requested, boundedMaximum);
     }
 
@@ -442,6 +446,64 @@ namespace SceneUtil
             1.0 - 2.0 * normal.z() * normal.z(), 0.0, 2.0 * plane.mDistance * normal.x(),
             2.0 * plane.mDistance * normal.y(), 2.0 * plane.mDistance * normal.z(), 1.0);
         return reflection;
+    }
+
+    double waterReflectionPlaneCoverage(
+        const WaterSurfacePlane& plane, const osg::Matrixd& viewMatrix, const osg::Matrixd& projectionMatrix)
+    {
+        constexpr unsigned int horizontalSamples = 16;
+        constexpr unsigned int verticalSamples = 9;
+        const osg::Matrixd clipToWorld = osg::Matrixd::inverse(viewMatrix * projectionMatrix);
+        unsigned int intersections = 0;
+        for (unsigned int y = 0; y < verticalSamples; ++y)
+        {
+            for (unsigned int x = 0; x < horizontalSamples; ++x)
+            {
+                const double ndcX = 2.0 * (static_cast<double>(x) + 0.5) / horizontalSamples - 1.0;
+                const double ndcY = 2.0 * (static_cast<double>(y) + 0.5) / verticalSamples - 1.0;
+                osg::Vec4d nearPoint = osg::Vec4d(ndcX, ndcY, -1.0, 1.0) * clipToWorld;
+                osg::Vec4d farPoint = osg::Vec4d(ndcX, ndcY, 1.0, 1.0) * clipToWorld;
+                if (std::abs(nearPoint.w()) <= 0.000001 || std::abs(farPoint.w()) <= 0.000001)
+                    continue;
+                nearPoint /= nearPoint.w();
+                farPoint /= farPoint.w();
+                const osg::Vec3d start(nearPoint.x(), nearPoint.y(), nearPoint.z());
+                const osg::Vec3d direction = osg::Vec3d(farPoint.x(), farPoint.y(), farPoint.z()) - start;
+                const double denominator = osg::Vec3d(plane.mNormal) * direction;
+                if (std::abs(denominator) <= 0.000001)
+                    continue;
+                const double distance = (plane.mDistance - osg::Vec3d(plane.mNormal) * start) / denominator;
+                if (distance >= 0.0)
+                    ++intersections;
+            }
+        }
+        return static_cast<double>(intersections) / (horizontalSamples * verticalSamples);
+    }
+
+    std::uint64_t WaterReflectionAnchorPolicy::select(
+        std::span<const WaterReflectionAnchorCandidate> candidates, unsigned int frameNumber)
+    {
+        if (candidates.empty())
+            return mCurrent;
+        const auto strongest = std::max_element(candidates.begin(), candidates.end(),
+            [](const auto& lhs, const auto& rhs) { return lhs.mImpact < rhs.mImpact; });
+        const auto current = std::find_if(
+            candidates.begin(), candidates.end(), [&](const auto& candidate) { return candidate.mId == mCurrent; });
+        if (mCurrent == 0 || current == candidates.end())
+        {
+            mCurrent = strongest->mId;
+            mLastSwitchFrame = frameNumber;
+            return mCurrent;
+        }
+        constexpr double switchAdvantage = 1.2;
+        constexpr unsigned int minimumDwellFrames = 30;
+        if (strongest->mId != mCurrent && strongest->mImpact > current->mImpact * switchAdvantage
+            && frameNumber - mLastSwitchFrame >= minimumDwellFrames)
+        {
+            mCurrent = strongest->mId;
+            mLastSwitchFrame = frameNumber;
+        }
+        return mCurrent;
     }
 
     bool waterReflectionShouldRender(

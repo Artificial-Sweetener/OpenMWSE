@@ -246,7 +246,7 @@ The versioned providers expose these evidence domains:
 
 * ``core@2`` records the effective video, camera, atmosphere, and complete shadow configuration used by the captured engine
   instance so replay evidence can attest to rendering-setting parity.
-* ``graphics@3`` captures scene color and depth, resolved atmospheric volumes and metadata, shafts, and the final composite over
+* ``graphics@4`` captures scene color and depth, resolved atmospheric volumes and metadata, shafts, and the final composite over
   normal and diagnostic-isolation stages. It also supports native-resolution route composites;
   ``graphics@1`` supports 1024-pixel route previews.
 * ``gameplay@9`` records accumulated cloud wind displacement, regional palette and volume blending,
@@ -265,7 +265,7 @@ The versioned providers expose these evidence domains:
   cloud-field offset used by procedural density and shadow evaluation. Readers also accept ``gameplay@4``, ``gameplay@5``,
   ``gameplay@6``, and ``gameplay@7`` capsules.
   The replay controller checks stable save fields before applying any explicit atmosphere scenario and advancing the simulation.
-* ``performance@16`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
+* ``performance@17`` records a bounded per-frame window plus median, p95, p99, and worst distributions for frame pacing, CPU
   scopes for scripts, Lua, mechanics, physics, world, and UI, resource caches and work queues, navigation and paging activity,
   scene statistics, delayed per-camera GPU/render timing, and camera-owned GPU passes for the main scene, shadow maps, water
   reflection, sky render target, post-processing, precipitation occlusion, ripples, and terrain-composite generation. It divides
@@ -302,7 +302,8 @@ The versioned providers expose these evidence domains:
   and distortion intervals. Raw render-bin CPU statistics include a separate ``callback overhead`` duration for timestamp
   allocation, retirement, and timing publication, excluding delegated rendering and the overhead statistic's own publication.
   Groundcover submission and primitive near/far work are attributed separately to each named camera
-  pass. It also reports a bounded stable counter schema for static rendering, attachment resolves,
+  pass, including a separately attributed shared planar-reflection source capture. It also reports a bounded stable counter
+  schema for static rendering, attachment resolves,
   transparent and first-person replay, actors, lights, groundcover,
   deformation, uploads, caches, and optimized-path fallbacks. Counters and pass timings not produced by their owning subsystem
   are recorded as unavailable rather than inferred. Resolve byte counts describe the logical destination attachment volume
@@ -312,6 +313,10 @@ The versioned providers expose these evidence domains:
   ``fallback.gpu-deformation`` counts captured rigs that remain on CPU deformation after GPU eligibility and capability checks.
   Both counters are zero when the GPU scene exists but GPU skinning is inactive, and unavailable when no GPU scene publishes
   them; baseline CPU work remains represented by the ordinary deformation counters.
+  Shared planar-reflection source statistics include the selected and comparison receiver identifiers and measured impacts,
+  exact source-plane distance, cumulative anchor changes, handoff state (0 idle, 1 staging, 2 blending), and frozen-prior
+  texture weight. These values distinguish a stable exact endpoint from source preparation and output cross-fading without
+  inferring transition behavior from screenshots.
 
 A ``.omwdiag`` capsule contains a manifest, effective settings, full loadable world snapshot, stable world state, provider
 versions, frame identity, and performance evidence. A scenario capsule also contains its versioned deterministic atmosphere
@@ -393,7 +398,11 @@ Entries use ``settings-version: 2``, boolean ``scattering``, ``clouds``, ``shado
 OpenMWSE or 1 for MGE XE). Version 1 entries with the original five preferences remain accepted and initialize
 appearance to OpenMWSE, godrays and cloud sun occlusion to enabled, and sun glare to disabled. Updates go through the same settings-change owner as the video menu and preserve weather state.
 The controller verifies requested-versus-observed preferences and retains the sequence with replay evidence.
-``--capture-route-native-frames`` captures the actual rendered transition frames.
+``--capture-route-native-frames`` captures the actual rendered transition frames. Each route frame also records the selected
+dominant planar-reflection colour and depth attachments. The graphics parity checker requires those attachments to match
+exactly between direct and shared-capture runs. Representative non-anchor attachments are observational because reconstruction
+is expected to differ from direct rendering. Pass ``--planar-mode-comparison`` when comparing Direct Reference and shared
+captures so expected final-colour differences remain observational while dominant colour and depth identity stay enforced.
 
 ``run`` and ``replay`` accept repeatable ``--video-settings-page preferences|audio|controls|display|visibility|visibility-fog|atmosphere|water|lighting|shadows|advanced`` options to display and capture real settings pages
 inside the isolated child for graphical review. Each requested page produces a separately named ``video-settings-*.png`` image. Both preference mutation and menu navigation are rejected by interactive
@@ -421,10 +430,12 @@ Live water controls
 -------------------
 
 ``replay --water-settings-sequence sequence.yaml`` drives the real water controls before each gameplay-route segment while
-keeping the Water settings page open. Version 8 entries have ``water-version: 8``, integer ``geometric-wave-height`` and
+keeping the Water settings page open. Version 9 entries have ``water-version: 9``, integer ``geometric-wave-height`` and
 ``mesh-geometric-wave-height`` fields from 0 through 250 Morrowind world units, boolean ``mesh-water`` and ``caustics`` fields, ``caustics-strength`` from 0 through 2,
 integer ``interior-local-lights`` and ``exterior-local-lights`` budgets from 0 through 4, and ``appearance`` set to ``openmw``,
-``mge-xe``, ``enhanced``, or ``vanilla``. Versions 1 through 7 remain accepted with compatible defaults; the retired
+``mge-xe``, ``enhanced``, or ``vanilla``. The required ``shared-planar-reflections`` boolean switches between the shared
+source reconstruction and exact direct comparison paths. Versions 1 through 8 remain accepted and explicitly select direct
+reflections so historical routes retain their original meaning; the retired
 ``reflected-caustics`` field in versions 3 and 4 is ignored. The sequence contains one entry per segment, at most 64. The
 controller verifies the values observed after the control events and records ``water-settings-<segment>.yaml``.
 This operation is restricted to isolated diagnostic children. The source profile remains unchanged.

@@ -34,6 +34,7 @@ namespace SceneUtil
             DiagnosticGpuPass{ "main-scene", sceneCameraName },
             DiagnosticGpuPass{ "shadow-maps", shadowCameraName },
             DiagnosticGpuPass{ "water-reflection", reflectionCameraName },
+            DiagnosticGpuPass{ "shared-planar-reflection-source", sharedPlanarReflectionSourceCameraName },
             DiagnosticGpuPass{ "sky-render-target", skyCameraName },
             DiagnosticGpuPass{ "post-processing", postProcessingCameraName },
             DiagnosticGpuPass{ "precipitation-occlusion", precipitationOcclusionCameraName },

@@ -2181,7 +2181,7 @@ void main()
         EXPECT_NE(groundcover->getShaderSource().find("shadowVisibility"), std::string::npos);
         EXPECT_NE(sky->getShaderSource().find("if (isReflection)"), std::string::npos);
         EXPECT_NE(sky->getShaderSource().find("position.z = 2.0 * waterHeight - position.z"), std::string::npos);
-        EXPECT_NE(water->getShaderSource().find("sampleReflectionMap(screenCoords + reflectionCoordsOffset)"),
+        EXPECT_NE(water->getShaderSource().find("sampleWaterReflectionMap(screenCoords + reflectionCoordsOffset)"),
             std::string::npos);
         EXPECT_NE(water->getShaderSource().find("mix(max(reflection, vec3(0.0)), vec3(1.0), 0.05)"), std::string::npos);
         EXPECT_NE(water->getShaderSource().find("vec3 waterInScatteringColor()"), std::string::npos);

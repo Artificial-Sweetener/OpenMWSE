@@ -31,6 +31,12 @@ namespace SceneUtil
     inline constexpr std::string_view sceneCameraName = "SceneCam";
     inline constexpr std::string_view shadowCameraName = "ShadowCamera";
     inline constexpr std::string_view reflectionCameraName = "ReflectionCamera";
+    inline constexpr std::string_view sharedPlanarReflectionSourceCameraName = "Shared Planar Reflection Source";
+    /// Return whether a camera requires reflected-sky and reflected-cloud composition.
+    inline constexpr bool isReflectionCamera(std::string_view name)
+    {
+        return name == reflectionCameraName || name == sharedPlanarReflectionSourceCameraName;
+    }
     inline constexpr std::string_view skyCameraName = "SkyCamera";
     inline constexpr std::string_view postProcessingCameraName = "PostProcessingCamera";
     inline constexpr std::string_view precipitationOcclusionCameraName = "PrecipitationOcclusionCamera";

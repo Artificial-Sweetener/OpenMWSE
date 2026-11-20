@@ -6,6 +6,27 @@
 
 #include "lib/core/fragment.h.glsl"
 
+#if @useOVR_multiview
+uniform sampler2DArray previousReflectionMap;
+#else
+uniform sampler2D previousReflectionMap;
+#endif
+uniform float previousReflectionWeight;
+
+/// Cross-fade exact endpoint textures without moving either reflection camera through an artificial plane.
+vec4 sampleWaterReflectionMap(vec2 uv)
+{
+    vec4 current = sampleReflectionMap(uv);
+    if (previousReflectionWeight <= 0.0)
+        return current;
+#if @useOVR_multiview
+    vec4 previous = texture(previousReflectionMap, vec3(uv, gl_ViewID_OVR));
+#else
+    vec4 previous = texture2D(previousReflectionMap, uv);
+#endif
+    return mix(current, previous, clamp(previousReflectionWeight, 0.0, 1.0));
+}
+
 // Inspired by Blender GLSL Water by martinsh ( https://devlog-martinsh.blogspot.de/2012/07/waterundewater-shader-wip.html )
 // OpenMWSE ports the MGE XE water at revision 2697fdfa7fd5af48a321a8b6cee3303a0a256690,
 // Enhanced Water Shader 2.2 by Krokantor and credited contributors, and Pixel Shader Style Water 1.0
@@ -250,7 +271,7 @@ void main(void)
     refractionCoordsOffset *= clamp(realWaterDepth / BUMP_SUPPRESS_DEPTH, 0.0, 1.0);
 #endif
     // reflection
-    vec3 reflection = sampleReflectionMap(screenCoords + reflectionCoordsOffset).rgb * fogScale + fogOffset;
+    vec3 reflection = sampleWaterReflectionMap(screenCoords + reflectionCoordsOffset).rgb * fogScale + fogOffset;
 
     vec3 waterColor = waterInScatteringColor();
 
@@ -357,7 +378,7 @@ void main(void)
         }
         vec2 reflectionOffset = mgeProjectedOffset(
             vec2(-2.1 * refFactor.x, abs(refFactor.y)), surfaceDepth);
-        vec3 mgeReflection = sampleReflectionMap(authoredReflectionCoords + reflectionOffset).rgb;
+        vec3 mgeReflection = sampleWaterReflectionMap(authoredReflectionCoords + reflectionOffset).rgb;
         mgeReflection = mix(fogOffset, mgeReflection, fogScale);
         vec3 adjustedNormal = mix(surfaceUp * 0.1, normal, pow(clamp(1.05 * fogScale, 0.0, 1.0), 2.0));
         adjustedNormal = mix(adjustedNormal, surfaceUp,
@@ -427,7 +448,7 @@ void main(void)
         }
         vec2 reflectionOffset = mgeProjectedOffset(
             vec2(-1.5 * refFactor.x, abs(refFactor.y)), surfaceDepth);
-        vec3 enhancedReflection = sampleReflectionMap(authoredReflectionCoords + reflectionOffset).rgb;
+        vec3 enhancedReflection = sampleWaterReflectionMap(authoredReflectionCoords + reflectionOffset).rgb;
         enhancedReflection = mix(fogOffset, enhancedReflection, fogScale);
         vec3 adjustedNormal = mix(surfaceUp * 0.1, normal, pow(clamp(1.05 * fogScale, 0.0, 1.0), 2.0));
         adjustedNormal = mix(adjustedNormal, surfaceUp,
@@ -514,7 +535,7 @@ void main(void)
             max(shoreFactor, clamp(depthAttenuation - 0.4, 0.0, 1.0)));
         vec2 reflectionOffset = mgeProjectedOffset(
             vec2(-12.0 * refFactor.x, 12.0 - 4.0 * refFactor.y), surfaceDepth);
-        vec3 vanillaReflection = sampleReflectionMap(authoredReflectionCoords + reflectionOffset).rgb;
+        vec3 vanillaReflection = sampleWaterReflectionMap(authoredReflectionCoords + reflectionOffset).rgb;
         vanillaReflection = mix(fogOffset, vanillaReflection, fogScale);
         float vanillaFresnel = 0.02
             + pow(clamp(0.9988 - 0.28 * (-surfaceViewDir.z), 0.0, 1.0), 6.0);
@@ -544,7 +565,7 @@ void main(void)
             ? vec2(-4.5 * refFactor.x, -refFactor.y)
             : vec2(-2.1 * refFactor.x, abs(refFactor.y));
         vec3 underwaterReflection
-            = sampleReflectionMap(authoredReflectionCoords + mgeProjectedOffset(d3dReflectionOffset, surfaceDepth)).rgb;
+            = sampleWaterReflectionMap(authoredReflectionCoords + mgeProjectedOffset(d3dReflectionOffset, surfaceDepth)).rgb;
         float underwaterFresnel = pow(clamp(
             1.12 - 0.65 * dot(-viewDir, underwaterNormal), 0.0, 1.0), 8.0);
         vec3 underwaterResult = mix(underwaterRefraction, underwaterReflection, underwaterFresnel);

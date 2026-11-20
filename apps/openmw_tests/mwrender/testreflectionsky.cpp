@@ -89,7 +89,7 @@ namespace
     };
 
     /// Render opaque geometry, background, and a translucent overlay through the real reflection cull callback.
-    SkyRender renderSky(bool reflection, bool useCallback)
+    SkyRender renderSky(bool reflection, bool useCallback, bool sharedSource = false)
     {
         SkyRender result;
         osg::ref_ptr<osg::GraphicsContext> context = SceneUtil::createOffscreenContext({ 32, 16, 0 });
@@ -99,7 +99,9 @@ namespace
         viewer.setThreadingModel(osgViewer::Viewer::SingleThreaded);
         osg::Camera* camera = viewer.getCamera();
         camera->setGraphicsContext(context);
-        camera->setName(std::string(reflection ? SceneUtil::reflectionCameraName : SceneUtil::sceneCameraName));
+        camera->setName(std::string(reflection
+                ? (sharedSource ? SceneUtil::sharedPlanarReflectionSourceCameraName : SceneUtil::reflectionCameraName)
+                : SceneUtil::sceneCameraName));
         camera->setViewport(0, 0, 32, 16);
         camera->setProjectionMatrix(osg::Matrix::scale(1, 1, SceneUtil::AutoDepth::isReversed() ? -1 : 1));
         camera->setViewMatrix(osg::Matrix::identity());
@@ -189,6 +191,15 @@ TEST(ReflectionSkyTest, PreservesMainCameraOrdering)
     EXPECT_EQ(main.order, (std::vector<std::string>{ "sky", "opaque", "transparent" }));
     EXPECT_GT(main.image->getColor(4, 8).r(), 0.9f);
     EXPECT_GT(main.image->getColor(28, 8).b(), 0.9f);
+}
+
+/// Give the separately timed shared source the same depth-aware sky composition as direct reflection cameras.
+TEST(ReflectionSkyTest, RecognizesSharedPlanarReflectionSource)
+{
+    const SkyRender shared = renderSky(true, true, true);
+    EXPECT_EQ(shared.order, (std::vector<std::string>{ "opaque", "sky", "transparent" }));
+    EXPECT_GT(shared.image->getColor(4, 8).r(), 0.9f);
+    EXPECT_GT(shared.image->getColor(28, 8).b(), 0.9f);
 }
 
 /// Exercise reversed depth in a subprocess because the renderer's depth convention is immutable process state.

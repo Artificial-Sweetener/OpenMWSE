@@ -82,3 +82,29 @@ TEST(WaterShaderTest, WorldAndAuthoredMeshPermutationsLinkInARealContext)
     context->releaseContext();
     context->close();
 }
+
+/// Compile the instanced shared-capture reconstruction program with its required GPU-shader capability.
+TEST(WaterShaderTest, PlanarReflectionProxyLinksInARealContext)
+{
+    osg::ref_ptr<osg::GraphicsContext> context = SceneUtil::createOffscreenContext({ .mWidth = 32, .mHeight = 32 });
+    ASSERT_TRUE(context);
+    ASSERT_TRUE(context->realize());
+    ASSERT_TRUE(context->makeCurrent());
+
+    Shader::ShaderManager manager;
+    manager.setShaderPath(std::filesystem::path(OPENMW_PROJECT_SOURCE_DIR) / "files/shaders");
+    Shader::ShaderManager::DefineMap globals = waterGlobalDefines();
+    globals["useGPUShader4"] = "1";
+    manager.setGlobalDefines(globals);
+    const osg::ref_ptr<osg::Program> program = manager.getProgram("planarreflectionproxy");
+    ASSERT_TRUE(program);
+    program->compileGLObjects(*context->getState());
+    const osg::Program::PerContextProgram* linkedProgram = program->getPCP(*context->getState());
+    ASSERT_NE(linkedProgram, nullptr);
+    std::string informationLog;
+    linkedProgram->getInfoLog(informationLog);
+    EXPECT_TRUE(linkedProgram->isLinked()) << informationLog;
+
+    context->releaseContext();
+    context->close();
+}

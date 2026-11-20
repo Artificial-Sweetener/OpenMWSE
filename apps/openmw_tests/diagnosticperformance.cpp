@@ -281,7 +281,7 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     OMW::reportDiagnosticPerformance(frame, frame, viewer, output);
     const std::string report = output.str();
 
-    EXPECT_NE(report.find("provider: performance@16"), std::string::npos);
+    EXPECT_NE(report.find("provider: performance@17"), std::string::npos);
     EXPECT_NE(report.find("threading-model: automatic-selection"), std::string::npos);
     EXPECT_NE(report.find("presentation:\n  swap-buffers:\n    available: true\n    count: 1"), std::string::npos)
         << report;
@@ -317,6 +317,7 @@ TEST(DiagnosticPerformanceTest, ReportsNamedGpuPassesAndAggregatesMatchingCamera
     EXPECT_NE(report.find("  main-scene:\n    available: true\n    count: 1\n    median: 0.01"), std::string::npos);
     EXPECT_NE(report.find("  shadow-maps:\n    available: true\n    count: 1\n    median: 0.009"), std::string::npos);
     EXPECT_NE(report.find("  water-reflection:\n    available: false"), std::string::npos);
+    EXPECT_NE(report.find("  shared-planar-reflection-source:\n    available: false"), std::string::npos);
     EXPECT_NE(
         report.find("  unclassified-cameras:\n    available: true\n    count: 1\n    median: 0.003"), std::string::npos)
         << report;

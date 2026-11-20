@@ -57,6 +57,7 @@ MWGui::GraphicsSettings::GraphicsSettings(Layout& layout, std::function<void()> 
     , mWaterAppearance(layout.getWidget("WaterAppearance")->castType<MyGUI::ComboBox>())
     , mGeometricWaveHeight(layout.getWidget("GeometricWaveHeight")->castType<MyGUI::ScrollBar>())
     , mMeshWater(layout.getWidget("MeshWaterButton")->castType<MyGUI::Button>())
+    , mSharedPlanarReflections(layout.getWidget("SharedPlanarReflectionsButton")->castType<MyGUI::Button>())
     , mMeshGeometricWaveHeight(layout.getWidget("MeshGeometricWaveHeight")->castType<MyGUI::ScrollBar>())
     , mWaterCaustics(layout.getWidget("WaterCausticsButton")->castType<MyGUI::Button>())
     , mWaterCausticsStrength(layout.getWidget("WaterCausticsStrength")->castType<MyGUI::ScrollBar>())
@@ -182,7 +183,8 @@ void MWGui::GraphicsSettings::setGeometricWaveHeight(float height)
 }
 
 void MWGui::GraphicsSettings::setWaterValues(std::string_view appearance, float height, bool caustics,
-    float causticsStrength, int interiorLocalLights, int exteriorLocalLights, bool meshWater, float meshHeight)
+    float causticsStrength, int interiorLocalLights, int exteriorLocalLights, bool meshWater, float meshHeight,
+    bool sharedPlanarReflections)
 {
     if (!std::isfinite(causticsStrength) || causticsStrength < 0.f || causticsStrength > 2.f)
         throw std::invalid_argument("diagnostic caustics strength must be between 0 and 2");
@@ -209,6 +211,13 @@ void MWGui::GraphicsSettings::setWaterValues(std::string_view appearance, float 
     {
         water.mMeshWater.set(meshWater);
         mMeshWater->setCaptionWithReplacing(meshWater ? "#{Interface:On}" : "#{Interface:Off}");
+        mApply();
+    }
+    if (water.mSharedPlanarReflections.get() != sharedPlanarReflections)
+    {
+        water.mSharedPlanarReflections.set(sharedPlanarReflections);
+        mSharedPlanarReflections->setCaptionWithReplacing(
+            sharedPlanarReflections ? "#{Interface:On}" : "#{Interface:Off}");
         mApply();
     }
     if (water.mCaustics.get() != caustics)

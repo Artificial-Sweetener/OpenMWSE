@@ -1061,10 +1061,11 @@ namespace MWGui
     }
 
     void SettingsWindow::setWaterValues(std::string_view appearance, float height, bool caustics,
-        float causticsStrength, int interiorLocalLights, int exteriorLocalLights, bool meshWater, float meshHeight)
+        float causticsStrength, int interiorLocalLights, int exteriorLocalLights, bool meshWater, float meshHeight,
+        bool sharedPlanarReflections)
     {
         mGraphicsSettings->setWaterValues(appearance, height, caustics, causticsStrength, interiorLocalLights,
-            exteriorLocalLights, meshWater, meshHeight);
+            exteriorLocalLights, meshWater, meshHeight, sharedPlanarReflections);
     }
 
     void SettingsWindow::onOpen()

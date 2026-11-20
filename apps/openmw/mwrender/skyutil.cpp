@@ -107,7 +107,7 @@ namespace MWRender
 
     void ReflectionSkyCullCallback::operator()(osg::Node* node, osgUtil::CullVisitor* visitor)
     {
-        const bool reflection = visitor->getCurrentCamera()->getName() == SceneUtil::reflectionCameraName;
+        const bool reflection = SceneUtil::isReflectionCamera(visitor->getCurrentCamera()->getName());
         if (reflection)
             visitor->pushStateSet(mStateSet);
         traverse(node, visitor);

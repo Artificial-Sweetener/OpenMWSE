@@ -387,7 +387,8 @@ namespace MWGui
 
         /// Exercise live water presentation and optical controls for isolated diagnostics.
         void setVideoWaterValues(std::string_view appearance, float height, bool caustics, float causticsStrength,
-            int interiorLocalLights, int exteriorLocalLights, bool meshWater, float meshHeight);
+            int interiorLocalLights, int exteriorLocalLights, bool meshWater, float meshHeight,
+            bool sharedPlanarReflections);
 
         /// Display a named video settings page through the ordinary settings window lifecycle.
         void showVideoSettings(std::string_view page);

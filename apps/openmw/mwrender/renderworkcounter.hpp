@@ -22,6 +22,25 @@ namespace MWRender
     inline constexpr std::string_view meshWaterReflectionHeightCounter = "Diagnostic Mesh Water Reflection Height";
     inline constexpr std::string_view meshWaterReflectionResolutionCounter
         = "Diagnostic Mesh Water Reflection Resolution";
+    inline constexpr std::string_view planarReflectionSourceResolutionCounter
+        = "Diagnostic Planar Reflection Source Resolution";
+    inline constexpr std::string_view planarReflectionReceiverCountCounter
+        = "Diagnostic Planar Reflection Receiver Count";
+    inline constexpr std::string_view planarReflectionAnchorIdCounter = "Diagnostic Planar Reflection Anchor Id";
+    inline constexpr std::string_view planarReflectionAnchorChangeCounter
+        = "Diagnostic Planar Reflection Anchor Changes";
+    inline constexpr std::string_view planarReflectionAnchorImpactCounter
+        = "Diagnostic Planar Reflection Anchor Impact";
+    inline constexpr std::string_view planarReflectionComparisonIdCounter
+        = "Diagnostic Planar Reflection Comparison Id";
+    inline constexpr std::string_view planarReflectionComparisonImpactCounter
+        = "Diagnostic Planar Reflection Comparison Impact";
+    inline constexpr std::string_view planarReflectionProxyDrawCounter = "Diagnostic Planar Reflection Proxy Draws";
+    inline constexpr std::string_view planarReflectionSourcePlaneDistanceCounter
+        = "Diagnostic Planar Reflection Source Plane Distance";
+    inline constexpr std::string_view planarReflectionHandoffStateCounter
+        = "Diagnostic Planar Reflection Handoff State";
+    inline constexpr std::string_view planarReflectionPriorWeightCounter = "Diagnostic Planar Reflection Prior Weight";
     inline constexpr std::string_view firstPersonReplayCounter = "Diagnostic First Person Replay Drawables";
     inline constexpr std::string_view groundcoverInstanceTestCounter = "Diagnostic Groundcover Instances Tested";
     inline constexpr std::string_view groundcoverInstanceRenderCounter = "Diagnostic Groundcover Instances Rendered";

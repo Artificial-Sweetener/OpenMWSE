@@ -39,7 +39,8 @@ namespace MWGui
 
         /// Exercise live water presentation and optical controls for isolated diagnostics.
         void setWaterValues(std::string_view appearance, float height, bool caustics, float causticsStrength,
-            int interiorLocalLights, int exteriorLocalLights, bool meshWater, float meshHeight);
+            int interiorLocalLights, int exteriorLocalLights, bool meshWater, float meshHeight,
+            bool sharedPlanarReflections);
 
         void onClose() override;
 

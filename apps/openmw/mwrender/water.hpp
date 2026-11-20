@@ -65,12 +65,14 @@ namespace Fallback
 namespace MWRender
 {
 
-    class Reflection;
+    class PlanarReflectionProvider;
+    class PlanarReflectionReceiver;
     class GpuScene;
     class RippleSimulation;
     class RainSettingsUpdater;
     class Ripples;
     class WaterWaveOcclusion;
+    class WaterScreenCoverage;
     class MeshWaterObject;
     class MeshWaterPlane;
 
@@ -86,6 +88,7 @@ namespace MWRender
         osg::ref_ptr<osg::Geometry> mDisplacedWaterGeom;
         osg::ref_ptr<osg::Geometry> mWaterGeom;
         osg::ref_ptr<osg::Geometry> mSimpleWaterGeom;
+        osg::ref_ptr<WaterScreenCoverage> mWorldWaterCoverage;
         osg::ref_ptr<osg::Group> mMeshWaterSeamRoot;
         Resource::ResourceSystem* mResourceSystem;
         GpuScene* mGpuScene;
@@ -98,7 +101,8 @@ namespace MWRender
         /// Track whether classified authored materials currently use renderer-owned water replacements.
         bool mMeshWaterEnabled = true;
 
-        osg::ref_ptr<Reflection> mReflection;
+        osg::ref_ptr<PlanarReflectionProvider> mReflectionProvider;
+        osg::ref_ptr<PlanarReflectionReceiver> mReflection;
         osg::ref_ptr<Ripples> mRipples;
 
         bool mEnabled;
@@ -114,7 +118,6 @@ namespace MWRender
         std::unordered_map<const osg::Node*, std::unique_ptr<MeshWaterObject>> mMeshWaterObjects;
         SurfaceEffectObjectRegistry mKnownSurfaceEffectObjects;
         std::map<SceneUtil::WaterSurfacePlaneKey, std::unique_ptr<MeshWaterPlane>> mMeshWaterPlanes;
-        std::unordered_map<unsigned int, std::vector<osg::ref_ptr<Reflection>>> mMeshWaterReflectionPool;
         unsigned int mMeshWaterSeamRebuildDelay = 0;
         bool mUsesDisplacedGeometry = false;
         bool mUsesSurfaceCoverage = false;
@@ -129,18 +132,18 @@ namespace MWRender
         void createShaderWaterStateSet(osg::Node* node);
 
         /// Replace one classified authored material scope with renderer-owned mesh water state.
-        void createMeshWaterStateSet(osg::Group& wrapper, Reflection& reflection,
+        void createMeshWaterStateSet(osg::Group& wrapper, PlanarReflectionReceiver& reflection,
             const SceneUtil::SurfaceEffectProfile& profile, const osg::Vec3f& nodePosition);
 
         /// Reallocate one mesh-water reflection at a stable quality-bucket transition.
         void resizeMeshWaterPlane(MeshWaterPlane& plane, unsigned int resolution);
 
-        /// Acquire and configure a bounded reusable reflection target for one exact plane.
-        osg::ref_ptr<Reflection> acquireMeshWaterReflection(
+        /// Allocate one provider-owned reflection receiver for an exact mesh-water plane.
+        osg::ref_ptr<PlanarReflectionReceiver> acquireMeshWaterReflection(
             unsigned int resolution, const SceneUtil::WaterSurfacePlane& plane);
 
-        /// Return an unused reflection target to the one-per-resolution reuse pool.
-        void releaseMeshWaterReflection(unsigned int resolution, osg::ref_ptr<Reflection> reflection);
+        /// Release an unused reflection target through its owning provider.
+        void releaseMeshWaterReflection(osg::ref_ptr<PlanarReflectionReceiver> reflection);
 
         /// Restore authored geometry for one object without forgetting its live classification source.
         void removeSurfaceEffectBindings(const osg::Node* objectRoot);

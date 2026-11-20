@@ -46,7 +46,7 @@ Diagnostics::Capsule OMW::Engine::createDiagnosticCapsule(unsigned frameNumber)
     manifest << "capsule-version: " << Diagnostics::capsuleVersion << '\n'
              << "build: " << quoteDiagnosticYaml(Version::getOpenmwVersionDescription()) << '\n'
              << "frame: " << frameNumber << '\n'
-             << "providers: [core@2, graphics@3, gameplay@9, " << OMW::diagnosticPerformanceProvider << "]\n"
+             << "providers: [core@2, graphics@4, gameplay@9, " << OMW::diagnosticPerformanceProvider << "]\n"
              << "content:\n";
     for (const std::string& content : mContentFiles)
     {

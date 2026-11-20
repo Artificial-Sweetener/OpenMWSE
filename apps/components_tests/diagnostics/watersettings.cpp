@@ -9,11 +9,22 @@ TEST(DiagnosticWaterSettings, PreservesSliderDomainAndProtocolSupport)
 {
     for (const float height : { 0.f, 1.f, 30.f, 128.f, 250.f })
     {
-        const Diagnostics::WaterSettings settings{ height, height > 0.f, 0.75f, 3, 4, "enhanced", false, height };
+        const Diagnostics::WaterSettings settings{ height, height > 0.f, 0.75f, 3, 4, "enhanced", false, height, true };
         EXPECT_EQ(Diagnostics::deserializeWaterSettings(Diagnostics::serializeWaterSettings(settings)), settings);
     }
     EXPECT_TRUE(
         Diagnostics::isSupportedCommand(static_cast<std::uint16_t>(Diagnostics::CommandType::SetWaterSettings)));
+}
+
+/// Preserve historical route meaning by keeping versions before shared capture on the direct path.
+TEST(DiagnosticWaterSettings, ReadsVersionEightPayloadWithDirectPlanarReflections)
+{
+    const Diagnostics::WaterSettings expected{ 32.f, true, 0.75f, 3, 4, "enhanced", true, 10.f, false };
+    EXPECT_EQ(Diagnostics::deserializeWaterSettings("water-version: 8\ngeometric-wave-height: 32\ncaustics: true\n"
+                                                    "caustics-strength: 0.75\ninterior-local-lights: 3\n"
+                                                    "exterior-local-lights: 4\nappearance: enhanced\nmesh-water: true\n"
+                                                    "mesh-geometric-wave-height: 10"),
+        expected);
 }
 
 /// Preserve version-six routes while enabling the newly controllable mesh-water replacement by default.

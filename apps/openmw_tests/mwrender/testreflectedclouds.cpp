@@ -44,6 +44,7 @@ namespace
         bool mBuffered = true;
         std::array<bool, 4> mEnabled{ true, true, true, true };
         bool mReflection = true;
+        bool mSharedSource = false;
         int mWidth = 32;
         int mHeight = 16;
         bool mCameraRelative = false;
@@ -119,8 +120,10 @@ namespace
         osg::Camera* camera = viewer.getCamera();
         camera->setGraphicsContext(context);
         camera->setViewport(0, 0, width, height);
-        camera->setName(
-            std::string(sceneSettings.mReflection ? SceneUtil::reflectionCameraName : SceneUtil::sceneCameraName));
+        camera->setName(std::string(sceneSettings.mReflection
+                ? (sceneSettings.mSharedSource ? SceneUtil::sharedPlanarReflectionSourceCameraName
+                                               : SceneUtil::reflectionCameraName)
+                : SceneUtil::sceneCameraName));
         camera->setCullMask(MWRender::Mask_Sky);
         camera->setProjectionMatrix(osg::Matrix::scale(1, 1, SceneUtil::AutoDepth::isReversed() ? -1 : 1));
         SceneUtil::setCameraClearDepth(camera);
@@ -270,6 +273,18 @@ TEST(ReflectedCloudsTest, PreservesCurrentViewTransportAtHalfResolution)
                 EXPECT_GT(actual.b(), .2f);
             }
     }
+}
+
+/// Schedule the independent cloud target for the shared planar-reflection source camera identity.
+TEST(ReflectedCloudsTest, SupportsSharedPlanarReflectionSource)
+{
+    const auto control = renderCloudBuffer({ .mBuffered = false, .mSharedSource = true });
+    const auto candidate = renderCloudBuffer({ .mSharedSource = true });
+    EXPECT_FALSE(candidate.cloudViewports.empty());
+    ASSERT_EQ(control.image->getTotalSizeInBytes(), candidate.image->getTotalSizeInBytes());
+    for (unsigned i = 0; i < control.image->getTotalSizeInBytes() / sizeof(float); ++i)
+        EXPECT_NEAR(reinterpret_cast<const float*>(candidate.image->data())[i],
+            reinterpret_cast<const float*>(control.image->data())[i], 1.f / 255.f);
 }
 
 /// Keep ordinary sky rendering independent of reflected texture state and avoid scheduling cloud targets for it.

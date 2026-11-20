@@ -1047,6 +1047,25 @@
                             <Widget type="HBox" align="Stretch">
                                 <UserString key="HStretch" value="true"/>
                                 <UserString key="VStretch" value="false"/>
+                                <Widget type="AutoSizedButton" skin="MW_Button" name="SharedPlanarReflectionsButton">
+                                    <UserString key="SettingCategory" value="OpenMWSE Water"/>
+                                    <UserString key="SettingName" value="shared planar reflections"/>
+                                    <UserString key="SettingType" value="CheckButton"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:SharedPlanarReflectionsTooltip}"/>
+                                </Widget>
+                                <Widget type="AutoSizedTextBox" skin="SandText">
+                                    <Property key="Caption" value="#{OMWEngine:SharedPlanarReflections}"/>
+                                    <UserString key="ToolTipType" value="Layout"/>
+                                    <UserString key="ToolTipLayout" value="TextToolTip"/>
+                                    <UserString key="Caption_Text" value="#{OMWEngine:SharedPlanarReflectionsTooltip}"/>
+                                </Widget>
+                            </Widget>
+
+                            <Widget type="HBox" align="Stretch">
+                                <UserString key="HStretch" value="true"/>
+                                <UserString key="VStretch" value="false"/>
                                 <Widget type="AutoSizedButton" skin="MW_Button" name="MeshWaterButton">
                                     <UserString key="SettingCategory" value="OpenMWSE Water"/>
                                     <UserString key="SettingName" value="mesh water"/>

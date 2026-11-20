@@ -47,6 +47,27 @@ flat water retains caustics and future water-surface providers can retain the sa
    loaded surfaces without reloading the cell. Mesh-specific preferences remain saved while replacement is disabled.
 
 .. omw-setting::
+   :title: shared planar reflections
+   :type: boolean
+   :range: true, false
+   :default: false
+   :location: :bdg-info:`In Game > Options > Video > Water`
+
+   When disabled, every visible world-water and classified mesh-water plane renders its own direct planar reflection.
+
+   When enabled, uses one source capture at the full configured ``Water/rtt size`` for world water and classified mesh-water planes.
+   The provider selects the most visually impactful visible plane from asynchronous depth-tested main-view sample counts,
+   with a score advantage and minimum dwell interval. Occluded water and empty projected bounds do not contribute. The
+   source uses that receiver's exact direct-reflection plane, clipping, scene eligibility, target format, and sampling
+   contract. The anchor samples this complete source image directly at full resolution; it is never reconstructed. Other
+   planes use independently sized colour-and-depth reconstructions with receiver-local clipping and reflected sky. Large
+   receivers can use 1024- and 2048-pixel output buckets when ``rtt size`` permits. A newly dominant plane must exceed the
+   current plane's impact by 20 percent after a 30-frame minimum dwell. The winner remains locked while a second exact source
+   renders the new plane to completion. The provider then freezes the prior source and cross-fades the two reprojected endpoint
+   textures for 0.3 seconds; no reflection camera moves through an intermediate plane. Either mode transition retains the last completed textures until
+   the source and every visible non-anchor replacement target complete, then switches atomically at a frame boundary.
+
+.. omw-setting::
    :title: mesh geometric wave height
    :type: float32
    :range: 0.0 to 250.0

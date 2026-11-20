@@ -41,6 +41,9 @@ namespace Settings
         /// Replace classified authored water materials with renderer-owned mesh water.
         SettingValue<bool> mMeshWater{ mIndex, "OpenMWSE Water", "mesh water" };
 
+        /// Reconstruct every receiver from one full-resolution source capture; disabled renders each plane directly.
+        SettingValue<bool> mSharedPlanarReflections{ mIndex, "OpenMWSE Water", "shared planar reflections" };
+
         /// Set classified mesh-water wave height independently from the default world surface.
         SettingValue<float> mMeshGeometricWaveHeight{ mIndex, "OpenMWSE Water", "mesh geometric wave height",
             makeClampSanitizerFloat(0.f, 250.f) };

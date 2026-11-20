@@ -16,6 +16,9 @@ MAGIC = b"OMWATMD1"
 VERSION = 1
 STAGE_PATTERN = re.compile(r"atmosphere-(.+)-frame-\d+-\d+\.omwdiag")
 ROUTE_COLOR_PATTERN = re.compile(r"route-frame-(\d+)-osg-\d+")
+ROUTE_PLANAR_REFLECTION_PATTERN = re.compile(
+    r"route-planar-frame-(\d+)-(dominant|comparison)-planar-reflection-(color|depth)"
+)
 ROUTE_SHADOW_PATTERN = re.compile(r"route-shadow-frame-(\d+)-shadow-map-depth-cascade-(\d+)-\d+")
 ATTACHMENT_RULES = {
     "atmosphere-cloud-models-v2": {"mean": 0.000001, "p999": 0.000001, "localize": 0.000001},
@@ -53,6 +56,13 @@ ATTACHMENT_RULES = {
 }
 ROUTE_ATTACHMENT_RULES = {
     "final-color": {"mean": 0.001, "p999": 0.01, "localize": 0.0001},
+    "dominant-planar-reflection": {"mean": 0.0, "p999": 0.0, "localize": 0.0},
+    "comparison-planar-reflection": {
+        "mean": 1.0,
+        "p999": 1.0,
+        "localize": 0.0001,
+        "informational": True,
+    },
     "shadow-depth": {
         "mean": 0.00001,
         "p999": 0.0001,
@@ -127,6 +137,8 @@ def normalize_route_images(images: dict[str, numpy.ndarray], path: Path) -> dict
     for label, pixels in images.items():
         if match := ROUTE_COLOR_PATTERN.fullmatch(label):
             normalized = f"frame-{match.group(1)}-final-color"
+        elif match := ROUTE_PLANAR_REFLECTION_PATTERN.fullmatch(label):
+            normalized = f"frame-{match.group(1)}-{match.group(2)}-planar-reflection-{match.group(3)}"
         elif match := ROUTE_SHADOW_PATTERN.fullmatch(label):
             normalized = f"frame-{match.group(1)}-shadow-depth-cascade-{match.group(2)}"
         else:
@@ -143,6 +155,10 @@ def comparison_rule(name: str) -> dict:
         return ATTACHMENT_RULES[name]
     if name.endswith("-final-color"):
         return ROUTE_ATTACHMENT_RULES["final-color"]
+    if "-dominant-planar-reflection-" in name:
+        return ROUTE_ATTACHMENT_RULES["dominant-planar-reflection"]
+    if "-comparison-planar-reflection-" in name:
+        return ROUTE_ATTACHMENT_RULES["comparison-planar-reflection"]
     if "-shadow-depth-cascade-" in name:
         return ROUTE_ATTACHMENT_RULES["shadow-depth"]
     raise ValueError(f"attachment {name} has no explicit comparison rule")
@@ -178,7 +194,12 @@ def write_heatmap(path: Path, pixel_difference: numpy.ndarray) -> None:
     Image.fromarray(normalized).save(path)
 
 
-def compare_directories(reference: Path, replay: Path, heatmap_directory: Path | None = None) -> dict:
+def compare_directories(
+    reference: Path,
+    replay: Path,
+    heatmap_directory: Path | None = None,
+    planar_mode_comparison: bool = False,
+) -> dict:
     """Return enforcing numerical parity evidence for matching production stages or route frames."""
     reference_stages = index_stages(reference)
     replay_stages = index_stages(replay)
@@ -191,6 +212,7 @@ def compare_directories(reference: Path, replay: Path, heatmap_directory: Path |
         "passed": True,
         "attachment_rules": ATTACHMENT_RULES,
         "route_attachment_rules": ROUTE_ATTACHMENT_RULES,
+        "planar_mode_comparison": planar_mode_comparison,
         "stages": {},
     }
     for stage in sorted(reference_stages):
@@ -253,7 +275,8 @@ def compare_directories(reference: Path, replay: Path, heatmap_directory: Path |
                 "maximum_relative": float(relative_difference.max()),
                 "localized_difference": difference_region(pixel_difference, rule["localize"]),
             }
-            informational = bool(rule.get("informational"))
+            mode_difference = planar_mode_comparison and name.endswith("-final-color")
+            informational = bool(rule.get("informational")) or mode_difference
             attachment_passed = informational or (
                 stage_report[name]["mean_absolute"] <= rule["mean"]
                 and stage_report[name]["p999_absolute"] <= rule["p999"]
@@ -261,7 +284,11 @@ def compare_directories(reference: Path, replay: Path, heatmap_directory: Path |
             stage_report[name]["enforced"] = not informational
             if informational:
                 stage_report[name]["comparison"] = "finite-structure-and-observational-difference"
-                stage_report[name]["reason"] = "cascade transforms can differ between rendering implementations"
+                stage_report[name]["reason"] = (
+                    "the final composite is observational when comparing direct and shared reflection modes"
+                    if mode_difference
+                    else "receiver reconstructions and shadow cascades are observational attachments"
+                )
             stage_report[name]["passed"] = attachment_passed
             if heatmap_directory and (stage == "normal" or not attachment_passed):
                 heatmap_path = heatmap_directory / stage / f"{name}.png"
@@ -280,13 +307,23 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("replay", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--heatmaps", type=Path)
+    parser.add_argument(
+        "--planar-mode-comparison",
+        action="store_true",
+        help="enforce dominant-reflection identity while treating expected reconstructed final-color changes as observational",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     """Compare both runs, emit evidence, and fail when replay parity regresses."""
     arguments = parse_arguments()
-    report = compare_directories(arguments.reference, arguments.replay, arguments.heatmaps)
+    report = compare_directories(
+        arguments.reference,
+        arguments.replay,
+        arguments.heatmaps,
+        arguments.planar_mode_comparison,
+    )
     encoded = json.dumps(report, indent=2)
     if arguments.output:
         arguments.output.write_text(encoded + "\n", encoding="utf-8")

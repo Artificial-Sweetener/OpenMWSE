@@ -50,7 +50,8 @@ namespace MWGui
 
         /// Exercise only changed live water presentation and optical controls with isolated diagnostic values.
         void setWaterValues(std::string_view appearance, float height, bool caustics, float causticsStrength,
-            int interiorLocalLights, int exteriorLocalLights, bool meshWater, float meshHeight);
+            int interiorLocalLights, int exteriorLocalLights, bool meshWater, float meshHeight,
+            bool sharedPlanarReflections);
 
     private:
         /// Retain one category page and its responsive scrolling content.
@@ -126,6 +127,7 @@ namespace MWGui
         MyGUI::ComboBox* mWaterAppearance;
         MyGUI::ScrollBar* mGeometricWaveHeight;
         MyGUI::Button* mMeshWater;
+        MyGUI::Button* mSharedPlanarReflections;
         MyGUI::ScrollBar* mMeshGeometricWaveHeight;
         MyGUI::Button* mWaterCaustics;
         MyGUI::ScrollBar* mWaterCausticsStrength;

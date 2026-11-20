@@ -17,6 +17,7 @@ namespace Diagnostics
         std::string mAppearance = "openmw";
         bool mMeshWater = true;
         float mMeshGeometricWaveHeight = 0.f;
+        bool mSharedPlanarReflections = false;
 
         /// Compare the complete requested water-control state.
         bool operator==(const WaterSettings&) const = default;

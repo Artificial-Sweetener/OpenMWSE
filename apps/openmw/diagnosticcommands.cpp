@@ -248,7 +248,7 @@ void OMW::Engine::processDiagnosticCommands(unsigned frameNumber)
                            << '\n'
                            << "performance-capture: " << (mDiagnosticCollection->active() ? "collecting" : "idle")
                            << '\n'
-                           << "providers: [core@2, graphics@3, gameplay@9, " << OMW::diagnosticPerformanceProvider
+                           << "providers: [core@2, graphics@4, gameplay@9, " << OMW::diagnosticPerformanceProvider
                            << "]\n";
                     response.mPayload = diagnosticBytes(output.str());
                     break;

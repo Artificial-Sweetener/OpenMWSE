@@ -1,5 +1,6 @@
 #include "renderframediagnostics.hpp"
 
+#include "planarreflectiondiagnostics.hpp"
 #include "renderdiagnosticbundle.hpp"
 #include "renderdiagnosticcapture.hpp"
 #include "shadowmapdiagnostics.hpp"
@@ -81,6 +82,15 @@ namespace MWRender
             RenderDiagnosticCapture capture(renderInfo);
             RenderDiagnosticImage image
                 = capture.captureFramebuffer(framebuffer, width, height, name.str(), maximumCaptureDimension);
+            std::vector<RenderDiagnosticImage> planarReflections
+                = capturePlanarReflectionDiagnostics(capture, renderInfo);
+            for (RenderDiagnosticImage& reflection : planarReflections)
+            {
+                std::ostringstream reflectionName;
+                reflectionName << "route-planar-frame-" << std::setw(4) << std::setfill('0') << frameOrdinal << '-'
+                               << reflection.mName;
+                reflection.mName = reflectionName.str();
+            }
             ShadowMapDiagnosticCapture shadowMaps = captureShadowMapDiagnostics(capture, renderInfo, 512);
             for (RenderDiagnosticImage& shadowMap : shadowMaps.mImages)
             {
@@ -94,6 +104,7 @@ namespace MWRender
             if (!mOutputPath)
                 return;
             mWriter->append(std::span<const RenderDiagnosticImage>(&image, 1));
+            mWriter->append(planarReflections);
             mWriter->append(shadowMaps.mImages);
             mShadowMetadataWriter->append(frameOrdinal, frameNumber, shadowMaps.mMetadata);
             ++mCapturedFrameCount;
